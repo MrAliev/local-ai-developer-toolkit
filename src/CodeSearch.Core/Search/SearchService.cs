@@ -4,6 +4,7 @@ using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
+using LocalAi.Repository;
 
 namespace CodeSearch.Core.Search;
 
@@ -229,6 +230,11 @@ public sealed class SearchService
             : !string.Equals(index.GitTree, identity.HeadTree, StringComparison.Ordinal) ||
               identity.DirtyHash is not null;
         var overlay = OverlayStatusFor(workingRoot, index, identity);
+        var currentBaseCommit = CurrentBaseCommit(
+            workingRoot,
+            index,
+            currentCommit,
+            identity);
 
         return new IndexStatus(
             workingRoot,
@@ -241,11 +247,46 @@ public sealed class SearchService
             index.Chunks.Count,
             new FileInfo(indexPath).Length,
             index.GitCommit,
-            SameRoot(index.Root, workingRoot) ? currentCommit : RepoLocator.GitCommit(index.Root),
+            currentBaseCommit,
             index.IndexedAtUtc,
             index.Root,
             requiresOverlay,
             overlay);
+    }
+
+    private static string CurrentBaseCommit(
+        string workingRoot,
+        CodeIndex index,
+        string workingCommit,
+        WorkingIndexIdentity? identity)
+    {
+        if (string.IsNullOrWhiteSpace(index.GenerationId))
+        {
+            return SameRoot(index.Root, workingRoot)
+                ? workingCommit
+                : RepoLocator.GitCommit(index.Root);
+        }
+
+        if (identity is null)
+        {
+            return index.GitCommit;
+        }
+
+        var manifest = new RepositoryManifestStore(
+            identity.RepositoryRuntimeRoot).Read();
+        if (manifest is null ||
+            !string.Equals(
+                manifest.RepositoryId,
+                index.RepositoryId,
+                StringComparison.Ordinal))
+        {
+            return index.GitCommit;
+        }
+
+        return RepoLocator.GitOutput(
+            workingRoot,
+            $"rev-parse --verify {manifest.DevRef}^{{commit}}")
+            ?? index.GitCommit;
     }
 
     private OverlayStatus OverlayStatusFor(

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Search;
+using LocalAi.Contracts;
+using LocalAi.Repository;
 
 namespace CodeSearch.Tests;
 
@@ -10,6 +12,87 @@ public sealed class SearchServiceStatusTests : IDisposable
         Path.GetTempPath(),
         "codesearch-status-" + Guid.NewGuid().ToString("N"));
     private string? _runtimeRoot;
+
+    [Fact]
+    public void Generation_status_tracks_the_manifest_mainline_ref()
+    {
+        Directory.CreateDirectory(_root);
+        var sourcePath = Path.Combine(_root, "A.cs");
+        File.WriteAllText(sourcePath, "class A {}\r\n");
+        Git("init", "-b", "main");
+        Git("config", "user.email", "tests@local.invalid");
+        Git("config", "user.name", "LocalAi Tests");
+        Git("add", "A.cs");
+        Git("commit", "-m", "Initial");
+        Git("branch", "dev");
+        var devIdentity = RuntimeIndexLayout.Inspect(_root);
+
+        Git("switch", "-c", "feature");
+        File.WriteAllText(sourcePath, "class A { int Feature; }\r\n");
+        Git("add", "A.cs");
+        Git("commit", "-m", "Feature");
+        var featureIdentity = RuntimeIndexLayout.Inspect(_root);
+        _runtimeRoot = featureIdentity.RepositoryRuntimeRoot;
+
+        var generation = new GenerationIdentity(
+            featureIdentity.RepositoryId,
+            devIdentity.HeadCommit,
+            devIdentity.HeadTree,
+            "test-model",
+            2,
+            1,
+            CodeIndex.CurrentVersion,
+            4,
+            1);
+        var sourceIndex = Path.Combine(Path.GetTempPath(), generation.Id + ".cidx");
+        try
+        {
+            new CodeIndex
+            {
+                Dim = 2,
+                Model = "test-model",
+                Root = _root,
+                GitCommit = devIdentity.HeadCommit,
+                GitTree = devIdentity.HeadTree,
+                RepositoryId = featureIdentity.RepositoryId,
+                GenerationId = generation.Id,
+                IndexedAtUtc = DateTime.UtcNow,
+                Files = [],
+                Chunks = [],
+                Vectors = []
+            }.Save(sourceIndex);
+            var store = new GenerationStore(featureIdentity.RepositoryRuntimeRoot);
+            var manifest = store.PublishIndex(sourceIndex, generation);
+            store.SetCurrent(manifest);
+        }
+        finally
+        {
+            File.Delete(sourceIndex);
+        }
+
+        new RepositoryManifestStore(featureIdentity.RepositoryRuntimeRoot).Save(
+            new RepositoryManifest(
+                featureIdentity.RepositoryId,
+                RepoLocator.GitOutput(
+                    _root,
+                    "rev-parse --path-format=absolute --git-common-dir")!,
+                "refs/heads/dev",
+                generation.Id,
+                devIdentity.HeadTree,
+                generation.EmbeddingModel,
+                generation.EmbeddingDimension,
+                generation.ChunkFormatVersion,
+                generation.IndexFormatVersion,
+                RepositoryIndexState.Current,
+                [new RepositoryWorktree(_root, featureIdentity.HeadCommit, "refs/heads/feature")],
+                DateTimeOffset.UtcNow));
+
+        Assert.False(new SearchService().Status(_root).CommitDrifted);
+
+        Git("branch", "-f", "dev", "feature");
+
+        Assert.True(new SearchService().Status(_root).CommitDrifted);
+    }
 
     [Fact]
     public void Dirty_base_checkout_is_not_reported_as_needing_no_overlay()

@@ -61,9 +61,29 @@ public sealed class RuntimeAcl
         // validation even though nothing is actually wrong.
         foreach (var path in EnumerateRuntimeTree(fullPath))
         {
+            ApplyAndValidate(path, currentUserSid, expected);
+        }
+    }
+
+    private void ApplyAndValidate(
+        string path,
+        string currentUserSid,
+        IReadOnlySet<string> expected)
+    {
+        try
+        {
             var isDirectory = Directory.Exists(path);
             _applyExactAcl(path, isDirectory, false, currentUserSid, AdministratorsSid);
             ValidateSnapshot(path, _readAclSnapshot(path), expected);
+        }
+        catch (Exception exception) when (
+            IsDisappearanceCandidate(exception) &&
+            HasDisappeared(path))
+        {
+            // The broker atomically moves jobs between runtime directories. A path that no longer
+            // exists has no ACL left to repair or validate; its destination is covered by the
+            // secured runtime tree and will be normalized by a subsequent pass if this traversal
+            // already passed it.
         }
     }
 
@@ -151,12 +171,49 @@ public sealed class RuntimeAcl
     private static IEnumerable<string> EnumerateRuntimeTree(string runtimeRoot)
     {
         yield return runtimeRoot;
-        foreach (var path in Directory.EnumerateFileSystemEntries(
-                     runtimeRoot,
-                     "*",
-                     SearchOption.AllDirectories))
+
+        var pending = new Stack<string>();
+        pending.Push(runtimeRoot);
+        while (pending.TryPop(out var directory))
         {
-            yield return path;
+            string[] entries;
+            try
+            {
+                entries = Directory.GetFileSystemEntries(directory);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                yield return entry;
+                if (Directory.Exists(entry))
+                {
+                    pending.Push(entry);
+                }
+            }
+        }
+    }
+
+    private static bool IsDisappearanceCandidate(Exception exception) =>
+        exception is IOException or InvalidOperationException;
+
+    private static bool HasDisappeared(string path)
+    {
+        try
+        {
+            _ = File.GetAttributes(path);
+            return false;
+        }
+        catch (FileNotFoundException)
+        {
+            return true;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return true;
         }
     }
 

@@ -9,6 +9,79 @@ namespace LocalAi.Broker.Tests;
 public sealed class RuntimeAclTests
 {
     [Fact]
+    public void Ensure_ignores_a_job_directory_moved_during_acl_application()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        foreach (var child in new[] { "jobs", "archive", "staging", "quarantine" })
+        {
+            Directory.CreateDirectory(Path.Combine(root.Path, child));
+        }
+
+        var source = Path.Combine(root.Path, "jobs", "job-1");
+        var destination = Path.Combine(root.Path, "archive", "job-1");
+        Directory.CreateDirectory(source);
+        File.WriteAllText(Path.Combine(source, "request.json"), "{}");
+        var moved = false;
+        var userSid = WindowsIdentity.GetCurrent().User!.Value;
+        var acl = new RuntimeAcl(
+            isWindows: true,
+            currentUser: userSid,
+            applyExactAcl: (path, isDirectory, createNew, user, administrators) =>
+            {
+                if (!moved &&
+                    string.Equals(path, source, StringComparison.OrdinalIgnoreCase))
+                {
+                    Directory.Move(source, destination);
+                    moved = true;
+                    throw new InvalidOperationException(
+                        "Method failed with unexpected error code 3.");
+                }
+
+                ApplyRealAcl(path, isDirectory, createNew, user, administrators);
+            },
+            readAclSnapshot: ReadRealAclSnapshot);
+
+        acl.Ensure(root.Path);
+
+        Assert.True(moved);
+        Assert.False(Directory.Exists(source));
+        Assert.True(Directory.Exists(destination));
+    }
+
+    [Fact]
+    public void Ensure_propagates_acl_failure_while_the_target_still_exists()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        foreach (var child in new[] { "jobs", "archive", "staging", "quarantine" })
+        {
+            Directory.CreateDirectory(Path.Combine(root.Path, child));
+        }
+
+        var target = Path.Combine(root.Path, "jobs", "job-1");
+        Directory.CreateDirectory(target);
+        var userSid = WindowsIdentity.GetCurrent().User!.Value;
+        var acl = new RuntimeAcl(
+            isWindows: true,
+            currentUser: userSid,
+            applyExactAcl: (path, isDirectory, createNew, user, administrators) =>
+            {
+                if (string.Equals(path, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("ACL write failed.");
+                }
+
+                ApplyRealAcl(path, isDirectory, createNew, user, administrators);
+            },
+            readAclSnapshot: ReadRealAclSnapshot);
+
+        var error = Assert.Throws<InvalidOperationException>(
+            () => acl.Ensure(root.Path));
+
+        Assert.Equal("ACL write failed.", error.Message);
+        Assert.True(Directory.Exists(target));
+    }
+
+    [Fact]
     public void Ensure_applies_and_validates_each_path_in_the_same_pass()
     {
         using var root = new TemporaryRuntimeRoot();
