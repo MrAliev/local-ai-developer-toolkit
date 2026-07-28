@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
 
@@ -58,6 +59,77 @@ public sealed class BrokerProcessTests
 
         Assert.Equal(1, starts);
         Assert.True(reads >= 3);
+    }
+
+    [Fact]
+    public async Task Stale_heartbeat_does_not_probe_reused_process()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var staleProbes = 0;
+        var process = new BrokerProcess(
+            "broker.exe",
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(42, now.AddMinutes(-2), now.AddMinutes(-1), 1)
+                : new BrokerProcessState(99, now, now, 1),
+            state =>
+            {
+                if (state.ProcessId == 42)
+                {
+                    staleProbes++;
+                    throw new Win32Exception(5, "Access is denied.");
+                }
+
+                return state.ProcessId == 99;
+            },
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask,
+            startupTimeout: TimeSpan.FromSeconds(2));
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, staleProbes);
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
+    public async Task Inaccessible_process_state_starts_replacement()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var process = new BrokerProcess(
+            "broker.exe",
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(42, now, now, 1)
+                : new BrokerProcessState(99, now, now, 1),
+            state =>
+            {
+                if (state.ProcessId == 42)
+                {
+                    throw new Win32Exception(5, "Access is denied.");
+                }
+
+                return state.ProcessId == 99;
+            },
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask,
+            startupTimeout: TimeSpan.FromSeconds(2));
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, starts);
     }
 
     [Fact]
