@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -122,10 +123,23 @@ public sealed class BrokerProcess : IBrokerProcess
     public static string StatePath(string runtimeRoot) =>
         Path.Combine(Path.GetFullPath(runtimeRoot), "host.json");
 
-    private bool IsHealthy(BrokerProcessState? state) =>
-        state is { SchemaVersion: 1 } &&
-        _isRunning(state) &&
-        _timeProvider.GetUtcNow() - state.HeartbeatAtUtc <= TimeSpan.FromSeconds(5);
+    private bool IsHealthy(BrokerProcessState? state)
+    {
+        if (state is not { SchemaVersion: 1 } ||
+            _timeProvider.GetUtcNow() - state.HeartbeatAtUtc > TimeSpan.FromSeconds(5))
+        {
+            return false;
+        }
+
+        try
+        {
+            return _isRunning(state);
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+    }
 
     private static BrokerProcessState? ReadState(string runtimeRoot)
     {
