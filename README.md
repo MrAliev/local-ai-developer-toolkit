@@ -5,8 +5,8 @@ CodeSearch and LocalLm sources and tests into one repository while preserving th
 package versions, and runtime behavior.
 
 The repository contains the source and explicit opt-in setup commands. Nothing is registered or
-mutated merely by opening the repository. `localai sync` creates a verified local-dev generation
-and exact worktree overlays; `localai hooks install` installs shared chained Git hooks only after
+mutated merely by opening the repository. `localai sync` creates a verified local-mainline
+generation and exact worktree overlays; `localai hooks install` installs shared chained Git hooks only after
 the owner has approved that external setup.
 
 ## Projects
@@ -64,8 +64,13 @@ an AI client.
 ## Runtime notes
 
 - CodeSearch and LocalLm submit all model work through the LocalAi durable FIFO broker.
-- The immutable base generation is built from local `dev`; every worktree gets an exact
-  generation/tree/dirty-content overlay under `%LOCALAPPDATA%\LocalAi`.
+- The immutable base generation is built from local `dev` when present, otherwise local `main`;
+  every worktree gets an exact generation/tree/dirty-content overlay under
+  `%LOCALAPPDATA%\LocalAi`. The selected mainline remains stable in the repository manifest.
+- CodeSearch canonicalizes indexed text to Windows CRLF in memory for hashing, chunking, and
+  embedding. Source files are never rewritten, and a normalization-version change creates a new
+  immutable base generation. Existing vectors are reused only when the model, dimensions, chunk
+  format, index format, and normalization contract all match.
 - Shared post-commit, post-merge, post-rewrite, and post-checkout hooks call `localai sync`.
 - Direct agent-facing Ollama endpoints are forbidden; the `native` compatibility command is
   strictly allowlisted and still routes through the broker.

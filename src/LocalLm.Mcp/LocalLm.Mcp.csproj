@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>locallm-mcp</AssemblyName>
+    <RootNamespace>LocalLm.Mcp</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="1.4.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalLm.Core\LocalLm.Core.csproj" />
+    <ProjectReference Include="..\LocalAi.Broker.Client\LocalAi.Broker.Client.csproj" />
+  </ItemGroup>
+
+</Project>

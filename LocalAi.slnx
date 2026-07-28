@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CodeSearch.Cli/CodeSearch.Cli.csproj" />
+    <Project Path="src/CodeSearch.Core/CodeSearch.Core.csproj" />
+    <Project Path="src/CodeSearch.Mcp/CodeSearch.Mcp.csproj" />
+    <Project Path="src/LocalAi.Broker/LocalAi.Broker.csproj" />
+    <Project Path="src/LocalAi.Broker.Client/LocalAi.Broker.Client.csproj" />
+    <Project Path="src/LocalAi.Contracts/LocalAi.Contracts.csproj" />
+    <Project Path="src/LocalAi.Repository/LocalAi.Repository.csproj" />
+    <Project Path="src/LocalAi.Cli/LocalAi.Cli.csproj" />
+    <Project Path="src/LocalLm.Core/LocalLm.Core.csproj" />
+    <Project Path="src/LocalLm.Mcp/LocalLm.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CodeSearch.Tests/CodeSearch.Tests.csproj" />
+    <Project Path="tests/LocalAi.Broker.Tests/LocalAi.Broker.Tests.csproj" />
+    <Project Path="tests/LocalLm.Tests/LocalLm.Tests.csproj" />
+    <Project Path="tests/LocalAi.Repository.Tests/LocalAi.Repository.Tests.csproj" />
+    <Project Path="tests/LocalAi.IntegrationTests/LocalAi.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

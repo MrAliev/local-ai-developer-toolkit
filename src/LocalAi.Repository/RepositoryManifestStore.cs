@@ -1,0 +1,84 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using LocalAi.Contracts;
+
+namespace LocalAi.Repository;
+
+public sealed class RepositoryManifestStore
+{
+    private readonly string _manifestPath;
+
+    public RepositoryManifestStore(string repositoryRuntimeRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRuntimeRoot);
+        var root = Path.GetFullPath(repositoryRuntimeRoot);
+        _manifestPath = Path.Combine(root, "manifest.json");
+    }
+
+    public void Save(RepositoryManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        Directory.CreateDirectory(
+            Path.GetDirectoryName(_manifestPath)
+            ?? throw new InvalidOperationException("Manifest directory is unavailable."));
+        var payload = JsonSerializer.SerializeToUtf8Bytes(
+            manifest,
+            LocalAiJson.Strict);
+        var document = new ManifestDocument(
+            1,
+            manifest,
+            Convert.ToHexString(SHA256.HashData(payload)));
+        var temporary = _manifestPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(
+                temporary,
+                JsonSerializer.Serialize(document, LocalAiJson.Strict));
+            File.Move(temporary, _manifestPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
+    }
+
+    public RepositoryManifest? Read()
+    {
+        if (!File.Exists(_manifestPath))
+        {
+            return null;
+        }
+
+        var document = JsonSerializer.Deserialize<ManifestDocument>(
+            File.ReadAllText(_manifestPath),
+            LocalAiJson.Strict)
+            ?? throw new InvalidDataException("Repository manifest is empty.");
+        if (document.SchemaVersion != 1)
+        {
+            throw new InvalidDataException("Repository manifest schema is unsupported.");
+        }
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(
+            document.Manifest,
+            LocalAiJson.Strict);
+        var checksum = Convert.ToHexString(SHA256.HashData(payload));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(document.Checksum),
+                Convert.FromHexString(checksum)))
+        {
+            throw new InvalidDataException("Repository manifest checksum does not match.");
+        }
+
+        return document.Manifest;
+    }
+
+    [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+    private sealed record ManifestDocument(
+        [property: JsonRequired] int SchemaVersion,
+        [property: JsonRequired] RepositoryManifest Manifest,
+        [property: JsonRequired] string Checksum);
+}

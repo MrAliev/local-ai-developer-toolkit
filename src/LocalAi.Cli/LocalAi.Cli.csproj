@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>localai</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CodeSearch.Core\CodeSearch.Core.csproj" />
+    <ProjectReference Include="..\LocalAi.Repository\LocalAi.Repository.csproj" />
+    <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+    <ProjectReference Include="..\LocalAi.Broker.Client\LocalAi.Broker.Client.csproj" />
+  </ItemGroup>
+</Project>

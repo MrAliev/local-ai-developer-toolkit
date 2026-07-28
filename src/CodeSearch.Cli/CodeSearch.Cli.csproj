@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>codesearch</AssemblyName>
+    <RootNamespace>CodeSearch.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeSearch.Core\CodeSearch.Core.csproj" />
+    <ProjectReference Include="..\LocalAi.Broker.Client\LocalAi.Broker.Client.csproj" />
+  </ItemGroup>
+
+</Project>

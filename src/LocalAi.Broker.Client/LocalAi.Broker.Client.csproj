@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Broker\LocalAi.Broker.csproj" />
+    <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

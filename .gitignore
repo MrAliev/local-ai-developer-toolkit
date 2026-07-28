@@ -1,0 +1,31 @@
+# Build and publish output
+bin/
+obj/
+publish/
+artifacts/
+
+# IDE and editor state
+.vs/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Test and coverage output
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Local runtime state
+.localai/
+.runtime/
+*.cidx
+*.pid
+*.log
+
+# Operating-system files
+.DS_Store
+Thumbs.db
