@@ -123,8 +123,9 @@ The operation:
 
 1. Acquires a machine-wide activation mutex to serialize activators.
 2. Resolves the candidate beneath `bin\versions`.
-3. Verifies the required CLI, broker, MCP, dependency, runtime, and routing
-   artifacts without changing current state.
+3. Verifies the required CLI, broker, MCP, dependency, and runtime artifacts
+   without changing current state. Broker tests separately prove that the
+   routing catalog is embedded in `LocalAi.Broker.dll`.
 4. With `--stop-running`, stops only processes whose exact executable or broker
    assembly path belongs to the currently active LocalAi version. It never
    stops Ollama or an unrelated `dotnet` process.

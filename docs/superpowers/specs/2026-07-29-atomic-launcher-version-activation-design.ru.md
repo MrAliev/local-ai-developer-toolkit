@@ -123,8 +123,9 @@ localai-launcher activate <version> [--stop-running]
 
 1. Получает машинный activation mutex для сериализации activators.
 2. Разрешает candidate внутри `bin\versions`.
-3. Без изменения состояния проверяет обязательные CLI, broker, MCP, dependency,
-   runtime и routing artifacts.
+3. Без изменения состояния проверяет обязательные CLI, broker, MCP, dependency
+   и runtime artifacts. Отдельные broker tests доказывают, что routing catalog
+   встроен в `LocalAi.Broker.dll`.
 4. С `--stop-running` останавливает только процессы, чей точный executable или
    путь broker assembly принадлежит текущей активной версии LocalAi. Ollama и
    посторонний `dotnet` не останавливаются.
