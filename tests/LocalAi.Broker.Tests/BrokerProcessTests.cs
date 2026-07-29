@@ -17,10 +17,10 @@ public sealed class BrokerProcessTests
             "dotnet",
             "\"LocalAi.Broker.dll\" serve --runtime runtime");
 
-        Assert.False(startInfo.UseShellExecute);
-        Assert.True(startInfo.RedirectStandardInput);
-        Assert.True(startInfo.RedirectStandardOutput);
-        Assert.True(startInfo.RedirectStandardError);
+        Assert.True(startInfo.UseShellExecute);
+        Assert.False(startInfo.RedirectStandardInput);
+        Assert.False(startInfo.RedirectStandardOutput);
+        Assert.False(startInfo.RedirectStandardError);
         Assert.True(startInfo.CreateNoWindow);
         Assert.Equal(ProcessWindowStyle.Hidden, startInfo.WindowStyle);
     }
