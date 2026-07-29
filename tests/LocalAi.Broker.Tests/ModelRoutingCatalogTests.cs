@@ -72,6 +72,29 @@ public sealed class ModelRoutingCatalogTests
     }
 
     [Fact]
+    public void Every_multi_model_route_has_a_distinct_fallback_for_every_candidate()
+    {
+        var routes = ModelRoutingCatalog.LoadEmbedded().Routes
+            .Where(route =>
+                route.Candidates
+                    .Concat(route.Fallbacks)
+                    .Distinct(StringComparer.Ordinal)
+                    .Skip(1)
+                    .Any());
+
+        Assert.All(
+            routes,
+            route => Assert.All(
+                route.Candidates,
+                candidate => Assert.Contains(
+                    route.Fallbacks,
+                    fallback => !string.Equals(
+                        fallback,
+                        candidate,
+                        StringComparison.Ordinal))));
+    }
+
+    [Fact]
     public void Maintenance_allowlist_contains_only_catalog_recommended_or_experimental_tags()
     {
         var catalog = ModelRoutingCatalog.LoadEmbedded();

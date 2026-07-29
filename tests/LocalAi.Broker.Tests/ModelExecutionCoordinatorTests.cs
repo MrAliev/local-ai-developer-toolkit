@@ -187,6 +187,55 @@ public sealed class ModelExecutionCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Established_candidate_technical_failure_uses_distinct_catalog_fallback()
+    {
+        var runtime = new FakeRuntime();
+        var executedModels = new List<string>();
+        var coordinator = Create(
+            runtime,
+            (request, _) =>
+            {
+                var model = Assert.IsType<ChatJobPayload>(request.Payload).Model!;
+                executedModels.Add(model);
+                return model == "qwen3.5:9b"
+                    ? Task.FromException<BrokerExecutionResult>(
+                        new IOException("model execution failed"))
+                    : Task.FromResult(Result("summary"));
+            });
+        var request = LocalJobRequestFactory.CreateRoutedChat(
+            "summary-fallback",
+            LocalJobPriority.Foreground,
+            LocalTaskProfile.ShortSummary,
+            "Summarize supplied facts",
+            null,
+            [],
+            new LocalWorkloadMetadata(
+                100,
+                120,
+                1,
+                0,
+                0,
+                LocalDurationClass.Short),
+            workflow: null,
+            requestedContextTokens: 2048);
+        var availability = new ModelAvailability(
+            ["qwen3.5:9b", "qwen2.5-coder:14b"],
+            [],
+            []);
+
+        var result = await coordinator.ExecuteAsync(
+            request,
+            availability,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            ["qwen3.5:9b", "qwen2.5-coder:14b"],
+            executedModels);
+        Assert.Equal("qwen2.5-coder:14b", result.Routing!.SelectedModel);
+        Assert.True(result.Routing.UsedFallback);
+    }
+
+    [Fact]
     public async Task Workflow_technical_failure_is_reported_without_counting_a_chunk()
     {
         var coordinator = Create(

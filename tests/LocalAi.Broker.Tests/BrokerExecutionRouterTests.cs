@@ -378,6 +378,12 @@ public sealed class BrokerExecutionRouterTests : IDisposable
             return Task.CompletedTask;
         }
 
+        public Task PreflightEmbeddingAsync(
+            string model,
+            int contextTokens,
+            CancellationToken ct) =>
+            PreflightAsync(model, contextTokens, ct);
+
         public Task UnloadAsync(string model, CancellationToken ct)
         {
             UnloadedModels.Add(model);

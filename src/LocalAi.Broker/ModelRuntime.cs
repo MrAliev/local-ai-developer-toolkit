@@ -25,6 +25,11 @@ public interface IModelRuntimeTransport
 
     Task PreflightAsync(string model, int contextTokens, CancellationToken ct);
 
+    Task PreflightEmbeddingAsync(
+        string model,
+        int contextTokens,
+        CancellationToken ct);
+
     Task UnloadAsync(string model, CancellationToken ct);
 }
 
@@ -154,7 +159,21 @@ public sealed class ModelRuntime : IModelRuntime
                 await _transport.UnloadAsync(model, cancellationToken);
             }
 
-            await _transport.PreflightAsync(model, contextTokens, cancellationToken);
+            if (entry.Capabilities.Contains(LocalAi.Contracts.LocalModelCapability.Embedding) &&
+                !entry.Capabilities.Contains(LocalAi.Contracts.LocalModelCapability.Text))
+            {
+                await _transport.PreflightEmbeddingAsync(
+                    model,
+                    contextTokens,
+                    cancellationToken);
+            }
+            else
+            {
+                await _transport.PreflightAsync(
+                    model,
+                    contextTokens,
+                    cancellationToken);
+            }
             var processes = await _transport.ListProcessesAsync(cancellationToken);
             var process = processes.SingleOrDefault(
                 candidate => string.Equals(

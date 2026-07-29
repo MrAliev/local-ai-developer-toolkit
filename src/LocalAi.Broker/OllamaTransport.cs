@@ -210,6 +210,39 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         RequireObject(document, "preflight");
     }
 
+    public async Task PreflightEmbeddingAsync(
+        string model,
+        int contextTokens,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        if (!LocalContextTiers.IsSupported(contextTokens))
+        {
+            throw new ArgumentOutOfRangeException(nameof(contextTokens));
+        }
+
+        const string input = "localai-preflight";
+        var body = JsonSerializer.Serialize(new EmbedRequest(
+            model,
+            [input],
+            KeepAlive: "30m",
+            new GenerateOptions(contextTokens)));
+        using var document = await SendAsync(
+            HttpMethod.Post,
+            "api/embed",
+            body,
+            [input],
+            cancellationToken);
+        var response = document.RootElement.Deserialize<EmbedResponse>(
+            ExternalResponseJson);
+        if (response?.Embeddings is not [var embedding] ||
+            embedding.Count == 0)
+        {
+            throw new InvalidDataException(
+                "Ollama returned an invalid embedding preflight response.");
+        }
+    }
+
     public async Task UnloadAsync(
         string model,
         CancellationToken cancellationToken)
@@ -598,7 +631,13 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
 
     private sealed record EmbedRequest(
         [property: JsonPropertyName("model")] string Model,
-        [property: JsonPropertyName("input")] IReadOnlyList<string> Input);
+        [property: JsonPropertyName("input")] IReadOnlyList<string> Input,
+        [property: JsonPropertyName("keep_alive")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? KeepAlive = null,
+        [property: JsonPropertyName("options")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        GenerateOptions? Options = null);
 
     private sealed record EmbedResponse(
         [property: JsonPropertyName("embeddings")]

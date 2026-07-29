@@ -38,6 +38,39 @@ public sealed class ModelRuntimeTests
     }
 
     [Fact]
+    public async Task Ensure_ready_uses_embedding_preflight_for_embedding_only_model()
+    {
+        const string model = "qwen3-embedding:8b-q8_0";
+        var transport = new FakeRuntimeTransport
+        {
+            Installed = [model],
+            RejectEmbeddingGenerationPreflight = true,
+            Processes =
+            [
+                new OllamaProcessInfo(
+                    model,
+                    11800223415,
+                    11800223415,
+                    2048,
+                    DateTimeOffset.UtcNow.AddMinutes(30))
+            ]
+        };
+        var runtime = new ModelRuntime(
+            transport,
+            ModelRoutingCatalog.LoadEmbedded());
+
+        var proof = await runtime.EnsureReadyAsync(
+            model,
+            2048,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(proof.FullyResident);
+        Assert.Equal([model + ":2048"], transport.EmbeddingPreflights);
+        Assert.Empty(transport.Preflights);
+        Assert.False(runtime.IsDisabled(model, 2048));
+    }
+
+    [Fact]
     public async Task Ensure_ready_unloads_and_disables_partial_vram_residency()
     {
         var transport = new FakeRuntimeTransport
@@ -223,7 +256,11 @@ public sealed class ModelRuntimeTests
 
         public List<string> Preflights { get; } = [];
 
+        public List<string> EmbeddingPreflights { get; } = [];
+
         public List<string> Unloaded { get; } = [];
+
+        public bool RejectEmbeddingGenerationPreflight { get; init; }
 
         public Task<IReadOnlyList<string>> ListInstalledAsync(CancellationToken ct) =>
             Task.FromResult(Installed);
@@ -243,7 +280,26 @@ public sealed class ModelRuntimeTests
 
         public Task PreflightAsync(string model, int contextTokens, CancellationToken ct)
         {
+            if (RejectEmbeddingGenerationPreflight &&
+                string.Equals(
+                    model,
+                    "qwen3-embedding:8b-q8_0",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Embedding-only models do not support generate preflight.");
+            }
+
             Preflights.Add($"{model}:{contextTokens}");
+            return Task.CompletedTask;
+        }
+
+        public Task PreflightEmbeddingAsync(
+            string model,
+            int contextTokens,
+            CancellationToken ct)
+        {
+            EmbeddingPreflights.Add($"{model}:{contextTokens}");
             return Task.CompletedTask;
         }
 

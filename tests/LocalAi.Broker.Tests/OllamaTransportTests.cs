@@ -91,6 +91,36 @@ public sealed class OllamaTransportTests
     }
 
     [Fact]
+    public async Task Runtime_embedding_preflight_uses_embed_endpoint_and_selected_context()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"embeddings":[[1,2,3]]}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await transport.PreflightEmbeddingAsync(
+            "qwen3-embedding:8b-q8_0",
+            2048,
+            TestContext.Current.CancellationToken);
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Equal(new Uri(BaseUri, "api/embed"), request.Uri);
+        using var body = JsonDocument.Parse(request.Body!);
+        Assert.Equal(
+            "qwen3-embedding:8b-q8_0",
+            body.RootElement.GetProperty("model").GetString());
+        Assert.Equal(
+            ["localai-preflight"],
+            body.RootElement.GetProperty("input")
+                .EnumerateArray()
+                .Select(value => value.GetString()));
+        Assert.Equal("30m", body.RootElement.GetProperty("keep_alive").GetString());
+        Assert.Equal(
+            2048,
+            body.RootElement.GetProperty("options").GetProperty("num_ctx").GetInt32());
+    }
+
+    [Fact]
     public async Task Runtime_unload_sets_keep_alive_to_zero()
     {
         var fake = new FakeOllamaServer();
