@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
 
@@ -8,6 +9,21 @@ public sealed class BrokerProcessTests
 {
     private static readonly string BrokerAssemblyPath =
         Path.GetFullPath("LocalAi.Broker.dll");
+
+    [Fact]
+    public void Broker_start_info_does_not_inherit_caller_stdio()
+    {
+        var startInfo = BrokerProcess.CreateStartInfo(
+            "dotnet",
+            "\"LocalAi.Broker.dll\" serve --runtime runtime");
+
+        Assert.False(startInfo.UseShellExecute);
+        Assert.True(startInfo.RedirectStandardInput);
+        Assert.True(startInfo.RedirectStandardOutput);
+        Assert.True(startInfo.RedirectStandardError);
+        Assert.True(startInfo.CreateNoWindow);
+        Assert.Equal(ProcessWindowStyle.Hidden, startInfo.WindowStyle);
+    }
 
     [Fact]
     public async Task Healthy_matching_process_is_reused()

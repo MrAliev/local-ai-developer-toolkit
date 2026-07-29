@@ -206,13 +206,44 @@ public sealed class BrokerProcess : IBrokerProcess
 
     private static int Start(string executablePath, string arguments)
     {
-        using var process = Process.Start(new ProcessStartInfo(executablePath, arguments)
+        var process = Process.Start(CreateStartInfo(executablePath, arguments))
+            ?? throw new InvalidOperationException("Could not start the LocalAi broker.");
+        var processId = process.Id;
+        process.StandardInput.Dispose();
+        _ = ObserveDetachedProcessAsync(process);
+        return processId;
+    }
+
+    internal static ProcessStartInfo CreateStartInfo(
+        string executablePath,
+        string arguments) =>
+        new(executablePath, arguments)
         {
             UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden
-        }) ?? throw new InvalidOperationException("Could not start the LocalAi broker.");
-        return process.Id;
+        };
+
+    private static async Task ObserveDetachedProcessAsync(Process process)
+    {
+        try
+        {
+            await Task.WhenAll(
+                process.StandardOutput.ReadToEndAsync(),
+                process.StandardError.ReadToEndAsync(),
+                process.WaitForExitAsync());
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or IOException)
+        {
+        }
+        finally
+        {
+            process.Dispose();
+        }
     }
 
     private static string BuildArguments(string runtimeRoot, string? ollamaUrl)
