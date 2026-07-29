@@ -51,6 +51,13 @@ internal sealed class TestInstall : IDisposable
     public void RemoveRequiredFile(string version, string fileName) =>
         File.Delete(Path.Combine(VersionDirectory(version), fileName));
 
+    public void CreateIncomplete(string version)
+    {
+        var directory = VersionDirectory(version);
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "localai.exe"), "localai.exe");
+    }
+
     public void ReplaceTool(string version, string toolFileName, string sourcePath) =>
         File.Copy(
             sourcePath,

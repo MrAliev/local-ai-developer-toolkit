@@ -34,11 +34,14 @@ internal static class BrokerProgram
         var startedAt = new DateTimeOffset(
             process.StartTime.ToUniversalTime(),
             TimeSpan.Zero);
+        var brokerAssemblyPath = Path.GetFullPath(
+            typeof(BrokerHost).Assembly.Location);
         var owner = new BrokerProcessState(
             process.Id,
             startedAt,
             DateTimeOffset.UtcNow,
-            1);
+            2,
+            brokerAssemblyPath);
         var stateStore = new BrokerRuntimeStateStore(runtimeRoot);
         stateStore.Publish(owner);
 

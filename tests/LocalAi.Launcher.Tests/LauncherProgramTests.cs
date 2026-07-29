@@ -63,4 +63,23 @@ public sealed class LauncherProgramTests
             error.ToString(),
             StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Activate_command_commits_requested_version()
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        using var error = new StringWriter();
+
+        var exitCode = await LauncherProgram.RunAsync(
+            ["activate", "v2"],
+            install.BinRoot,
+            @"C:\LocalAi\bin\launcher\localai-launcher.exe",
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
+        Assert.Equal(string.Empty, error.ToString());
+    }
 }

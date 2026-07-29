@@ -41,15 +41,25 @@ public sealed class VersionResolver
         }
 
         var pointer = ReadPointer();
-        ValidateVersionName(pointer.Version);
-        var versionDirectory = Path.GetFullPath(
-            Path.Combine(_versionsRoot, pointer.Version));
+        var versionDirectory = ValidateVersion(pointer.Version);
+        return new ResolvedTool(
+            pointer.Version,
+            versionDirectory,
+            Path.Combine(versionDirectory, executableName));
+    }
+
+    public VersionPointer ReadCurrent() => ReadPointer();
+
+    public string ValidateVersion(string version)
+    {
+        ValidateVersionName(version);
+        var versionDirectory = Path.GetFullPath(Path.Combine(_versionsRoot, version));
         EnsureBelow(versionDirectory, _versionsRoot, "version_path_invalid");
         if (!Directory.Exists(versionDirectory))
         {
             throw new LauncherException(
                 "version_incomplete",
-                $"LocalAi version '{pointer.Version}' does not exist.");
+                $"LocalAi version '{version}' does not exist.");
         }
 
         var physicalVersionsRoot = _resolvePhysicalPath(_versionsRoot);
@@ -65,7 +75,7 @@ public sealed class VersionResolver
             {
                 throw new LauncherException(
                     "version_incomplete",
-                    $"LocalAi version '{pointer.Version}' is missing '{fileName}'.");
+                    $"LocalAi version '{version}' is missing '{fileName}'.");
             }
 
             EnsureBelow(
@@ -74,10 +84,7 @@ public sealed class VersionResolver
                 "version_path_invalid");
         }
 
-        return new ResolvedTool(
-            pointer.Version,
-            versionDirectory,
-            Path.Combine(versionDirectory, executableName));
+        return versionDirectory;
     }
 
     private VersionPointer ReadPointer()

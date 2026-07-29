@@ -58,6 +58,22 @@ public sealed class ToolRunnerTests : IDisposable
         Assert.NotNull(exclusive);
     }
 
+    [Fact]
+    public async Task Missing_child_is_reported_with_stable_error_code()
+    {
+        var runner = new ToolRunner(
+            @"C:\LocalAi\bin\launcher\localai-launcher.exe");
+
+        var error = await Assert.ThrowsAsync<LauncherException>(
+            () => runner.RunAsync(
+                Path.Combine(_root, "missing.exe"),
+                [],
+                "v1",
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("child_start_failed", error.Code);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

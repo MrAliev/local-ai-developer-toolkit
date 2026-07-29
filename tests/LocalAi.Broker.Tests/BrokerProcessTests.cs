@@ -6,15 +6,23 @@ namespace LocalAi.Broker.Tests;
 
 public sealed class BrokerProcessTests
 {
+    private static readonly string BrokerAssemblyPath =
+        Path.GetFullPath("LocalAi.Broker.dll");
+
     [Fact]
     public async Task Healthy_matching_process_is_reused()
     {
         var now = DateTimeOffset.UtcNow;
         var starts = 0;
         var process = new BrokerProcess(
-            "broker.exe",
+            BrokerAssemblyPath,
             "runtime",
-            _ => new BrokerProcessState(42, now.AddMinutes(-1), now, 1),
+            _ => new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now,
+                2,
+                BrokerAssemblyPath),
             state => state.ProcessId == 42 && state.StartedAtUtc == now.AddMinutes(-1),
             (_, _) =>
             {
@@ -30,20 +38,100 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
+    public async Task Matching_process_with_another_broker_assembly_is_replaced()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(
+                    42,
+                    now,
+                    now,
+                    2,
+                    Path.GetFullPath("another-version/LocalAi.Broker.dll"))
+                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
+            state => state.ProcessId is 42 or 99,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
+    public async Task Schema_one_state_is_replaced()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(42, now, now, 1, BrokerAssemblyPath)
+                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
+            state => state.ProcessId is 42 or 99,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
+    public async Task Invalid_broker_assembly_path_is_replaced()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(42, now, now, 2, "\0")
+                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
+            state => state.ProcessId is 42 or 99,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
     public async Task Stale_state_starts_once_and_waits_for_matching_ready_state()
     {
         var now = DateTimeOffset.UtcNow;
         var reads = 0;
         var starts = 0;
         var process = new BrokerProcess(
-            "broker.exe",
+            BrokerAssemblyPath,
             "runtime",
             _ =>
             {
                 reads++;
                 return reads < 3
                     ? null
-                    : new BrokerProcessState(99, now, now, 1);
+                    : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath);
             },
             state => state.ProcessId == 99,
             (_, _) =>
@@ -68,11 +156,16 @@ public sealed class BrokerProcessTests
         var starts = 0;
         var staleProbes = 0;
         var process = new BrokerProcess(
-            "broker.exe",
+            BrokerAssemblyPath,
             "runtime",
             _ => starts == 0
-                ? new BrokerProcessState(42, now.AddMinutes(-2), now.AddMinutes(-1), 1)
-                : new BrokerProcessState(99, now, now, 1),
+                ? new BrokerProcessState(
+                    42,
+                    now.AddMinutes(-2),
+                    now.AddMinutes(-1),
+                    2,
+                    BrokerAssemblyPath)
+                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
             state =>
             {
                 if (state.ProcessId == 42)
@@ -104,11 +197,11 @@ public sealed class BrokerProcessTests
         var now = DateTimeOffset.UtcNow;
         var starts = 0;
         var process = new BrokerProcess(
-            "broker.exe",
+            BrokerAssemblyPath,
             "runtime",
             _ => starts == 0
-                ? new BrokerProcessState(42, now, now, 1)
-                : new BrokerProcessState(99, now, now, 1),
+                ? new BrokerProcessState(42, now, now, 2, BrokerAssemblyPath)
+                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
             state =>
             {
                 if (state.ProcessId == 42)
@@ -136,7 +229,7 @@ public sealed class BrokerProcessTests
     public async Task Startup_timeout_is_bounded()
     {
         var process = new BrokerProcess(
-            "broker.exe",
+            BrokerAssemblyPath,
             "runtime",
             _ => null,
             _ => false,
@@ -159,9 +252,11 @@ public sealed class BrokerProcessTests
         var ready = false;
         var starts = 0;
         BrokerProcess CreateProcess() => new(
-            "broker.exe",
+            BrokerAssemblyPath,
             runtimeRoot,
-            _ => ready ? new BrokerProcessState(99, now, now, 1) : null,
+            _ => ready
+                ? new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath)
+                : null,
             state => state.ProcessId == 99,
             (_, _) =>
             {

@@ -24,6 +24,8 @@ public sealed class BrokerProcess : IBrokerProcess
     private readonly TimeSpan _startupTimeout;
     private readonly string _arguments;
     private readonly string _startupSemaphoreName;
+    private readonly string _brokerAssemblyPath;
+    private readonly StringComparison _pathComparison;
 
     public BrokerProcess(
         string executablePath,
@@ -40,13 +42,14 @@ public sealed class BrokerProcess : IBrokerProcess
             timeProvider ?? TimeProvider.System,
             Task.Delay,
             startupTimeout,
-            BuildArguments(runtimeRoot, ollamaUrl))
+            BuildArguments(runtimeRoot, ollamaUrl),
+            executablePath)
     {
     }
 
     public static BrokerProcess CreateDefault(string runtimeRoot)
     {
-        var brokerAssembly = typeof(DurableQueue).Assembly.Location;
+        var brokerAssembly = Path.GetFullPath(typeof(DurableQueue).Assembly.Location);
         var arguments =
             Quote(brokerAssembly) + " " + BuildArguments(runtimeRoot, null);
         return new BrokerProcess(
@@ -57,7 +60,8 @@ public sealed class BrokerProcess : IBrokerProcess
             Start,
             TimeProvider.System,
             Task.Delay,
-            arguments: arguments);
+            arguments: arguments,
+            brokerAssemblyPath: brokerAssembly);
     }
 
     public BrokerProcess(
@@ -69,7 +73,8 @@ public sealed class BrokerProcess : IBrokerProcess
         TimeProvider timeProvider,
         Func<TimeSpan, CancellationToken, Task> delay,
         TimeSpan? startupTimeout = null,
-        string? arguments = null)
+        string? arguments = null,
+        string? brokerAssemblyPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
@@ -88,6 +93,11 @@ public sealed class BrokerProcess : IBrokerProcess
 
         _arguments = arguments ?? BuildArguments(_runtimeRoot, null);
         _startupSemaphoreName = CreateSemaphoreName(_runtimeRoot);
+        _brokerAssemblyPath = CanonicalizePath(
+            brokerAssemblyPath ?? executablePath);
+        _pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
     }
 
     public async Task EnsureRunningAsync(CancellationToken cancellationToken = default)
@@ -125,7 +135,8 @@ public sealed class BrokerProcess : IBrokerProcess
 
     private bool IsHealthy(BrokerProcessState? state)
     {
-        if (state is not { SchemaVersion: 1 } ||
+        if (state is not { SchemaVersion: 2 } ||
+            string.IsNullOrWhiteSpace(state.BrokerAssemblyPath) ||
             _timeProvider.GetUtcNow() - state.HeartbeatAtUtc > TimeSpan.FromSeconds(5))
         {
             return false;
@@ -133,9 +144,22 @@ public sealed class BrokerProcess : IBrokerProcess
 
         try
         {
+            if (!string.Equals(
+                    CanonicalizePath(state.BrokerAssemblyPath),
+                    _brokerAssemblyPath,
+                    _pathComparison))
+            {
+                return false;
+            }
+
             return _isRunning(state);
         }
-        catch (Win32Exception)
+        catch (Exception exception) when (
+            exception is Win32Exception or
+            ArgumentException or
+            IOException or
+            NotSupportedException or
+            UnauthorizedAccessException)
         {
             return false;
         }
@@ -204,6 +228,20 @@ public sealed class BrokerProcess : IBrokerProcess
     }
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
+
+    private static string CanonicalizePath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath))
+        {
+            return fullPath;
+        }
+
+        FileSystemInfo info = new FileInfo(fullPath);
+        return (info.Attributes & FileAttributes.ReparsePoint) != 0
+            ? info.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fullPath
+            : fullPath;
+    }
 
     private SemaphoreLease EnterSemaphore(CancellationToken cancellationToken)
     {

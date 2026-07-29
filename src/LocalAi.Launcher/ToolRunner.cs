@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace LocalAi.Launcher;
@@ -36,24 +37,38 @@ public sealed class ToolRunner
 
         startInfo.Environment["LOCALAI_LAUNCHER_PATH"] = _launcherPath;
         startInfo.Environment["LOCALAI_ACTIVE_VERSION"] = version;
-        using var process = Process.Start(startInfo)
-            ?? throw new LauncherException(
-                "child_start_failed",
-                $"Could not start LocalAi tool '{executablePath}'.");
-        using var cancellation = cancellationToken.Register(() =>
+        Process process;
+        try
         {
-            try
+            process = Process.Start(startInfo)
+                ?? throw new LauncherException(
+                    "child_start_failed",
+                    $"Could not start LocalAi tool '{executablePath}'.");
+        }
+        catch (Win32Exception exception)
+        {
+            throw new LauncherException(
+                "child_start_failed",
+                $"Could not start LocalAi tool '{executablePath}': {exception.Message}");
+        }
+
+        using (process)
+        {
+            using var cancellation = cancellationToken.Register(() =>
             {
-                if (!process.HasExited)
+                try
                 {
-                    process.Kill(entireProcessTree: true);
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
                 }
-            }
-            catch (InvalidOperationException)
-            {
-            }
-        });
-        await process.WaitForExitAsync(cancellationToken);
-        return process.ExitCode;
+                catch (InvalidOperationException)
+                {
+                }
+            });
+            await process.WaitForExitAsync(cancellationToken);
+            return process.ExitCode;
+        }
     }
 }
