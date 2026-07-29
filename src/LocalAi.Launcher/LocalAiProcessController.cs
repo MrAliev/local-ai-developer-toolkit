@@ -68,6 +68,9 @@ public sealed class LocalAiProcessController
         }
     }
 
+    public bool HasOwnedByVersion(string versionDirectory) =>
+        SelectOwnedByVersion(versionDirectory, _snapshot()).Count > 0;
+
     private bool IsBelow(string path, string root)
     {
         try

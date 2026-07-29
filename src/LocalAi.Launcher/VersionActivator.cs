@@ -69,9 +69,11 @@ public sealed class VersionActivator
             }
 
             _resolver.ValidateVersion(version);
-            if (stopRunning && File.Exists(_currentPath))
+            var currentDirectory = File.Exists(_currentPath)
+                ? _resolver.Resolve("localai").VersionDirectory
+                : null;
+            if (stopRunning && currentDirectory is not null)
             {
-                var currentDirectory = _resolver.Resolve("localai").VersionDirectory;
                 _processController.StopOwnedByVersion(
                     currentDirectory,
                     _stopTimeout);
@@ -80,6 +82,22 @@ public sealed class VersionActivator
             using var lease = VersionLease.AcquireExclusive(
                 Path.Combine(_binRoot, "current.lock"),
                 _leaseTimeout);
+            if (currentDirectory is not null)
+            {
+                if (stopRunning)
+                {
+                    _processController.StopOwnedByVersion(
+                        currentDirectory,
+                        _stopTimeout);
+                }
+                else if (_processController.HasOwnedByVersion(currentDirectory))
+                {
+                    throw new LauncherException(
+                        "version_in_use",
+                        "The active LocalAi version is currently in use.");
+                }
+            }
+
             _resolver.ValidateVersion(version);
             WritePointer(temporaryPath, version);
             File.Move(temporaryPath, _currentPath, overwrite: true);
