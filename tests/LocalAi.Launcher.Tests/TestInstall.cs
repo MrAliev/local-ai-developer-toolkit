@@ -51,6 +51,12 @@ internal sealed class TestInstall : IDisposable
     public void RemoveRequiredFile(string version, string fileName) =>
         File.Delete(Path.Combine(VersionDirectory(version), fileName));
 
+    public void ReplaceTool(string version, string toolFileName, string sourcePath) =>
+        File.Copy(
+            sourcePath,
+            Path.Combine(VersionDirectory(version), toolFileName),
+            overwrite: true);
+
     public void Dispose()
     {
         if (Directory.Exists(Root))
