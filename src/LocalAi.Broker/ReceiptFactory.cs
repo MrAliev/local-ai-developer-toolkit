@@ -8,7 +8,8 @@ public static class ReceiptFactory
     public static LocalUsageReceipt Create(
         LocalJobRequest request,
         DateTimeOffset executionStartedAtUtc,
-        DateTimeOffset executionCompletedAtUtc)
+        DateTimeOffset executionCompletedAtUtc,
+        LocalRoutingReceipt? routing = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         var inputCharacters = InputCharacters(request.Payload);
@@ -16,14 +17,15 @@ public static class ReceiptFactory
             request.JobId,
             Tool(request.Kind),
             Operation(request.Kind),
-            Model(request.Payload),
+            routing?.SelectedModel ?? Model(request.Payload),
             NonNegative(executionStartedAtUtc - request.CreatedAtUtc),
             NonNegative(executionCompletedAtUtc - executionStartedAtUtc),
             inputCharacters,
-            (inputCharacters + 3) / 4,
+            routing?.EstimatedNetCloudTokensSaved ?? (inputCharacters + 3) / 4,
             null,
             null,
-            null);
+            null,
+            routing);
     }
 
     private static string Tool(LocalJobKind kind) =>
@@ -35,6 +37,8 @@ public static class ReceiptFactory
             LocalJobKind.Embed => "embed",
             LocalJobKind.Chat => "chat",
             LocalJobKind.ListModels => "list-models",
+            LocalJobKind.ModelMaintenance => "model-maintenance",
+            LocalJobKind.ModelControl => "model-control",
             LocalJobKind.NativeOllama => "native-ollama",
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
         };
@@ -43,8 +47,10 @@ public static class ReceiptFactory
         payload switch
         {
             EmbedJobPayload embed => embed.Model,
-            ChatJobPayload chat => chat.Model,
+            ChatJobPayload chat => chat.Model ?? "routed",
             ListModelsJobPayload => "n/a",
+            ModelMaintenanceJobPayload maintenance => maintenance.Model,
+            ModelControlJobPayload control => control.Model ?? "n/a",
             NativeOllamaJobPayload native => NativeModel(native.RequestBody),
             _ => throw new ArgumentOutOfRangeException(nameof(payload))
         };
@@ -58,6 +64,8 @@ public static class ReceiptFactory
                 (chat.System?.Length ?? 0) +
                 chat.ImagesBase64.Sum(value => (long)value.Length),
             ListModelsJobPayload => 0,
+            ModelMaintenanceJobPayload => 0,
+            ModelControlJobPayload => 0,
             NativeOllamaJobPayload native =>
                 native.RequestBody?.GetRawText().Length ?? 0,
             _ => throw new ArgumentOutOfRangeException(nameof(payload))

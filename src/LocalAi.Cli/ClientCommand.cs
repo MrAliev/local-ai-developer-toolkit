@@ -5,7 +5,11 @@ public sealed record ClientRegistrationPlan(
     string LocalLmBinary,
     IReadOnlyList<string> ClaudeCommands,
     IReadOnlyList<string> CodexTomlSections,
-    bool RequiresClientRestart);
+    bool RequiresClientRestart,
+    bool IncludesEmbeddedRoutingCatalog,
+    bool PreservesExistingModels,
+    string RecommendedModelSyncTool,
+    bool AppliesClientConfiguration);
 
 public static class ClientCommand
 {
@@ -27,7 +31,11 @@ public static class ClientCommand
                 $"[mcp_servers.codesearch]\ncommand = \"{EscapeToml(codeSearch)}\"",
                 $"[mcp_servers.locallm]\ncommand = \"{EscapeToml(localLm)}\""
             ],
-            RequiresClientRestart: true);
+            RequiresClientRestart: true,
+            IncludesEmbeddedRoutingCatalog: true,
+            PreservesExistingModels: true,
+            RecommendedModelSyncTool: "local_models_sync",
+            AppliesClientConfiguration: false);
     }
 
     public static IReadOnlyList<string> McpFallbackChoices() =>

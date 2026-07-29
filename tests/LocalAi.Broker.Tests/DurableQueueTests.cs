@@ -11,6 +11,27 @@ namespace LocalAi.Broker.Tests;
 public sealed class DurableQueueTests
 {
     [Fact]
+    public async Task Candidate_listing_and_chosen_leasing_are_atomic_and_preserve_single_runner()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        var queue = new DurableQueue(root.Path);
+        var first = Request("first", LocalJobPriority.Foreground);
+        var second = Request("second", LocalJobPriority.Background);
+        await queue.EnqueueAsync(first);
+        await queue.EnqueueAsync(second);
+
+        var candidates = await queue.ListQueuedAsync();
+        Assert.Equal(
+            [first.JobId, second.JobId],
+            candidates.Select(value => value.Request.JobId));
+
+        var lease = Assert.IsType<LeasedJob>(
+            await queue.TryLeaseAsync(second.JobId, "scheduler"));
+        Assert.Equal(second.JobId, lease.Request.JobId);
+        Assert.Null(await queue.TryLeaseAsync(first.JobId, "scheduler"));
+    }
+
+    [Fact]
     public async Task Persisted_request_round_trip_preserves_concrete_payload_and_immutable_collection()
     {
         using var root = new TemporaryRuntimeRoot();

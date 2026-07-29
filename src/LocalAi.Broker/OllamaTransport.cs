@@ -8,7 +8,7 @@ using LocalAi.Contracts;
 
 namespace LocalAi.Broker;
 
-public sealed class OllamaTransport : IDisposable
+public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
 {
     private const int MaxAttempts = 3;
     private const int MaxErrorBodyCharacters = 400;
@@ -32,7 +32,7 @@ public sealed class OllamaTransport : IDisposable
     public OllamaTransport(
         Uri baseUri,
         Func<TimeSpan, CancellationToken, Task>? retryDelay = null)
-        : this(new HttpClient(), baseUri, retryDelay, ownsHttpClient: true)
+        : this(CreateOwnedHttpClient(), baseUri, retryDelay, ownsHttpClient: true)
     {
     }
 
@@ -67,6 +67,167 @@ public sealed class OllamaTransport : IDisposable
             _ => throw new NotSupportedException(
                 $"Unsupported payload type '{request.Payload.GetType().Name}'.")
         };
+    }
+
+    public async Task<IReadOnlyList<string>> ListInstalledAsync(
+        CancellationToken cancellationToken)
+    {
+        using var document = await SendAsync(
+            HttpMethod.Get,
+            "api/tags",
+            body: null,
+            sensitiveValues: [],
+            cancellationToken);
+        TagsResponse response;
+        try
+        {
+            response = document.RootElement.Deserialize<TagsResponse>(ExternalResponseJson)
+                ?? throw new InvalidDataException("Ollama returned a null tags response.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Ollama returned an invalid tags response.", exception);
+        }
+
+        if (response.Models is null ||
+            response.Models.Any(model =>
+                model is null || string.IsNullOrWhiteSpace(model.Name)))
+        {
+            throw new InvalidDataException("Ollama returned a blank model name.");
+        }
+
+        return Array.AsReadOnly(
+            response.Models
+                .Select(model => model.Name)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray());
+    }
+
+    public async Task<IReadOnlyList<OllamaProcessInfo>> ListProcessesAsync(
+        CancellationToken cancellationToken)
+    {
+        using var document = await SendAsync(
+            HttpMethod.Get,
+            "api/ps",
+            body: null,
+            sensitiveValues: [],
+            cancellationToken);
+        ProcessResponse response;
+        try
+        {
+            response = document.RootElement.Deserialize<ProcessResponse>(ExternalResponseJson)
+                ?? throw new InvalidDataException("Ollama returned a null process response.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException(
+                "Ollama returned an invalid process response.",
+                exception);
+        }
+
+        if (response.Models is null)
+        {
+            throw new InvalidDataException("Ollama returned a null process list.");
+        }
+
+        var processes = new List<OllamaProcessInfo>(response.Models.Count);
+        foreach (var model in response.Models)
+        {
+            if (model is null ||
+                string.IsNullOrWhiteSpace(model.Name) ||
+                model.Size <= 0 ||
+                model.SizeVram <= 0 ||
+                model.ContextLength <= 0 ||
+                model.ExpiresAt == default)
+            {
+                throw new InvalidDataException(
+                    "Ollama returned an invalid process entry.");
+            }
+
+            processes.Add(new OllamaProcessInfo(
+                model.Name,
+                model.Size,
+                model.SizeVram,
+                model.ContextLength,
+                model.ExpiresAt.ToUniversalTime()));
+        }
+
+        return processes.AsReadOnly();
+    }
+
+    public async Task PullAsync(
+        string model,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        var body = JsonSerializer.Serialize(new PullRequest(model, Stream: false));
+        using var document = await SendAsync(
+            HttpMethod.Post,
+            "api/pull",
+            body,
+            [model],
+            cancellationToken);
+        PullResponse response;
+        try
+        {
+            response = document.RootElement.Deserialize<PullResponse>(ExternalResponseJson)
+                ?? throw new InvalidDataException("Ollama returned a null pull response.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Ollama returned an invalid pull response.", exception);
+        }
+
+        if (!string.Equals(response.Status, "success", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Ollama did not confirm model pull success.");
+        }
+    }
+
+    public async Task PreflightAsync(
+        string model,
+        int contextTokens,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        if (!LocalContextTiers.IsSupported(contextTokens))
+        {
+            throw new ArgumentOutOfRangeException(nameof(contextTokens));
+        }
+
+        var body = JsonSerializer.Serialize(new GenerateRequest(
+            model,
+            string.Empty,
+            Stream: false,
+            KeepAlive: "30m",
+            new GenerateOptions(contextTokens)));
+        using var document = await SendAsync(
+            HttpMethod.Post,
+            "api/generate",
+            body,
+            [model],
+            cancellationToken);
+        RequireObject(document, "preflight");
+    }
+
+    public async Task UnloadAsync(
+        string model,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        var body = JsonSerializer.Serialize(new GenerateRequest(
+            model,
+            string.Empty,
+            Stream: false,
+            KeepAlive: 0,
+            Options: null));
+        using var document = await SendAsync(
+            HttpMethod.Post,
+            "api/generate",
+            body,
+            [model],
+            cancellationToken);
+        RequireObject(document, "unload");
     }
 
     private async Task<BrokerExecutionResult> ExecuteNativeAsync(
@@ -174,6 +335,9 @@ public sealed class OllamaTransport : IDisposable
         ChatJobPayload payload,
         CancellationToken cancellationToken)
     {
+        var model = payload.Model
+            ?? throw new InvalidOperationException(
+                "Routed chat must be resolved to a concrete model before transport.");
         var messages = new List<ChatRequestMessage>();
         if (payload.System is not null)
         {
@@ -184,7 +348,13 @@ public sealed class OllamaTransport : IDisposable
             "user",
             payload.Prompt,
             payload.ImagesBase64.Count == 0 ? null : payload.ImagesBase64));
-        var body = JsonSerializer.Serialize(new ChatRequest(payload.Model, messages, Stream: false));
+        var body = JsonSerializer.Serialize(new ChatRequest(
+            model,
+            messages,
+            Stream: false,
+            payload.RequestedContextTokens is { } contextTokens
+                ? new GenerateOptions(contextTokens)
+                : null));
         using var document = await SendAsync(
             HttpMethod.Post,
             "api/chat",
@@ -214,35 +384,17 @@ public sealed class OllamaTransport : IDisposable
     private async Task<BrokerExecutionResult> ExecuteListModelsAsync(
         CancellationToken cancellationToken)
     {
-        using var document = await SendAsync(
-            HttpMethod.Get,
-            "api/tags",
-            body: null,
-            sensitiveValues: [],
-            cancellationToken);
-        TagsResponse response;
-        try
-        {
-            response = document.RootElement.Deserialize<TagsResponse>(ExternalResponseJson)
-                ?? throw new InvalidDataException("Ollama returned a null tags response.");
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException("Ollama returned an invalid tags response.", exception);
-        }
-
-        if (response.Models is null ||
-            response.Models.Any(model =>
-                model is null || string.IsNullOrWhiteSpace(model.Name)))
-        {
-            throw new InvalidDataException("Ollama returned a blank model name.");
-        }
-
-        var names = response.Models
-            .Select(model => model.Name)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+        var names = await ListInstalledAsync(cancellationToken);
         return Result(new ListModelsJobOutput(names));
+    }
+
+    private static void RequireObject(JsonDocument document, string operation)
+    {
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException(
+                $"Ollama returned a non-object {operation} response.");
+        }
     }
 
     private async Task<JsonDocument> SendAsync(
@@ -352,6 +504,12 @@ public sealed class OllamaTransport : IDisposable
         return options;
     }
 
+    private static HttpClient CreateOwnedHttpClient() =>
+        new()
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+
     private static bool IsTransient(HttpStatusCode statusCode) =>
         statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
         (int)statusCode >= 500;
@@ -450,7 +608,10 @@ public sealed class OllamaTransport : IDisposable
     private sealed record ChatRequest(
         [property: JsonPropertyName("model")] string Model,
         [property: JsonPropertyName("messages")] IReadOnlyList<ChatRequestMessage> Messages,
-        [property: JsonPropertyName("stream")] bool Stream);
+        [property: JsonPropertyName("stream")] bool Stream,
+        [property: JsonPropertyName("options")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        GenerateOptions? Options);
 
     private sealed record ChatRequestMessage(
         [property: JsonPropertyName("role")] string Role,
@@ -478,6 +639,49 @@ public sealed class OllamaTransport : IDisposable
         [property: JsonPropertyName("name")]
         [property: JsonRequired]
         string Name);
+
+    private sealed record ProcessResponse(
+        [property: JsonPropertyName("models")]
+        [property: JsonRequired]
+        IReadOnlyList<ProcessModel>? Models);
+
+    private sealed record ProcessModel(
+        [property: JsonPropertyName("name")]
+        [property: JsonRequired]
+        string Name,
+        [property: JsonPropertyName("size")]
+        [property: JsonRequired]
+        long Size,
+        [property: JsonPropertyName("size_vram")]
+        [property: JsonRequired]
+        long SizeVram,
+        [property: JsonPropertyName("context_length")]
+        [property: JsonRequired]
+        int ContextLength,
+        [property: JsonPropertyName("expires_at")]
+        [property: JsonRequired]
+        DateTimeOffset ExpiresAt);
+
+    private sealed record PullRequest(
+        [property: JsonPropertyName("model")] string Model,
+        [property: JsonPropertyName("stream")] bool Stream);
+
+    private sealed record PullResponse(
+        [property: JsonPropertyName("status")]
+        [property: JsonRequired]
+        string Status);
+
+    private sealed record GenerateRequest(
+        [property: JsonPropertyName("model")] string Model,
+        [property: JsonPropertyName("prompt")] string Prompt,
+        [property: JsonPropertyName("stream")] bool Stream,
+        [property: JsonPropertyName("keep_alive")] object KeepAlive,
+        [property: JsonPropertyName("options")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        GenerateOptions? Options);
+
+    private sealed record GenerateOptions(
+        [property: JsonPropertyName("num_ctx")] int ContextTokens);
 
     private sealed record BoundedErrorBody(string Text, bool IsTruncated);
 }

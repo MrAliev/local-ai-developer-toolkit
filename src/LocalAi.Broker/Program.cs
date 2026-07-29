@@ -46,10 +46,59 @@ internal static class BrokerProgram
         {
             var queue = new DurableQueue(runtimeRoot);
             using var transport = new OllamaTransport(ollamaUri);
+            var catalog = ModelRoutingCatalog.LoadEmbedded();
+            var runtime = new ModelRuntime(transport, catalog);
+            var experiments = new ExperimentStateStore(runtimeRoot);
+            var telemetry = new ModelTelemetryStore(runtimeRoot);
+            var coordinator = new ModelExecutionCoordinator(
+                new ModelRouter(catalog),
+                runtime,
+                experiments,
+                telemetry,
+                transport.ExecuteAsync);
+            var control = new ModelControlService(
+                catalog,
+                transport,
+                experiments,
+                telemetry,
+                runtime,
+                queue);
+            var executionRouter = new BrokerExecutionRouter(
+                catalog,
+                transport,
+                runtime,
+                coordinator,
+                control,
+                transport.ExecuteAsync);
+            var durationEstimator = new DurationEstimator();
+            var scheduleMetadata = new ScheduleMetadataResolver(
+                catalog,
+                durationEstimator);
             var host = new BrokerHost(
                 queue,
                 $"broker-{process.Id}",
-                transport.ExecuteAsync);
+                executionRouter.ExecuteAsync,
+                scheduler: new ModelAwareScheduler(),
+                scheduleMetadata: async (candidates, cancellationToken) =>
+                {
+                    var prepared = await executionRouter.PrepareAsync(
+                        candidates,
+                        cancellationToken);
+                    var residentModel = executionRouter.ResidentModel;
+                    return candidates
+                        .Select(candidate => scheduleMetadata.Resolve(
+                            candidate,
+                            prepared.TryGetValue(
+                                candidate.Request.JobId,
+                                out var selection)
+                                ? selection.Model
+                                : null,
+                            residentModel))
+                        .ToArray();
+                },
+                residentModel: () => executionRouter.ResidentModel,
+                durationObserver: scheduleMetadata.Observe,
+                idleUnload: executionRouter.UnloadResidentAsync);
             var heartbeat = PublishHeartbeatAsync(
                 stateStore,
                 owner,

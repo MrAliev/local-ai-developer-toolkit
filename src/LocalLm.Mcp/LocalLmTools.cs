@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text.Json;
+using LocalAi.Contracts;
 using LocalLm.Core;
 using ModelContextProtocol.Server;
 
@@ -24,10 +26,17 @@ public static class LocalLmTools
         string[] paths,
         [Description("What to extract or answer. Be specific: 'transcribe the error text', 'list every row of the table', 'what does this diagram show'.")]
         string question,
-        [Description("Override the vision model. Defaults to qwen3-vl:8b-instruct-q8_0.")]
+        [Description("Task mode: VisualAnalysis, Ocr, or ImageTranslation.")]
+        string mode = "VisualAnalysis",
+        [Description("Optional model override. Normally leave blank so the router can choose a resident eligible model.")]
         string? model = null,
         CancellationToken cancellationToken = default)
-        => await Run(() => tasks.ReadImageAsync(paths, question, model, cancellationToken));
+        => await Run(() => tasks.ReadImageAsync(
+            paths,
+            question,
+            ParseProfile(mode),
+            model,
+            cancellationToken));
 
     [McpServerTool(Name = "triage_log")]
     [Description("""
@@ -43,7 +52,7 @@ public static class LocalLmTools
         string path,
         [Description("Optional focus. Defaults to 'what failed and why, with exact file and line'.")]
         string? question = null,
-        [Description("Override the model. Defaults to qwen3.6:27b.")]
+        [Description("Optional model override. Normally leave blank so the router chooses.")]
         string? model = null,
         CancellationToken cancellationToken = default)
         => await Run(() => tasks.TriageLogAsync(path, question, model, cancellationToken));
@@ -51,8 +60,8 @@ public static class LocalLmTools
     [McpServerTool(Name = "ask_local")]
     [Description("""
         Runs a mechanical, low-judgement task over specific files on a local model: summarize this,
-        list every method that does X, extract the TODOs, draft an English translation of these
-        Russian commit messages, check these files against a convention.
+        list every method that does X, extract the TODOs, collect named identifiers, check these
+        files against a convention.
         Use when you already know which files matter and the task does not need deep cross-file
         reasoning - a local 9-27B model is good at 'list' and 'summarize', not at architectural
         judgement or subtle bug analysis. Verify anything that matters before relying on it.
@@ -64,10 +73,99 @@ public static class LocalLmTools
         string prompt,
         [Description("Absolute paths whose full content is sent along with the prompt. May be empty for a file-less question.")]
         string[]? files = null,
-        [Description("Override the model. Defaults to qwen3.6:27b.")]
+        [Description("Routing profile such as ShortSummary, CodeAnalysis, CodeReview, Extraction, Classification, or Planning.")]
+        string taskProfile = "ShortSummary",
+        [Description("Optional model override. Normally leave blank so the router chooses.")]
         string? model = null,
         CancellationToken cancellationToken = default)
-        => await Run(() => tasks.AskAsync(prompt, files ?? [], model, cancellationToken));
+        => await Run(() => tasks.AskAsync(
+            ParseProfile(taskProfile),
+            prompt,
+            files ?? [],
+            model,
+            cancellationToken));
+
+    [McpServerTool(Name = "translate_local")]
+    [Description("Translates text through the model-aware FIFO broker, validates structure, and appends attribution naming the actual model.")]
+    public static async Task<string> TranslateLocal(
+        LocalTasks tasks,
+        [Description("Text to translate.")]
+        string source,
+        [Description("Source language name.")]
+        string sourceLanguage,
+        [Description("Target language name.")]
+        string targetLanguage,
+        [Description("True when Markdown/code/URLs/placeholders must be structurally preserved.")]
+        bool markdown = false,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await tasks.TranslateAsync(
+                source,
+                sourceLanguage,
+                targetLanguage,
+                markdown,
+                cancellationToken);
+            return $"{result.Notice}\n\n{result.Answer}";
+        }
+        catch (Exception exception)
+        {
+            return $"Локальный перевод не выполнен: {exception.Message}";
+        }
+    }
+
+    [McpServerTool(Name = "local_models_status")]
+    [Description("Shows installed and resident models, recommended missing models, and per-task experiment state.")]
+    public static async Task<string> LocalModelsStatus(
+        ModelManagementTasks tasks,
+        CancellationToken cancellationToken = default) =>
+        Serialize(await tasks.GetStatusAsync(cancellationToken));
+
+    [McpServerTool(Name = "local_model_preflight")]
+    [Description("Loads one model/context through the FIFO broker without task content and returns full-VRAM residency proof.")]
+    public static async Task<string> LocalModelPreflight(
+        ModelManagementTasks tasks,
+        string model,
+        int contextTokens = 2048,
+        CancellationToken cancellationToken = default) =>
+        Serialize(await tasks.PreflightAsync(
+            model,
+            contextTokens,
+            cancellationToken));
+
+    [McpServerTool(Name = "local_models_sync")]
+    [Description("Queues installation of recommended missing models through the durable FIFO broker.")]
+    public static async Task<string> LocalModelsSync(
+        ModelManagementTasks tasks,
+        CancellationToken cancellationToken = default) =>
+        Serialize(await tasks.SyncRecommendedAsync(cancellationToken));
+
+    [McpServerTool(Name = "local_model_experiment_report")]
+    [Description("Returns timing, error, fallback, warm/cold, and estimated token-saving statistics for one task/model experiment pair.")]
+    public static async Task<string> LocalModelExperimentReport(
+        ModelManagementTasks tasks,
+        string taskProfile,
+        string model,
+        CancellationToken cancellationToken = default) =>
+        Serialize(await tasks.GetExperimentReportAsync(
+            ParseProfile(taskProfile),
+            model,
+            cancellationToken));
+
+    [McpServerTool(Name = "local_model_feedback")]
+    [Description("Applies owner feedback to one task/model pair: Promote, ContinueExperiment, FallbackOnly, or Disable.")]
+    public static async Task<string> LocalModelFeedback(
+        ModelManagementTasks tasks,
+        string taskProfile,
+        string model,
+        string action,
+        CancellationToken cancellationToken = default) =>
+        Serialize(await tasks.ApplyFeedbackAsync(
+            ParseProfile(taskProfile),
+            model,
+            ParseEnum<ExperimentOwnerAction>(action, nameof(action)),
+            cancellationToken));
 
     /// <summary>
     /// Turns a result into the text the caller sees: the notice line first, so the delegation and
@@ -95,4 +193,19 @@ public static class LocalLmTools
             return $"Локальная модель не отработала: {ex.Message}";
         }
     }
+
+    private static LocalTaskProfile ParseProfile(string value) =>
+        ParseEnum<LocalTaskProfile>(value, "taskProfile");
+
+    private static T ParseEnum<T>(string value, string parameterName)
+        where T : struct, Enum =>
+        Enum.TryParse<T>(value, ignoreCase: true, out var parsed) &&
+        Enum.IsDefined(parsed)
+            ? parsed
+            : throw new ArgumentException(
+                $"Unknown {parameterName} '{value}'.",
+                parameterName);
+
+    private static string Serialize<T>(T value) =>
+        JsonSerializer.Serialize(value, LocalAiJson.Strict);
 }

@@ -1,0 +1,205 @@
+{
+  "SchemaVersion": 1,
+  "CatalogVersion": "1",
+  "Models": [
+    {
+      "Tag": "qwen2.5-coder:14b",
+      "Source": "ollama",
+      "Lifecycle": "Established",
+      "InstallPolicy": "Existing",
+      "Capabilities": [ "Text", "Code" ],
+      "ContextTokens": [ 2048, 4096, 8192, 16384, 32768 ],
+      "SupportsImages": false,
+      "MaxImagePixels": null
+    },
+    {
+      "Tag": "qwen3-vl:8b-instruct-q8_0",
+      "Source": "ollama",
+      "Lifecycle": "Established",
+      "InstallPolicy": "Existing",
+      "Capabilities": [ "Text", "Vision", "Ocr" ],
+      "ContextTokens": [ 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144 ],
+      "SupportsImages": true,
+      "MaxImagePixels": 16777216
+    },
+    {
+      "Tag": "qwen3-embedding:8b-q8_0",
+      "Source": "ollama",
+      "Lifecycle": "Established",
+      "InstallPolicy": "Existing",
+      "Capabilities": [ "Embedding" ],
+      "ContextTokens": [ 2048, 4096, 8192, 16384, 32768 ],
+      "SupportsImages": false,
+      "MaxImagePixels": null
+    },
+    {
+      "Tag": "gpt-oss:20b",
+      "Source": "ollama",
+      "Lifecycle": "Established",
+      "InstallPolicy": "Existing",
+      "Capabilities": [ "Text", "Reasoning" ],
+      "ContextTokens": [ 2048, 4096, 8192, 16384, 32768, 65536, 131072 ],
+      "SupportsImages": false,
+      "MaxImagePixels": null
+    },
+    {
+      "Tag": "qwen3.5:9b",
+      "Source": "ollama",
+      "Lifecycle": "Established",
+      "InstallPolicy": "Existing",
+      "Capabilities": [ "Text", "Translation", "Vision", "Reasoning" ],
+      "ContextTokens": [ 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144 ],
+      "SupportsImages": true,
+      "MaxImagePixels": 4194304
+    },
+    {
+      "Tag": "translategemma:12b",
+      "Source": "ollama",
+      "Lifecycle": "Experimental",
+      "InstallPolicy": "Recommended",
+      "Capabilities": [ "Text", "Translation", "Vision" ],
+      "ContextTokens": [ 2048, 4096, 8192, 16384, 32768, 65536, 131072 ],
+      "SupportsImages": true,
+      "MaxImagePixels": 16777216
+    }
+  ],
+  "Routes": [
+    {
+      "Profile": "PlainTranslation",
+      "Mode": "Model",
+      "Candidates": [ "translategemma:12b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "TranslationStructure",
+      "DefaultDuration": "Short"
+    },
+    {
+      "Profile": "TechnicalTranslation",
+      "Mode": "Model",
+      "Candidates": [ "translategemma:12b" ],
+      "Fallbacks": [ "qwen2.5-coder:14b", "qwen3.5:9b" ],
+      "Validator": "TranslationStructure",
+      "DefaultDuration": "Medium"
+    },
+    {
+      "Profile": "ImageTranslation",
+      "Mode": "Model",
+      "Candidates": [ "translategemma:12b" ],
+      "Fallbacks": [ "qwen3-vl:8b-instruct-q8_0", "qwen3.5:9b" ],
+      "Validator": "TranslationStructure",
+      "DefaultDuration": "Medium"
+    },
+    {
+      "Profile": "Ocr",
+      "Mode": "Model",
+      "Candidates": [ "qwen3-vl:8b-instruct-q8_0" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "OcrCompleteness",
+      "DefaultDuration": "Medium"
+    },
+    {
+      "Profile": "VisualAnalysis",
+      "Mode": "Model",
+      "Candidates": [ "qwen3-vl:8b-instruct-q8_0" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "None",
+      "DefaultDuration": "Medium"
+    },
+    {
+      "Profile": "VectorEmbedding",
+      "Mode": "Model",
+      "Candidates": [ "qwen3-embedding:8b-q8_0" ],
+      "Fallbacks": [ "qwen3-embedding:8b-q8_0" ],
+      "Validator": "StructuredOutput",
+      "DefaultDuration": "Short"
+    },
+    {
+      "Profile": "ExactSearch",
+      "Mode": "Deterministic",
+      "Candidates": [],
+      "Fallbacks": [],
+      "Validator": "None",
+      "DefaultDuration": "Short"
+    },
+    {
+      "Profile": "CodeRerank",
+      "Mode": "Model",
+      "Candidates": [ "qwen2.5-coder:14b", "qwen3.5:9b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "StructuredOutput",
+      "DefaultDuration": "Short"
+    },
+    {
+      "Profile": "CodeAnalysis",
+      "Mode": "Model",
+      "Candidates": [ "qwen2.5-coder:14b", "gpt-oss:20b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "CodeReferences",
+      "DefaultDuration": "Medium"
+    },
+    {
+      "Profile": "CodeEditing",
+      "Mode": "Model",
+      "Candidates": [ "qwen2.5-coder:14b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "CodeReferences",
+      "DefaultDuration": "Medium"
+    },
+    {
+      "Profile": "CodeReview",
+      "Mode": "Model",
+      "Candidates": [ "qwen2.5-coder:14b", "gpt-oss:20b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "CodeReferences",
+      "DefaultDuration": "Medium"
+    },
+    {
+      "Profile": "LogTriage",
+      "Mode": "Model",
+      "Candidates": [ "qwen2.5-coder:14b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "CodeReferences",
+      "DefaultDuration": "Short"
+    },
+    {
+      "Profile": "Extraction",
+      "Mode": "Model",
+      "Candidates": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "StructuredOutput",
+      "DefaultDuration": "Short"
+    },
+    {
+      "Profile": "Classification",
+      "Mode": "Model",
+      "Candidates": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "StructuredOutput",
+      "DefaultDuration": "Short"
+    },
+    {
+      "Profile": "ShortSummary",
+      "Mode": "Model",
+      "Candidates": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
+      "Fallbacks": [ "qwen3.5:9b" ],
+      "Validator": "None",
+      "DefaultDuration": "Short"
+    },
+    {
+      "Profile": "MultiFileSynthesis",
+      "Mode": "Model",
+      "Candidates": [ "gpt-oss:20b", "qwen3.5:9b", "qwen2.5-coder:14b" ],
+      "Fallbacks": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
+      "Validator": "None",
+      "DefaultDuration": "Long"
+    },
+    {
+      "Profile": "Planning",
+      "Mode": "Model",
+      "Candidates": [ "gpt-oss:20b", "qwen3.5:9b", "qwen2.5-coder:14b" ],
+      "Fallbacks": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
+      "Validator": "None",
+      "DefaultDuration": "Long"
+    }
+  ],
+  "MaintenanceAllowlist": [ "translategemma:12b" ]
+}

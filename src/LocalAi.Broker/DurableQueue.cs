@@ -6,7 +6,7 @@ using LocalAi.Contracts;
 
 namespace LocalAi.Broker;
 
-public sealed class DurableQueue : IBrokerQueue
+public sealed class DurableQueue : ISelectableBrokerQueue
 {
     private static JsonSerializerOptions JsonOptions => LocalAiJson.Strict;
 
@@ -139,28 +139,55 @@ public sealed class DurableQueue : IBrokerQueue
             return Task.FromResult<LeasedJob?>(null);
         }
 
-        var expires = now + LeaseDuration;
-        var leaseId = Guid.NewGuid();
-        var running = next.State with
+        return Task.FromResult<LeasedJob?>(Lease(next, workerId, now));
+    }
+
+    public Task<IReadOnlyList<QueuedJobCandidate>> ListQueuedAsync(
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var mutex = EnterMutex(cancellationToken);
+        MaintainActiveRoot();
+        RecoverExpiredLeases(_timeProvider.GetUtcNow());
+        var candidates = ReadEntries()
+            .Where(entry => entry.State.State == LocalJobState.Queued)
+            .OrderBy(entry => entry.State.Sequence)
+            .Select(entry => new QueuedJobCandidate(
+                ReadRequest(entry.Directory),
+                entry.State.Sequence,
+                entry.State.CreatedAtUtc))
+            .ToArray();
+        return Task.FromResult<IReadOnlyList<QueuedJobCandidate>>(
+            Array.AsReadOnly(candidates));
+    }
+
+    public Task<LeasedJob?> TryLeaseAsync(
+        Guid jobId,
+        string workerId,
+        CancellationToken cancellationToken = default)
+    {
+        if (jobId == Guid.Empty)
         {
-            State = LocalJobState.Running,
-            UpdatedAtUtc = now,
-            WorkerId = workerId,
-            LeaseId = leaseId,
-            LeaseExpiresAtUtc = expires,
-            HeartbeatAtUtc = now,
-            AttemptCount = next.State.AttemptCount + 1,
-            FailureCode = null
-        };
-        WriteState(next.Directory, running);
-        return Task.FromResult<LeasedJob?>(new LeasedJob(
-            ReadRequest(next.Directory),
-            running.Sequence,
-            workerId,
-            leaseId,
-            expires,
-            running.AttemptCount,
-            running.RecoveryCount));
+            throw new ArgumentException("Job ID cannot be empty.", nameof(jobId));
+        }
+
+        ValidateWorkerId(workerId);
+        cancellationToken.ThrowIfCancellationRequested();
+        using var mutex = EnterMutex(cancellationToken);
+        MaintainActiveRoot();
+        var now = _timeProvider.GetUtcNow();
+        RecoverExpiredLeases(now);
+        var entries = ReadEntries();
+        if (entries.Any(entry => entry.State.State == LocalJobState.Running))
+        {
+            return Task.FromResult<LeasedJob?>(null);
+        }
+
+        var selected = entries.SingleOrDefault(entry =>
+            entry.State.JobId == jobId &&
+            entry.State.State == LocalJobState.Queued);
+        return Task.FromResult(
+            selected is null ? null : Lease(selected, workerId, now));
     }
 
     public Task<LeaseHeartbeat> HeartbeatAsync(
@@ -318,6 +345,35 @@ public sealed class DurableQueue : IBrokerQueue
         {
             throw new LeaseLostException($"The lease for job '{state.JobId}' has expired.");
         }
+    }
+
+    private LeasedJob Lease(
+        JobEntry entry,
+        string workerId,
+        DateTimeOffset now)
+    {
+        var expires = now + LeaseDuration;
+        var leaseId = Guid.NewGuid();
+        var running = entry.State with
+        {
+            State = LocalJobState.Running,
+            UpdatedAtUtc = now,
+            WorkerId = workerId,
+            LeaseId = leaseId,
+            LeaseExpiresAtUtc = expires,
+            HeartbeatAtUtc = now,
+            AttemptCount = entry.State.AttemptCount + 1,
+            FailureCode = null
+        };
+        WriteState(entry.Directory, running);
+        return new LeasedJob(
+            ReadRequest(entry.Directory),
+            running.Sequence,
+            workerId,
+            leaseId,
+            expires,
+            running.AttemptCount,
+            running.RecoveryCount);
     }
 
     private static JobStateDocument ToTerminal(
@@ -701,6 +757,11 @@ public sealed class DurableQueue : IBrokerQueue
 
 public sealed record EnqueueResult(Guid JobId, long Sequence, bool JoinedExisting);
 
+public sealed record QueuedJobCandidate(
+    LocalJobRequest Request,
+    long Sequence,
+    DateTimeOffset CreatedAtUtc);
+
 public sealed record LeasedJob(
     LocalJobRequest Request,
     long Sequence,
@@ -770,5 +831,16 @@ public interface IBrokerQueue
         Guid jobId,
         string workerId,
         Guid leaseId,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ISelectableBrokerQueue : IBrokerQueue
+{
+    Task<IReadOnlyList<QueuedJobCandidate>> ListQueuedAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<LeasedJob?> TryLeaseAsync(
+        Guid jobId,
+        string workerId,
         CancellationToken cancellationToken = default);
 }

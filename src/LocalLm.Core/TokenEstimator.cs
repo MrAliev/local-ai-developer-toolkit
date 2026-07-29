@@ -66,12 +66,29 @@ public static class TokenEstimator
     public static int Saved(int wouldHaveCost, string actualAnswer) =>
         Math.Max(0, wouldHaveCost - ForText(actualAnswer));
 
+    public static TranslationTokenMetrics ForTranslation(
+        string source,
+        string translated)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(translated);
+        var input = ForText(source);
+        var output = ForText(translated);
+        return new TranslationTokenMetrics(
+            input,
+            output,
+            checked(input + output),
+            output,
+            Math.Max(0, input - output));
+    }
+
     /// <summary>
     /// Formats a saving as a deliberately coarse range. Presenting "~18,437 tokens" would imply a
     /// precision that does not exist.
     /// </summary>
     public static string Describe(int saved) => saved switch
     {
+        0 => "0",
         < 500 => "менее ~0.5K",
         < 100_000 => $"~{Round(saved * 0.85)}–{Round(saved * 1.15)}K",
         _ => $"~{Round(saved * 0.8)}–{Round(saved * 1.2)}K",
@@ -83,3 +100,10 @@ public static class TokenEstimator
         return thousands >= 10 ? Math.Round(thousands).ToString("0") : Math.Round(thousands, 1).ToString("0.#");
     }
 }
+
+public sealed record TranslationTokenMetrics(
+    int InputTokens,
+    int OutputTokens,
+    int LocalTokensProcessed,
+    int EstimatedCloudGenerationTokensSaved,
+    int EstimatedNetCloudContextTokensSaved);

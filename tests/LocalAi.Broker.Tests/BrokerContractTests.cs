@@ -14,6 +14,12 @@ public sealed class BrokerContractTests
     public static TheoryData<LocalJobState> JobStates =>
         new(Enum.GetValues<LocalJobState>());
 
+    public static TheoryData<LocalTaskProfile> TaskProfiles =>
+        new(Enum.GetValues<LocalTaskProfile>());
+
+    public static TheoryData<LocalModelLifecycle> ModelLifecycles =>
+        new(Enum.GetValues<LocalModelLifecycle>());
+
     [Theory]
     [MemberData(nameof(JobKinds))]
     public void JobKind_serializes_as_a_string_and_round_trips(LocalJobKind value) =>
@@ -28,6 +34,77 @@ public sealed class BrokerContractTests
     [MemberData(nameof(JobStates))]
     public void JobState_serializes_as_a_string_and_round_trips(LocalJobState value) =>
         AssertJsonStringRoundTrip(value);
+
+    [Theory]
+    [MemberData(nameof(TaskProfiles))]
+    public void TaskProfile_serializes_as_a_string_and_round_trips(LocalTaskProfile value) =>
+        AssertJsonStringRoundTrip(value);
+
+    [Theory]
+    [MemberData(nameof(ModelLifecycles))]
+    public void ModelLifecycle_serializes_as_a_string_and_round_trips(
+        LocalModelLifecycle value) =>
+        AssertJsonStringRoundTrip(value);
+
+    [Fact]
+    public void Routed_chat_carries_workload_and_workflow_without_a_concrete_model()
+    {
+        var workflowId = Guid.NewGuid();
+
+        var request = LocalJobRequestFactory.CreateRoutedChat(
+            "routed-chat",
+            LocalJobPriority.Foreground,
+            LocalTaskProfile.TechnicalTranslation,
+            "translate",
+            "preserve structure",
+            [],
+            new LocalWorkloadMetadata(
+                1200,
+                1400,
+                1,
+                0,
+                0,
+                LocalDurationClass.Short),
+            new LocalWorkflowHint(
+                workflowId,
+                0,
+                2,
+                [
+                    LocalTaskProfile.TechnicalTranslation,
+                    LocalTaskProfile.TechnicalTranslation
+                ],
+                isDependencyReady: true),
+            requestedContextTokens: 2048);
+
+        var payload = Assert.IsType<ChatJobPayload>(request.Payload);
+        Assert.Null(payload.Model);
+        Assert.Equal(LocalTaskProfile.TechnicalTranslation, payload.TaskProfile);
+        Assert.Equal(1200, payload.Workload!.InputCharacters);
+        Assert.Equal(workflowId, payload.Workflow!.WorkflowId);
+        Assert.Equal(2048, payload.RequestedContextTokens);
+    }
+
+    [Fact]
+    public void Legacy_chat_remains_an_explicit_model_override()
+    {
+        var request = LocalJobRequestFactory.CreateChat(
+            "legacy-chat",
+            LocalJobPriority.Foreground,
+            "qwen3.5:9b",
+            "prompt",
+            null,
+            []);
+
+        var roundTrip = JsonSerializer.Deserialize<LocalJobRequest>(
+            JsonSerializer.Serialize(request),
+            LocalAiJson.Strict)!;
+        var payload = Assert.IsType<ChatJobPayload>(roundTrip.Payload);
+
+        Assert.Equal("qwen3.5:9b", payload.Model);
+        Assert.Null(payload.TaskProfile);
+        Assert.Null(payload.Workload);
+        Assert.Null(payload.Workflow);
+    }
 
     [Fact]
     public void Create_uses_supplied_identity_timestamp_and_payload()
