@@ -14,7 +14,8 @@ public sealed class BrokerRuntimeStateStoreTests
             42,
             DateTimeOffset.UtcNow.AddMinutes(-1),
             DateTimeOffset.UtcNow,
-            1);
+            2,
+            Path.GetFullPath("LocalAi.Broker.dll"));
 
         fixture.Store.Publish(state);
 
@@ -33,7 +34,8 @@ public sealed class BrokerRuntimeStateStoreTests
             42,
             DateTimeOffset.UtcNow.AddMinutes(-1),
             DateTimeOffset.UtcNow.AddSeconds(-1),
-            1);
+            2,
+            Path.GetFullPath("LocalAi.Broker.dll"));
         var heartbeat = initial with { HeartbeatAtUtc = DateTimeOffset.UtcNow };
         fixture.Store.Publish(initial);
         var locked = new FileStream(
@@ -76,7 +78,8 @@ public sealed class BrokerRuntimeStateStoreTests
             42,
             DateTimeOffset.UtcNow.AddMinutes(-1),
             DateTimeOffset.UtcNow,
-            1);
+            2,
+            Path.GetFullPath("LocalAi.Broker.dll"));
         var replacement = owner with { ProcessId = 99 };
         fixture.Store.Publish(replacement);
 
@@ -93,7 +96,8 @@ public sealed class BrokerRuntimeStateStoreTests
             42,
             DateTimeOffset.UtcNow.AddMinutes(-1),
             DateTimeOffset.UtcNow,
-            1);
+            2,
+            Path.GetFullPath("LocalAi.Broker.dll"));
         fixture.Store.Publish(owner);
 
         fixture.Store.DeleteIfOwnedBy(owner);

@@ -80,7 +80,7 @@ local_models_sync
 Установите общий цепочный Git hook только после одобрения внешнего изменения:
 
 ```powershell
-dotnet run --project src/LocalAi.Cli -- hooks install --root C:\path\to\repository
+C:\path\to\LocalAi\bin\launcher\localai-launcher.exe run localai hooks install --root C:\path\to\repository
 ```
 
 ## Сборка и тестирование
@@ -108,9 +108,50 @@ dotnet publish src/CodeSearch.Cli/CodeSearch.Cli.csproj --configuration Release 
 dotnet publish src/CodeSearch.Mcp/CodeSearch.Mcp.csproj --configuration Release --output publish/CodeSearch.Mcp
 dotnet publish src/LocalLm.Mcp/LocalLm.Mcp.csproj --configuration Release --output publish/LocalLm.Mcp
 dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --output publish/LocalAi.Cli
+dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --output publish/LocalAi.Launcher
 ```
 
 Каталог `publish/` игнорируется. Публикация не регистрирует исполняемые файлы с клиентом AI или устанавливает Git хуки.
+
+### Неизменяемые версии и атомарная активация
+
+Опубликуйте CLI, MCP-серверы, брокер, контракты и их зависимости среды выполнения
+в новый промежуточный каталог. Проверьте полный результат, затем один раз скопируйте
+его в `bin\versions\<version>`. Каталог опубликованной версии неизменяем: активация
+никогда не обновляет и не удаляет его, а исторические версии остаются доступными для
+отката.
+
+Отдельно опубликованный launcher установите по пути
+`bin\launcher\localai-launcher.exe`. Codex, Claude, Git hooks и обёртки делегирования
+должны регистрировать этот стабильный исполняемый файл вместе с префиксом инструмента,
+например:
+
+```text
+localai-launcher.exe run codesearch-mcp
+localai-launcher.exe run locallm-mcp
+localai-launcher.exe run localai
+```
+
+Активная версия хранится в атомарно заменяемом документе `bin\current.json`:
+
+```json
+{"schemaVersion":1,"version":"<version>"}
+```
+
+После проверки каталога кандидата активируйте его:
+
+```powershell
+bin\launcher\localai-launcher.exe activate <version>
+bin\launcher\localai-launcher.exe activate <version> --stop-running
+```
+
+Первая форма завершается ошибкой, пока версия используется процессом, запущенным через
+launcher. Вторая останавливает только процессы, чей точный путь исполняемого файла или
+свежая идентичность сборки брокера относится к предыдущей версии, а затем переключает
+указатель. Она не останавливает Ollama или несвязанные процессы `dotnet`. Для отката
+активируйте ранее проверенный неизменяемый каталог. Все запросы к моделям, включая
+команды совместимости, по-прежнему проходят через общий FIFO-брокер; прямой доступ к
+Ollama не поддерживается.
 
 ## Модельно-ориентированное маршрутизирование
 
@@ -173,6 +214,7 @@ LocalLm предоставляет эти инструменты управле�
 | `src/LocalAi.Contracts` | Брокер, индекс и репозиторий контакты. |
 | `src/LocalAi.Broker` | Устойчивая общесистемная FIFO-очередь и единственный транспорт к Ollama. |
 | `src/LocalAi.Broker.Client` | Интеграция клиента и процесса брокера. |
+| `src/LocalAi.Launcher` | Стабильный запуск инструментов и атомарная активация неизменяемых версий. |
 | `src/LocalAi.Repository` | Идентификация репозитория, манифест и состояние рабочего каталога. |
 | `src/LocalAi.Cli` | Синхронизация репозиториев, совместимый транспорт и установка хуков. |
 | `src/CodeSearch.Core` | Обрезка, вложения, хранилище индекса, оверлей и гибридный поиск. |

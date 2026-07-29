@@ -98,7 +98,7 @@ does not expose a generic pull command and does not remove existing models.
 Install the shared chained Git hooks only after approving that external mutation:
 
 ```powershell
-dotnet run --project src/LocalAi.Cli -- hooks install --root C:\path\to\repository
+C:\path\to\LocalAi\bin\launcher\localai-launcher.exe run localai hooks install --root C:\path\to\repository
 ```
 
 ## Build and test
@@ -126,10 +126,48 @@ dotnet publish src/CodeSearch.Cli/CodeSearch.Cli.csproj --configuration Release 
 dotnet publish src/CodeSearch.Mcp/CodeSearch.Mcp.csproj --configuration Release --output publish/CodeSearch.Mcp
 dotnet publish src/LocalLm.Mcp/LocalLm.Mcp.csproj --configuration Release --output publish/LocalLm.Mcp
 dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --output publish/LocalAi.Cli
+dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --output publish/LocalAi.Launcher
 ```
 
 The `publish/` directory is ignored. Publishing does not register executables with an
 AI client or install Git hooks.
+
+### Immutable versions and atomic activation
+
+Publish the CLI, MCP servers, broker, contracts, and their runtime dependencies into a
+fresh staging directory. Verify the complete output, then copy it once to
+`bin\versions\<version>`. A published version directory is immutable: activation never
+updates or deletes it, and historical versions remain available for rollback.
+
+Install the independently published launcher at
+`bin\launcher\localai-launcher.exe`. Codex, Claude, Git hooks, and delegation wrappers
+must register that stable executable plus a tool prefix, for example:
+
+```text
+localai-launcher.exe run codesearch-mcp
+localai-launcher.exe run locallm-mcp
+localai-launcher.exe run localai
+```
+
+The active version is the atomically replaced `bin\current.json` document:
+
+```json
+{"schemaVersion":1,"version":"<version>"}
+```
+
+After the candidate directory has been verified, activate it with:
+
+```powershell
+bin\launcher\localai-launcher.exe activate <version>
+bin\launcher\localai-launcher.exe activate <version> --stop-running
+```
+
+The first form fails while a launcher-managed version is in use. The second form stops
+only processes whose exact executable or fresh broker assembly identity belongs to the
+previous version, then switches the pointer. It does not stop Ollama or unrelated
+`dotnet` processes. Roll back by activating a previously verified immutable directory.
+All model requests, including compatibility commands, continue to use the shared FIFO
+broker; direct Ollama access is unsupported.
 
 ## Model-aware routing
 
@@ -217,6 +255,7 @@ same capability, installation, context, and full-VRAM checks.
 | `src/LocalAi.Contracts` | Broker, index, and repository wire contracts. |
 | `src/LocalAi.Broker` | Durable machine-wide FIFO and exclusive Ollama transport. |
 | `src/LocalAi.Broker.Client` | Client and broker-process integration. |
+| `src/LocalAi.Launcher` | Stable tool dispatch and atomic immutable-version activation. |
 | `src/LocalAi.Repository` | Repository identity, manifest, and worktree state. |
 | `src/LocalAi.Cli` | Repository synchronization, compatibility transport, and hook installation. |
 | `src/CodeSearch.Core` | Chunking, embeddings, index storage, overlays, and hybrid search. |

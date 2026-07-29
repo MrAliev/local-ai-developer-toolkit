@@ -37,7 +37,8 @@ public sealed record BrokerProcessState(
     int ProcessId,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset HeartbeatAtUtc,
-    int SchemaVersion);
+    int SchemaVersion,
+    string BrokerAssemblyPath);
 
 [JsonPolymorphic(
     TypeDiscriminatorPropertyName = "$type",

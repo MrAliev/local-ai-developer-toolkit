@@ -80,6 +80,16 @@ if (args is ["hook", var hookName, ..])
 
 if (args is ["hooks", "install", ..])
 {
+    var launcherPath = Environment.GetEnvironmentVariable(
+        "LOCALAI_LAUNCHER_PATH");
+    if (string.IsNullOrWhiteSpace(launcherPath))
+    {
+        Console.Error.WriteLine(
+            "LocalAi hooks require LOCALAI_LAUNCHER_PATH. " +
+            "Run this command through the stable LocalAi launcher.");
+        return 2;
+    }
+
     var rootIndex = Array.IndexOf(args, "--root");
     var root = rootIndex >= 0 && rootIndex + 1 < args.Length
         ? args[rootIndex + 1]
@@ -88,8 +98,8 @@ if (args is ["hooks", "install", ..])
         .GetCommonDirectoryAsync(root);
     var result = HookInstaller.Install(
         commonDirectory,
-        Environment.ProcessPath
-        ?? throw new InvalidOperationException("LocalAi executable path is unavailable."));
+        launcherPath,
+        ["run", "localai"]);
     Console.WriteLine($"Installed {result.Installed.Count} shared Git hooks.");
     return 0;
 }
