@@ -54,6 +54,20 @@ public class TokenEstimatorTests
         Assert.InRange(saved, 49_000, 50_000);
     }
 
+    [Fact]
+    public void Translation_metrics_separate_local_work_generation_and_context_delta()
+    {
+        var metrics = TokenEstimator.ForTranslation(
+            new string('a', 4_000),
+            new string('ф', 2_200));
+
+        Assert.Equal(1_000, metrics.InputTokens);
+        Assert.Equal(1_000, metrics.OutputTokens);
+        Assert.Equal(2_000, metrics.LocalTokensProcessed);
+        Assert.Equal(1_000, metrics.EstimatedCloudGenerationTokensSaved);
+        Assert.Equal(0, metrics.EstimatedNetCloudContextTokensSaved);
+    }
+
     [Theory]
     [InlineData(100, "менее")]
     [InlineData(20_000, "–")]

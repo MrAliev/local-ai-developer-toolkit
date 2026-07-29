@@ -21,6 +21,10 @@ public sealed class ClientRegistrationTests
                 plan.CodeSearchBinary.Replace("\\", "\\\\"),
                 StringComparison.Ordinal));
         Assert.True(plan.RequiresClientRestart);
+        Assert.True(plan.IncludesEmbeddedRoutingCatalog);
+        Assert.True(plan.PreservesExistingModels);
+        Assert.Equal("local_models_sync", plan.RecommendedModelSyncTool);
+        Assert.False(plan.AppliesClientConfiguration);
         Assert.Equal(3, ClientCommand.McpFallbackChoices().Count);
     }
 }

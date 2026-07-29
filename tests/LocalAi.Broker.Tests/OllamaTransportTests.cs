@@ -12,6 +12,101 @@ public sealed class OllamaTransportTests
     private static readonly Uri BaseUri = new("http://ollama.test:11434/");
 
     [Fact]
+    public async Task Runtime_processes_map_full_vram_and_context_fields()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(
+            HttpStatusCode.OK,
+            """
+            {
+              "models": [{
+                "name": "translategemma:12b",
+                "size": 8109818272,
+                "size_vram": 8109818272,
+                "context_length": 2048,
+                "expires_at": "2026-07-29T05:00:00+03:00"
+              }]
+            }
+            """);
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        var processes = await transport.ListProcessesAsync(
+            TestContext.Current.CancellationToken);
+
+        var process = Assert.Single(processes);
+        Assert.Equal("translategemma:12b", process.Model);
+        Assert.Equal(8109818272, process.SizeBytes);
+        Assert.Equal(process.SizeBytes, process.SizeVramBytes);
+        Assert.Equal(2048, process.ContextTokens);
+        Assert.Equal(
+            new DateTimeOffset(2026, 7, 29, 2, 0, 0, TimeSpan.Zero),
+            process.ExpiresAtUtc);
+        Assert.Equal(new Uri(BaseUri, "api/ps"), Assert.Single(fake.Requests).Uri);
+    }
+
+    [Fact]
+    public async Task Runtime_pull_posts_non_streaming_request()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"status":"success"}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await transport.PullAsync(
+            "translategemma:12b",
+            TestContext.Current.CancellationToken);
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal(new Uri(BaseUri, "api/pull"), request.Uri);
+        Assert.Equal(
+            """{"model":"translategemma:12b","stream":false}""",
+            request.Body);
+    }
+
+    [Fact]
+    public async Task Runtime_preflight_uses_empty_prompt_selected_context_and_bounded_residency()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"response":"","done":true}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await transport.PreflightAsync(
+            "translategemma:12b",
+            2048,
+            TestContext.Current.CancellationToken);
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Equal(new Uri(BaseUri, "api/generate"), request.Uri);
+        using var body = JsonDocument.Parse(request.Body!);
+        Assert.Equal("translategemma:12b", body.RootElement.GetProperty("model").GetString());
+        Assert.Equal(string.Empty, body.RootElement.GetProperty("prompt").GetString());
+        Assert.False(body.RootElement.GetProperty("stream").GetBoolean());
+        Assert.Equal("30m", body.RootElement.GetProperty("keep_alive").GetString());
+        Assert.Equal(
+            2048,
+            body.RootElement.GetProperty("options").GetProperty("num_ctx").GetInt32());
+    }
+
+    [Fact]
+    public async Task Runtime_unload_sets_keep_alive_to_zero()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"response":"","done":true}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await transport.UnloadAsync(
+            "translategemma:12b",
+            TestContext.Current.CancellationToken);
+
+        using var body = JsonDocument.Parse(Assert.Single(fake.Requests).Body!);
+        Assert.Equal(0, body.RootElement.GetProperty("keep_alive").GetInt32());
+    }
+
+    [Fact]
     public async Task Native_chat_preserves_tool_calls_and_usage_metadata()
     {
         var fake = new FakeOllamaServer();
@@ -178,6 +273,44 @@ public sealed class OllamaTransportTests
         Assert.Equal(
             "answer",
             result.Body.Deserialize<ChatJobOutput>(LocalAiJson.Strict)!.Content);
+    }
+
+    [Fact]
+    public async Task Routed_chat_reuses_the_preflight_context_on_the_real_request()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"message":{"content":"answer"}}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+        var routed = LocalJobRequestFactory.CreateRoutedChat(
+            "routed-chat",
+            LocalJobPriority.Foreground,
+            LocalTaskProfile.PlainTranslation,
+            "translate",
+            null,
+            null,
+            new LocalWorkloadMetadata(
+                9,
+                20,
+                0,
+                0,
+                0,
+                LocalDurationClass.Short),
+            requestedContextTokens: 2048);
+
+        await transport.ExecuteAsync(
+            LocalJobRequestFactory.ResolveRoutedChat(
+                routed,
+                "translategemma:12b"),
+            TestContext.Current.CancellationToken);
+
+        using var body = JsonDocument.Parse(Assert.Single(fake.Requests).Body!);
+        Assert.Equal(
+            2048,
+            body.RootElement
+                .GetProperty("options")
+                .GetProperty("num_ctx")
+                .GetInt32());
     }
 
     [Fact]

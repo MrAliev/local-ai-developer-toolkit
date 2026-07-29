@@ -1,5 +1,6 @@
 using System.Text;
 using LocalLm.Core;
+using LocalLm.Mcp;
 using LocalAi.Broker.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,6 +22,8 @@ catch (IOException)
 builder.Services.AddSingleton<ILocalModelClient>(
     new BrokerLocalModelClient(BrokerClientFactory.CreateDefault()));
 builder.Services.AddSingleton<LocalTasks>();
+builder.Services.AddSingleton<ModelManagementTasks>();
+builder.Services.AddHostedService<RecommendedModelSyncService>();
 
 builder.Services
     .AddMcpServer()

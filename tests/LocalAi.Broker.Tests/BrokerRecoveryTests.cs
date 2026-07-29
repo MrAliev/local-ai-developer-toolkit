@@ -111,6 +111,111 @@ public sealed class BrokerRecoveryTests
     }
 
     [Fact]
+    public async Task BrokerHost_unloads_resident_model_once_after_thirty_idle_minutes()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 7, 29, 8, 0, 0, TimeSpan.Zero));
+        var queue = new DurableQueue(root.Path, clock);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var unloadCalls = 0;
+        var host = new BrokerHost(
+            queue,
+            "idle-unload-worker",
+            (_, _) => throw new UnreachableException(),
+            clock,
+            idleDelay: (delay, _) =>
+            {
+                clock.Advance(delay);
+                return Task.CompletedTask;
+            },
+            idleInterval: TimeSpan.FromMinutes(10),
+            idleUnload: _ =>
+            {
+                Interlocked.Increment(ref unloadCalls);
+                stop.Cancel();
+                return Task.CompletedTask;
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => host.RunAsync(stop.Token));
+
+        Assert.Equal(1, unloadCalls);
+    }
+
+    [Fact]
+    public async Task BrokerHost_does_not_unload_while_dependency_blocked_work_is_queued()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 7, 29, 8, 0, 0, TimeSpan.Zero));
+        var queue = new DurableQueue(root.Path, clock);
+        var workflow = new LocalWorkflowHint(
+            Guid.NewGuid(),
+            stepIndex: 1,
+            expectedStepCount: 2,
+            [
+                LocalTaskProfile.Ocr,
+                LocalTaskProfile.ImageTranslation
+            ],
+            isDependencyReady: false);
+        var request = LocalJobRequestFactory.CreateRoutedChat(
+            "blocked-work",
+            LocalJobPriority.Foreground,
+            LocalTaskProfile.ImageTranslation,
+            "translate",
+            null,
+            [],
+            new LocalWorkloadMetadata(
+                100,
+                100,
+                1,
+                1,
+                1_000_000,
+                LocalDurationClass.Medium),
+            workflow,
+            createdAtUtc: clock.GetUtcNow());
+        await queue.EnqueueAsync(request, TestContext.Current.CancellationToken);
+        var resolver = new ScheduleMetadataResolver(
+            ModelRoutingCatalog.LoadEmbedded(),
+            new DurationEstimator());
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var idleCycles = 0;
+        var unloadCalls = 0;
+        var host = new BrokerHost(
+            queue,
+            "blocked-unload-worker",
+            (_, _) => throw new UnreachableException(),
+            clock,
+            idleDelay: (delay, _) =>
+            {
+                clock.Advance(delay);
+                if (Interlocked.Increment(ref idleCycles) == 4)
+                {
+                    stop.Cancel();
+                }
+
+                return Task.CompletedTask;
+            },
+            idleInterval: TimeSpan.FromMinutes(10),
+            scheduler: new ModelAwareScheduler(clock),
+            scheduleMetadata: (candidates, _) => Task.FromResult(
+                (IReadOnlyList<ScheduledJobCandidate>)candidates
+                    .Select(candidate => resolver.Resolve(candidate))
+                    .ToArray()),
+            idleUnload: _ =>
+            {
+                Interlocked.Increment(ref unloadCalls);
+                return Task.CompletedTask;
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => host.RunAsync(stop.Token));
+
+        Assert.Equal(0, unloadCalls);
+    }
+
+    [Fact]
     public async Task BrokerHost_cancels_active_job_without_publishing_response()
     {
         using var root = new TemporaryRuntimeRoot();

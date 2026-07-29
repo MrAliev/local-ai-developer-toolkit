@@ -6,11 +6,37 @@ namespace LocalAi.Broker.Tests;
 
 public sealed class BrokerPayloadContractTests
 {
+    [Fact]
+    public void Model_preflight_payload_requires_only_model_and_context()
+    {
+        var payload = JsonSerializer.Deserialize<ModelControlJobPayload>(
+            """
+            {
+              "Operation": "Preflight",
+              "Profile": null,
+              "Model": "translategemma:12b",
+              "OwnerAction": null,
+              "WorkflowId": null,
+              "Outcome": null,
+              "TaskMetrics": null,
+              "ContextTokens": 2048
+            }
+            """,
+            LocalAiJson.Strict);
+
+        Assert.NotNull(payload);
+        Assert.Equal("translategemma:12b", payload.Model);
+        Assert.Equal(2048, payload.ContextTokens);
+        Assert.Null(payload.Profile);
+    }
+
     public static TheoryData<Type> PayloadTypes =>
         new(
             typeof(EmbedJobPayload),
             typeof(ChatJobPayload),
-            typeof(ListModelsJobPayload));
+            typeof(ListModelsJobPayload),
+            typeof(ModelMaintenanceJobPayload),
+            typeof(ModelControlJobPayload));
 
     [Fact]
     public void Strict_json_options_are_read_only_and_reject_duplicate_root_request_fields()
@@ -65,7 +91,16 @@ public sealed class BrokerPayloadContractTests
         {
             [new EmbedJobPayload("model", ["input"])] = "embed",
             [new ChatJobPayload("model", "prompt", null, [])] = "chat",
-            [new ListModelsJobPayload()] = "listModels"
+            [new ListModelsJobPayload()] = "listModels",
+            [new ModelMaintenanceJobPayload(
+                ModelMaintenanceOperation.Pull,
+                "translategemma:12b",
+                "1")] = "modelMaintenance",
+            [new ModelControlJobPayload(
+                ModelControlOperation.Status,
+                null,
+                null,
+                null)] = "modelControl"
         };
 
         foreach (var (payload, discriminator) in cases)
@@ -197,6 +232,31 @@ public sealed class BrokerPayloadContractTests
         Assert.Throws<ArgumentException>(
             () => JsonSerializer.Deserialize<LocalJobPayload>(
                 """{"$type":"chat","Model":"model","Prompt":"prompt","System":null,"ImagesBase64":[" "]}"""));
+    }
+
+    [Theory]
+    [InlineData(32768)]
+    [InlineData(65536)]
+    [InlineData(131072)]
+    [InlineData(262144)]
+    public void Routed_chat_accepts_extended_power_of_two_context_tiers(int context)
+    {
+        var payload = new ChatJobPayload(
+            null,
+            "prompt",
+            null,
+            [],
+            LocalTaskProfile.Planning,
+            new LocalWorkloadMetadata(
+                100,
+                100,
+                0,
+                0,
+                0,
+                LocalDurationClass.Long),
+            requestedContextTokens: context);
+
+        Assert.Equal(context, payload.RequestedContextTokens);
     }
 
     [Fact]

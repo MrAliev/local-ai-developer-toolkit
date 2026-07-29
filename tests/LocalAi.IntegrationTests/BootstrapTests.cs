@@ -36,6 +36,22 @@ public sealed class BootstrapTests : IDisposable
     }
 
     [Fact]
+    public void Bootstrap_plans_model_sync_only_through_mcp()
+    {
+        var plan = BootstrapCommand.Plan(
+            Path.Combine(_root, "repo.git"),
+            Path.Combine(_root, "runtime"),
+            Path.Combine(_root, "install"));
+
+        Assert.Contains(
+            plan.Changes,
+            change => change.Contains("local_models_sync", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            plan.Changes,
+            change => change.Contains("ollama pull", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Configured_repository_does_not_offer_bootstrap_again()
     {
         var common = Path.Combine(_root, "repo.git");

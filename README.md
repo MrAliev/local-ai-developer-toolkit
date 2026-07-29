@@ -17,6 +17,10 @@ toolkit rather than renaming those stable contracts.
 
 - A durable machine-wide FIFO broker is the only supported Ollama transport, keeping
   concurrent Codex, Claude, CodeSearch, and LocalLm workloads sequential.
+- Task-aware routing selects an eligible model by capability, current VRAM residency,
+  context limit, experiment state, and established fallback order.
+- Model-aware snapshots group work for the same model, run shorter compatible tasks
+  first, and prevent starvation after 15 minutes.
 - CodeSearch combines vector similarity with literal matching for repository-aware
   semantic and lexical code search.
 - Immutable base generations represent the selected local mainline, while exact
@@ -24,6 +28,8 @@ toolkit rather than renaming those stable contracts.
 - CodeSearch and LocalLm expose stdio MCP servers for integration with compatible AI
   clients.
 - Repository synchronization and shared Git hooks are explicit opt-in operations.
+- Recommended models are discovered and installed through MCP without removing
+  existing fallback models.
 
 ## How the components fit together
 
@@ -78,6 +84,17 @@ Synchronize an authorized repository explicitly:
 dotnet run --project src/LocalAi.Cli -- sync --root C:\path\to\repository
 ```
 
+After installing the MCP binaries, inspect and synchronize the model catalog through
+LocalLm:
+
+```text
+local_models_status
+local_models_sync
+```
+
+The sync command submits allowlisted maintenance jobs to the same durable queue. It
+does not expose a generic pull command and does not remove existing models.
+
 Install the shared chained Git hooks only after approving that external mutation:
 
 ```powershell
@@ -114,6 +131,62 @@ dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --outp
 The `publish/` directory is ignored. Publishing does not register executables with an
 AI client or install Git hooks.
 
+## Model-aware routing
+
+The embedded `model-routing.json` catalog maps each local task profile to one or more
+eligible models. Profiles cover plain, technical, and image translation; OCR and visual
+analysis; vector embedding and deterministic exact search; code analysis, editing,
+review, and reranking; log triage; extraction and classification; summaries,
+multi-file synthesis, and planning.
+
+The broker enforces these invariants:
+
+- Context tiers range from 2K to each model's official maximum (up to 256K).
+  A tier is usable only when live preflight proves the complete runner fits in VRAM.
+- A cold model is preflighted with empty content before the real task is sent.
+- `/api/ps` must report `size_vram == size`; CPU or system-RAM offload disables that
+  exact model/context combination and triggers an established fallback.
+- The scheduler prefers compatible work for the resident model, freezes each selected
+  snapshot, orders its jobs by predicted duration, waits at most two seconds to collect
+  related work before a switch or long task, and forces work older than 15 minutes into
+  the next compatible snapshot. Successful execution feeds its actual duration back
+  into the content-free rolling estimate.
+- Resident models are unloaded once after 30 minutes with no queued or running work.
+  A dependency-blocked workflow step still counts as queued work.
+- Before a cold model switch, the broker unloads every other catalog-managed runner.
+  Unknown external Ollama processes are left untouched.
+- Experiments are tracked independently per task profile and model. A new candidate is
+  tried for the first ten completed logical tasks of each applicable profile, then
+  paused for owner review; feedback is rejected before that report gate. Technical,
+  structural, and context failures run an established fallback. Translation chunks
+  share one workflow ID and consume only one attempt after final validation, while
+  preserving the candidate's failure category if the broker used a fallback. The sole
+  early exception is `continue_experiment`, which may reset a circuit opened by two
+  consecutive technical failures.
+- Experiment telemetry is retained for seven days and contains only workflow/task/model
+  identifiers, counts, outcomes, timings, and token estimates. It reports local input
+  and output, total local processing, avoided cloud generation, and net cloud-context
+  reduction separately. Prompts, answers, file contents, image bytes, paths, and
+  secrets are excluded.
+
+LocalLm exposes these model-management and translation MCP tools:
+
+| Tool | Purpose |
+|---|---|
+| `translate_local` | Translate text, validate protected Markdown structure, and append the actual model attribution. |
+| `local_models_status` | Show installed, resident, missing recommended, and experiment state. |
+| `local_model_preflight` | Load one model/context without task content and return full-VRAM residency proof. |
+| `local_models_sync` | Queue allowlisted recommended-model installation. |
+| `local_model_experiment_report` | Show logical-task attempts, errors, fallbacks, timing, warm/cold counts, local processing, avoided cloud generation, and net context reduction. |
+| `local_model_feedback` | Promote, continue, restrict to fallback, or disable one task/model pair. |
+
+`translate_local` is the validated local translation path. The calling agent decides
+whether a translation runs locally or in the cloud; LocalAi does not impose that policy.
+
+`read_image` accepts `VisualAnalysis`, `Ocr`, or `ImageTranslation`; `ask_local`
+accepts an explicit text task profile. An explicit model is an override subject to the
+same capability, installation, context, and full-VRAM checks.
+
 ## Runtime and security
 
 - CodeSearch and LocalLm submit all model work through the durable LocalAi FIFO broker.
@@ -126,6 +199,8 @@ AI client or install Git hooks.
   and embedding. Source files are never rewritten.
 - Existing vectors are reused only when the model, dimensions, chunk format, index
   format, and normalization contract all match.
+- Semantic indexing always uses the embedding model recorded in the index header.
+  Exact lexical search remains deterministic and never invokes a chat model.
 - Shared post-commit, post-merge, post-rewrite, and post-checkout hooks call
   `localai sync`; installation is always explicit.
 - The allowlisted `native` compatibility command still routes through the broker.

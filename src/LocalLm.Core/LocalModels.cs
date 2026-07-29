@@ -12,13 +12,10 @@ public static class LocalModels
     public const string Vision = "qwen3-vl:8b-instruct-q8_0";
 
     /// <summary>
-    /// Text. Best-tested general model on this machine.
-    ///
-    /// CAVEAT: it needs ~17-19GB in VRAM, so it only runs today because a second GPU is present.
-    /// Once the 4070 Ti is removed, this default has to drop to something that fits 16.3GB -
-    /// `qwen3.5:9b` is the fallback already installed.
+    /// Compatibility fallback for callers that still require an explicit text model.
+    /// New task-aware calls are routed by the broker catalog.
     /// </summary>
-    public const string Text = "qwen3.6:27b";
+    public const string Text = "qwen3.5:9b";
 
     public const string TextFallbackSingleGpu = "qwen3.5:9b";
 }

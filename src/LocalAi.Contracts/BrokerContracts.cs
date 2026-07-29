@@ -9,6 +9,8 @@ public enum LocalJobKind
     Embed,
     Chat,
     ListModels,
+    ModelMaintenance,
+    ModelControl,
     NativeOllama
 }
 
@@ -43,6 +45,8 @@ public sealed record BrokerProcessState(
 [JsonDerivedType(typeof(EmbedJobPayload), "embed")]
 [JsonDerivedType(typeof(ChatJobPayload), "chat")]
 [JsonDerivedType(typeof(ListModelsJobPayload), "listModels")]
+[JsonDerivedType(typeof(ModelMaintenanceJobPayload), "modelMaintenance")]
+[JsonDerivedType(typeof(ModelControlJobPayload), "modelControl")]
 [JsonDerivedType(typeof(NativeOllamaJobPayload), "nativeOllama")]
 public abstract record LocalJobPayload
 {
@@ -155,11 +159,17 @@ public sealed record ChatJobPayload : LocalJobPayload
         string? model,
         string? prompt,
         string? system,
-        IReadOnlyList<string>? imagesBase64)
+        IReadOnlyList<string>? imagesBase64,
+        LocalTaskProfile? taskProfile = null,
+        LocalWorkloadMetadata? workload = null,
+        LocalWorkflowHint? workflow = null,
+        int? requestedContextTokens = null)
     {
-        if (string.IsNullOrWhiteSpace(model))
+        if (string.IsNullOrWhiteSpace(model) && taskProfile is null)
         {
-            throw new ArgumentException("Model cannot be blank.", nameof(model));
+            throw new ArgumentException(
+                "Either a model or task profile is required.",
+                nameof(model));
         }
 
         if (string.IsNullOrWhiteSpace(prompt))
@@ -167,15 +177,38 @@ public sealed record ChatJobPayload : LocalJobPayload
             throw new ArgumentException("Prompt cannot be blank.", nameof(prompt));
         }
 
-        Model = model;
+        if (taskProfile is { } profile && !Enum.IsDefined(profile))
+        {
+            throw new ArgumentOutOfRangeException(nameof(taskProfile));
+        }
+
+        if (taskProfile is not null && workload is null)
+        {
+            throw new ArgumentNullException(
+                nameof(workload),
+                "Routed chat requires workload metadata.");
+        }
+
+        if (requestedContextTokens is { } contextTokens &&
+            !LocalContextTiers.IsSupported(contextTokens))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(requestedContextTokens),
+                "Context must be a supported power-of-two tier from 2K through 256K.");
+        }
+
+        Model = string.IsNullOrWhiteSpace(model) ? null : model;
         Prompt = prompt;
         System = string.IsNullOrWhiteSpace(system) ? null : system;
         ImagesBase64 = Snapshot(imagesBase64, nameof(imagesBase64), requireValues: false);
+        TaskProfile = taskProfile;
+        Workload = workload;
+        Workflow = workflow;
+        RequestedContextTokens = requestedContextTokens;
     }
 
-    [JsonRequired]
     [JsonInclude]
-    public string Model { get; private init; }
+    public string? Model { get; private init; }
 
     [JsonRequired]
     [JsonInclude]
@@ -191,6 +224,18 @@ public sealed record ChatJobPayload : LocalJobPayload
 
     [JsonIgnore]
     public override LocalJobKind Kind => LocalJobKind.Chat;
+
+    [JsonInclude]
+    public LocalTaskProfile? TaskProfile { get; private init; }
+
+    [JsonInclude]
+    public LocalWorkloadMetadata? Workload { get; private init; }
+
+    [JsonInclude]
+    public LocalWorkflowHint? Workflow { get; private init; }
+
+    [JsonInclude]
+    public int? RequestedContextTokens { get; private init; }
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -203,6 +248,226 @@ public sealed record ListModelsJobPayload : LocalJobPayload
 
     [JsonIgnore]
     public override LocalJobKind Kind => LocalJobKind.ListModels;
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ModelMaintenanceJobPayload : LocalJobPayload
+{
+    [JsonConstructor]
+    public ModelMaintenanceJobPayload(
+        ModelMaintenanceOperation operation,
+        string? model,
+        string? catalogVersion)
+    {
+        if (!Enum.IsDefined(operation))
+        {
+            throw new ArgumentOutOfRangeException(nameof(operation));
+        }
+
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            throw new ArgumentException("Model cannot be blank.", nameof(model));
+        }
+
+        if (string.IsNullOrWhiteSpace(catalogVersion))
+        {
+            throw new ArgumentException(
+                "Catalog version cannot be blank.",
+                nameof(catalogVersion));
+        }
+
+        Operation = operation;
+        Model = model;
+        CatalogVersion = catalogVersion;
+    }
+
+    [JsonIgnore]
+    public override LocalJobKind Kind => LocalJobKind.ModelMaintenance;
+
+    [JsonRequired]
+    [JsonInclude]
+    public ModelMaintenanceOperation Operation { get; private init; }
+
+    [JsonRequired]
+    [JsonInclude]
+    public string Model { get; private init; }
+
+    [JsonRequired]
+    [JsonInclude]
+    public string CatalogVersion { get; private init; }
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ModelMaintenanceJobOutput(
+    [property: JsonRequired] string Status);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ModelControlJobPayload : LocalJobPayload
+{
+    [JsonConstructor]
+    public ModelControlJobPayload(
+        ModelControlOperation operation,
+        LocalTaskProfile? profile,
+        string? model,
+        ExperimentOwnerAction? ownerAction,
+        Guid? workflowId = null,
+        ModelExecutionOutcome? outcome = null,
+        LocalExperimentTaskMetrics? taskMetrics = null,
+        int? contextTokens = null)
+    {
+        if (!Enum.IsDefined(operation))
+        {
+            throw new ArgumentOutOfRangeException(nameof(operation));
+        }
+
+        if (profile is { } taskProfile && !Enum.IsDefined(taskProfile))
+        {
+            throw new ArgumentOutOfRangeException(nameof(profile));
+        }
+
+        if (ownerAction is { } action && !Enum.IsDefined(action))
+        {
+            throw new ArgumentOutOfRangeException(nameof(ownerAction));
+        }
+
+        if (outcome is { } taskOutcome && !Enum.IsDefined(taskOutcome))
+        {
+            throw new ArgumentOutOfRangeException(nameof(outcome));
+        }
+
+        if (operation == ModelControlOperation.Status)
+        {
+            if (profile is not null ||
+                model is not null ||
+                ownerAction is not null ||
+                workflowId is not null ||
+                outcome is not null ||
+                taskMetrics is not null ||
+                contextTokens is not null)
+            {
+                throw new ArgumentException(
+                    "Status does not accept experiment parameters.");
+            }
+        }
+        else if (operation == ModelControlOperation.Preflight)
+        {
+            if (profile is not null ||
+                string.IsNullOrWhiteSpace(model) ||
+                ownerAction is not null ||
+                workflowId is not null ||
+                outcome is not null ||
+                taskMetrics is not null ||
+                contextTokens is null or <= 0)
+            {
+                throw new ArgumentException(
+                    "Preflight requires only a model and positive context tokens.");
+            }
+        }
+        else
+        {
+            if (profile is null)
+            {
+                throw new ArgumentNullException(nameof(profile));
+            }
+
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                throw new ArgumentException("Model cannot be blank.", nameof(model));
+            }
+
+            if (operation == ModelControlOperation.Feedback && ownerAction is null)
+            {
+                throw new ArgumentNullException(nameof(ownerAction));
+            }
+
+            if (operation is
+                    ModelControlOperation.ExperimentReport or
+                    ModelControlOperation.Feedback &&
+                (workflowId is not null ||
+                 outcome is not null ||
+                 taskMetrics is not null))
+            {
+                throw new ArgumentException(
+                    "Report and feedback do not accept workflow completion data.");
+            }
+
+            if (operation == ModelControlOperation.ExperimentReport &&
+                ownerAction is not null)
+            {
+                throw new ArgumentException(
+                    "Experiment report does not accept an owner action.",
+                    nameof(ownerAction));
+            }
+
+            if (operation == ModelControlOperation.CompleteExperiment)
+            {
+                if (ownerAction is not null)
+                {
+                    throw new ArgumentException(
+                        "Experiment completion does not accept an owner action.",
+                        nameof(ownerAction));
+                }
+
+                if (workflowId is null || workflowId == Guid.Empty)
+                {
+                    throw new ArgumentException(
+                        "Experiment completion requires a workflow ID.",
+                        nameof(workflowId));
+                }
+
+                if (outcome is null)
+                {
+                    throw new ArgumentNullException(nameof(outcome));
+                }
+
+                ArgumentNullException.ThrowIfNull(taskMetrics);
+            }
+
+            if (contextTokens is not null)
+            {
+                throw new ArgumentException(
+                    "Experiment operations do not accept context tokens.",
+                    nameof(contextTokens));
+            }
+        }
+
+        Operation = operation;
+        Profile = profile;
+        Model = string.IsNullOrWhiteSpace(model) ? null : model;
+        OwnerAction = ownerAction;
+        WorkflowId = workflowId;
+        Outcome = outcome;
+        TaskMetrics = taskMetrics;
+        ContextTokens = contextTokens;
+    }
+
+    [JsonIgnore]
+    public override LocalJobKind Kind => LocalJobKind.ModelControl;
+
+    [JsonRequired]
+    [JsonInclude]
+    public ModelControlOperation Operation { get; private init; }
+
+    [JsonInclude]
+    public LocalTaskProfile? Profile { get; private init; }
+
+    [JsonInclude]
+    public string? Model { get; private init; }
+
+    [JsonInclude]
+    public ExperimentOwnerAction? OwnerAction { get; private init; }
+
+    [JsonInclude]
+    public Guid? WorkflowId { get; private init; }
+
+    [JsonInclude]
+    public ModelExecutionOutcome? Outcome { get; private init; }
+
+    [JsonInclude]
+    public LocalExperimentTaskMetrics? TaskMetrics { get; private init; }
+
+    [JsonInclude]
+    public int? ContextTokens { get; private init; }
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -287,7 +552,22 @@ public sealed record LocalUsageReceipt(
     long EstimatedCloudTokensSaved,
     string? RepositoryId,
     string? GenerationId,
-    string? GitTree);
+    string? GitTree,
+    LocalRoutingReceipt? Routing = null);
+
+public sealed record LocalRoutingReceipt(
+    LocalTaskProfile? TaskProfile,
+    string SelectedModel,
+    int? ContextTokens,
+    bool WasCold,
+    bool UsedFallback,
+    string? ValidatorResult,
+    long EstimatedGrossCloudTokensSaved,
+    long EstimatedVerificationTokens,
+    long EstimatedNetCloudTokensSaved,
+    bool IsExperimentalAttempt = false,
+    string? ExperimentalModel = null,
+    ModelExecutionOutcome? ExperimentalOutcome = null);
 
 public sealed record LocalJobResult<T>(T Value, LocalUsageReceipt Receipt);
 
@@ -405,6 +685,33 @@ public static class LocalJobRequestFactory
             jobId,
             createdAtUtc);
 
+    public static LocalJobRequest CreateRoutedChat(
+        string? deduplicationKey,
+        LocalJobPriority priority,
+        LocalTaskProfile taskProfile,
+        string? prompt,
+        string? system,
+        IReadOnlyList<string>? imagesBase64,
+        LocalWorkloadMetadata workload,
+        LocalWorkflowHint? workflow = null,
+        int? requestedContextTokens = null,
+        Guid? jobId = null,
+        DateTimeOffset? createdAtUtc = null) =>
+        Create(
+            deduplicationKey,
+            priority,
+            new ChatJobPayload(
+                null,
+                prompt,
+                system,
+                imagesBase64,
+                taskProfile,
+                workload,
+                workflow,
+                requestedContextTokens),
+            jobId,
+            createdAtUtc);
+
     public static LocalJobRequest CreateListModels(
         string? deduplicationKey,
         LocalJobPriority priority,
@@ -416,6 +723,113 @@ public static class LocalJobRequestFactory
             new ListModelsJobPayload(),
             jobId,
             createdAtUtc);
+
+    public static LocalJobRequest CreateModelMaintenance(
+        string? deduplicationKey,
+        LocalJobPriority priority,
+        ModelMaintenanceOperation operation,
+        string? model,
+        string? catalogVersion,
+        Guid? jobId = null,
+        DateTimeOffset? createdAtUtc = null) =>
+        Create(
+            deduplicationKey,
+            priority,
+            new ModelMaintenanceJobPayload(operation, model, catalogVersion),
+            jobId,
+            createdAtUtc);
+
+    public static LocalJobRequest CreateModelControl(
+        string? deduplicationKey,
+        LocalJobPriority priority,
+        ModelControlOperation operation,
+        LocalTaskProfile? profile = null,
+        string? model = null,
+        ExperimentOwnerAction? ownerAction = null,
+        Guid? jobId = null,
+        DateTimeOffset? createdAtUtc = null) =>
+        Create(
+            deduplicationKey,
+            priority,
+            new ModelControlJobPayload(operation, profile, model, ownerAction),
+            jobId,
+            createdAtUtc);
+
+    public static LocalJobRequest CreateModelPreflight(
+        string? deduplicationKey,
+        LocalJobPriority priority,
+        string model,
+        int contextTokens,
+        Guid? jobId = null,
+        DateTimeOffset? createdAtUtc = null) =>
+        Create(
+            deduplicationKey,
+            priority,
+            new ModelControlJobPayload(
+                ModelControlOperation.Preflight,
+                profile: null,
+                model,
+                ownerAction: null,
+                contextTokens: contextTokens),
+            jobId,
+            createdAtUtc);
+
+    public static LocalJobRequest CreateExperimentCompletion(
+        string? deduplicationKey,
+        LocalJobPriority priority,
+        Guid workflowId,
+        LocalTaskProfile profile,
+        string model,
+        ModelExecutionOutcome outcome,
+        LocalExperimentTaskMetrics taskMetrics,
+        Guid? jobId = null,
+        DateTimeOffset? createdAtUtc = null) =>
+        Create(
+            deduplicationKey,
+            priority,
+            new ModelControlJobPayload(
+                ModelControlOperation.CompleteExperiment,
+                profile,
+                model,
+                ownerAction: null,
+                workflowId,
+                outcome,
+                taskMetrics),
+            jobId,
+            createdAtUtc);
+
+    public static LocalJobRequest ResolveRoutedChat(
+        LocalJobRequest request,
+        string model)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        var chat = request.Payload as ChatJobPayload
+            ?? throw new ArgumentException(
+                "Only chat requests can be model-resolved.",
+                nameof(request));
+        if (chat.TaskProfile is null)
+        {
+            throw new ArgumentException(
+                "Chat request is not routed.",
+                nameof(request));
+        }
+
+        return new LocalJobRequest(
+            request.JobId,
+            request.DeduplicationKey,
+            request.Priority,
+            new ChatJobPayload(
+                model,
+                chat.Prompt,
+                chat.System,
+                chat.ImagesBase64,
+                chat.TaskProfile,
+                chat.Workload,
+                chat.Workflow,
+                chat.RequestedContextTokens),
+            request.CreatedAtUtc);
+    }
 
     public static LocalJobRequest CreateNativeOllama(
         string? deduplicationKey,
