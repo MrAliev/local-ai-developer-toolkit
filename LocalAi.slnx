@@ -6,6 +6,7 @@
     <Project Path="src/LocalAi.Broker/LocalAi.Broker.csproj" />
     <Project Path="src/LocalAi.Broker.Client/LocalAi.Broker.Client.csproj" />
     <Project Path="src/LocalAi.Contracts/LocalAi.Contracts.csproj" />
+    <Project Path="src/LocalAi.Launcher/LocalAi.Launcher.csproj" />
     <Project Path="src/LocalAi.Repository/LocalAi.Repository.csproj" />
     <Project Path="src/LocalAi.Cli/LocalAi.Cli.csproj" />
     <Project Path="src/LocalLm.Core/LocalLm.Core.csproj" />
@@ -17,5 +18,6 @@
     <Project Path="tests/LocalLm.Tests/LocalLm.Tests.csproj" />
     <Project Path="tests/LocalAi.Repository.Tests/LocalAi.Repository.Tests.csproj" />
     <Project Path="tests/LocalAi.IntegrationTests/LocalAi.IntegrationTests.csproj" />
+    <Project Path="tests/LocalAi.Launcher.Tests/LocalAi.Launcher.Tests.csproj" />
   </Folder>
 </Solution>
