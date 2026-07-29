@@ -25,6 +25,33 @@ public sealed class ToolRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Proxies_real_child_stdout_and_stderr()
+    {
+        using var standardOutput = new MemoryStream();
+        using var standardError = new MemoryStream();
+        var runner = new ToolRunner(
+            @"C:\LocalAi\bin\launcher\localai-launcher.exe",
+            standardOutput,
+            standardError);
+
+        var exitCode = await runner.RunAsync(
+            Environment.GetEnvironmentVariable("ComSpec")!,
+            ["/d", "/c", "echo child-out & echo child-error 1>&2"],
+            "v1",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(
+            "child-out",
+            System.Text.Encoding.UTF8.GetString(standardOutput.ToArray()),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "child-error",
+            System.Text.Encoding.UTF8.GetString(standardError.ToArray()),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Application_holds_shared_lease_until_real_child_exits()
     {
         using var install = TestInstall.CreateComplete("v1");

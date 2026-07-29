@@ -6,11 +6,28 @@ namespace LocalAi.Launcher;
 public sealed class ToolRunner
 {
     private readonly string _launcherPath;
+    private readonly Stream _standardOutput;
+    private readonly Stream _standardError;
 
     public ToolRunner(string launcherPath)
+        : this(
+            launcherPath,
+            Console.OpenStandardOutput(),
+            Console.OpenStandardError())
+    {
+    }
+
+    public ToolRunner(
+        string launcherPath,
+        Stream standardOutput,
+        Stream standardError)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(launcherPath);
         _launcherPath = Path.GetFullPath(launcherPath);
+        _standardOutput = standardOutput
+            ?? throw new ArgumentNullException(nameof(standardOutput));
+        _standardError = standardError
+            ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RunAsync(
@@ -26,8 +43,8 @@ public sealed class ToolRunner
         {
             UseShellExecute = false,
             RedirectStandardInput = false,
-            RedirectStandardOutput = false,
-            RedirectStandardError = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
             CreateNoWindow = true
         };
         foreach (var argument in arguments)
@@ -54,6 +71,12 @@ public sealed class ToolRunner
 
         using (process)
         {
+            var standardOutput = CopyAndFlushAsync(
+                process.StandardOutput.BaseStream,
+                _standardOutput);
+            var standardError = CopyAndFlushAsync(
+                process.StandardError.BaseStream,
+                _standardError);
             using var cancellation = cancellationToken.Register(() =>
             {
                 try
@@ -67,8 +90,24 @@ public sealed class ToolRunner
                 {
                 }
             });
-            await process.WaitForExitAsync(cancellationToken);
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            finally
+            {
+                await Task.WhenAll(standardOutput, standardError);
+            }
+
             return process.ExitCode;
         }
+    }
+
+    private static async Task CopyAndFlushAsync(
+        Stream source,
+        Stream destination)
+    {
+        await source.CopyToAsync(destination);
+        await destination.FlushAsync();
     }
 }
