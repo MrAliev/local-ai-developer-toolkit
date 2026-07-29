@@ -1,8 +1,12 @@
 namespace LocalAi.Cli;
 
+public sealed record ClientToolRegistration(
+    string Command,
+    IReadOnlyList<string> Arguments);
+
 public sealed record ClientRegistrationPlan(
-    string CodeSearchBinary,
-    string LocalLmBinary,
+    ClientToolRegistration CodeSearch,
+    ClientToolRegistration LocalLm,
     IReadOnlyList<string> ClaudeCommands,
     IReadOnlyList<string> CodexTomlSections,
     bool RequiresClientRestart,
@@ -16,20 +20,30 @@ public static class ClientCommand
     public static ClientRegistrationPlan Plan(string installationDirectory)
     {
         var root = Path.GetFullPath(installationDirectory);
-        var codeSearch = Path.Combine(root, "codesearch-mcp.exe");
-        var localLm = Path.Combine(root, "locallm-mcp.exe");
+        var launcher = Path.Combine(
+            root,
+            "launcher",
+            "localai-launcher.exe");
+        var codeSearch = new ClientToolRegistration(
+            launcher,
+            ["run", "codesearch-mcp"]);
+        var localLm = new ClientToolRegistration(
+            launcher,
+            ["run", "locallm-mcp"]);
         return new ClientRegistrationPlan(
             codeSearch,
             localLm,
             [
                 "claude mcp remove codesearch -s user",
                 "claude mcp remove locallm -s user",
-                $"claude mcp add codesearch -s user -- \"{codeSearch}\"",
-                $"claude mcp add locallm -s user -- \"{localLm}\""
+                $"claude mcp add codesearch -s user -- \"{launcher}\" " +
+                string.Join(' ', codeSearch.Arguments),
+                $"claude mcp add locallm -s user -- \"{launcher}\" " +
+                string.Join(' ', localLm.Arguments)
             ],
             [
-                $"[mcp_servers.codesearch]\ncommand = \"{EscapeToml(codeSearch)}\"",
-                $"[mcp_servers.locallm]\ncommand = \"{EscapeToml(localLm)}\""
+                TomlSection("codesearch", codeSearch),
+                TomlSection("locallm", localLm)
             ],
             RequiresClientRestart: true,
             IncludesEmbeddedRoutingCatalog: true,
@@ -47,4 +61,16 @@ public static class ClientCommand
 
     private static string EscapeToml(string value) =>
         value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+    private static string TomlSection(
+        string name,
+        ClientToolRegistration registration) =>
+        $"[mcp_servers.{name}]\n" +
+        $"command = \"{EscapeToml(registration.Command)}\"\n" +
+        "args = [" +
+        string.Join(
+            ", ",
+            registration.Arguments.Select(
+                argument => $"\"{EscapeToml(argument)}\"")) +
+        "]";
 }

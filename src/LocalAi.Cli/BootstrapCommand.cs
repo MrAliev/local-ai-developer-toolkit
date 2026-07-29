@@ -29,7 +29,7 @@ public static class BootstrapCommand
                 $"Create LocalAi repository state for {repository.Identity.Id}.",
                 "Set repository state to INITIALIZING until a verified mainline generation exists.",
                 "Install a chained LocalAi Git hook dispatcher after compatibility checks.",
-                "Register the same CodeSearch and LocalLm MCP binaries in Claude and Codex.",
+                "Register CodeSearch and LocalLm through the stable launcher in Claude and Codex.",
                 "Synchronize recommended models through the local_models_sync MCP tool.",
                 "Do not remove legacy models or profiles."
             ]);

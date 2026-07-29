@@ -18,13 +18,36 @@ public static class HookInstaller
 
     public static HookInstallResult Install(
         string commonDirectory,
-        string localAiExecutable)
+        string launcherPath,
+        IReadOnlyList<string> launcherArguments)
     {
+        if (string.IsNullOrWhiteSpace(launcherPath))
+        {
+            throw new ArgumentException(
+                "A stable LocalAi launcher path is required.",
+                nameof(launcherPath));
+        }
+        ArgumentNullException.ThrowIfNull(launcherArguments);
+        if (launcherArguments.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException(
+                "Launcher arguments cannot contain blank values.",
+                nameof(launcherArguments));
+        }
+
         var hooksRoot = Path.Combine(
             Path.GetFullPath(commonDirectory),
             "hooks");
         Directory.CreateDirectory(hooksRoot);
-        var executable = Path.GetFullPath(localAiExecutable).Replace('\\', '/');
+        var executable = Path.GetFullPath(launcherPath).Replace('\\', '/');
+        var commandPrefix = QuoteExecutable(executable);
+        if (launcherArguments.Count > 0)
+        {
+            commandPrefix += " " + string.Join(
+                ' ',
+                launcherArguments.Select(QuoteArgument));
+        }
+
         var installed = new List<string>();
         var chained = new List<string>();
 
@@ -56,7 +79,8 @@ public static class HookInstaller
                 "#!/bin/sh\n" +
                 "# LocalAi managed dispatcher\n" +
                 previous +
-                $"\"{executable}\" hook {hookEvent} --root \"$(git rev-parse --show-toplevel)\"\n";
+                $"{commandPrefix} hook {hookEvent} " +
+                "--root \"$(git rev-parse --show-toplevel)\"\n";
             File.WriteAllText(
                 hookPath,
                 script,
@@ -66,4 +90,19 @@ public static class HookInstaller
 
         return new HookInstallResult(installed, chained);
     }
+
+    private static string QuoteExecutable(string value) =>
+        "\"" +
+        value
+            .Replace("`", "\\`")
+            .Replace("$", "\\$")
+            .Replace("\"", "\\\"") +
+        "\"";
+
+    private static string QuoteArgument(string value) =>
+        value.All(character =>
+            char.IsAsciiLetterOrDigit(character) ||
+            character is '_' or '-' or '.')
+                ? value
+                : "'" + value.Replace("'", "'\"'\"'") + "'";
 }
