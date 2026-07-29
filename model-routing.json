@@ -124,7 +124,7 @@
       "Profile": "CodeRerank",
       "Mode": "Model",
       "Candidates": [ "qwen2.5-coder:14b", "qwen3.5:9b" ],
-      "Fallbacks": [ "qwen3.5:9b" ],
+      "Fallbacks": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
       "Validator": "StructuredOutput",
       "DefaultDuration": "Short"
     },
@@ -164,7 +164,7 @@
       "Profile": "Extraction",
       "Mode": "Model",
       "Candidates": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
-      "Fallbacks": [ "qwen3.5:9b" ],
+      "Fallbacks": [ "qwen2.5-coder:14b", "qwen3.5:9b" ],
       "Validator": "StructuredOutput",
       "DefaultDuration": "Short"
     },
@@ -172,7 +172,7 @@
       "Profile": "Classification",
       "Mode": "Model",
       "Candidates": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
-      "Fallbacks": [ "qwen3.5:9b" ],
+      "Fallbacks": [ "qwen2.5-coder:14b", "qwen3.5:9b" ],
       "Validator": "StructuredOutput",
       "DefaultDuration": "Short"
     },
@@ -180,7 +180,7 @@
       "Profile": "ShortSummary",
       "Mode": "Model",
       "Candidates": [ "qwen3.5:9b", "qwen2.5-coder:14b" ],
-      "Fallbacks": [ "qwen3.5:9b" ],
+      "Fallbacks": [ "qwen2.5-coder:14b", "qwen3.5:9b" ],
       "Validator": "None",
       "DefaultDuration": "Short"
     },

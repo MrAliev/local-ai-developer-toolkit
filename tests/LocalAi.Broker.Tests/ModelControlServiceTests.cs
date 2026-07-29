@@ -342,6 +342,11 @@ public sealed class ModelControlServiceTests : IDisposable
         public Task PullAsync(string model, CancellationToken ct) => Task.CompletedTask;
         public Task PreflightAsync(string model, int contextTokens, CancellationToken ct) =>
             Task.CompletedTask;
+        public Task PreflightEmbeddingAsync(
+            string model,
+            int contextTokens,
+            CancellationToken ct) =>
+            Task.CompletedTask;
         public Task UnloadAsync(string model, CancellationToken ct) => Task.CompletedTask;
     }
 }
