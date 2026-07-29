@@ -52,6 +52,32 @@ public sealed class ToolRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Proxies_real_child_stdin()
+    {
+        using var standardInput = new MemoryStream(
+            System.Text.Encoding.UTF8.GetBytes("hello-from-launcher\r\n"));
+        using var standardOutput = new MemoryStream();
+        using var standardError = new MemoryStream();
+        var runner = new ToolRunner(
+            @"C:\LocalAi\bin\launcher\localai-launcher.exe",
+            standardInput,
+            standardOutput,
+            standardError);
+
+        var exitCode = await runner.RunAsync(
+            Environment.GetEnvironmentVariable("ComSpec")!,
+            ["/d", "/v:on", "/c", "set /p line=& echo INPUT:!line!"],
+            "v1",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(
+            "INPUT:hello-from-launcher",
+            System.Text.Encoding.UTF8.GetString(standardOutput.ToArray()),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Application_holds_shared_lease_until_real_child_exits()
     {
         using var install = TestInstall.CreateComplete("v1");

@@ -6,12 +6,14 @@ namespace LocalAi.Launcher;
 public sealed class ToolRunner
 {
     private readonly string _launcherPath;
+    private readonly Stream _standardInput;
     private readonly Stream _standardOutput;
     private readonly Stream _standardError;
 
     public ToolRunner(string launcherPath)
         : this(
             launcherPath,
+            Console.OpenStandardInput(),
             Console.OpenStandardOutput(),
             Console.OpenStandardError())
     {
@@ -21,9 +23,24 @@ public sealed class ToolRunner
         string launcherPath,
         Stream standardOutput,
         Stream standardError)
+        : this(
+            launcherPath,
+            Stream.Null,
+            standardOutput,
+            standardError)
+    {
+    }
+
+    public ToolRunner(
+        string launcherPath,
+        Stream standardInput,
+        Stream standardOutput,
+        Stream standardError)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(launcherPath);
         _launcherPath = Path.GetFullPath(launcherPath);
+        _standardInput = standardInput
+            ?? throw new ArgumentNullException(nameof(standardInput));
         _standardOutput = standardOutput
             ?? throw new ArgumentNullException(nameof(standardOutput));
         _standardError = standardError
@@ -42,7 +59,7 @@ public sealed class ToolRunner
         var startInfo = new ProcessStartInfo(Path.GetFullPath(executablePath))
         {
             UseShellExecute = false,
-            RedirectStandardInput = false,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
@@ -71,6 +88,9 @@ public sealed class ToolRunner
 
         using (process)
         {
+            _ = CopyInputAsync(
+                _standardInput,
+                process.StandardInput.BaseStream);
             var standardOutput = CopyAndFlushAsync(
                 process.StandardOutput.BaseStream,
                 _standardOutput);
@@ -109,5 +129,26 @@ public sealed class ToolRunner
     {
         await source.CopyToAsync(destination);
         await destination.FlushAsync();
+    }
+
+    private static async Task CopyInputAsync(
+        Stream source,
+        Stream destination)
+    {
+        try
+        {
+            await source.CopyToAsync(destination);
+            await destination.FlushAsync();
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+            InvalidOperationException or
+            ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            await destination.DisposeAsync();
+        }
     }
 }
