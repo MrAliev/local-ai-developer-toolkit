@@ -586,7 +586,33 @@ public sealed class BrokerProcessTests
             () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
 
         Assert.Equal("broker_start_timeout", exception.Code);
-        Assert.Contains("lock owner did not publish compatible state", exception.Message);
+        Assert.Contains(
+            "startup process 42 exited successfully; lock owner did not publish compatible state",
+            exception.Message);
+        Assert.True(startAttempt.IsDisposed);
+    }
+
+    [Fact]
+    public async Task Startup_cancellation_propagates_and_disposes_attempt()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var startAttempt = FakeStartAttempt.Running(42);
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => null,
+            _ => false,
+            (_, _) => startAttempt,
+            TimeProvider.System,
+            (_, token) =>
+            {
+                cancellation.Cancel();
+                return Task.FromCanceled(token);
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => process.EnsureRunningAsync(cancellation.Token));
+
         Assert.True(startAttempt.IsDisposed);
     }
 

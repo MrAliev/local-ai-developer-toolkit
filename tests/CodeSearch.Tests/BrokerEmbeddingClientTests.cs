@@ -61,6 +61,46 @@ public sealed class BrokerEmbeddingClientTests
         Assert.Same(timeout, error.InnerException);
     }
 
+    [Fact]
+    public async Task Translates_typed_broker_startup_timeout_to_embedding_unavailable()
+    {
+        var timeout = new BrokerBootstrapException(
+            "broker_start_timeout",
+            "broker startup timed out");
+        var client = new BrokerEmbeddingClient(
+            "embed-model",
+            new ThrowingBrokerClient(timeout));
+
+        var error = await Assert.ThrowsAsync<EmbeddingUnavailableException>(
+            () => client.EmbedAsync(
+                ["text"],
+                LocalJobPriority.Interactive,
+                "query:tree",
+                TestContext.Current.CancellationToken));
+
+        Assert.Same(timeout, error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("broker_incompatible")]
+    [InlineData("broker_start_failed")]
+    public async Task Does_not_translate_other_broker_bootstrap_errors(string code)
+    {
+        var failure = new BrokerBootstrapException(code, "broker startup failed");
+        var client = new BrokerEmbeddingClient(
+            "embed-model",
+            new ThrowingBrokerClient(failure));
+
+        var error = await Assert.ThrowsAsync<BrokerBootstrapException>(
+            () => client.EmbedAsync(
+                ["text"],
+                LocalJobPriority.Interactive,
+                "query:tree",
+                TestContext.Current.CancellationToken));
+
+        Assert.Same(failure, error);
+    }
+
     [Theory]
     [InlineData("InvalidDataException")]
     [InlineData("HttpRequestException")]

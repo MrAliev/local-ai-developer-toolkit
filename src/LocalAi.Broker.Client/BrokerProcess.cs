@@ -197,8 +197,9 @@ public sealed class BrokerProcess : IBrokerProcess
                 }
 
                 lastObservation =
-                    "lock owner did not publish compatible state (process " +
-                    startAttempt.ProcessId + "); last observation: " + lastObservation;
+                    "startup process " + startAttempt.ProcessId +
+                    " exited successfully; lock owner did not publish compatible state; " +
+                    "last observation: " + lastObservation;
             }
             else
             {
