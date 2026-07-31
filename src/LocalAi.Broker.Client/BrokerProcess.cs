@@ -233,7 +233,14 @@ public sealed class BrokerProcess : IBrokerProcess
         var builder = new StringBuilder(Math.Min(value.Length, MaximumDiagnosticValueLength));
         foreach (var rune in value.EnumerateRunes())
         {
-            var normalizedRune = Rune.IsControl(rune) ? new Rune('?') : rune;
+            var category = Rune.GetUnicodeCategory(rune);
+            var normalizedRune = category is
+                UnicodeCategory.Control or
+                UnicodeCategory.Format or
+                UnicodeCategory.LineSeparator or
+                UnicodeCategory.ParagraphSeparator
+                ? new Rune('?')
+                : rune;
             if (builder.Length + normalizedRune.Utf16SequenceLength >
                 MaximumDiagnosticValueLength)
             {

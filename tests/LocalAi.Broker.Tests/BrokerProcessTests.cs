@@ -213,6 +213,24 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
+    public async Task Incompatible_live_host_diagnostic_replaces_line_and_format_separators()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        await AssertLiveIncompatibleStateIsRejected(
+            new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now,
+                BrokerCompatibilityContract.HostStateSchemaVersion,
+                "path\u2028\u2029\u202E\u2066tail",
+                new BrokerCompatibility(
+                    BrokerCompatibilityContract.ProtocolVersion,
+                    "build\u2028\u2029\u202E\u2066id")),
+            "actual schema=3 protocol=1 build=build????id; broker path=path????tail");
+    }
+
+    [Fact]
     public async Task Non_owner_process_is_replaced()
     {
         var now = DateTimeOffset.UtcNow;
@@ -228,6 +246,43 @@ public sealed class BrokerProcessTests
                     BrokerCompatibilityContract.HostStateSchemaVersion,
                     Path.GetFullPath("another-version/LocalAi.Broker.dll"),
                     BrokerCompatibilityContract.Current)
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
+            state => state.ProcessId == 99,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
+    public async Task Non_owner_incompatible_looking_state_is_replaced_before_compatibility_is_checked()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(
+                    42,
+                    now.AddMinutes(-1),
+                    now,
+                    2,
+                    BrokerAssemblyPath,
+                    Compatibility: null)
                 : new BrokerProcessState(
                     99,
                     now,
