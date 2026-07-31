@@ -186,7 +186,7 @@ git commit -m "fix(broker): reject incompatible live hosts"
 - [ ] Добавить в `BrokerBootstrap.cs` production abstraction:
 
 ```csharp
-public interface IBrokerStartAttempt : IDisposable
+internal interface IBrokerStartAttempt : IDisposable
 {
     int ProcessId { get; }
     bool TryGetExitCode(out int exitCode);

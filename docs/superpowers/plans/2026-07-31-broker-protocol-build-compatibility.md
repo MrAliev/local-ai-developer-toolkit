@@ -320,7 +320,7 @@ git commit -m "fix(broker): reject incompatible live hosts"
 Add the production abstraction to `BrokerBootstrap.cs`:
 
 ```csharp
-public interface IBrokerStartAttempt : IDisposable
+internal interface IBrokerStartAttempt : IDisposable
 {
     int ProcessId { get; }
 

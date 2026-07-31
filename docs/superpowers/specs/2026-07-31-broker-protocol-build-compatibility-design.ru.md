@@ -99,8 +99,7 @@ Build compatibility ID не является commit SHA, версией assembly
 
 - `broker_incompatible`;
 - `broker_start_failed`;
-- `broker_start_timeout`;
-- `broker_state_invalid`.
+- `broker_start_timeout`.
 
 Сообщения содержат безопасные compatibility values, сведения о процессе и exit
 code при наличии, а также последнюю классификацию. Содержимое заданий,

@@ -34,8 +34,8 @@ public enum LocalJobState
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record BrokerCompatibility(
-    int ProtocolVersion,
-    string BuildCompatibilityId);
+    [property: JsonRequired] int ProtocolVersion,
+    [property: JsonRequired] string BuildCompatibilityId);
 
 public static class BrokerCompatibilityContract
 {
@@ -57,11 +57,11 @@ public static class BrokerCompatibilityContract
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record BrokerProcessState(
-    int ProcessId,
-    DateTimeOffset StartedAtUtc,
-    DateTimeOffset HeartbeatAtUtc,
-    int SchemaVersion,
-    string BrokerAssemblyPath,
+    [property: JsonRequired] int ProcessId,
+    [property: JsonRequired] DateTimeOffset StartedAtUtc,
+    [property: JsonRequired] DateTimeOffset HeartbeatAtUtc,
+    [property: JsonRequired] int SchemaVersion,
+    [property: JsonRequired] string BrokerAssemblyPath,
     BrokerCompatibility? Compatibility = null);
 
 [JsonPolymorphic(

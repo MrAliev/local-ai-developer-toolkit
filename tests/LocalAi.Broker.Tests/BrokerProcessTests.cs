@@ -499,6 +499,84 @@ public sealed class BrokerProcessTests
         Assert.Equal(1, starts);
     }
 
+    [Theory]
+    [InlineData(-5)]
+    [InlineData(5)]
+    public async Task Heartbeat_at_clock_skew_boundary_is_reused(int offsetSeconds)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now.AddSeconds(offsetSeconds),
+                BrokerCompatibilityContract.HostStateSchemaVersion,
+                BrokerAssemblyPath,
+                BrokerCompatibilityContract.Current),
+            state => state.ProcessId == 42,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            new ManualTimeProvider(now),
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, starts);
+    }
+
+    [Fact]
+    public async Task Heartbeat_beyond_future_clock_skew_is_replaced_without_process_probe()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var staleProbes = 0;
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(
+                    42,
+                    now.AddMinutes(-1),
+                    now.AddSeconds(5).AddTicks(1),
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current)
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
+            state =>
+            {
+                if (state.ProcessId == 42)
+                {
+                    staleProbes++;
+                }
+
+                return state.ProcessId == 99;
+            },
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            new ManualTimeProvider(now),
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, staleProbes);
+        Assert.Equal(1, starts);
+    }
+
     [Fact]
     public async Task Inaccessible_process_state_starts_replacement()
     {
@@ -566,6 +644,119 @@ public sealed class BrokerProcessTests
         Assert.Contains("last observation:", exception.Message);
         Assert.Contains("host state is absent or unreadable", exception.Message);
         Assert.True(startAttempt.IsDisposed);
+    }
+
+    [Fact]
+    public async Task Startup_timeout_includes_wait_for_startup_semaphore()
+    {
+        var runtimeRoot = Path.Combine(
+            Path.GetTempPath(),
+            "localai-process-" + Guid.NewGuid().ToString("N"));
+        var now = DateTimeOffset.UtcNow;
+        using var startEntered = new ManualResetEventSlim();
+        using var releaseStart = new ManualResetEventSlim();
+        var ready = false;
+        var secondStarts = 0;
+        BrokerProcessState? ReadState(string _) =>
+            ready
+                ? new BrokerProcessState(
+                    42,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current)
+                : null;
+        var first = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            runtimeRoot,
+            ReadState,
+            state => state.ProcessId == 42,
+            (_, _) =>
+            {
+                startEntered.Set();
+                releaseStart.Wait(TestContext.Current.CancellationToken);
+                ready = true;
+                return FakeStartAttempt.Running(42);
+            },
+            TimeProvider.System,
+            static (_, token) => Task.Delay(5, token),
+            startupTimeout: TimeSpan.FromSeconds(5));
+        var second = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            runtimeRoot,
+            ReadState,
+            state => state.ProcessId == 42,
+            (_, _) =>
+            {
+                Interlocked.Increment(ref secondStarts);
+                return FakeStartAttempt.Running(99);
+            },
+            TimeProvider.System,
+            static (_, token) => Task.Delay(5, token),
+            startupTimeout: TimeSpan.FromMilliseconds(75));
+
+        var firstTask = first.EnsureRunningAsync(TestContext.Current.CancellationToken);
+        Assert.True(
+            startEntered.Wait(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken));
+        using var safetyCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        safetyCancellation.CancelAfter(TimeSpan.FromSeconds(2));
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
+                () => second.EnsureRunningAsync(safetyCancellation.Token));
+
+            Assert.Equal("broker_start_timeout", exception.Code);
+            Assert.Contains("startup semaphore contention", exception.Message);
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1));
+            Assert.Equal(0, secondStarts);
+        }
+        finally
+        {
+            releaseStart.Set();
+            await firstTask;
+        }
+    }
+
+    [Fact]
+    public async Task Startup_timeout_uses_monotonic_time_when_utc_clock_rolls_back()
+    {
+        var clock = new RollingBackTimeProvider(DateTimeOffset.UtcNow);
+        var delays = 0;
+        using var safetyCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        safetyCancellation.CancelAfter(TimeSpan.FromSeconds(2));
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => null,
+            _ => false,
+            (_, _) => FakeStartAttempt.Running(99),
+            clock,
+            (_, _) =>
+            {
+                delays++;
+                clock.Advance(
+                    TimeSpan.FromMilliseconds(60),
+                    TimeSpan.FromMinutes(-1));
+                if (delays > 10)
+                {
+                    safetyCancellation.Cancel();
+                }
+
+                return Task.CompletedTask;
+            },
+            startupTimeout: TimeSpan.FromMilliseconds(100));
+
+        var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
+            () => process.EnsureRunningAsync(safetyCancellation.Token));
+
+        Assert.Equal("broker_start_timeout", exception.Code);
+        Assert.Equal(2, delays);
     }
 
     [Fact]
@@ -818,5 +1009,23 @@ public sealed class BrokerProcessTests
         }
 
         public void Dispose() => IsDisposed = true;
+    }
+
+    private sealed class RollingBackTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+        private long _timestamp;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public override long GetTimestamp() => _timestamp;
+
+        public void Advance(TimeSpan elapsed, TimeSpan utcChange)
+        {
+            _timestamp += elapsed.Ticks;
+            _utcNow += utcChange;
+        }
     }
 }

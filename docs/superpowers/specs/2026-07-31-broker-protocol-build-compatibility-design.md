@@ -103,8 +103,7 @@ diagnostics:
 
 - `broker_incompatible`;
 - `broker_start_failed`;
-- `broker_start_timeout`;
-- `broker_state_invalid`.
+- `broker_start_timeout`.
 
 Messages include safe compatibility values, process/exit information when
 available, and the last classified state. They do not expose job contents,
