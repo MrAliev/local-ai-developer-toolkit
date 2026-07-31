@@ -8,8 +8,12 @@ public sealed class LocalAiProcessControllerTests
         using var install = TestInstall.CreateComplete("v1");
         var now = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
         var started = now.AddMinutes(-1);
+        var canonicalAssemblyPath = Path.Combine(
+            install.VersionDirectory("v1"),
+            "LocalAi.Broker.dll");
         var assemblyPath = Path.Combine(
             install.VersionDirectory("v1"),
+            ".",
             "LocalAi.Broker.dll");
         WriteHostState(
             install.Root,
@@ -26,7 +30,7 @@ public sealed class LocalAiProcessControllerTests
         Assert.NotNull(ownership);
         Assert.Equal(42, ownership.ProcessId);
         Assert.Equal(started, ownership.StartedAtUtc);
-        Assert.Equal(assemblyPath, ownership.BrokerAssemblyPath);
+        Assert.Equal(canonicalAssemblyPath, ownership.BrokerAssemblyPath);
     }
 
     [Fact]
@@ -38,14 +42,13 @@ public sealed class LocalAiProcessControllerTests
         var assemblyPath = Path.Combine(
             install.VersionDirectory("v1"),
             "LocalAi.Broker.dll");
-        WriteHostState(
+        WriteLegacyHostState(
             install.Root,
             42,
             started,
             now,
             2,
-            assemblyPath,
-            compatibility: null);
+            assemblyPath);
 
         var ownership = new BrokerHostStateReader(new FixedTimeProvider(now))
             .ReadFreshOwnership(install.Root);
@@ -61,6 +64,7 @@ public sealed class LocalAiProcessControllerTests
     [InlineData(3, "2026-07-31T09:59:54.9999999+00:00", "path", true)]
     [InlineData(2, "2026-07-31T10:00:00.0000000+00:00", "", false)]
     [InlineData(3, "2026-07-31T10:00:00.0000000+00:00", "path", false)]
+    [InlineData(2, "2026-07-31T10:00:00.0000000+00:00", "path", true)]
     public void Invalid_broker_states_return_no_ownership(
         int schemaVersion,
         string heartbeatAtUtc,
@@ -79,6 +83,89 @@ public sealed class LocalAiProcessControllerTests
             includeCompatibility
                 ? new CompatibilityForTest(1, "localai-broker-v1")
                 : null);
+
+        var ownership = new BrokerHostStateReader(new FixedTimeProvider(now))
+            .ReadFreshOwnership(install.Root);
+
+        Assert.Null(ownership);
+    }
+
+    [Theory]
+    [InlineData(-5)]
+    [InlineData(5)]
+    public void Heartbeat_at_freshness_boundaries_returns_ownership(
+        int offsetSeconds)
+    {
+        using var install = TestInstall.CreateComplete("v1");
+        var now = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
+        WriteHostState(
+            install.Root,
+            42,
+            now.AddMinutes(-1),
+            now.AddSeconds(offsetSeconds),
+            3,
+            Path.Combine(install.VersionDirectory("v1"), "LocalAi.Broker.dll"),
+            new CompatibilityForTest(1, "localai-broker-v1"));
+
+        var ownership = new BrokerHostStateReader(new FixedTimeProvider(now))
+            .ReadFreshOwnership(install.Root);
+
+        Assert.NotNull(ownership);
+    }
+
+    [Fact]
+    public void Heartbeat_more_than_five_seconds_in_the_future_returns_no_ownership()
+    {
+        using var install = TestInstall.CreateComplete("v1");
+        var now = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
+        WriteHostState(
+            install.Root,
+            42,
+            now.AddMinutes(-1),
+            now.AddSeconds(5).AddTicks(1),
+            3,
+            Path.Combine(install.VersionDirectory("v1"), "LocalAi.Broker.dll"),
+            new CompatibilityForTest(1, "localai-broker-v1"));
+
+        var ownership = new BrokerHostStateReader(new FixedTimeProvider(now))
+            .ReadFreshOwnership(install.Root);
+
+        Assert.Null(ownership);
+    }
+
+    [Fact]
+    public void Relative_broker_assembly_path_returns_no_ownership()
+    {
+        using var install = TestInstall.CreateComplete("v1");
+        var now = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
+        WriteHostState(
+            install.Root,
+            42,
+            now.AddMinutes(-1),
+            now,
+            3,
+            Path.Combine("v1", "LocalAi.Broker.dll"),
+            new CompatibilityForTest(1, "localai-broker-v1"));
+
+        var ownership = new BrokerHostStateReader(new FixedTimeProvider(now))
+            .ReadFreshOwnership(install.Root);
+
+        Assert.Null(ownership);
+    }
+
+    [Fact]
+    public void Invalid_broker_assembly_path_returns_no_ownership()
+    {
+        using var install = TestInstall.CreateComplete("v1");
+        var now = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
+        WriteHostState(
+            install.Root,
+            42,
+            now.AddMinutes(-1),
+            now,
+            3,
+            Path.GetTempPath() + "\0",
+            new CompatibilityForTest(1, "localai-broker-v1"));
 
         var ownership = new BrokerHostStateReader(new FixedTimeProvider(now))
             .ReadFreshOwnership(install.Root);
@@ -183,6 +270,23 @@ public sealed class LocalAiProcessControllerTests
                     brokerAssemblyPath,
                     compatibility)));
 
+    private static void WriteLegacyHostState(
+        string runtimeRoot,
+        int processId,
+        DateTimeOffset startedAtUtc,
+        DateTimeOffset heartbeatAtUtc,
+        int schemaVersion,
+        string brokerAssemblyPath) =>
+        File.WriteAllText(
+            Path.Combine(runtimeRoot, "host.json"),
+            System.Text.Json.JsonSerializer.Serialize(
+                new LegacyHostStateForTest(
+                    processId,
+                    startedAtUtc,
+                    heartbeatAtUtc,
+                    schemaVersion,
+                    brokerAssemblyPath)));
+
     private sealed record HostStateForTest(
         int ProcessId,
         DateTimeOffset StartedAtUtc,
@@ -194,6 +298,13 @@ public sealed class LocalAiProcessControllerTests
     private sealed record CompatibilityForTest(
         int ProtocolVersion,
         string BuildCompatibilityId);
+
+    private sealed record LegacyHostStateForTest(
+        int ProcessId,
+        DateTimeOffset StartedAtUtc,
+        DateTimeOffset HeartbeatAtUtc,
+        int SchemaVersion,
+        string BrokerAssemblyPath);
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {

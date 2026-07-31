@@ -7,6 +7,8 @@ namespace LocalAi.Launcher;
 internal sealed class BrokerHostStateReader
 {
     private static readonly JsonSerializerOptions StrictJson = CreateJsonOptions();
+    // Permit only the short read/clock skew that can occur around host-state publication.
+    private static readonly TimeSpan MaximumHeartbeatSkew = TimeSpan.FromSeconds(5);
     private readonly TimeProvider _timeProvider;
 
     internal BrokerHostStateReader(TimeProvider? timeProvider = null)
@@ -27,11 +29,18 @@ internal sealed class BrokerHostStateReader
             var state = JsonSerializer.Deserialize<BrokerHostState>(
                 File.ReadAllText(path),
                 StrictJson);
-            return IsTrustedOwnership(state)
+            if (!IsTrustedOwnership(state))
+            {
+                return null;
+            }
+
+            var brokerAssemblyPath = TryGetCanonicalAssemblyPath(
+                state!.BrokerAssemblyPath);
+            return brokerAssemblyPath is not null
                 ? new BrokerHostOwnership(
                     state!.ProcessId,
                     state.StartedAtUtc,
-                    state.BrokerAssemblyPath!)
+                    brokerAssemblyPath)
                 : null;
         }
         catch (Exception exception) when (
@@ -49,13 +58,39 @@ internal sealed class BrokerHostStateReader
         } &&
         state.StartedAtUtc != default &&
         !string.IsNullOrWhiteSpace(state.BrokerAssemblyPath) &&
-        _timeProvider.GetUtcNow() - state.HeartbeatAtUtc <= TimeSpan.FromSeconds(5) &&
+        IsWithinHeartbeatSkew(_timeProvider.GetUtcNow() - state.HeartbeatAtUtc) &&
         (state.SchemaVersion == 2 && state.Compatibility is null ||
          state.SchemaVersion == 3 && state.Compatibility is
          {
              ProtocolVersion: > 0,
              BuildCompatibilityId: { Length: > 0 }
          } && !string.IsNullOrWhiteSpace(state.Compatibility.BuildCompatibilityId));
+
+    private static bool IsWithinHeartbeatSkew(TimeSpan age) =>
+        age >= -MaximumHeartbeatSkew && age <= MaximumHeartbeatSkew;
+
+    private static string? TryGetCanonicalAssemblyPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.IsPathFullyQualified(path)
+                ? Path.GetFullPath(path)
+                : null;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or
+            IOException or
+            NotSupportedException or
+            UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     private static JsonSerializerOptions CreateJsonOptions()
     {
