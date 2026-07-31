@@ -492,7 +492,7 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
             layout,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(LocalAiPackageInstallStatus.RollbackFailed, result.Status);
+        Assert.Equal(LocalAiPackageInstallStatus.Indeterminate, result.Status);
         Assert.Equal(driftedPrior, File.ReadAllBytes(layout.CurrentPointerPath));
         Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
         Assert.Equal(2, runner.Calls.Count);

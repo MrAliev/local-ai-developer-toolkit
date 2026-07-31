@@ -393,35 +393,18 @@ public sealed class LocalAiPackageInstaller
         bool targetExisted)
     {
         var priorVersion = priorPointer.Version;
-        var actualPointer = ReadPointerLockedOrNull(layout);
         if (!priorPointer.Exists)
         {
-            if (actualPointer is null || actualPointer.Exists)
-            {
-                return new(
-                    LocalAiPackageInstallStatus.ManualRecoveryRequired,
-                    version,
-                    null,
-                    versionPath,
-                    launcherBackup,
-                    "Activation may have changed the current version; manual recovery is required.",
-                    publishedVersion && !targetExisted);
-            }
-
-            if (File.Exists(layout.LauncherPath))
-            {
-                File.Delete(layout.LauncherPath);
-            }
-
-            return new(
-                LocalAiPackageInstallStatus.RolledBack,
+            return RecoverFreshFailureUnderPointerLock(
+                layout,
                 version,
-                null,
                 versionPath,
                 launcherBackup,
-                "Activation failed before a current version was selected.",
-                publishedVersion && !targetExisted);
+                publishedVersion,
+                targetExisted);
         }
+
+        var actualPointer = ReadPointerLockedOrNull(layout);
 
         if (launcherBackup is null)
         {
@@ -436,10 +419,11 @@ public sealed class LocalAiPackageInstaller
 
         if (actualPointer is not null && PointersEqual(actualPointer, priorPointer))
         {
-            return RestorePriorLauncher(
+            return RestorePriorLauncherUnderPointerLock(
                 layout,
                 version,
                 priorVersion!,
+                priorPointer,
                 versionPath,
                 launcherBackup,
                 publishedVersion,
@@ -487,14 +471,13 @@ public sealed class LocalAiPackageInstaller
         {
         }
 
-        var restoredPointer = ReadPointerLockedOrNull(layout);
-        if (rollback is { ExitCode: 0, TimedOut: false, Cancelled: false } &&
-            restoredPointer is not null && PointersEqual(restoredPointer, priorPointer))
+        if (rollback is { ExitCode: 0, TimedOut: false, Cancelled: false })
         {
-            return RestorePriorLauncher(
+            return RestorePriorLauncherUnderPointerLock(
                 layout,
                 version,
                 priorVersion!,
+                priorPointer,
                 versionPath,
                 launcherBackup,
                 publishedVersion,
@@ -509,6 +492,110 @@ public sealed class LocalAiPackageInstaller
             versionPath,
             launcherBackup,
             "Activation and rollback both failed; manual recovery is required.");
+    }
+
+    private LocalAiPackageInstallResult RecoverFreshFailureUnderPointerLock(
+        InstallationLayout layout,
+        string version,
+        string versionPath,
+        LauncherBackupMetadata? launcherBackup,
+        bool publishedVersion,
+        bool targetExisted)
+    {
+        try
+        {
+            using var pointerLease = ActivationCoordinator.AcquireExclusive(
+                layout.BinRoot,
+                activationTimeout);
+            var actualPointer = CurrentPointerSnapshot.Read(pointerLease);
+            if (actualPointer.Exists)
+            {
+                return Manual();
+            }
+
+            if (File.Exists(layout.LauncherPath))
+            {
+                File.Delete(layout.LauncherPath);
+            }
+
+            return new(
+                LocalAiPackageInstallStatus.RolledBack,
+                version,
+                null,
+                versionPath,
+                launcherBackup,
+                "Activation failed before a current version was selected.",
+                publishedVersion && !targetExisted);
+        }
+        catch (Exception exception) when (
+            exception is CurrentPointerException or ActivationCoordinationException or
+            IOException or UnauthorizedAccessException)
+        {
+            return Manual();
+        }
+
+        LocalAiPackageInstallResult Manual() => new(
+            LocalAiPackageInstallStatus.ManualRecoveryRequired,
+            version,
+            null,
+            versionPath,
+            launcherBackup,
+            "Activation may have changed the current version; manual recovery is required.",
+            publishedVersion && !targetExisted);
+    }
+
+    private LocalAiPackageInstallResult RestorePriorLauncherUnderPointerLock(
+        InstallationLayout layout,
+        string version,
+        string priorVersion,
+        CurrentPointerSnapshot expectedPointer,
+        string versionPath,
+        LauncherBackupMetadata launcherBackup,
+        bool publishedVersion,
+        bool targetExisted,
+        string reason)
+    {
+        try
+        {
+            using var pointerLease = ActivationCoordinator.AcquireExclusive(
+                layout.BinRoot,
+                activationTimeout);
+            var actualPointer = CurrentPointerSnapshot.Read(pointerLease);
+            if (!PointersEqual(actualPointer, expectedPointer))
+            {
+                return new(
+                    LocalAiPackageInstallStatus.Indeterminate,
+                    version,
+                    priorVersion,
+                    versionPath,
+                    launcherBackup,
+                    "The current-version pointer changed before launcher recovery; no launcher mutation was attempted.",
+                    publishedVersion && !targetExisted);
+            }
+
+            return RestorePriorLauncher(
+                layout,
+                version,
+                priorVersion,
+                versionPath,
+                launcherBackup,
+                publishedVersion,
+                targetExisted,
+                reason);
+        }
+        catch (Exception exception) when (
+            exception is CurrentPointerException or ActivationCoordinationException or
+            IOException or UnauthorizedAccessException)
+        {
+            return new(
+                LocalAiPackageInstallStatus.Indeterminate,
+                version,
+                priorVersion,
+                versionPath,
+                launcherBackup,
+                "The current-version pointer could not be locked for launcher recovery; no launcher mutation was attempted.",
+                publishedVersion && !targetExisted);
+        }
     }
 
     private static LocalAiPackageInstallResult RestorePriorLauncher(
