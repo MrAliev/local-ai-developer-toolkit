@@ -15,7 +15,18 @@ internal interface IStagingRootFactory
 
 internal interface IStagingCreationObserver
 {
-    void AfterExclusiveCreate(string path);
+    void OnStage(StagingCreationStage stage, string path);
+}
+
+internal enum StagingCreationStage
+{
+    HandleOpen,
+    LeaseConstruction,
+    NonceGeneration,
+    MarkerOpen,
+    PartialMarkerWrite,
+    MarkerFlush,
+    PostMarker,
 }
 
 internal interface IStagingRootLease : IDisposable
@@ -67,74 +78,95 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
         var canonicalPath = ValidateRequestedPath(requestedPath);
         ValidateAncestors(canonicalPath);
         var security = BuildSecurity();
-        var expectedSecurity = security.GetSecurityDescriptorSddlForm(
-            AccessControlSections.Owner | AccessControlSections.Access);
         var descriptor = security.GetSecurityDescriptorBinaryForm();
         var descriptorPointer = Marshal.AllocHGlobal(descriptor.Length);
-        try
-        {
-            Marshal.Copy(descriptor, 0, descriptorPointer, descriptor.Length);
-            var attributes = new SecurityAttributes
-            {
-                Length = Marshal.SizeOf<SecurityAttributes>(),
-                SecurityDescriptor = descriptorPointer,
-                InheritHandle = false,
-            };
-            if (!CreateDirectoryW(canonicalPath, ref attributes))
-            {
-                var error = Marshal.GetLastWin32Error();
-                throw error == 183
-                    ? Failure()
-                    : new Win32Exception(error);
-            }
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(descriptorPointer);
-        }
-
-        var ownershipNonce = RandomNumberGenerator.GetBytes(32);
-        var ownershipMarker = Path.Combine(
-            canonicalPath,
-            ".localai-staging-owner-" + Guid.NewGuid().ToString("N"));
+        var createdExclusively = false;
+        string? ownershipMarker = null;
         var markerCreated = false;
-        SafeFileHandle? handle = null;
+        SafeFileHandle? markerHandle = null;
+        SafeFileHandle? rootHandle = null;
         WindowsStagingRootLease? lease = null;
         try
         {
-            using (var marker = new FileStream(
-                       ownershipMarker,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       4096,
-                       FileOptions.WriteThrough))
+            try
             {
-                marker.Write(ownershipNonce);
-                marker.Flush(flushToDisk: true);
+                Marshal.Copy(descriptor, 0, descriptorPointer, descriptor.Length);
+                var attributes = new SecurityAttributes
+                {
+                    Length = Marshal.SizeOf<SecurityAttributes>(),
+                    SecurityDescriptor = descriptorPointer,
+                    InheritHandle = false,
+                };
+                if (!CreateDirectoryW(canonicalPath, ref attributes))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    throw error == 183
+                        ? Failure()
+                        : new Win32Exception(error);
+                }
+
+                createdExclusively = true;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(descriptorPointer);
             }
 
-            markerCreated = true;
-            creationObserver?.AfterExclusiveCreate(canonicalPath);
-            handle = CreateFileW(
-                canonicalPath,
-                0x00010000 | 0x00020000 | 0x00100000,
-                FileShare.ReadWrite,
-                IntPtr.Zero,
-                3,
-                0x02200000,
-                IntPtr.Zero);
-            if (handle.IsInvalid)
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
+            creationObserver?.OnStage(
+                StagingCreationStage.HandleOpen,
+                canonicalPath);
+            rootHandle = OpenRootHandle(canonicalPath);
 
+            creationObserver?.OnStage(
+                StagingCreationStage.LeaseConstruction,
+                canonicalPath);
             lease = new WindowsStagingRootLease(
                 canonicalPath,
-                handle,
+                rootHandle,
                 security);
-            handle = null;
+            rootHandle = null;
             lease.Revalidate();
+
+            creationObserver?.OnStage(
+                StagingCreationStage.NonceGeneration,
+                canonicalPath);
+            var ownershipNonce = RandomNumberGenerator.GetBytes(32);
+            ownershipMarker = Path.Combine(
+                canonicalPath,
+                ".localai-staging-owner-" + Guid.NewGuid().ToString("N"));
+
+            creationObserver?.OnStage(
+                StagingCreationStage.MarkerOpen,
+                canonicalPath);
+            markerHandle = File.OpenHandle(
+                ownershipMarker,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                FileOptions.WriteThrough);
+            markerCreated = true;
+            var markerStream = new FileStream(
+                markerHandle,
+                FileAccess.Write,
+                bufferSize: 4096,
+                isAsync: false);
+            markerHandle = null;
+            using (markerStream)
+            {
+                markerStream.Write(ownershipNonce.AsSpan(0, 1));
+                creationObserver?.OnStage(
+                    StagingCreationStage.PartialMarkerWrite,
+                    canonicalPath);
+                markerStream.Write(ownershipNonce.AsSpan(1));
+                creationObserver?.OnStage(
+                    StagingCreationStage.MarkerFlush,
+                    canonicalPath);
+                markerStream.Flush(flushToDisk: true);
+            }
+
+            creationObserver?.OnStage(
+                StagingCreationStage.PostMarker,
+                canonicalPath);
             File.Delete(ownershipMarker);
             markerCreated = false;
             lease.Revalidate();
@@ -142,30 +174,20 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
         }
         catch
         {
-            handle?.Dispose();
-            if (lease is not null)
+            markerHandle?.Dispose();
+            if (createdExclusively)
             {
-                try
-                {
-                    lease.Cleanup();
-                }
-                catch (Exception exception) when (
-                    exception is IOException or UnauthorizedAccessException or
-                    ReleaseVerificationException or Win32Exception)
-                {
-                    lease.Dispose();
-                }
-            }
-
-            if (markerCreated)
-            {
-                TryRemoveMarkerBoundOwnedLeaf(
+                TryCleanupCreationFailure(
                     canonicalPath,
+                    security,
                     ownershipMarker,
-                    ownershipNonce,
-                    expectedSecurity);
+                    markerCreated,
+                    ref rootHandle,
+                    ref lease);
             }
 
+            rootHandle?.Dispose();
+            lease?.Dispose();
             throw;
         }
     }
@@ -242,51 +264,52 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
             AccessControlType.Allow));
 
     [SupportedOSPlatform("windows")]
-    private static void TryRemoveMarkerBoundOwnedLeaf(
+    private static SafeFileHandle OpenRootHandle(string path)
+    {
+        var handle = CreateFileW(
+            path,
+            0x00010000 | 0x00020000 | 0x00100000,
+            FileShare.ReadWrite,
+            IntPtr.Zero,
+            3,
+            0x02200000,
+            IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            throw new Win32Exception(error);
+        }
+
+        return handle;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void TryCleanupCreationFailure(
         string path,
-        string markerPath,
-        ReadOnlySpan<byte> ownershipNonce,
-        string expectedSecurity)
+        DirectorySecurity expectedSecurity,
+        string? markerPath,
+        bool markerCreated,
+        ref SafeFileHandle? rootHandle,
+        ref WindowsStagingRootLease? lease)
     {
         try
         {
-            if (!Directory.Exists(path) ||
-                File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+            if (lease is null)
             {
-                return;
+                rootHandle ??= OpenRootHandle(path);
+                lease = new WindowsStagingRootLease(
+                    path,
+                    rootHandle,
+                    expectedSecurity);
+                rootHandle = null;
             }
 
-            var actualSecurity = new DirectoryInfo(path).GetAccessControl(
-                AccessControlSections.Owner | AccessControlSections.Access);
-            if (!actualSecurity.AreAccessRulesProtected ||
-                !string.Equals(
-                    actualSecurity.GetSecurityDescriptorSddlForm(
-                        AccessControlSections.Owner | AccessControlSections.Access),
-                    expectedSecurity,
-                    StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            var entries = Directory.EnumerateFileSystemEntries(path).ToArray();
-            if (entries.Length != 1 ||
-                !string.Equals(entries[0], markerPath, StringComparison.OrdinalIgnoreCase) ||
-                File.GetAttributes(markerPath).HasFlag(FileAttributes.ReparsePoint))
-            {
-                return;
-            }
-
-            var actualNonce = File.ReadAllBytes(markerPath);
-            if (!CryptographicOperations.FixedTimeEquals(actualNonce, ownershipNonce))
-            {
-                return;
-            }
-
-            File.Delete(markerPath);
-            Directory.Delete(path, recursive: false);
+            _ = lease.TryCleanupCreationFailure(markerPath, markerCreated);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
+            ReleaseVerificationException or Win32Exception or
             System.Security.SecurityException or ArgumentException)
         {
         }
@@ -423,6 +446,46 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
         }
 
         Revalidate();
+        DeleteEmptyRootByHandle();
+    }
+
+    internal bool TryCleanupCreationFailure(
+        string? markerPath,
+        bool markerCreated)
+    {
+        Revalidate();
+        var entries = Directory.EnumerateFileSystemEntries(CanonicalPath).ToArray();
+        if (!markerCreated)
+        {
+            if (entries.Length != 0)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if (markerPath is null ||
+                entries.Length != 1 ||
+                !string.Equals(
+                    entries[0],
+                    markerPath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                Directory.Exists(markerPath) ||
+                File.GetAttributes(markerPath).HasFlag(FileAttributes.ReparsePoint))
+            {
+                return false;
+            }
+
+            File.Delete(markerPath);
+        }
+
+        Revalidate();
+        DeleteEmptyRootByHandle();
+        return true;
+    }
+
+    private void DeleteEmptyRootByHandle()
+    {
         var disposition = new FileDispositionInformation { DeleteFile = true };
         if (!SetFileInformationByHandle(
                 rootHandle,

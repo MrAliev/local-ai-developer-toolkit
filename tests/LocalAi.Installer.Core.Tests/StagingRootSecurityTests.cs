@@ -29,13 +29,22 @@ public sealed class StagingRootSecurityTests : IDisposable
         Assert.Equal("caller", File.ReadAllText(sentinel));
     }
 
-    [Fact]
-    public void Post_create_pre_lease_failure_removes_only_marker_bound_owned_leaf()
+    [Theory]
+    [InlineData((int)StagingCreationStage.HandleOpen)]
+    [InlineData((int)StagingCreationStage.LeaseConstruction)]
+    [InlineData((int)StagingCreationStage.NonceGeneration)]
+    [InlineData((int)StagingCreationStage.MarkerOpen)]
+    [InlineData((int)StagingCreationStage.PartialMarkerWrite)]
+    [InlineData((int)StagingCreationStage.MarkerFlush)]
+    [InlineData((int)StagingCreationStage.PostMarker)]
+    public void Every_post_create_failure_removes_safe_known_owned_leaf(
+        int stageValue)
     {
+        var stage = (StagingCreationStage)stageValue;
         Directory.CreateDirectory(root);
-        var staging = Path.Combine(root, "owned-failure");
+        var staging = Path.Combine(root, "owned-failure-" + stage);
         var factory = new WindowsStagingRootFactory(
-            new ThrowAfterExclusiveCreate());
+            new ThrowAtCreationStage(stage));
 
         Assert.Throws<ReleaseVerificationException>(() =>
             factory.CreateExclusive(staging));
@@ -49,7 +58,7 @@ public sealed class StagingRootSecurityTests : IDisposable
         Directory.CreateDirectory(root);
         var staging = Path.Combine(root, "replacement");
         var factory = new WindowsStagingRootFactory(
-            new ReplaceThenThrowAfterExclusiveCreate());
+            new ReplaceThenThrowBeforeHandleOpen());
 
         Assert.Throws<ReleaseVerificationException>(() =>
             factory.CreateExclusive(staging));
@@ -210,16 +219,28 @@ public sealed class StagingRootSecurityTests : IDisposable
         }
     }
 
-    private sealed class ThrowAfterExclusiveCreate : IStagingCreationObserver
+    private sealed class ThrowAtCreationStage(
+        StagingCreationStage failureStage) : IStagingCreationObserver
     {
-        public void AfterExclusiveCreate(string path) =>
-            throw new ReleaseVerificationException("Injected pre-lease failure.");
+        public void OnStage(StagingCreationStage stage, string path)
+        {
+            if (stage == failureStage)
+            {
+                throw new ReleaseVerificationException(
+                    "Injected pre-lease failure at " + stage + ".");
+            }
+        }
     }
 
-    private sealed class ReplaceThenThrowAfterExclusiveCreate : IStagingCreationObserver
+    private sealed class ReplaceThenThrowBeforeHandleOpen : IStagingCreationObserver
     {
-        public void AfterExclusiveCreate(string path)
+        public void OnStage(StagingCreationStage stage, string path)
         {
+            if (stage != StagingCreationStage.HandleOpen)
+            {
+                return;
+            }
+
             Directory.Delete(path, recursive: true);
             Directory.CreateDirectory(path);
             File.WriteAllText(Path.Combine(path, "foreign.txt"), "foreign");
