@@ -548,18 +548,46 @@ public sealed class BrokerProcessTests
     [Fact]
     public async Task Startup_timeout_is_bounded()
     {
-        var process = new BrokerProcess(
+        var startAttempt = FakeStartAttempt.Running(99);
+        var process = BrokerProcess.CreateForTesting(
             BrokerAssemblyPath,
             "runtime",
             _ => null,
             _ => false,
-            (_, _) => 99,
+            (_, _) => startAttempt,
             TimeProvider.System,
             static (_, _) => Task.CompletedTask,
             startupTimeout: TimeSpan.Zero);
 
-        await Assert.ThrowsAsync<TimeoutException>(
+        var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
             () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("broker_start_timeout", exception.Code);
+        Assert.Contains("last observation:", exception.Message);
+        Assert.Contains("host state is absent or unreadable", exception.Message);
+        Assert.True(startAttempt.IsDisposed);
+    }
+
+    [Fact]
+    public async Task Child_exiting_zero_lock_owner_did_not_publish_times_out_with_diagnostics()
+    {
+        var startAttempt = FakeStartAttempt.Exited(42, 0);
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => null,
+            _ => false,
+            (_, _) => startAttempt,
+            new ManualTimeProvider(DateTimeOffset.UtcNow),
+            static (_, _) => Task.CompletedTask,
+            startupTimeout: TimeSpan.Zero);
+
+        var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
+            () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("broker_start_timeout", exception.Code);
+        Assert.Contains("lock owner did not publish compatible state", exception.Message);
+        Assert.True(startAttempt.IsDisposed);
     }
 
     [Fact]

@@ -172,10 +172,12 @@ public sealed class BrokerProcess : IBrokerProcess
 
         using var startAttempt = _start(_executablePath, _arguments);
         var deadline = _timeProvider.GetUtcNow() + _startupTimeout;
+        var lastObservation = observation.Detail;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             observation = ReadObservation();
+            lastObservation = observation.Detail;
             if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
             {
                 return;
@@ -191,26 +193,26 @@ public sealed class BrokerProcess : IBrokerProcess
                         "broker_start_failed",
                         "LocalAi broker process " + startAttempt.ProcessId +
                         " exited with code " + exitCode +
-                        "; last observation: " + observation.Detail);
+                        "; last observation: " + lastObservation);
                 }
 
-                observation = new BrokerObservation(
-                    BrokerObservationStatus.StartingOrLockOwned,
-                    "broker process " + startAttempt.ProcessId +
-                    " exited successfully; last observation: " + observation.Detail);
+                lastObservation =
+                    "lock owner did not publish compatible state (process " +
+                    startAttempt.ProcessId + "); last observation: " + lastObservation;
             }
             else
             {
-                observation = new BrokerObservation(
-                    BrokerObservationStatus.StartingOrLockOwned,
+                lastObservation =
                     "broker process " + startAttempt.ProcessId +
-                    " is starting; last observation: " + observation.Detail);
+                    " is starting; last observation: " + lastObservation;
             }
 
             if (_timeProvider.GetUtcNow() >= deadline)
             {
-                throw new TimeoutException(
-                    $"LocalAi broker did not become ready within {_startupTimeout}.");
+                throw new BrokerBootstrapException(
+                    "broker_start_timeout",
+                    $"LocalAi broker did not become ready within {_startupTimeout}; " +
+                    $"last observation: {lastObservation}.");
             }
 
             await _delay(TimeSpan.FromMilliseconds(50), cancellationToken);
