@@ -13,8 +13,13 @@
   6 unrelated/no-answer.
 - Идентификатор корпуса:
   `schema1:sha256:d675331cb7008a67a7335c5a1f2aba85e382974b71b1473e34b9e4685f0d7a52`.
-- Коммит исходников: `966aae8eda5653897190b4b69f7b5074deef9652`.
-- Дерево исходников: `8f1d9458a60bcd4ba04aae1c29b6c500bba0c7e5`.
+- Коммит реализации evaluator:
+  `b4c621d143ae6daeff9359ae1147a2c4118858d8`. Это состояние реализации в feature
+  branch, использованное для всех четырёх запусков до коммита этого отчёта.
+- Коммит исходников индексированной цели/base:
+  `966aae8eda5653897190b4b69f7b5074deef9652`.
+- Дерево исходников индексированной цели/base:
+  `8f1d9458a60bcd4ba04aae1c29b6c500bba0c7e5`.
 - Generation индекса:
   `399fcc0b53b35ede05dc64f1a84cbc3bfc6bf382bdd2de7d71f2f9dc1ae8debc`,
   содержащая 203 файла и 1 529 чанков.
@@ -32,19 +37,55 @@
 
 ## Команды и сырые артефакты
 
-Поддерживаемая команда evaluator:
+### Воспроизводимый способ
+
+Запускайте закоммиченный evaluator из канонической неизменяемой установки, в которой
+`codesearch` и `LocalAi.Broker.dll` относятся к одной опубликованной feature-сборке.
+Если активна другая неизменяемая версия, после подтверждения простоя брокера следуйте
+описанному в README workflow публикации и
+`localai-launcher activate <version> --stop-running`; не заменяйте DLL на месте. Все
+запросы по-прежнему идут через общий брокер, а не напрямую в Ollama.
+
+Следующий синтаксис задан закоммиченным usage `CodeSearch.Cli` и передачей аргументов
+launcher:
 
 ```powershell
-dotnet run --project src/CodeSearch.Cli/CodeSearch.Cli.csproj -c Release -- evaluate --cases tests/CodeSearch.Tests/Fixtures/SearchEvaluation/cases.json --root C:\Users\Mr.Aliev\tools\LocalAi --profile
-dotnet run --project src/CodeSearch.Cli/CodeSearch.Cli.csproj -c Release -- evaluate --cases tests/CodeSearch.Tests/Fixtures/SearchEvaluation/cases.json --root C:\Users\Mr.Aliev\tools\LocalAi --no-floor
+$launcher = 'C:\Users\Mr.Aliev\tools\LocalAi\bin\launcher\localai-launcher.exe'
+$cases = (Resolve-Path 'tests\CodeSearch.Tests\Fixtures\SearchEvaluation\cases.json').Path
+$repo = 'C:\Users\Mr.Aliev\tools\LocalAi'
+
+& $launcher run codesearch evaluate --cases $cases --root $repo --profile |
+  Set-Content -Encoding utf8NoBOM -LiteralPath (Join-Path $env:TEMP 'codesearch-eval-profile-cold.json')
+& $launcher run codesearch evaluate --cases $cases --root $repo --profile |
+  Set-Content -Encoding utf8NoBOM -LiteralPath (Join-Path $env:TEMP 'codesearch-eval-profile-warm.json')
+
+& $launcher run codesearch evaluate --cases $cases --root $repo --no-floor |
+  Set-Content -Encoding utf8NoBOM -LiteralPath (Join-Path $env:TEMP 'codesearch-eval-no-floor-cold.json')
+& $launcher run codesearch evaluate --cases $cases --root $repo --no-floor |
+  Set-Content -Encoding utf8NoBOM -LiteralPath (Join-Path $env:TEMP 'codesearch-eval-no-floor-warm.json')
 ```
 
-Во время измерения в этой ветке работал брокер из неизменяемой установленной версии
-`966aae8`. В issue #6 отслеживается привязка к пути сборки, из-за которой клиент из
-worktree не принимает уже запущенный брокер. Установленная версия не заменялась и не
-перезапускалась. Игнорируемый временный adapter проверял канонический процесс брокера,
-после чего использовал обычный путь `SearchService` -> `BrokerEmbeddingClient` -> общая
-устойчивая очередь. Точные команды сбора:
+Для настоящей пары cold/warm сначала дождитесь, пока поддерживаемая idle-политика
+брокера увидит отсутствие queued и running работы в течение 30 минут и выгрузит
+резидентную модель эмбеддингов. Подтвердите состояние MCP-инструментом
+`local_models_status`. Один раз выполните первую команду, а сразу после неё — вторую.
+Перед парой без порога снова дождитесь и подтвердите управляемую брокером idle-выгрузку,
+затем также выполните две команды подряд. Если модель уже была резидентной, пометьте
+первый результат как тёплый, а не холодный. Не используйте прямые команды Ollama для
+проверки, загрузки или выгрузки модели.
+
+### Операторское происхождение этого измерения
+
+Во время этого измерения канонический установленный брокер был версии `966aae8`, а
+реализация evaluator находилась на `b4c621d`. В issue #6 отслеживается привязка к пути
+сборки, из-за которой клиент из worktree не принимает уже запущенный брокер.
+Установленная версия не заменялась и не перезапускалась. Игнорируемый временный adapter
+проверял канонический процесс брокера, после чего использовал обычный путь
+`SearchService` -> `BrokerEmbeddingClient` -> общая устойчивая очередь.
+
+Следующие команды приведены только как операторское происхождение, а не как
+воспроизводимая процедура: их проект `artifacts\eval-harness` намеренно игнорировался и
+отсутствует в Git.
 
 ```powershell
 dotnet run --project artifacts\eval-harness\EvalHarness.csproj -c Release --no-build -- profile cold tests\CodeSearch.Tests\Fixtures\SearchEvaluation\cases.json C:\Users\Mr.Aliev\tools\LocalAi C:\Users\Mr.Aliev\tools\LocalAi\bin\versions\966aae8\LocalAi.Broker.dll C:\Users\Mr.Aliev\AppData\Local\Temp\codesearch-eval-profile-cold-20260731.json
@@ -53,8 +94,9 @@ dotnet run --project artifacts\eval-harness\EvalHarness.csproj -c Release --no-b
 dotnet run --project artifacts\eval-harness\EvalHarness.csproj -c Release --no-build -- no-floor warm tests\CodeSearch.Tests\Fixtures\SearchEvaluation\cases.json C:\Users\Mr.Aliev\tools\LocalAi C:\Users\Mr.Aliev\tools\LocalAi\bin\versions\966aae8\LocalAi.Broker.dll C:\Users\Mr.Aliev\AppData\Local\Temp\codesearch-eval-no-floor-run2-20260731.json
 ```
 
-Сырые JSON-файлы сохранены по этим временным путям для локального ревью и не
-закоммичены. Adapter также игнорируется и не является продуктовым путём выполнения.
+Сырые JSON-файлы были записаны по этим временным путям для локального ревью и не
+закоммичены. Они эфемерны и после обычной очистки временных файлов могут больше не
+существовать. Adapter не является продуктовым путём выполнения.
 
 ## Измеренные факты
 
