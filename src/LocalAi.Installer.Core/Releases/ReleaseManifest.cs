@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 
 namespace LocalAi.Installer.Core.Releases;
 
@@ -112,28 +113,42 @@ public sealed class VerifiedPackage : IDisposable
     public Stream OpenRead(string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
-        lock (gate)
+        try
         {
-            ThrowIfDisposed();
-            if (!retainedByPath.TryGetValue(relativePath, out var file))
+            lock (gate)
             {
-                throw Failure();
-            }
+                ThrowIfDisposed();
+                if (!retainedByPath.TryGetValue(relativePath, out var file))
+                {
+                    throw Failure();
+                }
 
-            stagingLease!.ValidateExactLayout(
-                Files.Select(approved => approved.RelativePath));
-            file.Revalidate();
-            stagingLease.Revalidate();
-            return file.OpenRead();
+                stagingLease!.ValidateExactLayout(
+                    Files.Select(approved => approved.RelativePath));
+                file.Revalidate();
+                stagingLease.Revalidate();
+                return new SanitizedReadStream(file.OpenRead());
+            }
+        }
+        catch (Exception exception) when (IsNativeBoundaryFailure(exception))
+        {
+            throw Failure();
         }
     }
 
     public void Revalidate()
     {
-        lock (gate)
+        try
         {
-            ThrowIfDisposed();
-            RevalidateCore();
+            lock (gate)
+            {
+                ThrowIfDisposed();
+                RevalidateCore();
+            }
+        }
+        catch (Exception exception) when (IsNativeBoundaryFailure(exception))
+        {
+            throw Failure();
         }
     }
 
@@ -182,6 +197,127 @@ public sealed class VerifiedPackage : IDisposable
 
     private static ReleaseVerificationException Failure() =>
         new("Verified package content is unavailable.");
+
+    private static bool IsNativeBoundaryFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or
+        Win32Exception or System.Security.SecurityException;
+
+    private sealed class SanitizedReadStream(Stream inner) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+
+        public override bool CanSeek => inner.CanSeek;
+
+        public override bool CanWrite => false;
+
+        public override long Length => Execute(() => inner.Length);
+
+        public override long Position
+        {
+            get => Execute(() => inner.Position);
+            set => Execute(() => inner.Position = value);
+        }
+
+        public override void Flush() => Execute(inner.Flush);
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            Execute(() => inner.Read(buffer, offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            try
+            {
+                return inner.Read(buffer);
+            }
+            catch (Exception exception) when (IsNativeBoundaryFailure(exception))
+            {
+                throw Failure();
+            }
+        }
+
+        public override int ReadByte() => Execute(inner.ReadByte);
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return await inner.ReadAsync(buffer, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsNativeBoundaryFailure(exception))
+            {
+                throw Failure();
+            }
+        }
+
+        public override async Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await inner.ReadAsync(buffer, offset, count, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsNativeBoundaryFailure(exception))
+            {
+                throw Failure();
+            }
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            Execute(() => inner.Seek(offset, origin));
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await inner.DisposeAsync().ConfigureAwait(false);
+            GC.SuppressFinalize(this);
+        }
+
+        private static T Execute<T>(Func<T> action)
+        {
+            try
+            {
+                return action();
+            }
+            catch (Exception exception) when (IsNativeBoundaryFailure(exception))
+            {
+                throw Failure();
+            }
+        }
+
+        private static void Execute(Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception exception) when (IsNativeBoundaryFailure(exception))
+            {
+                throw Failure();
+            }
+        }
+    }
 }
 
 public sealed class VerifiedPackageFile

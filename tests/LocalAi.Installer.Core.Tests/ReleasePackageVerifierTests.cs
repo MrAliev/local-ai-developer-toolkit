@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.ComponentModel;
 using System.IO.Compression;
 using System.Numerics;
 using System.Runtime.Versioning;
@@ -174,6 +175,114 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         Assert.False(Directory.Exists(staging));
         Directory.CreateDirectory(staging);
         Directory.Delete(staging);
+    }
+
+    [Theory]
+    [InlineData("revalidate", "win32")]
+    [InlineData("revalidate", "security")]
+    [InlineData("revalidate", "unauthorized")]
+    [InlineData("revalidate", "io")]
+    [InlineData("retain", "win32")]
+    [InlineData("retain", "security")]
+    [InlineData("retain", "unauthorized")]
+    [InlineData("retain", "io")]
+    [InlineData("layout", "win32")]
+    [InlineData("layout", "security")]
+    [InlineData("layout", "unauthorized")]
+    [InlineData("layout", "io")]
+    public async Task VerifyAsync_sanitizes_native_identity_and_layout_failures(
+        string stage,
+        string failureKind)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var staging = StagingPath();
+        var verifier = new ReleasePackageVerifier(
+            new ReleaseManifestVerifier(key.ExportSubjectPublicKeyInfo()),
+            new MemoryReleaseClient(package),
+            new RecordingAuthenticodeVerifier(true),
+            new AuthenticodePublisherPolicy(
+                "CN=Approved Publisher, O=LocalAi, C=US",
+                new string('A', 64)),
+            new BoundaryFaultFactory(stage, CreateBoundaryFailure(failureKind)));
+
+        var exception = await Assert.ThrowsAsync<ReleaseVerificationException>(() =>
+            verifier.VerifyAsync(
+                json,
+                Sign(key, json),
+                staging,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("Release package verification failed.", exception.Message);
+        Assert.DoesNotContain("secret", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(staging, exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Theory]
+    [InlineData("revalidate", "win32")]
+    [InlineData("revalidate", "security")]
+    [InlineData("revalidate", "unauthorized")]
+    [InlineData("revalidate", "io")]
+    [InlineData("layout", "win32")]
+    [InlineData("layout", "security")]
+    [InlineData("layout", "unauthorized")]
+    [InlineData("layout", "io")]
+    [InlineData("open", "win32")]
+    [InlineData("open", "security")]
+    [InlineData("open", "unauthorized")]
+    [InlineData("open", "io")]
+    [InlineData("read", "win32")]
+    [InlineData("read", "security")]
+    [InlineData("read", "unauthorized")]
+    [InlineData("read", "io")]
+    public void VerifiedPackage_sanitizes_native_content_boundary_failures(
+        string stage,
+        string failureKind)
+    {
+        var failure = CreateBoundaryFailure(failureKind);
+        var lease = new BoundaryPackageLease(
+            stage == "layout" ? failure : null);
+        var retained = new BoundaryRetainedFile(stage, failure);
+        using var package = new VerifiedPackage(
+            CreateManifest([1, 2, 3]),
+            lease,
+            [retained]);
+
+        var exception = stage switch
+        {
+            "revalidate" or "layout" =>
+                Assert.Throws<ReleaseVerificationException>(package.Revalidate),
+            "open" => Assert.Throws<ReleaseVerificationException>(() =>
+                package.OpenRead(retained.Metadata.RelativePath)),
+            _ => ReadFailure(package, retained.Metadata.RelativePath),
+        };
+
+        Assert.Equal("Verified package content is unavailable.", exception.Message);
+        Assert.DoesNotContain("secret", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void VerifiedPackage_preserves_cancellation_and_disposed_semantics()
+    {
+        var cancellation = new OperationCanceledException("caller cancellation");
+        using var canceled = new VerifiedPackage(
+            CreateManifest([1, 2, 3]),
+            new BoundaryPackageLease(),
+            [new BoundaryRetainedFile("revalidate", cancellation)]);
+
+        Assert.Same(cancellation, Assert.ThrowsAny<OperationCanceledException>(
+            canceled.Revalidate));
+
+        var disposed = new VerifiedPackage(
+            CreateManifest([1, 2, 3]),
+            new BoundaryPackageLease(),
+            [new BoundaryRetainedFile(null, null)]);
+        disposed.Dispose();
+        Assert.Throws<ObjectDisposedException>(disposed.Revalidate);
+        Assert.Throws<ObjectDisposedException>(() => disposed.OpenRead("approved.bin"));
     }
 
     [Fact]
@@ -673,6 +782,22 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             $"Expected a sharing violation, got {exception.GetType().Name}.");
     }
 
+    private static ReleaseVerificationException ReadFailure(
+        VerifiedPackage package,
+        string relativePath)
+    {
+        using var stream = package.OpenRead(relativePath);
+        return Assert.Throws<ReleaseVerificationException>(() => stream.ReadByte());
+    }
+
+    private static Exception CreateBoundaryFailure(string kind) => kind switch
+    {
+        "win32" => new Win32Exception(5, @"secret C:\private\identity"),
+        "security" => new System.Security.SecurityException("secret security identity"),
+        "unauthorized" => new UnauthorizedAccessException("secret unauthorized identity"),
+        _ => new IOException("secret io identity"),
+    };
+
     private static ReleasePackageVerifier CreateVerifier(
         ECDsa key,
         byte[] package,
@@ -897,6 +1022,140 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             return ValueTask.FromException(
                 new IOException(@"secret C:\private\source-dispose"));
         }
+    }
+
+    private sealed class BoundaryFaultFactory(
+        string stage,
+        Exception failure) : IStagingRootFactory
+    {
+        public IStagingRootLease CreateExclusive(string requestedPath) =>
+            new BoundaryFaultLease(
+                new WindowsStagingRootFactory().CreateExclusive(requestedPath),
+                stage,
+                failure);
+    }
+
+    private sealed class BoundaryFaultLease(
+        IStagingRootLease inner,
+        string stage,
+        Exception failure) : IStagingRootLease
+    {
+        public string CanonicalPath => inner.CanonicalPath;
+
+        public void Revalidate()
+        {
+            if (stage == "revalidate")
+            {
+                throw failure;
+            }
+
+            inner.Revalidate();
+        }
+
+        public void ValidateCreatedFile(
+            SafeFileHandle fileHandle,
+            string expectedPath) =>
+            inner.ValidateCreatedFile(fileHandle, expectedPath);
+
+        public IRetainedStagingFile RetainFile(string relativePath) =>
+            stage == "retain" ? throw failure : inner.RetainFile(relativePath);
+
+        public void ValidateExactLayout(IEnumerable<string> approvedRelativePaths)
+        {
+            if (stage == "layout")
+            {
+                throw failure;
+            }
+
+            inner.ValidateExactLayout(approvedRelativePaths);
+        }
+
+        public void Cleanup() => inner.Cleanup();
+
+        public void Dispose() => inner.Dispose();
+    }
+
+    private sealed class BoundaryPackageLease(Exception? layoutFailure = null)
+        : IStagingRootLease
+    {
+        public string CanonicalPath => @"C:\diagnostic\staging";
+
+        public void Revalidate()
+        {
+        }
+
+        public void ValidateCreatedFile(
+            SafeFileHandle fileHandle,
+            string expectedPath)
+        {
+        }
+
+        public IRetainedStagingFile RetainFile(string relativePath) =>
+            throw new NotSupportedException();
+
+        public void ValidateExactLayout(IEnumerable<string> approvedRelativePaths)
+        {
+            if (layoutFailure is not null)
+            {
+                throw layoutFailure;
+            }
+        }
+
+        public void Cleanup()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class BoundaryRetainedFile(
+        string? failureStage,
+        Exception? failure) : IRetainedStagingFile
+    {
+        public VerifiedPackageFile Metadata { get; } =
+            new("approved.bin", 3, new string('A', 64));
+
+        public void Revalidate()
+        {
+            if (failureStage == "revalidate")
+            {
+                throw failure!;
+            }
+        }
+
+        public Stream OpenRead()
+        {
+            if (failureStage == "open")
+            {
+                throw failure!;
+            }
+
+            return failureStage == "read"
+                ? new BoundaryFaultingReadStream(failure!)
+                : new MemoryStream([1, 2, 3], writable: false);
+        }
+
+        public byte[] ReadAllBytes(int maximumBytes) => [1, 2, 3];
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class BoundaryFaultingReadStream(Exception failure) : MemoryStream
+    {
+        public override int Read(byte[] buffer, int offset, int count) => throw failure;
+
+        public override int Read(Span<byte> buffer) => throw failure;
+
+        public override int ReadByte() => throw failure;
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(failure);
     }
 
     private sealed class RecordingAuthenticodeVerifier(

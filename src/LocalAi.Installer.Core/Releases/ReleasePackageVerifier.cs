@@ -149,6 +149,7 @@ public sealed class ReleasePackageVerifier
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
+            Win32Exception or System.Security.SecurityException or
             InvalidDataException or ArgumentException or NotSupportedException or
             CryptographicException or JsonException or DecoderFallbackException)
         {
