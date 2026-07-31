@@ -145,6 +145,38 @@ public sealed class ReleasePackageVerifierTests : IDisposable
     }
 
     [Fact]
+    public async Task Source_dispose_failure_releases_archive_and_cleans_owned_staging()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var client = new DisposeFaultingReleaseClient(package);
+        var staging = StagingPath();
+        var verifier = new ReleasePackageVerifier(
+            new ReleaseManifestVerifier(key.ExportSubjectPublicKeyInfo()),
+            client,
+            new RecordingAuthenticodeVerifier(true),
+            new AuthenticodePublisherPolicy(
+                "CN=Approved Publisher, O=LocalAi, C=US",
+                new string('A', 64)));
+
+        var exception = await Assert.ThrowsAsync<ReleaseVerificationException>(() =>
+            verifier.VerifyAsync(
+                json,
+                Sign(key, json),
+                staging,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("Release package verification failed.", exception.Message);
+        Assert.DoesNotContain("secret", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, client.Stream.DisposeAsyncCount);
+        Assert.False(Directory.Exists(staging));
+        Directory.CreateDirectory(staging);
+        Directory.Delete(staging);
+    }
+
+    [Fact]
     public async Task Approved_content_is_read_from_retained_handle_and_excludes_added_files()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -840,6 +872,30 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             }
 
             return Task.FromResult<Stream>(new MemoryStream(content, writable: false));
+        }
+    }
+
+    private sealed class DisposeFaultingReleaseClient(byte[] content) : IReleaseClient
+    {
+        public DisposeFaultingStream Stream { get; } = new(content);
+
+        public Task<Stream> OpenPackageAsync(
+            Uri approvedPackageUri,
+            long maximumBytes,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<Stream>(Stream);
+    }
+
+    private sealed class DisposeFaultingStream(byte[] content)
+        : MemoryStream(content, writable: false)
+    {
+        public int DisposeAsyncCount { get; private set; }
+
+        public override ValueTask DisposeAsync()
+        {
+            DisposeAsyncCount++;
+            return ValueTask.FromException(
+                new IOException(@"secret C:\private\source-dispose"));
         }
     }
 

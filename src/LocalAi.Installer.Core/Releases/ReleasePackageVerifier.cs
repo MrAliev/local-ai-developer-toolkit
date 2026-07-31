@@ -163,19 +163,21 @@ public sealed class ReleasePackageVerifier
         string archivePath,
         CancellationToken cancellationToken)
     {
-        await using var source = await releaseClient.OpenPackageAsync(
-            manifest.PackageUri,
-            manifest.PackageSize,
-            cancellationToken).ConfigureAwait(false);
-        var destination = new FileStream(
-            archivePath,
-            FileMode.CreateNew,
-            FileAccess.ReadWrite,
-            FileShare.Read,
-            64 * 1024,
-            FileOptions.Asynchronous | FileOptions.RandomAccess);
+        Stream? source = null;
+        FileStream? destination = null;
         try
         {
+            source = await releaseClient.OpenPackageAsync(
+                manifest.PackageUri,
+                manifest.PackageSize,
+                cancellationToken).ConfigureAwait(false);
+            destination = new FileStream(
+                archivePath,
+                FileMode.CreateNew,
+                FileAccess.ReadWrite,
+                FileShare.Read,
+                64 * 1024,
+                FileOptions.Asynchronous | FileOptions.RandomAccess);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var buffer = new byte[64 * 1024];
             long total = 0;
@@ -208,10 +210,16 @@ public sealed class ReleasePackageVerifier
                 throw Failure();
             }
 
-            return destination;
+            var sourceToDispose = source;
+            source = null;
+            await sourceToDispose.DisposeAsync().ConfigureAwait(false);
+            var result = destination;
+            destination = null;
+            return result;
         }
         catch
         {
+            await TryDisposeSourceAsync(source).ConfigureAwait(false);
             TryDisposeArchive(destination);
             throw;
         }
@@ -726,6 +734,25 @@ public sealed class ReleasePackageVerifier
         }
         catch (Exception exception) when (
             IsExpectedCleanupFailure(exception))
+        {
+        }
+    }
+
+    private static async ValueTask TryDisposeSourceAsync(Stream? source)
+    {
+        if (source is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await source.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (
+            IsExpectedCleanupFailure(exception) ||
+            exception is OperationCanceledException or InvalidOperationException or
+            NotSupportedException)
         {
         }
     }
