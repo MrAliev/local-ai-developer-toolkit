@@ -1,6 +1,6 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Runtime.Versioning;
+using System.ComponentModel;
+using LocalAi.Contracts.Activation;
 
 namespace LocalAi.Installer.Core.Activation;
 
@@ -20,7 +20,18 @@ internal sealed class InstallerTransactionLease : IDisposable
     public static InstallerTransactionLease Acquire(
         InstallationLayout layout,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        Acquire(
+            layout,
+            timeout,
+            cancellationToken,
+            SecureNamedMutexFactory.Instance);
+
+    internal static InstallerTransactionLease Acquire(
+        InstallationLayout layout,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        ISecureNamedMutexFactory mutexFactory)
     {
         ArgumentNullException.ThrowIfNull(layout);
         if (timeout < TimeSpan.Zero)
@@ -28,7 +39,11 @@ internal sealed class InstallerTransactionLease : IDisposable
             throw new ArgumentOutOfRangeException(nameof(timeout));
         }
 
-        var worker = new Worker(MutexName(layout.Root), timeout, cancellationToken);
+        var worker = new Worker(
+            MutexName(layout.Root),
+            timeout,
+            cancellationToken,
+            mutexFactory);
         worker.Start();
         try
         {
@@ -53,7 +68,11 @@ internal sealed class InstallerTransactionLease : IDisposable
             throw new ArgumentOutOfRangeException(nameof(timeout));
         }
 
-        var worker = new Worker(MutexName(layout.Root), timeout, cancellationToken);
+        var worker = new Worker(
+            MutexName(layout.Root),
+            timeout,
+            cancellationToken,
+            SecureNamedMutexFactory.Instance);
         worker.Start();
         try
         {
@@ -118,12 +137,7 @@ internal sealed class InstallerTransactionLease : IDisposable
     private static string MutexName(string root)
     {
         var canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
-        var normalized = OperatingSystem.IsWindows()
-            ? canonical.ToUpperInvariant()
-            : canonical;
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
-        return (OperatingSystem.IsWindows() ? @"Global\" : string.Empty) +
-               MutexPrefix + hash;
+        return SecureNamedMutexName.Create(MutexPrefix, canonical);
     }
 
     private sealed class Worker : IDisposable
@@ -131,6 +145,7 @@ internal sealed class InstallerTransactionLease : IDisposable
         private readonly string mutexName;
         private readonly TimeSpan timeout;
         private readonly CancellationToken cancellationToken;
+        private readonly ISecureNamedMutexFactory mutexFactory;
         private readonly TaskCompletionSource ready =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly ManualResetEventSlim release = new(false);
@@ -140,11 +155,13 @@ internal sealed class InstallerTransactionLease : IDisposable
         public Worker(
             string mutexName,
             TimeSpan timeout,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            ISecureNamedMutexFactory mutexFactory)
         {
             this.mutexName = mutexName;
             this.timeout = timeout;
             this.cancellationToken = cancellationToken;
+            this.mutexFactory = mutexFactory;
             thread = new Thread(Run)
             {
                 IsBackground = true,
@@ -163,11 +180,11 @@ internal sealed class InstallerTransactionLease : IDisposable
 
         private void Run()
         {
-            Mutex? mutex = null;
+            ISecureNamedMutex? mutex = null;
             var owns = false;
             try
             {
-                mutex = new Mutex(initiallyOwned: false, mutexName);
+                mutex = mutexFactory.Create(mutexName);
                 var deadline = DateTimeOffset.UtcNow + timeout;
                 while (!owns)
                 {
@@ -181,18 +198,17 @@ internal sealed class InstallerTransactionLease : IDisposable
                     var slice = remaining > TimeSpan.FromMilliseconds(25)
                         ? TimeSpan.FromMilliseconds(25)
                         : remaining;
-                    try
-                    {
-                        owns = mutex.WaitOne(slice);
-                    }
-                    catch (AbandonedMutexException)
-                    {
-                        owns = true;
-                    }
+                    owns = mutex.WaitOne(slice);
                 }
 
                 ready.TrySetResult();
                 release.Wait();
+            }
+            catch (Exception exception) when (
+                exception is UnauthorizedAccessException or Win32Exception or
+                    System.Security.SecurityException or IOException)
+            {
+                ready.TrySetException(new InstallerTransactionBusyException());
             }
             catch (Exception exception)
             {
@@ -202,7 +218,7 @@ internal sealed class InstallerTransactionLease : IDisposable
             {
                 if (owns)
                 {
-                    mutex!.ReleaseMutex();
+                    mutex!.Release();
                 }
 
                 mutex?.Dispose();

@@ -48,12 +48,14 @@ public sealed class VersionActivator
             $"current.{Guid.NewGuid():N}.tmp");
         try
         {
-            using var lease = ActivationCoordinator.AcquireExclusive(
+            using var startupGate = ActivationCoordinator.AcquireStartupGate(
                 _binRoot,
                 _leaseTimeout);
+            CurrentPointerSnapshot observed;
             try
             {
-                expectation.Validate(CurrentPointerSnapshot.Read(lease));
+                observed = CurrentPointerSnapshot.Read(startupGate);
+                expectation.Validate(observed);
             }
             catch (CurrentPointerChangedException exception)
             {
@@ -63,8 +65,8 @@ public sealed class VersionActivator
             }
 
             _resolver.ValidateVersion(version);
-            var currentDirectory = File.Exists(_currentPath)
-                ? _resolver.Resolve("localai").VersionDirectory
+            var currentDirectory = observed.Exists
+                ? _resolver.ValidateVersion(observed.Version!)
                 : null;
             if (currentDirectory is not null)
             {
@@ -80,6 +82,20 @@ public sealed class VersionActivator
                         "version_in_use",
                         "The active LocalAi version is currently in use.");
                 }
+            }
+
+            using var lease = ActivationCoordinator.AcquireExclusive(
+                startupGate,
+                _leaseTimeout);
+            try
+            {
+                expectation.Validate(CurrentPointerSnapshot.Read(lease));
+            }
+            catch (CurrentPointerChangedException exception)
+            {
+                throw new LauncherException(
+                    "current_pointer_changed",
+                    exception.Message);
             }
 
             _resolver.ValidateVersion(version);

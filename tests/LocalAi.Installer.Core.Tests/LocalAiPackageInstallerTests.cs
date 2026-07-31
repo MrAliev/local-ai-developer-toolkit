@@ -1,4 +1,5 @@
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Diagnosis;
@@ -146,6 +147,25 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.Equal("Another LocalAi installation is already in progress.", result.Reason);
         Assert.Equal(0, inspector.CallCount);
         Assert.False(Directory.Exists(layout.Root));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Installer_transaction_rejects_hostile_mutex_with_sanitized_failure()
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var factory = new ThrowingSecureMutexFactory(
+            new UnauthorizedAccessException("hostile mutex descriptor"));
+
+        var error = Assert.Throws<InstallerTransactionBusyException>(() =>
+            InstallerTransactionLease.Acquire(
+                layout,
+                TimeSpan.Zero,
+                CancellationToken.None,
+                factory));
+
+        Assert.Equal("Another LocalAi installation is already in progress.", error.Message);
+        Assert.DoesNotContain("hostile", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1162,5 +1182,11 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
                 approvedRelativePaths.Order());
         public void Cleanup() { }
         public void Dispose() { }
+    }
+
+    private sealed class ThrowingSecureMutexFactory(Exception exception)
+        : ISecureNamedMutexFactory
+    {
+        public ISecureNamedMutex Create(string name) => throw exception;
     }
 }

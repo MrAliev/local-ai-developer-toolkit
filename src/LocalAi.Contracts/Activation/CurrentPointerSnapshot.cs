@@ -35,14 +35,25 @@ public sealed class CurrentPointerSnapshot
     public static CurrentPointerSnapshot Read(ActivationExclusiveLease lease)
     {
         ArgumentNullException.ThrowIfNull(lease);
-        if (!File.Exists(lease.CurrentPath))
+        return ReadPath(lease.CurrentPath);
+    }
+
+    public static CurrentPointerSnapshot Read(ActivationStartupGateLease lease)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        return ReadPath(lease.CurrentPath);
+    }
+
+    private static CurrentPointerSnapshot ReadPath(string currentPath)
+    {
+        if (!File.Exists(currentPath))
         {
             return new(false, null, [], SHA256.HashData([]), canonical: true);
         }
 
         byte[] bytes;
         using (var stream = new FileStream(
-                   lease.CurrentPath,
+                   currentPath,
                    FileMode.Open,
                    FileAccess.Read,
                    FileShare.Read))
