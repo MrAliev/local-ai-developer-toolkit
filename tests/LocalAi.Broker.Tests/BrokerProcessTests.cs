@@ -10,6 +10,13 @@ public sealed class BrokerProcessTests
     private static readonly string BrokerAssemblyPath =
         Path.GetFullPath("LocalAi.Broker.dll");
 
+    public static TheoryData<Exception> UnreadableStateExceptions =>
+        new()
+        {
+            new IOException("The host state is being replaced."),
+            new UnauthorizedAccessException("The host state is temporarily unavailable.")
+        };
+
     [Fact]
     public void Broker_start_info_does_not_inherit_caller_stdio()
     {
@@ -87,7 +94,8 @@ public sealed class BrokerProcessTests
             },
             TimeProvider.System,
             static (_, _) => Task.CompletedTask,
-            arguments: "\"" + developmentAssembly + "\" serve --runtime runtime");
+            arguments: "\"" + developmentAssembly + "\" serve --runtime runtime",
+            brokerAssemblyPath: developmentAssembly);
 
         await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
 
@@ -235,6 +243,46 @@ public sealed class BrokerProcessTests
 
         Assert.Equal(1, starts);
         Assert.True(reads >= 3);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnreadableStateExceptions))]
+    public async Task Unreadable_state_starts_replacement(Exception exception)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var readyState = new BrokerProcessState(
+            99,
+            now,
+            now,
+            BrokerCompatibilityContract.HostStateSchemaVersion,
+            BrokerAssemblyPath,
+            BrokerCompatibilityContract.Current);
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ =>
+            {
+                if (starts == 0)
+                {
+                    throw exception;
+                }
+
+                return readyState;
+            },
+            state => state.ProcessId == 99,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask,
+            startupTimeout: TimeSpan.FromSeconds(2));
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, starts);
     }
 
     [Fact]

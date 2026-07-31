@@ -69,7 +69,8 @@ public sealed class BrokerProcess : IBrokerProcess
         TimeProvider timeProvider,
         Func<TimeSpan, CancellationToken, Task> delay,
         TimeSpan? startupTimeout = null,
-        string? arguments = null)
+        string? arguments = null,
+        string? brokerAssemblyPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
@@ -88,6 +89,7 @@ public sealed class BrokerProcess : IBrokerProcess
 
         _arguments = arguments ?? BuildArguments(_runtimeRoot, null);
         _startupSemaphoreName = CreateSemaphoreName(_runtimeRoot);
+        _ = brokerAssemblyPath;
     }
 
     public async Task EnsureRunningAsync(CancellationToken cancellationToken = default)
@@ -95,7 +97,7 @@ public sealed class BrokerProcess : IBrokerProcess
         using var startupLock = await Task.Run(
             () => EnterSemaphore(cancellationToken),
             cancellationToken);
-        var observation = Observe(_readState(_runtimeRoot));
+        var observation = ReadObservation();
         if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
         {
             return;
@@ -113,7 +115,7 @@ public sealed class BrokerProcess : IBrokerProcess
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            observation = Observe(_readState(_runtimeRoot));
+            observation = ReadObservation();
             if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
             {
                 return;
@@ -191,6 +193,23 @@ public sealed class BrokerProcess : IBrokerProcess
             "host broker assembly path: " + state.BrokerAssemblyPath);
     }
 
+    private BrokerObservation ReadObservation()
+    {
+        try
+        {
+            return Observe(_readState(_runtimeRoot));
+        }
+        catch (Exception exception) when (
+            exception is JsonException or
+            IOException or
+            UnauthorizedAccessException)
+        {
+            return new(
+                BrokerObservationStatus.AbsentOrStale,
+                "host state is absent or unreadable");
+        }
+    }
+
     private static string CompatibilityDetail(BrokerProcessState state) =>
         "host compatibility is incompatible: schema=" + state.SchemaVersion +
         ", protocol=" + (state.Compatibility?.ProtocolVersion.ToString() ?? "missing") +
@@ -218,7 +237,10 @@ public sealed class BrokerProcess : IBrokerProcess
                 File.ReadAllText(path),
                 LocalAiJson.Strict);
         }
-        catch (JsonException)
+        catch (Exception exception) when (
+            exception is JsonException or
+            IOException or
+            UnauthorizedAccessException)
         {
             return null;
         }
