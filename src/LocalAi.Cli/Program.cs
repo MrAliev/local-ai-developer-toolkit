@@ -1,15 +1,31 @@
 using LocalAi.Cli;
-using LocalAi.Broker.Client;
-using LocalLm.Core;
 using System.Text.Json;
 
 if (args is ["model", .. var modelArguments])
 {
-    return await ModelCommand.ExecuteAsync(
-        modelArguments,
-        new BrokerLocalModelClient(BrokerClientFactory.CreateDefault()),
-        Console.Out,
-        CancellationToken.None);
+    using var processLifetime = new CancellationTokenSource();
+    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+        processLifetime.Token);
+    ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        processLifetime.Cancel();
+    };
+    EventHandler exitHandler = (_, _) => processLifetime.Cancel();
+    Console.CancelKeyPress += cancelHandler;
+    AppDomain.CurrentDomain.ProcessExit += exitHandler;
+    try
+    {
+        return await ModelCommand.ExecuteProductionAsync(
+            modelArguments,
+            Console.Out,
+            cancellation.Token);
+    }
+    finally
+    {
+        Console.CancelKeyPress -= cancelHandler;
+        AppDomain.CurrentDomain.ProcessExit -= exitHandler;
+    }
 }
 
 if (args is ["native", var operation, ..])

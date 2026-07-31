@@ -191,6 +191,134 @@ public sealed class ModelCommandTests
         Assert.DoesNotContain("secret", output.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Production_initialization_failure_emits_one_sanitized_json_response()
+    {
+        using var output = new StringWriter();
+
+        var exitCode = await ModelCommand.ExecuteProductionAsync(
+            ["status"],
+            _ => throw new InvalidOperationException("secret ACL path and runtime detail"),
+            output,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ModelCommand.FailureExitCode, exitCode);
+        Assert.Equal(
+            "{\"schemaVersion\":1,\"operation\":\"status\",\"accepted\":false," +
+            "\"code\":\"broker_failure\"}" + Environment.NewLine,
+            output.ToString());
+        Assert.DoesNotContain("secret", output.ToString(), StringComparison.Ordinal);
+        Assert.Single(output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Fact]
+    public async Task Production_initialization_cancellation_is_distinct_and_skips_factory_when_pre_cancelled()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var factoryCalled = false;
+        using var output = new StringWriter();
+
+        var exitCode = await ModelCommand.ExecuteProductionAsync(
+            ["preflight", "--model", "qwen3.5:9b", "--context", "2048"],
+            token =>
+            {
+                factoryCalled = true;
+                throw new OperationCanceledException(token);
+            },
+            output,
+            cancellation.Token);
+
+        Assert.Equal(ModelCommand.CancelledExitCode, exitCode);
+        Assert.False(factoryCalled);
+        Assert.Equal(
+            "{\"schemaVersion\":1,\"operation\":\"preflight\",\"accepted\":false," +
+            "\"code\":\"cancelled\"}" + Environment.NewLine,
+            output.ToString());
+    }
+
+    [Fact]
+    public async Task Production_factory_cancellation_is_sanitized()
+    {
+        var factoryCalled = false;
+        using var output = new StringWriter();
+
+        var exitCode = await ModelCommand.ExecuteProductionAsync(
+            ["pull", "--model", "qwen3.5:9b", "--catalog-version", "catalog-7"],
+            token =>
+            {
+                factoryCalled = true;
+                throw new OperationCanceledException("secret initialization detail", token);
+            },
+            output,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ModelCommand.CancelledExitCode, exitCode);
+        Assert.True(factoryCalled);
+        Assert.Equal(
+            "{\"schemaVersion\":1,\"operation\":\"pull\",\"accepted\":false," +
+            "\"code\":\"cancelled\"}" + Environment.NewLine,
+            output.ToString());
+        Assert.DoesNotContain("secret", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Production_boundary_passes_the_real_cancellation_token_to_factory_and_client()
+    {
+        using var cancellation = new CancellationTokenSource();
+        CancellationToken observedFactoryToken = default;
+        var client = new RecordingClient
+        {
+            StatusResult = Result(new LocalModelsStatusOutput(
+                [], [], [], [], "catalog-7")),
+        };
+        using var output = new StringWriter();
+
+        var exitCode = await ModelCommand.ExecuteProductionAsync(
+            ["status"],
+            token =>
+            {
+                observedFactoryToken = token;
+                return client;
+            },
+            output,
+            cancellation.Token);
+
+        Assert.Equal(ModelCommand.SuccessExitCode, exitCode);
+        Assert.Equal(cancellation.Token, observedFactoryToken);
+        Assert.Equal(["status"], client.Calls);
+        Assert.Equal([cancellation.Token], client.Tokens);
+    }
+
+    [Fact]
+    public async Task Cancellation_during_factory_initialization_stops_before_client_call()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var client = new RecordingClient
+        {
+            StatusResult = Result(new LocalModelsStatusOutput(
+                [], [], [], [], "catalog-7")),
+        };
+        using var output = new StringWriter();
+
+        var exitCode = await ModelCommand.ExecuteProductionAsync(
+            ["status"],
+            _ =>
+            {
+                cancellation.Cancel();
+                return client;
+            },
+            output,
+            cancellation.Token);
+
+        Assert.Equal(ModelCommand.CancelledExitCode, exitCode);
+        Assert.Empty(client.Calls);
+        Assert.Equal(
+            "{\"schemaVersion\":1,\"operation\":\"status\",\"accepted\":false," +
+            "\"code\":\"cancelled\"}" + Environment.NewLine,
+            output.ToString());
+    }
+
     private static LocalJobResult<T> Result<T>(T value) =>
         new(value, new LocalUsageReceipt(
             Guid.Parse("11111111-1111-1111-1111-111111111111"),
@@ -200,6 +328,7 @@ public sealed class ModelCommandTests
     private sealed class RecordingClient : ILocalModelClient
     {
         public List<string> Calls { get; } = [];
+        public List<CancellationToken> Tokens { get; } = [];
         public LocalJobResult<LocalModelsStatusOutput>? StatusResult { get; init; }
         public LocalJobResult<ModelMaintenanceJobOutput>? PullResult { get; init; }
         public LocalJobResult<LocalModelPreflightOutput>? PreflightResult { get; init; }
@@ -209,6 +338,7 @@ public sealed class ModelCommandTests
             CancellationToken cancellationToken = default)
         {
             Calls.Add("status");
+            Tokens.Add(cancellationToken);
             return Complete(StatusResult!);
         }
 
@@ -218,6 +348,7 @@ public sealed class ModelCommandTests
             CancellationToken cancellationToken = default)
         {
             Calls.Add($"pull:{model}:{catalogVersion}");
+            Tokens.Add(cancellationToken);
             return Complete(PullResult!);
         }
 
@@ -227,6 +358,7 @@ public sealed class ModelCommandTests
             CancellationToken cancellationToken = default)
         {
             Calls.Add($"preflight:{model}:{contextTokens}");
+            Tokens.Add(cancellationToken);
             return Complete(PreflightResult!);
         }
 

@@ -29,13 +29,86 @@ public static class ModelCommand
 
         if (!TryParse(arguments, out var request))
         {
-            await WriteAsync(
-                output,
-                new ModelCommandError(
-                    SchemaVersion, "invalid", false, "invalid_arguments"));
-            return InvalidArgumentsExitCode;
+            return await WriteErrorAsync(
+                output, "invalid", "invalid_arguments", InvalidArgumentsExitCode);
         }
 
+        return await ExecuteParsedAsync(
+            request,
+            client,
+            output,
+            cancellationToken);
+    }
+
+    public static Task<int> ExecuteProductionAsync(
+        IReadOnlyList<string> arguments,
+        TextWriter output,
+        CancellationToken cancellationToken) =>
+        ExecuteProductionAsync(
+            arguments,
+            static token =>
+            {
+                token.ThrowIfCancellationRequested();
+                return new BrokerLocalModelClient(
+                    BrokerClientFactory.CreateDefault());
+            },
+            output,
+            cancellationToken);
+
+    internal static async Task<int> ExecuteProductionAsync(
+        IReadOnlyList<string> arguments,
+        Func<CancellationToken, ILocalModelClient> clientFactory,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentNullException.ThrowIfNull(clientFactory);
+        ArgumentNullException.ThrowIfNull(output);
+
+        if (!TryParse(arguments, out var request))
+        {
+            return await WriteErrorAsync(
+                output, "invalid", "invalid_arguments", InvalidArgumentsExitCode);
+        }
+
+        ILocalModelClient client;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            client = clientFactory(cancellationToken) ??
+                throw new InvalidOperationException();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException)
+        {
+            return await WriteErrorAsync(
+                output,
+                request.Operation,
+                "cancelled",
+                CancelledExitCode);
+        }
+        catch (Exception)
+        {
+            return await WriteErrorAsync(
+                output,
+                request.Operation,
+                "broker_failure",
+                FailureExitCode);
+        }
+
+        return await ExecuteParsedAsync(
+            request,
+            client,
+            output,
+            cancellationToken);
+    }
+
+    private static async Task<int> ExecuteParsedAsync(
+        Request request,
+        ILocalModelClient client,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
         try
         {
             return request.Operation switch
@@ -66,19 +139,19 @@ public static class ModelCommand
         }
         catch (OperationCanceledException)
         {
-            await WriteAsync(
+            return await WriteErrorAsync(
                 output,
-                new ModelCommandError(
-                    SchemaVersion, request.Operation, false, "cancelled"));
-            return CancelledExitCode;
+                request.Operation,
+                "cancelled",
+                CancelledExitCode);
         }
         catch (Exception)
         {
-            await WriteAsync(
+            return await WriteErrorAsync(
                 output,
-                new ModelCommandError(
-                    SchemaVersion, request.Operation, false, "broker_failure"));
-            return FailureExitCode;
+                request.Operation,
+                "broker_failure",
+                FailureExitCode);
         }
     }
 
@@ -256,6 +329,18 @@ public static class ModelCommand
 
     private static Task WriteAsync<T>(TextWriter output, T response) =>
         output.WriteLineAsync(JsonSerializer.Serialize(response, LocalAiJson.Strict));
+
+    private static async Task<int> WriteErrorAsync(
+        TextWriter output,
+        string operation,
+        string code,
+        int exitCode)
+    {
+        await WriteAsync(
+            output,
+            new ModelCommandError(SchemaVersion, operation, false, code));
+        return exitCode;
+    }
 
     private sealed record Request(
         string Operation,

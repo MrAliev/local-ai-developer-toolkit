@@ -5,10 +5,11 @@ using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Planning;
+using LocalAi.Installer.Core.Releases;
 
 namespace LocalAi.Installer.Core.Models;
 
-public interface ITrustedStableLauncher
+internal interface ITrustedStableLauncher
 {
     string CanonicalPath { get; }
 
@@ -118,7 +119,7 @@ public sealed class BrokerModelInstallBatchResult
     public string Code { get; }
 }
 
-public sealed class BrokerModelInstaller
+public sealed class BrokerModelInstaller : IDisposable
 {
     private const int MaximumResponseCharacters = 65_536;
     private const int MaximumStatusModels = 256;
@@ -127,8 +128,10 @@ public sealed class BrokerModelInstaller
     private readonly ITrustedStableLauncher launcher;
     private readonly string launcherPath;
     private readonly TimeSpan timeout;
+    private readonly IDisposable? ownedLauncher;
+    private bool disposed;
 
-    public BrokerModelInstaller(
+    internal BrokerModelInstaller(
         IProcessRunner processRunner,
         ITrustedStableLauncher launcher,
         InstallationLayout layout,
@@ -143,55 +146,57 @@ public sealed class BrokerModelInstaller
             throw new ArgumentOutOfRangeException(nameof(timeout));
         }
 
-        string expectedPath;
-        string suppliedPath;
-        string actualPath;
-        try
-        {
-            expectedPath = Path.GetFullPath(layout.LauncherPath);
-            suppliedPath = launcher.CanonicalPath;
-            actualPath = Path.GetFullPath(suppliedPath);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or NotSupportedException or
-            PathTooLongException)
-        {
-            throw new ArgumentException(
-                "The trusted launcher path is invalid.",
-                nameof(launcher));
-        }
-
-        if (!Path.IsPathFullyQualified(suppliedPath) ||
-            !string.Equals(suppliedPath, actualPath, PathComparison) ||
-            !string.Equals(expectedPath, actualPath, PathComparison))
-        {
-            throw new ArgumentException(
-                "The trusted launcher is not the exact stable launcher path.",
-                nameof(launcher));
-        }
-
-        launcherPath = actualPath;
+        launcherPath = ValidateLauncherPath(launcher, layout);
         this.timeout = timeout;
     }
 
     [SupportedOSPlatform("windows")]
     public BrokerModelInstaller(
         IProcessRunner processRunner,
-        InstallationLayoutLease.TrustedLauncher launcher,
-        InstallationLayout layout,
+        InstallationLayoutLease layoutLease,
+        VerifiedPackageFile launcherMetadata,
         TimeSpan timeout)
-        : this(
-            processRunner,
-            new TaskSixTrustedLauncher(launcher),
-            layout,
-            timeout)
     {
+        this.processRunner = processRunner ??
+            throw new ArgumentNullException(nameof(processRunner));
+        ArgumentNullException.ThrowIfNull(layoutLease);
+        ArgumentNullException.ThrowIfNull(launcherMetadata);
+        if (!string.Equals(
+                launcherMetadata.RelativePath,
+                LocalAiPackageLayout.StableLauncherFile,
+                StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "The verified metadata is not for the stable launcher.",
+                nameof(launcherMetadata));
+        }
+
+        if (timeout <= TimeSpan.Zero || timeout > MaximumCommandTimeout)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+
+        var retained = layoutLease.LockLauncher(launcherMetadata);
+        var adapter = new TaskSixTrustedLauncher(retained);
+        try
+        {
+            launcher = adapter;
+            launcherPath = ValidateLauncherPath(adapter, layoutLease.Layout);
+            this.timeout = timeout;
+            ownedLauncher = adapter;
+        }
+        catch
+        {
+            adapter.Dispose();
+            throw;
+        }
     }
 
     public async Task<BrokerModelInstallBatchResult> InstallAsync(
         IReadOnlyList<BrokerModelInstallRequest> requests,
         CancellationToken cancellationToken = default)
     {
+        ObjectDisposedException.ThrowIf(disposed, this);
         var snapshot = ValidateAndSnapshot(requests);
         if (snapshot.Length == 0)
         {
@@ -320,6 +325,15 @@ public sealed class BrokerModelInstaller
         }
 
         return Batch(results, BrokerModelBatchStopReason.None, false, "none");
+    }
+
+    public void Dispose()
+    {
+        if (!disposed)
+        {
+            disposed = true;
+            ownedLauncher?.Dispose();
+        }
     }
 
     private async Task<ProcessResult> RunAsync(
@@ -727,6 +741,40 @@ public sealed class BrokerModelInstaller
     private static bool IsAsciiAlphaNumeric(char value) =>
         value is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9';
 
+    private static string ValidateLauncherPath(
+        ITrustedStableLauncher launcher,
+        InstallationLayout layout)
+    {
+        string expectedPath;
+        string suppliedPath;
+        string actualPath;
+        try
+        {
+            expectedPath = Path.GetFullPath(layout.LauncherPath);
+            suppliedPath = launcher.CanonicalPath;
+            actualPath = Path.GetFullPath(suppliedPath);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or
+            PathTooLongException)
+        {
+            throw new ArgumentException(
+                "The trusted launcher path is invalid.",
+                nameof(launcher));
+        }
+
+        if (!Path.IsPathFullyQualified(suppliedPath) ||
+            !string.Equals(suppliedPath, actualPath, PathComparison) ||
+            !string.Equals(expectedPath, actualPath, PathComparison))
+        {
+            throw new ArgumentException(
+                "The trusted launcher is not the exact stable launcher path.",
+                nameof(launcher));
+        }
+
+        return actualPath;
+    }
+
     private static BrokerModelInstallResult Rejected(
         BrokerModelInstallRequest request,
         bool pullAttempted,
@@ -791,7 +839,9 @@ public sealed class BrokerModelInstaller
 
     [SupportedOSPlatform("windows")]
     private sealed class TaskSixTrustedLauncher(
-        InstallationLayoutLease.TrustedLauncher launcher) : ITrustedStableLauncher
+        InstallationLayoutLease.TrustedLauncher launcher) :
+        ITrustedStableLauncher,
+        IDisposable
     {
         private readonly InstallationLayoutLease.TrustedLauncher launcher =
             launcher ?? throw new ArgumentNullException(nameof(launcher));
@@ -799,6 +849,8 @@ public sealed class BrokerModelInstaller
         public string CanonicalPath => launcher.CanonicalPath;
 
         public void Revalidate() => launcher.Revalidate();
+
+        public void Dispose() => launcher.Dispose();
     }
 
     private sealed class CommandFailure(

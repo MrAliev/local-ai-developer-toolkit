@@ -15,6 +15,28 @@ public sealed class BrokerModelInstallerTests
         InstallationLayout.FromLocalAppData(@"C:\LocalAppData");
 
     [Fact]
+    public void Public_api_requires_task_six_lease_and_verified_launcher_metadata()
+    {
+        Assert.False(typeof(ITrustedStableLauncher).IsPublic);
+
+        var constructor = Assert.Single(typeof(BrokerModelInstaller).GetConstructors());
+        Assert.Equal(
+            [
+                typeof(IProcessRunner),
+                typeof(InstallationLayoutLease),
+                typeof(LocalAi.Installer.Core.Releases.VerifiedPackageFile),
+                typeof(TimeSpan),
+            ],
+            constructor.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.DoesNotContain(
+            typeof(ITrustedStableLauncher),
+            constructor.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.DoesNotContain(
+            typeof(InstallationLayoutLease.TrustedLauncher),
+            constructor.GetParameters().Select(parameter => parameter.ParameterType));
+    }
+
+    [Fact]
     public async Task Installed_model_skips_pull_but_is_always_preflighted_exactly()
     {
         var runner = new RecordingProcessRunner(
