@@ -16,6 +16,7 @@ public sealed class InstallationLayoutLease : IDisposable
 {
     private readonly List<DirectoryEvidence> directories;
     private readonly List<VersionTemporary> versionTemporaries = [];
+    private bool scaffoldCommitted;
     private bool disposed;
 
     private InstallationLayoutLease(
@@ -27,6 +28,13 @@ public sealed class InstallationLayoutLease : IDisposable
     }
 
     public InstallationLayout Layout { get; }
+
+    public void CommitScaffold()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        Revalidate();
+        scaffoldCommitted = true;
+    }
 
     public VersionTemporary CreateVersionTemporary()
     {
@@ -309,15 +317,15 @@ public sealed class InstallationLayoutLease : IDisposable
         try
         {
             var localAppData = NativeDirectory.OpenAbsolute(layout.LocalAppData);
-            directories.Add(Evidence(localAppData, layout.LocalAppData));
+            directories.Add(Evidence(localAppData, layout.LocalAppData, validateAcl: false));
             var root = NativeDirectory.OpenOrCreate(
                 localAppData,
                 "LocalAi",
                 layout.Root);
-            directories.Add(Evidence(root.Handle, layout.Root));
+            directories.Add(Evidence(root.Handle, layout.Root, created: root.Created));
             ValidateRootShape(layout.Root);
             var bin = NativeDirectory.OpenOrCreate(root.Handle, "bin", layout.BinRoot);
-            directories.Add(Evidence(bin.Handle, layout.BinRoot));
+            directories.Add(Evidence(bin.Handle, layout.BinRoot, created: bin.Created));
             if (requireFreshInstallerTree && !bin.Created)
             {
                 throw Failure();
@@ -329,7 +337,7 @@ public sealed class InstallationLayoutLease : IDisposable
                 bin.Handle,
                 "versions",
                 layout.VersionsRoot);
-            directories.Add(Evidence(versions.Handle, layout.VersionsRoot));
+            directories.Add(Evidence(versions.Handle, layout.VersionsRoot, created: versions.Created));
             if (requireFreshInstallerTree && !versions.Created)
             {
                 throw Failure();
@@ -339,7 +347,7 @@ public sealed class InstallationLayoutLease : IDisposable
                 bin.Handle,
                 "launcher",
                 layout.LauncherDirectory);
-            directories.Add(Evidence(launcher.Handle, layout.LauncherDirectory));
+            directories.Add(Evidence(launcher.Handle, layout.LauncherDirectory, created: launcher.Created));
             if (requireFreshInstallerTree && !launcher.Created)
             {
                 throw Failure();
@@ -349,13 +357,13 @@ public sealed class InstallationLayoutLease : IDisposable
                 root.Handle,
                 "installer",
                 layout.InstallerDirectory);
-            directories.Add(Evidence(installer.Handle, layout.InstallerDirectory));
+            directories.Add(Evidence(installer.Handle, layout.InstallerDirectory, created: installer.Created));
             ValidateExactNames(layout.InstallerDirectory, ["backups", "transaction.lock"]);
             var backups = NativeDirectory.OpenOrCreate(
                 installer.Handle,
                 "backups",
                 layout.InstallerBackupsRoot);
-            directories.Add(Evidence(backups.Handle, layout.InstallerBackupsRoot));
+            directories.Add(Evidence(backups.Handle, layout.InstallerBackupsRoot, created: backups.Created));
 
             foreach (var entry in Directory.EnumerateFileSystemEntries(layout.InstallerBackupsRoot))
             {
@@ -395,8 +403,8 @@ public sealed class InstallationLayoutLease : IDisposable
             }
 
             var result = new InstallationLayoutLease(layout, directories);
-            directories = null!;
             result.Revalidate();
+            directories = null!;
             return result;
         }
         catch (LocalAiPackageInstallationException)
@@ -414,10 +422,7 @@ public sealed class InstallationLayoutLease : IDisposable
         {
             if (directories is not null)
             {
-                foreach (var directory in directories.AsEnumerable().Reverse())
-                {
-                    directory.Handle.Dispose();
-                }
+                DisposeDirectories(directories, removeCreatedScaffold: true);
             }
         }
     }
@@ -437,6 +442,11 @@ public sealed class InstallationLayoutLease : IDisposable
                     StringComparison.OrdinalIgnoreCase))
             {
                 throw Failure();
+            }
+
+            if (directory.ValidateAcl)
+            {
+                ValidateDirectoryAcl(directory.CanonicalPath);
             }
         }
 
@@ -547,7 +557,7 @@ public sealed class InstallationLayoutLease : IDisposable
 
     private void Cleanup(VersionTemporary temporary)
     {
-        if (!versionTemporaries.Remove(temporary))
+        if (!versionTemporaries.Contains(temporary))
         {
             return;
         }
@@ -559,7 +569,6 @@ public sealed class InstallationLayoutLease : IDisposable
             if (attributes.HasFlag(FileAttributes.Directory) ||
                 attributes.HasFlag(FileAttributes.ReparsePoint))
             {
-                temporary.Handle.Dispose();
                 return;
             }
 
@@ -568,7 +577,11 @@ public sealed class InstallationLayoutLease : IDisposable
 
         temporary.Revalidate();
         NativeDirectory.DeleteEmpty(temporary.Handle);
+        versionTemporaries.Remove(temporary);
     }
+
+    private void Unregister(VersionTemporary temporary) =>
+        versionTemporaries.Remove(temporary);
 
     public void Dispose()
     {
@@ -577,10 +590,34 @@ public sealed class InstallationLayoutLease : IDisposable
             return;
         }
 
-        disposed = true;
-        foreach (var directory in directories.AsEnumerable().Reverse())
+        Exception? cleanupFailure = null;
+        foreach (var temporary in versionTemporaries.ToArray())
         {
-            directory.Handle.Dispose();
+            try
+            {
+                temporary.Dispose();
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or Win32Exception or
+                    LocalAiPackageInstallationException)
+            {
+                cleanupFailure ??= exception;
+            }
+        }
+
+        disposed = true;
+        if (!scaffoldCommitted)
+        {
+            DeleteFreshCoordinationFile();
+        }
+
+        DisposeDirectories(directories, removeCreatedScaffold: !scaffoldCommitted);
+
+        if (cleanupFailure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo
+                .Capture(cleanupFailure)
+                .Throw();
         }
     }
 
@@ -606,7 +643,40 @@ public sealed class InstallationLayoutLease : IDisposable
         }
     }
 
-    private static DirectoryEvidence Evidence(SafeFileHandle handle, string expectedPath)
+    private void DeleteFreshCoordinationFile()
+    {
+        var bin = directories.Single(directory =>
+            string.Equals(
+                directory.CanonicalPath,
+                Path.GetFullPath(Layout.BinRoot),
+                StringComparison.OrdinalIgnoreCase));
+        if (!bin.Created)
+        {
+            return;
+        }
+
+        var path = Path.Combine(Layout.BinRoot, "current.lock");
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            NativeDirectory.DeleteFile(path);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or Win32Exception or
+                System.Security.SecurityException or LocalAiPackageInstallationException)
+        {
+        }
+    }
+
+    private static DirectoryEvidence Evidence(
+        SafeFileHandle handle,
+        string expectedPath,
+        bool validateAcl = true,
+        bool created = false)
     {
         WindowsStagingRootLease.ValidateDirectoryHandle(handle, expectedPath);
         var identity = WindowsStagingRootLease.GetIdentity(handle);
@@ -619,7 +689,9 @@ public sealed class InstallationLayoutLease : IDisposable
         return new(
             handle,
             identity,
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(expectedPath)));
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(expectedPath)),
+            validateAcl,
+            created);
     }
 
     private static void ValidateBinNames(string binRoot)
@@ -718,6 +790,7 @@ public sealed class InstallationLayoutLease : IDisposable
         {
             throw Failure();
         }
+        ValidateFileAcl(path);
     }
 
     private static void ValidateRequiredFile(string path)
@@ -754,10 +827,104 @@ public sealed class InstallationLayoutLease : IDisposable
     private static LocalAiPackageInstallationException Failure() =>
         new("The LocalAi installation layout is unsafe.");
 
+    private static void DisposeDirectories(
+        IEnumerable<DirectoryEvidence> evidence,
+        bool removeCreatedScaffold)
+    {
+        foreach (var directory in evidence.Reverse())
+        {
+            try
+            {
+                if (removeCreatedScaffold && directory.Created &&
+                    WindowsStagingRootLease.GetIdentity(directory.Handle) == directory.Identity &&
+                    string.Equals(
+                        WindowsStagingRootLease.GetFinalPath(directory.Handle),
+                        directory.CanonicalPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        NativeDirectory.DeleteEmpty(directory.Handle);
+                    }
+                    catch (Exception exception) when (
+                        exception is IOException or UnauthorizedAccessException or Win32Exception)
+                    {
+                    }
+                }
+            }
+            finally
+            {
+                directory.Handle.Dispose();
+            }
+        }
+    }
+
+    private static void ValidateDirectoryAcl(string path)
+    {
+        var security = new DirectoryInfo(path).GetAccessControl(
+            AccessControlSections.Access | AccessControlSections.Owner);
+        ValidateAcl(security, directory: true);
+    }
+
+    private static void ValidateFileAcl(string path)
+    {
+        var security = new FileInfo(path).GetAccessControl(
+            AccessControlSections.Access | AccessControlSections.Owner);
+        ValidateAcl(security, directory: false);
+    }
+
+    private static void ValidateAcl(FileSystemSecurity security, bool directory)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = identity.User ?? throw Failure();
+        var allowed = new HashSet<string>(StringComparer.Ordinal)
+        {
+            user.Value,
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null).Value,
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null).Value,
+        };
+        if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner ||
+            owner != user ||
+            (directory && !security.AreAccessRulesProtected))
+        {
+            throw Failure();
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(
+                     includeExplicit: true,
+                     includeInherited: true,
+                     typeof(SecurityIdentifier)))
+        {
+            var expectedInheritance = directory
+                ? InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit
+                : InheritanceFlags.None;
+            if ((directory && rule.IsInherited) ||
+                rule.AccessControlType != AccessControlType.Allow ||
+                rule.IdentityReference is not SecurityIdentifier sid ||
+                !allowed.Contains(sid.Value) ||
+                (rule.FileSystemRights & FileSystemRights.FullControl) != FileSystemRights.FullControl ||
+                rule.InheritanceFlags != expectedInheritance ||
+                rule.PropagationFlags != PropagationFlags.None)
+            {
+                throw Failure();
+            }
+
+            seen.Add(sid.Value);
+        }
+
+        if (!seen.SetEquals(allowed))
+        {
+            throw Failure();
+        }
+    }
+
     private sealed record DirectoryEvidence(
         SafeFileHandle Handle,
         WindowsStagingRootLease.FileIdentity Identity,
-        string CanonicalPath);
+        string CanonicalPath,
+        bool ValidateAcl,
+        bool Created);
 
     public sealed class VersionTemporary : IDisposable
     {
@@ -808,6 +975,7 @@ public sealed class InstallationLayoutLease : IDisposable
             {
                 throw Failure();
             }
+            ValidateDirectoryAcl(CanonicalPath);
         }
 
         public void Dispose()
@@ -817,11 +985,22 @@ public sealed class InstallationLayoutLease : IDisposable
                 return;
             }
 
-            disposed = true;
-            if (!published)
+            try
             {
-                owner.Cleanup(this);
-                Handle.Dispose();
+                if (!published)
+                {
+                    owner.Cleanup(this);
+                }
+            }
+            finally
+            {
+                disposed = true;
+                if (!published)
+                {
+                    Handle.Dispose();
+                }
+
+                owner.Unregister(this);
             }
         }
     }
@@ -1081,7 +1260,12 @@ public sealed class InstallationLayoutLease : IDisposable
             SafeFileHandle parent,
             string name,
             string expectedPath) =>
-            OpenRelative(parent, name, expectedPath, FileOpenIf);
+            OpenRelative(
+                parent,
+                name,
+                expectedPath,
+                FileOpenIf,
+                FileListDirectory | FileReadAttributes | Delete | ReadControl | Synchronize);
 
         public static SafeFileHandle OpenExisting(
             SafeFileHandle parent,
@@ -1244,6 +1428,44 @@ public sealed class InstallationLayoutLease : IDisposable
 
         public static void DeleteEmpty(SafeFileHandle handle)
         {
+            var disposition = new FileDispositionInformation { DeleteFile = true };
+            if (!SetFileInformationByHandle(
+                    handle,
+                    4,
+                    ref disposition,
+                    (uint)Marshal.SizeOf<FileDispositionInformation>()))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+
+        public static void DeleteFile(string path)
+        {
+            using var handle = CreateFileW(
+                path,
+                FileReadAttributes | Delete | ReadControl | Synchronize,
+                FileShare.Read | FileShare.Write,
+                IntPtr.Zero,
+                OpenExistingDisposition,
+                FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            var identity = WindowsStagingRootLease.GetIdentity(handle);
+            if (identity.Attributes.HasFlag(FileAttributes.Directory) ||
+                identity.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                !string.Equals(
+                    WindowsStagingRootLease.GetFinalPath(handle),
+                    Path.GetFullPath(path),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw Failure();
+            }
+
+            ValidateFileAcl(path);
             var disposition = new FileDispositionInformation { DeleteFile = true };
             if (!SetFileInformationByHandle(
                     handle,

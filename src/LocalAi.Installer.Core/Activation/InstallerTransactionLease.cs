@@ -97,13 +97,28 @@ internal sealed class InstallerTransactionLease : IDisposable
 
         layoutLease.Revalidate();
         var path = Path.Combine(layoutLease.Layout.InstallerDirectory, "transaction.lock");
-        var stream = new FileStream(
-            path,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            1,
-            FileOptions.WriteThrough);
+        FileStream stream;
+        try
+        {
+            stream = new FileStream(
+                path,
+                FileMode.CreateNew,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                1,
+                FileOptions.WriteThrough | FileOptions.DeleteOnClose);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                1,
+                FileOptions.WriteThrough);
+        }
+
         try
         {
             if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
@@ -122,6 +137,13 @@ internal sealed class InstallerTransactionLease : IDisposable
         }
     }
 
+    public void DetachLayout()
+    {
+        var stream = transactionFile;
+        transactionFile = null;
+        stream?.Dispose();
+    }
+
     public void Dispose()
     {
         if (disposed)
@@ -130,7 +152,7 @@ internal sealed class InstallerTransactionLease : IDisposable
         }
 
         disposed = true;
-        transactionFile?.Dispose();
+        DetachLayout();
         worker.Dispose();
     }
 

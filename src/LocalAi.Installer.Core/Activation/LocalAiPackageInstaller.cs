@@ -185,60 +185,67 @@ public sealed class LocalAiPackageInstaller
         {
             try
             {
-                transaction.AttachLayout(layoutLease);
-            }
-            catch (IOException)
-            {
-                return new(
-                    LocalAiPackageInstallStatus.Busy,
-                    version,
-                    existing.Version,
-                    versionPath,
-                    null,
-                    "Another LocalAi installation is already in progress.");
-            }
+                try
+                {
+                    transaction.AttachLayout(layoutLease);
+                }
+                catch (IOException)
+                {
+                    return new(
+                        LocalAiPackageInstallStatus.Busy,
+                        version,
+                        existing.Version,
+                        versionPath,
+                        null,
+                        "Another LocalAi installation is already in progress.");
+                }
 
-            CurrentPointerSnapshot priorPointer;
-            try
-            {
-                priorPointer = ReadPointerLocked(layout);
-            }
-            catch (Exception exception) when (
-                exception is CurrentPointerException or ActivationCoordinationException ||
-                IsNativeHandoffFailure(exception))
-            {
-                return new(
-                    LocalAiPackageInstallStatus.Refused,
-                    version,
-                    existing.Version,
-                    versionPath,
-                    null,
-                    "The current-version pointer is invalid or unavailable.");
-            }
+                CurrentPointerSnapshot priorPointer;
+                try
+                {
+                    priorPointer = ReadPointerLocked(layout);
+                }
+                catch (Exception exception) when (
+                    exception is CurrentPointerException or ActivationCoordinationException ||
+                    IsNativeHandoffFailure(exception))
+                {
+                    return new(
+                        LocalAiPackageInstallStatus.Refused,
+                        version,
+                        existing.Version,
+                        versionPath,
+                        null,
+                        "The current-version pointer is invalid or unavailable.");
+                }
 
-            if ((existing.State == ExistingLocalAiState.Compatible &&
-                 (!priorPointer.Exists || !priorPointer.IsCanonical ||
-                  !string.Equals(priorPointer.Version, existing.Version, StringComparison.Ordinal))) ||
-                (existing.State == ExistingLocalAiState.Absent && priorPointer.Exists))
-            {
-                return new(
-                    LocalAiPackageInstallStatus.Refused,
-                    version,
-                    existing.Version,
-                    versionPath,
-                    null,
-                    "The current-version pointer changed during installation preparation.");
-            }
+                if ((existing.State == ExistingLocalAiState.Compatible &&
+                     (!priorPointer.Exists || !priorPointer.IsCanonical ||
+                      !string.Equals(priorPointer.Version, existing.Version, StringComparison.Ordinal))) ||
+                    (existing.State == ExistingLocalAiState.Absent && priorPointer.Exists))
+                {
+                    return new(
+                        LocalAiPackageInstallStatus.Refused,
+                        version,
+                        existing.Version,
+                        versionPath,
+                        null,
+                        "The current-version pointer changed during installation preparation.");
+                }
 
-            return await InstallUnderLayoutLeaseAsync(
-                    package,
-                    layout,
-                    layoutLease,
-                    version,
-                    versionPath,
-                    priorPointer,
-                    cancellationToken)
-                .ConfigureAwait(false);
+                return await InstallUnderLayoutLeaseAsync(
+                        package,
+                        layout,
+                        layoutLease,
+                        version,
+                        versionPath,
+                        priorPointer,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                transaction.DetachLayout();
+            }
         }
     }
 
@@ -289,6 +296,7 @@ public sealed class LocalAiPackageInstaller
                     temporaryVersion.CanonicalPath,
                     LocalAiPackageLayout.VersionRequiredFiles);
                 package.Revalidate();
+                layoutLease.CommitScaffold();
                 try
                 {
                     temporaryVersion.PublishAbsent(version);
@@ -315,6 +323,10 @@ public sealed class LocalAiPackageInstaller
                 {
                     throw new LocalAiPackageInstallationException("The immutable version failed read-back verification.");
                 }
+            }
+            else
+            {
+                layoutLease.CommitScaffold();
             }
 
             retainedVersion = layoutLease.LockInstalledVersion(

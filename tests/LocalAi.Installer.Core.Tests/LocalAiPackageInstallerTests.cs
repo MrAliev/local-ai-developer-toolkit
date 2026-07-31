@@ -7,9 +7,12 @@ using LocalAi.Installer.Core.Releases;
 using System.ComponentModel;
 using System.Runtime.Versioning;
 using System.Security;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace LocalAi.Installer.Core.Tests;
 
+[SupportedOSPlatform("windows")]
 public sealed class LocalAiPackageInstallerTests : IDisposable
 {
     private readonly string localAppData = Path.Combine(
@@ -388,8 +391,11 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         var layout = InstallationLayout.FromLocalAppData(localAppData);
         File.WriteAllText(layout.Root, "winner");
 
-        Assert.Throws<LocalAiPackageInstallationException>(() =>
-            InstallationLayoutLease.Acquire(layout));
+        var error = Record.Exception(() =>
+        {
+            using var unexpected = InstallationLayoutLease.Acquire(layout);
+        });
+        Assert.IsType<LocalAiPackageInstallationException>(error);
 
         Assert.Equal("winner", File.ReadAllText(layout.Root));
     }
@@ -406,6 +412,56 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
             InstallationLayoutLease.Acquire(layout));
 
         Assert.True(Directory.Exists(unsafeVersion));
+    }
+
+    [Theory]
+    [InlineData("permissive-parent")]
+    [InlineData("delete-child")]
+    [InlineData("inherited-ace")]
+    [SupportedOSPlatform("windows")]
+    public void Layout_lease_rejects_unsafe_existing_acl_without_mutation(string failure)
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        using (var lease = InstallationLayoutLease.Acquire(layout))
+        {
+            lease.CommitScaffold();
+        }
+
+        var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+        if (failure == "inherited-ace")
+        {
+            var rootSecurity = new DirectoryInfo(layout.Root).GetAccessControl();
+            rootSecurity.AddAccessRule(new FileSystemAccessRule(
+                everyone,
+                FileSystemRights.WriteData,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            new DirectoryInfo(layout.Root).SetAccessControl(rootSecurity);
+            var binSecurity = new DirectoryInfo(layout.BinRoot).GetAccessControl();
+            binSecurity.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
+            new DirectoryInfo(layout.BinRoot).SetAccessControl(binSecurity);
+        }
+        else
+        {
+            var target = failure == "permissive-parent" ? layout.Root : layout.BinRoot;
+            var security = new DirectoryInfo(target).GetAccessControl();
+            security.AddAccessRule(new FileSystemAccessRule(
+                everyone,
+                failure == "delete-child"
+                    ? FileSystemRights.DeleteSubdirectoriesAndFiles
+                    : FileSystemRights.WriteData,
+                AccessControlType.Allow));
+            new DirectoryInfo(target).SetAccessControl(security);
+        }
+
+        var error = Record.Exception(() =>
+        {
+            using var unexpected = InstallationLayoutLease.Acquire(layout);
+        });
+        Assert.IsType<LocalAiPackageInstallationException>(error);
+        Assert.True(Directory.Exists(layout.BinRoot));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(layout.VersionsRoot));
     }
 
     [Fact]
@@ -428,6 +484,53 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.ThrowsAny<IOException>(() =>
             Directory.Move(versionPath, versionPath + ".moved"));
         lease.Revalidate();
+    }
+
+    [Fact]
+    public void Parent_layout_lease_cleans_forgotten_version_temporary()
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var lease = InstallationLayoutLease.Acquire(layout);
+        var temporary = lease.CreateVersionTemporary();
+        var path = temporary.CanonicalPath;
+        foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
+        {
+            File.WriteAllBytes(Path.Combine(path, file), Content(file));
+        }
+
+        lease.Dispose();
+
+        Assert.False(Directory.Exists(path));
+        temporary.Dispose();
+    }
+
+    [Fact]
+    public void Temporary_cleanup_failure_closes_handle_and_repeated_dispose_is_safe()
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var lease = InstallationLayoutLease.Acquire(layout);
+        var temporary = lease.CreateVersionTemporary();
+        var path = temporary.CanonicalPath;
+        foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
+        {
+            File.WriteAllBytes(Path.Combine(path, file), Content(file));
+        }
+
+        var lockedPath = Path.Combine(path, LocalAiPackageLayout.VersionRequiredFiles[0]);
+        var locked = new FileStream(
+            lockedPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+        var error = Record.Exception(temporary.Dispose);
+        lease.Dispose();
+        locked.Dispose();
+
+        Assert.IsType<IOException>(error);
+        temporary.Dispose();
+        var moved = path + ".moved";
+        Directory.Move(path, moved);
+        Assert.True(Directory.Exists(moved));
     }
 
     [Fact]
@@ -554,12 +657,23 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
         var layout = InstallationLayout.FromLocalAppData(localAppData);
         var target = Path.Combine(layout.VersionsRoot, "v2");
-        Directory.CreateDirectory(target);
-        foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
+        using (var lease = InstallationLayoutLease.Acquire(layout))
+        using (var temporary = lease.CreateVersionTemporary())
         {
-            File.WriteAllBytes(Path.Combine(target, file), Content(file));
+            foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
+            {
+                File.WriteAllBytes(Path.Combine(temporary.CanonicalPath, file), Content(file));
+            }
+
+            File.WriteAllText(
+                Path.Combine(
+                    temporary.CanonicalPath,
+                    LocalAiPackageLayout.VersionRequiredFiles[0]),
+                "mismatch");
+            temporary.PublishAbsent("v2");
+            lease.CommitScaffold();
         }
-        File.WriteAllText(Path.Combine(target, LocalAiPackageLayout.VersionRequiredFiles[0]), "mismatch");
+
         var before = Directory.EnumerateFiles(target).ToDictionary(
             path => Path.GetFileName(path)!,
             File.ReadAllBytes);
@@ -970,7 +1084,40 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
             Installer(runner).InstallAsync(package, layout, TestContext.Current.CancellationToken));
 
         Assert.Empty(runner.Calls);
-        Assert.Empty(Directory.EnumerateDirectories(layout.VersionsRoot));
+        Assert.False(Directory.Exists(layout.Root));
+
+        using var retryPackage = Package("v1");
+        var retryRunner = new RecordingRunner((_, arguments, _, _) =>
+        {
+            WritePointer(arguments[1]);
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+        var retry = await Installer(retryRunner).InstallAsync(
+            retryPackage,
+            layout,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(LocalAiPackageInstallStatus.Installed, retry.Status);
+    }
+
+    [Fact]
+    public async Task Cancellation_before_publication_removes_fresh_scaffold_for_retry()
+    {
+        using var package = Package("v1");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        using var cancellation = new CancellationTokenSource();
+        var inspector = new DelegateInspector(_ =>
+        {
+            cancellation.Cancel();
+            return new ExistingLocalAiSnapshot(ExistingLocalAiState.Absent, null, null, null);
+        });
+        var runner = new RecordingRunner((_, _, _, _) => throw new InvalidOperationException());
+        var installer = new LocalAiPackageInstaller(runner, inspector, TimeSpan.FromSeconds(5));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            installer.InstallAsync(package, layout, cancellation.Token));
+
+        Assert.False(Directory.Exists(layout.Root));
+        Assert.Empty(runner.Calls);
     }
 
     [Fact]
@@ -1111,18 +1258,20 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     private void CreateExisting(string version, byte[] launcher, bool packageContent = false)
     {
         var layout = InstallationLayout.FromLocalAppData(localAppData);
-        var versionPath = Path.Combine(layout.VersionsRoot, version);
-        Directory.CreateDirectory(versionPath);
+        using var lease = InstallationLayoutLease.Acquire(layout);
+        using var temporary = lease.CreateVersionTemporary();
         foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
         {
             File.WriteAllBytes(
-                Path.Combine(versionPath, file),
+                Path.Combine(temporary.CanonicalPath, file),
                 packageContent ? Content(file) : System.Text.Encoding.UTF8.GetBytes("prior:" + file));
         }
 
-        Directory.CreateDirectory(layout.LauncherDirectory);
+        temporary.PublishAbsent(version);
         File.WriteAllBytes(layout.LauncherPath, launcher);
         WritePointer(version);
+        lease.Revalidate();
+        lease.CommitScaffold();
     }
 
     private static byte[] Content(string name) =>
