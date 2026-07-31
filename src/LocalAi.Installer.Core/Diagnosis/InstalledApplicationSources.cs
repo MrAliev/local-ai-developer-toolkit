@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using LocalAi.Installer.Core.Abstractions;
 using Microsoft.Win32;
 
 namespace LocalAi.Installer.Core.Diagnosis;
@@ -32,6 +33,19 @@ public interface IUninstallEntrySource
 public interface IExecutableIdentityProbe
 {
     ExecutableIdentitySnapshot Inspect(string path);
+}
+
+public interface IPhysicalPathResolver
+{
+    string ResolvePhysicalPath(string path);
+}
+
+public sealed class SystemPhysicalPathResolver : IPhysicalPathResolver
+{
+    private readonly SystemFileSystemProbe _fileSystem = new();
+
+    public string ResolvePhysicalPath(string path) =>
+        _fileSystem.ResolvePhysicalPath(path);
 }
 
 public sealed class SystemExecutableIdentityProbe : IExecutableIdentityProbe

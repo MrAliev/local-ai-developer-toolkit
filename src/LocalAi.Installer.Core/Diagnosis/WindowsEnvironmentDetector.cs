@@ -158,7 +158,7 @@ public sealed class WindowsEnvironmentDetector(
                          Path.GetFileName(installed.ExecutablePath),
                          "ollama.exe",
                          StringComparison.OrdinalIgnoreCase) &&
-                     !string.IsNullOrWhiteSpace(installed.ExecutableVersion);
+                     !string.IsNullOrWhiteSpace(installed.DetectedVersion);
         return !usable
             ? new DependencySnapshot(
                 "Ollama",
@@ -170,7 +170,7 @@ public sealed class WindowsEnvironmentDetector(
                 "Ollama",
                 DependencyState.Detected,
                 installed!.ExecutablePath,
-                installed.ExecutableVersion,
+                installed.DetectedVersion,
                 null);
     }
 

@@ -130,7 +130,8 @@ public sealed record InstalledApplicationMetadata(
     string? DisplayVersion,
     string? InstallLocation,
     string? ExecutablePath,
-    string? ExecutableVersion);
+    string? ExecutableVersion,
+    string? DetectedVersion = null);
 
 public sealed record EnvironmentDiagnosis
 {

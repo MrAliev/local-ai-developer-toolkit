@@ -96,6 +96,7 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
             "0.11.4",
             @"C:\Users\me\AppData\Local\Programs\Ollama",
             @"C:\Users\me\AppData\Local\Programs\Ollama\ollama.exe",
+            "0.11.4.0",
             "0.11.4.0");
 
         var diagnosis = await fixture.Detector.DetectAsync(TestContext.Current.CancellationToken);
