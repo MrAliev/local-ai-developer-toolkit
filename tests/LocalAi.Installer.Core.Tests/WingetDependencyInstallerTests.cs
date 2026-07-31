@@ -545,6 +545,7 @@ public sealed class WingetDependencyInstallerTests
     [InlineData(unchecked((int)0x8A15010A), DependencyProcessDisposition.RebootRequired)]
     [InlineData(unchecked((int)0x8A15010B), DependencyProcessDisposition.RebootInitiated)]
     [InlineData(unchecked((int)0x8A15010D), DependencyProcessDisposition.AlreadyInstalled)]
+    [InlineData(unchecked((int)0x8A150061), DependencyProcessDisposition.AlreadyInstalled)]
     [InlineData(unchecked((int)0x8A150102), DependencyProcessDisposition.ConcurrentInstallation)]
     public async Task Official_install_disposition_is_preserved_when_dependency_is_missing(
         int exitCode,
@@ -576,6 +577,25 @@ public sealed class WingetDependencyInstallerTests
         Assert.Equal(
             DependencyProcessDisposition.AlreadyInstalled,
             result.ProcessDisposition);
+        Assert.NotNull(result.NonTransactionalEffect);
+    }
+
+    [Fact]
+    public async Task Package_already_installed_code_with_exact_redetection_is_journaled()
+    {
+        var context = NewContext(
+            FailedProcess(unchecked((int)0x8A150061)));
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(
+            DependencyInstallOutcome.VerifiedInstalledWithProcessIssue,
+            result.Outcome);
+        Assert.Equal(
+            DependencyProcessDisposition.AlreadyInstalled,
+            result.ProcessDisposition);
+        Assert.Single(context.Detector.PackageIds);
+        Assert.NotNull(result.After);
         Assert.NotNull(result.NonTransactionalEffect);
     }
 

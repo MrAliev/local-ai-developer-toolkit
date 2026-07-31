@@ -553,6 +553,7 @@ public sealed class WingetDependencyInstaller
                 DependencyProcessDisposition.RebootRequired,
             unchecked((int)0x8A15010B) =>
                 DependencyProcessDisposition.RebootInitiated,
+            unchecked((int)0x8A150061) or
             unchecked((int)0x8A15010D) =>
                 DependencyProcessDisposition.AlreadyInstalled,
             unchecked((int)0x8A150102) =>
