@@ -43,9 +43,9 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         Assert.Equal(manifest.ReleaseVersion, verified.Manifest.ReleaseVersion);
         Assert.Equal(manifest.VersionDirectory, verified.Manifest.VersionDirectory);
         Assert.True(Path.IsPathFullyQualified(verified.DiagnosticStagingRoot));
-        Assert.Equal(LocalAiPackageLayout.RequiredFiles.Count, auth.Paths.Count);
+        Assert.Equal(LocalAiPackageLayout.PackageArtifactFiles.Count, auth.Paths.Count);
         Assert.Equal(
-            LocalAiPackageLayout.RequiredFiles.Append(
+            LocalAiPackageLayout.PackageArtifactFiles.Append(
                 ReleasePackageVerifier.PackageMetadataFileName),
             verified.Files.Select(file => file.RelativePath));
         Assert.All(verified.Files, file =>
@@ -89,7 +89,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         AssertBlocked(() => File.Move(replacement, path, overwrite: true));
 
         verified.Dispose();
-        foreach (var file in LocalAiPackageLayout.RequiredFiles.Append(
+        foreach (var file in LocalAiPackageLayout.PackageArtifactFiles.Append(
                      ReleasePackageVerifier.PackageMetadataFileName))
         {
             var releasedPath = Path.Combine(verified.DiagnosticStagingRoot, file);
@@ -115,7 +115,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             StagingPath(),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(LocalAiPackageLayout.RequiredFiles.Count, authenticode.VerifiedCount);
+        Assert.Equal(LocalAiPackageLayout.PackageArtifactFiles.Count, authenticode.VerifiedCount);
     }
 
     [Fact]
@@ -694,6 +694,13 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             missingFile: LocalAiPackageLayout.RequiredFiles[0]));
     }
 
+    [Fact]
+    public async Task VerifyAsync_rejects_missing_stable_launcher()
+    {
+        await AssertPackageRejected(CreatePackage(
+            missingFile: LocalAiPackageLayout.StableLauncherFile));
+    }
+
     [Theory]
     [InlineData("unexpected.txt")]
     [InlineData("nested/unexpected.txt")]
@@ -863,9 +870,9 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         using var stream = new MemoryStream();
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            for (var index = 0; index < LocalAiPackageLayout.RequiredFiles.Count; index++)
+            for (var index = 0; index < LocalAiPackageLayout.PackageArtifactFiles.Count; index++)
             {
-                var file = LocalAiPackageLayout.RequiredFiles[index];
+                var file = LocalAiPackageLayout.PackageArtifactFiles[index];
                 if (string.Equals(file, missingFile, StringComparison.Ordinal))
                 {
                     continue;

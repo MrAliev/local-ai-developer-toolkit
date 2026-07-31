@@ -333,7 +333,7 @@ public sealed class ReleasePackageVerifier
         ValidateLocalHeaders(stream, entries.Values, eocd.DirectoryOffset);
 
         var approved = new HashSet<string>(
-            LocalAiPackageLayout.RequiredFiles.Append(PackageMetadataFileName),
+            LocalAiPackageLayout.PackageArtifactFiles.Append(PackageMetadataFileName),
             StringComparer.Ordinal);
         if (!approved.SetEquals(entries.Keys))
         {
@@ -567,7 +567,7 @@ public sealed class ReleasePackageVerifier
         IReadOnlyDictionary<string, ExtractedFileEvidence> extracted,
         ICollection<IRetainedStagingFile> retainedFiles)
     {
-        foreach (var relativePath in LocalAiPackageLayout.RequiredFiles.Append(
+        foreach (var relativePath in LocalAiPackageLayout.PackageArtifactFiles.Append(
                      PackageMetadataFileName))
         {
             if (!extracted.TryGetValue(relativePath, out var evidence))
@@ -598,7 +598,7 @@ public sealed class ReleasePackageVerifier
             return;
         }
 
-        foreach (var file in LocalAiPackageLayout.RequiredFiles.Where(
+        foreach (var file in LocalAiPackageLayout.PackageArtifactFiles.Where(
                      file => file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
                              file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)))
         {

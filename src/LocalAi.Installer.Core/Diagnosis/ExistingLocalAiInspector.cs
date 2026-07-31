@@ -7,7 +7,13 @@ using LocalAi.Installer.Core.Abstractions;
 
 namespace LocalAi.Installer.Core.Diagnosis;
 
+public interface IExistingLocalAiInspector
+{
+    ExistingLocalAiSnapshot Inspect(string localAppData);
+}
+
 public sealed partial class ExistingLocalAiInspector(IFileSystemProbe fileSystem)
+    : IExistingLocalAiInspector
 {
     private static readonly JsonSerializerOptions StrictJson = CreateJsonOptions();
     public ExistingLocalAiSnapshot Inspect(string localAppData)
