@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using LocalAi.Contracts.Activation;
 
@@ -123,6 +124,81 @@ public sealed class VersionActivatorTests
         activator.Activate("v2", stopRunning: true, ExpectCurrent(before));
 
         Assert.Equal(1, stopCount);
+        Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
+    }
+
+    [Fact]
+    public async Task Startup_gate_and_current_lock_share_one_lease_timeout()
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        var before = File.ReadAllBytes(install.CurrentPath);
+        using var shared = VersionLease.AcquireShared(
+            Path.Combine(install.BinRoot, "current.lock"));
+        using var gate = ActivationCoordinator.AcquireStartupGate(
+            install.BinRoot,
+            TimeSpan.FromSeconds(1));
+        using var started = new ManualResetEventSlim();
+        var activation = Task.Run(() =>
+        {
+            started.Set();
+            var elapsed = Stopwatch.StartNew();
+            var error = Record.Exception(() =>
+                CreateActivator(install, TimeSpan.FromMilliseconds(500)).Activate(
+                    "v2",
+                    stopRunning: false,
+                    ExpectCurrent(before)));
+            elapsed.Stop();
+            return (error, elapsed.Elapsed);
+        });
+
+        started.Wait(TestContext.Current.CancellationToken);
+        Thread.Sleep(TimeSpan.FromMilliseconds(250));
+        gate.Dispose();
+        var result = await activation;
+
+        var launcherError = Assert.IsType<LauncherException>(result.error);
+        Assert.Equal("version_in_use", launcherError.Code);
+        Assert.InRange(
+            result.Elapsed,
+            TimeSpan.FromMilliseconds(400),
+            TimeSpan.FromMilliseconds(650));
+        Assert.Equal(before, File.ReadAllBytes(install.CurrentPath));
+    }
+
+    [Fact]
+    public async Task Stop_timeout_is_separate_from_shared_lease_acquisition_budget()
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        var before = File.ReadAllBytes(install.CurrentPath);
+        var process = new ProcessSnapshot(
+            42,
+            DateTimeOffset.UtcNow,
+            Path.Combine(install.VersionDirectory("v1"), "localai.exe"),
+            null);
+        using var shared = VersionLease.AcquireShared(
+            Path.Combine(install.BinRoot, "current.lock"));
+        Task? release = null;
+        var activator = new VersionActivator(
+            install.BinRoot,
+            new LocalAiProcessController(
+                () => [process],
+                (_, _) =>
+                {
+                    Thread.Sleep(TimeSpan.FromMilliseconds(350));
+                    release = Task.Run(() =>
+                    {
+                        Thread.Sleep(TimeSpan.FromMilliseconds(100));
+                        shared.Dispose();
+                    });
+                }),
+            TimeSpan.FromMilliseconds(250),
+            TimeSpan.FromSeconds(1));
+
+        activator.Activate("v2", stopRunning: true, ExpectCurrent(before));
+        await release!;
+
         Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
     }
 

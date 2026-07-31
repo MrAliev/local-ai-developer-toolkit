@@ -1,5 +1,6 @@
 using LocalAi.Contracts.Activation;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
@@ -51,9 +52,15 @@ public sealed class VersionActivator
             $"current.{Guid.NewGuid():N}.tmp");
         try
         {
+            var leaseStarted = Stopwatch.GetTimestamp();
             using var startupGate = ActivationCoordinator.AcquireStartupGate(
                 _binRoot,
                 _leaseTimeout);
+            // Process inspection and stopping use their own timeout; only the two
+            // lease-acquisition waits consume the shared lease budget.
+            var remainingLeaseTimeout = Remaining(
+                _leaseTimeout,
+                leaseStarted);
             CurrentPointerSnapshot observed;
             try
             {
@@ -89,7 +96,7 @@ public sealed class VersionActivator
 
             using var lease = ActivationCoordinator.AcquireExclusive(
                 startupGate,
-                _leaseTimeout);
+                remainingLeaseTimeout);
             try
             {
                 expectation.Validate(CurrentPointerSnapshot.Read(lease));
@@ -147,6 +154,12 @@ public sealed class VersionActivator
             {
             }
         }
+    }
+
+    private static TimeSpan Remaining(TimeSpan budget, long started)
+    {
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        return elapsed >= budget ? TimeSpan.Zero : budget - elapsed;
     }
 
     private static void WritePointer(string temporaryPath, string version)
