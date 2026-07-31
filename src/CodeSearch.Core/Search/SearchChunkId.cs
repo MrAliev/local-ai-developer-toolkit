@@ -165,7 +165,13 @@ public sealed record SearchChunkId(
             3 => "=",
             _ => throw new FormatException()
         };
-        return Convert.FromBase64String(base64);
+        var decoded = Convert.FromBase64String(base64);
+        if (!string.Equals(value, Base64Url(decoded), StringComparison.Ordinal))
+        {
+            throw new FormatException();
+        }
+
+        return decoded;
     }
 
     private static SearchChunkIdException Malformed() =>

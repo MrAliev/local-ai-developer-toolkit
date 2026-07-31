@@ -34,6 +34,23 @@ public sealed class SearchChunkIdTests
         Assert.Equal("chunk_id_tampered", error.Code);
     }
 
+    [Fact]
+    public void Rejects_a_non_canonical_digest_with_equivalent_trailing_pad_bits()
+    {
+        const string alphabet =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        var parts = Expected.Encode().Split('.');
+        var finalIndex = alphabet.IndexOf(parts[2][^1]);
+        Assert.Equal(0, finalIndex & 0x03);
+        parts[2] = parts[2][..^1] + alphabet[finalIndex + 1];
+        var nonCanonical = string.Join('.', parts);
+
+        var error = Assert.Throws<SearchChunkIdException>(
+            () => SearchChunkId.Parse(nonCanonical));
+
+        Assert.Equal("chunk_id_malformed", error.Code);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("not-a-chunk-id")]
