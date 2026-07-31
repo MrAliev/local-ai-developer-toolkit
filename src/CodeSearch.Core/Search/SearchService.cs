@@ -139,6 +139,7 @@ public sealed class SearchService
                 ct);
         }
         catch (EmbeddingUnavailableException)
+            when (resolvedOptions.AllowLexicalFallbackWhenEmbeddingsUnavailable)
         {
             return SearchEngine.SearchLexically(
                 searchable,

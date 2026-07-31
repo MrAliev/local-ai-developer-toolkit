@@ -196,12 +196,7 @@ async Task<int> EvaluateAsync(Dictionary<string, string> opts)
     {
         UseQueryInstruction = !opts.ContainsKey("no-instruct")
     };
-    var searchOptions = new SearchOptions
-    {
-        TopK = 10,
-        MaxPerFile = 3,
-        AllowUncalibratedModelForEvaluation = noFloor
-    };
+    var searchOptions = SearchEvaluation.CreateSearchOptions(noFloor);
     var observations = new List<SearchEvaluationObservation>(corpus.Cases.Count);
 
     foreach (var item in corpus.Cases)

@@ -84,6 +84,26 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
     }
 
     [Fact]
+    public async Task Service_propagates_unavailability_when_lexical_fallback_is_disabled()
+    {
+        var unavailable = new EmbeddingUnavailableException(
+            "broker unavailable",
+            new TimeoutException());
+
+        var error = await Assert.ThrowsAsync<EmbeddingUnavailableException>(
+            () => ServiceThrowing(unavailable).SearchAsync(
+                "ExactSymbol",
+                _root,
+                new SearchOptions
+                {
+                    AllowLexicalFallbackWhenEmbeddingsUnavailable = false
+                },
+                TestContext.Current.CancellationToken));
+
+        Assert.Same(unavailable, error);
+    }
+
+    [Fact]
     public async Task Mcp_returns_lexical_results_when_embeddings_are_unavailable()
     {
         var response = await CodeSearchTools.SearchCode(

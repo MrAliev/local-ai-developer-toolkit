@@ -27,6 +27,13 @@ public sealed record SearchOptions
 
     /// <summary>Only the deterministic evaluator may bypass a calibrated model profile.</summary>
     public bool AllowUncalibratedModelForEvaluation { get; init; }
+
+    /// <summary>
+    /// Allows interactive search to retain exact literal matches when query embeddings are
+    /// explicitly unavailable. Measurements disable this so degraded retrieval cannot be
+    /// recorded as a valid evaluation run.
+    /// </summary>
+    public bool AllowLexicalFallbackWhenEmbeddingsUnavailable { get; init; } = true;
 }
 
 public sealed record SearchHit(

@@ -330,6 +330,20 @@ public sealed class SearchEvaluationTests
         Assert.Null(options.MinVectorScore);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Evaluation_search_options_fail_closed_when_embeddings_are_unavailable(
+        bool noFloor)
+    {
+        var options = SearchEvaluation.CreateSearchOptions(noFloor);
+
+        Assert.False(options.AllowLexicalFallbackWhenEmbeddingsUnavailable);
+        Assert.Equal(noFloor, options.AllowUncalibratedModelForEvaluation);
+        Assert.Equal(10, options.TopK);
+        Assert.Equal(3, options.MaxPerFile);
+    }
+
     private static SearchEvaluationCase Case(
         string id,
         string query,

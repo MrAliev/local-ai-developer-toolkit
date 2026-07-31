@@ -225,6 +225,15 @@ public sealed record SearchEvaluationMetrics(
 
 public static class SearchEvaluation
 {
+    public static SearchOptions CreateSearchOptions(bool noFloor) =>
+        new()
+        {
+            TopK = 10,
+            MaxPerFile = 3,
+            AllowUncalibratedModelForEvaluation = noFloor,
+            AllowLexicalFallbackWhenEmbeddingsUnavailable = false
+        };
+
     public static SearchEvaluationHit FromSearchHit(SearchHit hit)
     {
         ArgumentNullException.ThrowIfNull(hit);
