@@ -157,6 +157,9 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         {
             Directory.CreateDirectory(layout.VersionsRoot);
             Directory.CreateDirectory(layout.LauncherDirectory);
+            var runtime = Path.Combine(layout.Root, "runtime");
+            Directory.CreateDirectory(runtime);
+            File.WriteAllText(Path.Combine(runtime, "keep.txt"), "keep");
             return new ExistingLocalAiSnapshot(ExistingLocalAiState.Absent, null, null, null);
         });
         var runner = new RecordingRunner((_, _, _, _) => throw new InvalidOperationException());
@@ -169,6 +172,7 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.True(Directory.Exists(layout.VersionsRoot));
         Assert.True(Directory.Exists(layout.LauncherDirectory));
         Assert.False(Directory.Exists(layout.InstallerDirectory));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(layout.Root, "runtime", "keep.txt")));
         Assert.Equal(
             ["launcher", "versions"],
             Directory.EnumerateFileSystemEntries(layout.BinRoot)
