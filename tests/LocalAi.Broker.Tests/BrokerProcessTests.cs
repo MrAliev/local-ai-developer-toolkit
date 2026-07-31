@@ -103,6 +103,78 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
+    public async Task Incompatible_live_host_at_same_assembly_path_is_rejected()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        await AssertLiveIncompatibleStateIsRejected(
+            new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now,
+                BrokerCompatibilityContract.HostStateSchemaVersion,
+                BrokerAssemblyPath,
+                new BrokerCompatibility(2, "other")),
+            "actual schema=3 protocol=2 build=other; broker path=" + BrokerAssemblyPath);
+    }
+
+    [Fact]
+    public async Task Legacy_live_host_at_same_assembly_path_is_rejected()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        await AssertLiveIncompatibleStateIsRejected(
+            new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now,
+                2,
+                BrokerAssemblyPath,
+                Compatibility: null),
+            "actual schema=2 protocol=missing build=missing; broker path=" + BrokerAssemblyPath);
+    }
+
+    [Fact]
+    public async Task Incompatible_live_host_with_differently_cased_build_id_is_rejected()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        await AssertLiveIncompatibleStateIsRejected(
+            new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now,
+                BrokerCompatibilityContract.HostStateSchemaVersion,
+                BrokerAssemblyPath,
+                new BrokerCompatibility(
+                    BrokerCompatibilityContract.ProtocolVersion,
+                    BrokerCompatibilityContract.BuildCompatibilityId.ToUpperInvariant())),
+            "actual schema=3 protocol=1 build=" +
+            BrokerCompatibilityContract.BuildCompatibilityId.ToUpperInvariant() +
+            "; broker path=" + BrokerAssemblyPath);
+    }
+
+    [Fact]
+    public async Task Incompatible_live_host_diagnostic_normalizes_and_bounds_untrusted_values()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var oversizedPath = "path\u0002" + new string('p', 600);
+
+        await AssertLiveIncompatibleStateIsRejected(
+            new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now,
+                BrokerCompatibilityContract.HostStateSchemaVersion,
+                oversizedPath,
+                new BrokerCompatibility(
+                    BrokerCompatibilityContract.ProtocolVersion,
+                    "other\r\nbuild")),
+            "actual schema=3 protocol=1 build=other??build; broker path=path?" +
+            new string('p', 507));
+    }
+
+    [Fact]
     public async Task Non_owner_process_is_replaced()
     {
         var now = DateTimeOffset.UtcNow;
@@ -440,5 +512,34 @@ public sealed class BrokerProcessTests
         await Task.WhenAll(first, second);
 
         Assert.Equal(1, starts);
+    }
+
+    private static async Task AssertLiveIncompatibleStateIsRejected(
+        BrokerProcessState liveState,
+        string expectedActualDetail)
+    {
+        var starts = 0;
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => liveState,
+            _ => true,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
+            () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("broker_incompatible", exception.Code);
+        Assert.Equal(
+            "expected schema=3 protocol=1 build=localai-broker-v1; " +
+            expectedActualDetail,
+            exception.Message);
+        Assert.Equal(0, starts);
     }
 }

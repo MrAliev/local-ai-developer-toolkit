@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,6 +15,8 @@ public interface IBrokerProcess
 
 public sealed class BrokerProcess : IBrokerProcess
 {
+    private const int MaximumDiagnosticValueLength = 512;
+
     private readonly string _executablePath;
     private readonly string _runtimeRoot;
     private readonly Func<string, BrokerProcessState?> _readState;
@@ -211,9 +214,35 @@ public sealed class BrokerProcess : IBrokerProcess
     }
 
     private static string CompatibilityDetail(BrokerProcessState state) =>
-        "host compatibility is incompatible: schema=" + state.SchemaVersion +
-        ", protocol=" + (state.Compatibility?.ProtocolVersion.ToString() ?? "missing") +
-        ", build=" + (state.Compatibility?.BuildCompatibilityId ?? "missing");
+        "expected schema=" + BrokerCompatibilityContract.HostStateSchemaVersion +
+        " protocol=" + BrokerCompatibilityContract.ProtocolVersion +
+        " build=" + BrokerCompatibilityContract.BuildCompatibilityId +
+        "; actual schema=" + state.SchemaVersion.ToString(CultureInfo.InvariantCulture) +
+        " protocol=" +
+        (state.Compatibility?.ProtocolVersion.ToString(CultureInfo.InvariantCulture) ?? "missing") +
+        " build=" + DiagnosticValue(state.Compatibility?.BuildCompatibilityId) +
+        "; broker path=" + DiagnosticValue(state.BrokerAssemblyPath);
+
+    private static string DiagnosticValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "missing";
+        }
+
+        var builder = new StringBuilder(Math.Min(value.Length, MaximumDiagnosticValueLength));
+        foreach (var character in value)
+        {
+            if (builder.Length == MaximumDiagnosticValueLength)
+            {
+                return builder.ToString();
+            }
+
+            builder.Append(char.IsControl(character) ? '?' : character);
+        }
+
+        return builder.ToString();
+    }
 
     private static void ThrowIfIncompatible(BrokerObservation observation)
     {
