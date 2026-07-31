@@ -27,10 +27,11 @@ public sealed record ModelPreflightCommandSuccess(
     [property: JsonRequired, JsonPropertyName("accepted"), JsonPropertyOrder(2)] bool Accepted,
     [property: JsonRequired, JsonPropertyName("model"), JsonPropertyOrder(3)] string Model,
     [property: JsonRequired, JsonPropertyName("contextTokens"), JsonPropertyOrder(4)] int ContextTokens,
-    [property: JsonRequired, JsonPropertyName("sizeBytes"), JsonPropertyOrder(5)] long SizeBytes,
-    [property: JsonRequired, JsonPropertyName("sizeVramBytes"), JsonPropertyOrder(6)] long SizeVramBytes,
-    [property: JsonRequired, JsonPropertyName("fullyResident"), JsonPropertyOrder(7)] bool FullyResident,
-    [property: JsonRequired, JsonPropertyName("verifiedAtUtc"), JsonPropertyOrder(8)] DateTimeOffset VerifiedAtUtc);
+    [property: JsonRequired, JsonPropertyName("catalogVersion"), JsonPropertyOrder(5)] string CatalogVersion,
+    [property: JsonRequired, JsonPropertyName("sizeBytes"), JsonPropertyOrder(6)] long SizeBytes,
+    [property: JsonRequired, JsonPropertyName("sizeVramBytes"), JsonPropertyOrder(7)] long SizeVramBytes,
+    [property: JsonRequired, JsonPropertyName("fullyResident"), JsonPropertyOrder(8)] bool FullyResident,
+    [property: JsonRequired, JsonPropertyName("verifiedAtUtc"), JsonPropertyOrder(9)] DateTimeOffset VerifiedAtUtc);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ModelPreflightCommandRejected(
@@ -39,7 +40,8 @@ public sealed record ModelPreflightCommandRejected(
     [property: JsonRequired, JsonPropertyName("accepted"), JsonPropertyOrder(2)] bool Accepted,
     [property: JsonRequired, JsonPropertyName("model"), JsonPropertyOrder(3)] string Model,
     [property: JsonRequired, JsonPropertyName("contextTokens"), JsonPropertyOrder(4)] int ContextTokens,
-    [property: JsonRequired, JsonPropertyName("code"), JsonPropertyOrder(5)] string Code);
+    [property: JsonRequired, JsonPropertyName("catalogVersion"), JsonPropertyOrder(5)] string CatalogVersion,
+    [property: JsonRequired, JsonPropertyName("code"), JsonPropertyOrder(6)] string Code);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ModelCommandError(

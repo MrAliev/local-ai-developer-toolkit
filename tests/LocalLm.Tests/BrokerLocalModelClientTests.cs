@@ -121,6 +121,7 @@ public sealed class BrokerLocalModelClientTests
         var output = new LocalModelPreflightOutput(
             "translategemma:12b",
             2048,
+            "signed-7",
             100,
             100,
             true,
@@ -131,6 +132,7 @@ public sealed class BrokerLocalModelClientTests
         var result = await client.PreflightModelAsync(
             "translategemma:12b",
             2048,
+            "signed-7",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(output, result.Value);
@@ -139,6 +141,7 @@ public sealed class BrokerLocalModelClientTests
         Assert.Equal(ModelControlOperation.Preflight, payload.Operation);
         Assert.Equal("translategemma:12b", payload.Model);
         Assert.Equal(2048, payload.ContextTokens);
+        Assert.Equal("signed-7", payload.CatalogVersion);
         Assert.Null(payload.Profile);
     }
 

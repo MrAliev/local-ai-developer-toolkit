@@ -338,7 +338,8 @@ public sealed record ModelControlJobPayload : LocalJobPayload
         Guid? workflowId = null,
         ModelExecutionOutcome? outcome = null,
         LocalExperimentTaskMetrics? taskMetrics = null,
-        int? contextTokens = null)
+        int? contextTokens = null,
+        string? catalogVersion = null)
     {
         if (!Enum.IsDefined(operation))
         {
@@ -368,7 +369,8 @@ public sealed record ModelControlJobPayload : LocalJobPayload
                 workflowId is not null ||
                 outcome is not null ||
                 taskMetrics is not null ||
-                contextTokens is not null)
+                contextTokens is not null ||
+                catalogVersion is not null)
             {
                 throw new ArgumentException(
                     "Status does not accept experiment parameters.");
@@ -382,10 +384,11 @@ public sealed record ModelControlJobPayload : LocalJobPayload
                 workflowId is not null ||
                 outcome is not null ||
                 taskMetrics is not null ||
-                contextTokens is null or <= 0)
+                contextTokens is null or <= 0 ||
+                !IsSafeCatalogVersion(catalogVersion))
             {
                 throw new ArgumentException(
-                    "Preflight requires only a model and positive context tokens.");
+                    "Preflight requires only a model, positive context tokens, and catalog version.");
             }
         }
         else
@@ -454,6 +457,13 @@ public sealed record ModelControlJobPayload : LocalJobPayload
                     "Experiment operations do not accept context tokens.",
                     nameof(contextTokens));
             }
+
+            if (catalogVersion is not null)
+            {
+                throw new ArgumentException(
+                    "Experiment operations do not accept a catalog version.",
+                    nameof(catalogVersion));
+            }
         }
 
         Operation = operation;
@@ -464,6 +474,7 @@ public sealed record ModelControlJobPayload : LocalJobPayload
         Outcome = outcome;
         TaskMetrics = taskMetrics;
         ContextTokens = contextTokens;
+        CatalogVersion = catalogVersion;
     }
 
     [JsonIgnore]
@@ -493,6 +504,20 @@ public sealed record ModelControlJobPayload : LocalJobPayload
 
     [JsonInclude]
     public int? ContextTokens { get; private init; }
+
+    [JsonInclude]
+    public string? CatalogVersion { get; private init; }
+
+    private static bool IsSafeCatalogVersion(string? value) =>
+        !string.IsNullOrEmpty(value) &&
+        value.Length <= 128 &&
+        IsAsciiAlphaNumeric(value[0]) &&
+        IsAsciiAlphaNumeric(value[^1]) &&
+        value.All(character =>
+            IsAsciiAlphaNumeric(character) || character is '.' or '_' or '-');
+
+    private static bool IsAsciiAlphaNumeric(char value) =>
+        value is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9';
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -785,6 +810,7 @@ public static class LocalJobRequestFactory
         LocalJobPriority priority,
         string model,
         int contextTokens,
+        string catalogVersion,
         Guid? jobId = null,
         DateTimeOffset? createdAtUtc = null) =>
         Create(
@@ -795,7 +821,8 @@ public static class LocalJobRequestFactory
                 profile: null,
                 model,
                 ownerAction: null,
-                contextTokens: contextTokens),
+                contextTokens: contextTokens,
+                catalogVersion: catalogVersion),
             jobId,
             createdAtUtc);
 

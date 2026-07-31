@@ -215,6 +215,16 @@ public sealed class BrokerExecutionRouter
         ModelControlJobPayload payload,
         CancellationToken cancellationToken)
     {
+        if (!string.Equals(
+                payload.CatalogVersion,
+                _catalog.CatalogVersion,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Preflight catalog '{payload.CatalogVersion}' is stale; " +
+                $"current catalog is '{_catalog.CatalogVersion}'.");
+        }
+
         var proof = await _runtime.EnsureReadyAsync(
             payload.Model!,
             payload.ContextTokens!.Value,
@@ -223,6 +233,7 @@ public sealed class BrokerExecutionRouter
         return new LocalModelPreflightOutput(
             proof.Model,
             proof.ContextTokens,
+            _catalog.CatalogVersion,
             proof.SizeBytes,
             proof.SizeVramBytes,
             proof.FullyResident,

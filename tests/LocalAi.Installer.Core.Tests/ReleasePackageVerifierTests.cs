@@ -42,6 +42,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
 
         Assert.Equal(manifest.ReleaseVersion, verified.Manifest.ReleaseVersion);
         Assert.Equal(manifest.VersionDirectory, verified.Manifest.VersionDirectory);
+        Assert.Equal(manifest.ModelCatalogVersion, verified.Manifest.ModelCatalogVersion);
         Assert.True(Path.IsPathFullyQualified(verified.DiagnosticStagingRoot));
         Assert.Equal(LocalAiPackageLayout.PackageArtifactFiles.Count, auth.Paths.Count);
         Assert.Equal(
@@ -392,6 +393,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var original = CreateManifest([1, 2, 3]);
         var manifest = new ReleaseManifest(
             original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ModelCatalogVersion,
             original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
             original.PackageSize, original.PackageSha256, false, models);
 
@@ -423,6 +425,25 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             verifier.Verify(json, signature));
         Assert.Throws<ReleaseVerificationException>(() =>
             verifier.Verify(json, new byte[65]));
+    }
+
+    [Fact]
+    public void Verify_signature_binds_model_catalog_version()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var manifest = CreateManifest([1, 2, 3]);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var signature = Sign(key, json);
+        var tampered = Encoding.UTF8.GetBytes(
+            Encoding.UTF8.GetString(json).Replace(
+                "\"ModelCatalogVersion\":\"signed-7\"",
+                "\"ModelCatalogVersion\":\"signed-8\"",
+                StringComparison.Ordinal));
+
+        using var verifier = new ReleaseManifestVerifier(
+            key.ExportSubjectPublicKeyInfo());
+        Assert.Throws<ReleaseVerificationException>(() =>
+            verifier.Verify(tampered, signature));
     }
 
     [Fact]
@@ -472,6 +493,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             correct.SchemaVersion,
             correct.ReleaseVersion,
             correct.VersionDirectory,
+            correct.ModelCatalogVersion,
             correct.ProtocolVersion,
             correct.BuildCompatibilityId,
             correct.PackageUri,
@@ -723,6 +745,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
     [Theory]
     [InlineData("ReleaseVersion", "9.9.9")]
     [InlineData("VersionDirectory", "9.9.9")]
+    [InlineData("ModelCatalogVersion", "stale")]
     [InlineData("ProtocolVersion", "2")]
     [InlineData("BuildCompatibilityId", "LOCALAI-BROKER-V1")]
     public async Task VerifyAsync_rejects_internal_metadata_mismatch(
@@ -744,6 +767,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var original = CreateManifest([1, 2, 3]);
         var manifest = new ReleaseManifest(
             1, original.ReleaseVersion, original.VersionDirectory,
+            original.ModelCatalogVersion,
             protocol, build, original.PackageUri, original.PackageSize,
             original.PackageSha256, false, []);
         var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
@@ -753,6 +777,31 @@ public sealed class ReleasePackageVerifierTests : IDisposable
                 .Verify(json, Sign(key, json)));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("../catalog")]
+    [InlineData("catalog/")]
+    [InlineData(" catalog")]
+    public void Verify_rejects_unsafe_model_catalog_version(string catalogVersion)
+    {
+        var original = CreateManifest([1, 2, 3]);
+        var manifest = new ReleaseManifest(
+            original.SchemaVersion,
+            original.ReleaseVersion,
+            original.VersionDirectory,
+            catalogVersion,
+            original.ProtocolVersion,
+            original.BuildCompatibilityId,
+            original.PackageUri,
+            original.PackageSize,
+            original.PackageSha256,
+            original.RequiresAuthenticode,
+            original.Models);
+
+        Assert.Throws<ReleaseVerificationException>(() =>
+            ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest));
+    }
+
     [Fact]
     public void Verify_allows_same_model_name_at_distinct_supported_contexts()
     {
@@ -760,6 +809,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var original = CreateManifest([1, 2, 3]);
         var manifest = new ReleaseManifest(
             original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ModelCatalogVersion,
             original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
             original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
             [
@@ -781,6 +831,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var original = CreateManifest([1, 2, 3]);
         var manifest = new ReleaseManifest(
             original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ModelCatalogVersion,
             original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
             original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
             [
@@ -798,6 +849,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var original = CreateManifest([1, 2, 3]);
         var manifest = new ReleaseManifest(
             original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ModelCatalogVersion,
             original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
             original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
             [
@@ -816,6 +868,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var original = CreateManifest([1, 2, 3]);
         var manifest = new ReleaseManifest(
             original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ModelCatalogVersion,
             original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
             original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
             [
@@ -834,6 +887,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var original = CreateManifest([1, 2, 3]);
         var manifest = new ReleaseManifest(
             original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ModelCatalogVersion,
             original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
             original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
             [
@@ -916,6 +970,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             1,
             "1.2.3",
             "1.2.3",
+            "signed-7",
             BrokerCompatibilityContract.ProtocolVersion,
             BrokerCompatibilityContract.BuildCompatibilityId,
             new Uri("https://releases.example.invalid/localai-1.2.3.zip"),
@@ -990,6 +1045,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
                 ["SchemaVersion"] = 1,
                 ["ReleaseVersion"] = "1.2.3",
                 ["VersionDirectory"] = "1.2.3",
+                ["ModelCatalogVersion"] = "signed-7",
                 ["ProtocolVersion"] = BrokerCompatibilityContract.ProtocolVersion,
                 ["BuildCompatibilityId"] = BrokerCompatibilityContract.BuildCompatibilityId,
             };

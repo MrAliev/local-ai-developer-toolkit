@@ -1265,6 +1265,7 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
             1,
             version,
             version,
+            "signed-7",
             BrokerCompatibilityContract.ProtocolVersion,
             BrokerCompatibilityContract.BuildCompatibilityId,
             new Uri("https://example.invalid/package.zip"),

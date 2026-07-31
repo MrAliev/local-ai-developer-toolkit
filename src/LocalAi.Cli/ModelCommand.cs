@@ -134,6 +134,7 @@ public static class ModelCommand
                     false,
                     request.Model!,
                     request.ContextTokens,
+                    request.CatalogVersion!,
                     "residency_rejected"));
             return RejectedExitCode;
         }
@@ -217,9 +218,23 @@ public static class ModelCommand
         var result = await client.PreflightModelAsync(
             request.Model!,
             request.ContextTokens,
+            request.CatalogVersion!,
             cancellationToken);
         var proof = result.Value ?? throw new InvalidOperationException();
-        if (!IsSafeModel(proof.Model))
+        if (!IsSafeModel(proof.Model) ||
+            !string.Equals(proof.Model, request.Model, StringComparison.Ordinal) ||
+            proof.ContextTokens != request.ContextTokens ||
+            !IsSafeCatalogVersion(proof.CatalogVersion) ||
+            !string.Equals(
+                proof.CatalogVersion,
+                request.CatalogVersion,
+                StringComparison.Ordinal) ||
+            proof.SizeBytes <= 0 ||
+            proof.SizeVramBytes != proof.SizeBytes ||
+            !proof.FullyResident ||
+            proof.VerifiedAtUtc == default ||
+            proof.VerifiedAtUtc.Offset != TimeSpan.Zero ||
+            proof.VerifiedAtUtc > DateTimeOffset.UtcNow.AddMinutes(5))
         {
             throw new InvalidOperationException();
         }
@@ -232,6 +247,7 @@ public static class ModelCommand
                 true,
                 proof.Model,
                 proof.ContextTokens,
+                proof.CatalogVersion,
                 proof.SizeBytes,
                 proof.SizeVramBytes,
                 proof.FullyResident,
@@ -274,11 +290,13 @@ public static class ModelCommand
             return true;
         }
 
-        if (arguments.Count == 5 &&
+        if (arguments.Count == 7 &&
             string.Equals(arguments[0], "preflight", StringComparison.Ordinal) &&
             string.Equals(arguments[1], "--model", StringComparison.Ordinal) &&
             string.Equals(arguments[3], "--context", StringComparison.Ordinal) &&
+            string.Equals(arguments[5], "--catalog-version", StringComparison.Ordinal) &&
             IsSafeModel(arguments[2]) &&
+            IsSafeCatalogVersion(arguments[6]) &&
             int.TryParse(
                 arguments[4],
                 NumberStyles.None,
@@ -286,7 +304,7 @@ public static class ModelCommand
                 out var contextTokens) &&
             LocalContextTiers.IsSupported(contextTokens))
         {
-            request = new Request("preflight", arguments[2], null, contextTokens);
+            request = new Request("preflight", arguments[2], arguments[6], contextTokens);
             return true;
         }
 

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Planning;
@@ -16,22 +17,100 @@ internal interface ITrustedStableLauncher
     void Revalidate();
 }
 
+internal interface IModelInstallTrust
+{
+    string CatalogVersion { get; }
+    IReadOnlyList<ManifestModel> Models { get; }
+    void RevalidatePackage();
+    IActiveVersionBatchLease AcquireActiveVersion();
+}
+
+internal interface IActiveVersionBatchLease : IDisposable
+{
+    void Revalidate();
+}
+
+internal sealed class ActiveVersionBatchLease : IActiveVersionBatchLease
+{
+    private readonly ActivationSharedLease shared;
+    private readonly CurrentPointerExpectation expectation;
+    private readonly string versionDirectory;
+
+    private ActiveVersionBatchLease(
+        ActivationSharedLease shared,
+        CurrentPointerSnapshot snapshot,
+        string versionDirectory)
+    {
+        this.shared = shared;
+        expectation = CurrentPointerExpectation.ExactSha256(
+            snapshot.Sha256.ToArray());
+        this.versionDirectory = versionDirectory;
+    }
+
+    public static ActiveVersionBatchLease Acquire(
+        string binRoot,
+        string versionDirectory,
+        TimeSpan timeout)
+    {
+        using var startupGate = ActivationCoordinator.AcquireStartupGate(
+            binRoot,
+            timeout);
+        var snapshot = CurrentPointerSnapshot.Read(startupGate);
+        ValidateExpected(snapshot, versionDirectory);
+        ActivationSharedLease? shared = null;
+        try
+        {
+            shared = ActivationCoordinator.AcquireShared(startupGate);
+            var result = new ActiveVersionBatchLease(
+                shared,
+                snapshot,
+                versionDirectory);
+            shared = null;
+            return result;
+        }
+        finally
+        {
+            shared?.Dispose();
+        }
+    }
+
+    public void Revalidate()
+    {
+        var current = CurrentPointerSnapshot.Read(shared);
+        expectation.Validate(current);
+        ValidateExpected(current, versionDirectory);
+    }
+
+    public void Dispose() => shared.Dispose();
+
+    private static void ValidateExpected(
+        CurrentPointerSnapshot snapshot,
+        string expectedVersion)
+    {
+        if (!snapshot.Exists || !snapshot.IsCanonical ||
+            !string.Equals(
+                snapshot.Version,
+                expectedVersion,
+                StringComparison.Ordinal))
+        {
+            throw new CurrentPointerChangedException(
+                "The active LocalAi version does not match the verified release.");
+        }
+    }
+}
+
 public sealed class BrokerModelInstallRequest
 {
     public BrokerModelInstallRequest(
         ModelInstallAction action,
-        string catalogVersion,
         IReadOnlyList<ModelRecommendationChoice> fallbackChoices)
     {
         Action = action ?? throw new ArgumentNullException(nameof(action));
-        CatalogVersion = catalogVersion ?? throw new ArgumentNullException(nameof(catalogVersion));
         FallbackChoices = new ReadOnlyCollection<ModelRecommendationChoice>(
             (fallbackChoices ?? throw new ArgumentNullException(nameof(fallbackChoices))).ToArray());
     }
 
     public ModelInstallAction Action { get; }
-
-    public string CatalogVersion { get; }
 
     public IReadOnlyList<ModelRecommendationChoice> FallbackChoices { get; }
 }
@@ -129,17 +208,20 @@ public sealed class BrokerModelInstaller : IDisposable
     private readonly string launcherPath;
     private readonly TimeSpan timeout;
     private readonly IDisposable? ownedLauncher;
+    private readonly IModelInstallTrust trust;
     private bool disposed;
 
     internal BrokerModelInstaller(
         IProcessRunner processRunner,
         ITrustedStableLauncher launcher,
         InstallationLayout layout,
+        IModelInstallTrust trust,
         TimeSpan timeout)
     {
         this.processRunner = processRunner ??
             throw new ArgumentNullException(nameof(processRunner));
         this.launcher = launcher ?? throw new ArgumentNullException(nameof(launcher));
+        this.trust = trust ?? throw new ArgumentNullException(nameof(trust));
         ArgumentNullException.ThrowIfNull(layout);
         if (timeout <= TimeSpan.Zero || timeout > MaximumCommandTimeout)
         {
@@ -154,22 +236,18 @@ public sealed class BrokerModelInstaller : IDisposable
     public BrokerModelInstaller(
         IProcessRunner processRunner,
         InstallationLayoutLease layoutLease,
-        VerifiedPackageFile launcherMetadata,
+        VerifiedPackage package,
         TimeSpan timeout)
     {
         this.processRunner = processRunner ??
             throw new ArgumentNullException(nameof(processRunner));
         ArgumentNullException.ThrowIfNull(layoutLease);
-        ArgumentNullException.ThrowIfNull(launcherMetadata);
-        if (!string.Equals(
-                launcherMetadata.RelativePath,
-                LocalAiPackageLayout.StableLauncherFile,
-                StringComparison.Ordinal))
-        {
-            throw new ArgumentException(
-                "The verified metadata is not for the stable launcher.",
-                nameof(launcherMetadata));
-        }
+        ArgumentNullException.ThrowIfNull(package);
+        package.Revalidate();
+        var launcherMetadata = package.Files.Single(file => string.Equals(
+            file.RelativePath,
+            LocalAiPackageLayout.StableLauncherFile,
+            StringComparison.Ordinal));
 
         if (timeout <= TimeSpan.Zero || timeout > MaximumCommandTimeout)
         {
@@ -184,6 +262,10 @@ public sealed class BrokerModelInstaller : IDisposable
             launcherPath = ValidateLauncherPath(adapter, layoutLease.Layout);
             this.timeout = timeout;
             ownedLauncher = adapter;
+            trust = new VerifiedModelInstallTrust(
+                package,
+                layoutLease.Layout.BinRoot,
+                timeout);
         }
         catch
         {
@@ -208,6 +290,47 @@ public sealed class BrokerModelInstaller : IDisposable
             return Batch([], BrokerModelBatchStopReason.Cancelled, false, "cancelled");
         }
 
+        IActiveVersionBatchLease? activeVersion = null;
+        try
+        {
+            trust.RevalidatePackage();
+            ValidateSignedSelections(snapshot, trust.Models);
+            activeVersion = trust.AcquireActiveVersion();
+        }
+        catch (Exception)
+        {
+            activeVersion?.Dispose();
+            return Batch(
+                [],
+                BrokerModelBatchStopReason.LauncherTrustFailure,
+                false,
+                "release_trust_failure");
+        }
+
+        using (activeVersion)
+        {
+            var result = await InstallCoreAsync(snapshot, cancellationToken);
+            try
+            {
+                activeVersion.Revalidate();
+                trust.RevalidatePackage();
+                return result;
+            }
+            catch (Exception)
+            {
+                return Batch(
+                    result.Models.Select(InvalidateTrust).ToArray(),
+                    BrokerModelBatchStopReason.LauncherTrustFailure,
+                    result.Models.Count != 0,
+                    "release_trust_failure");
+            }
+        }
+    }
+
+    private async Task<BrokerModelInstallBatchResult> InstallCoreAsync(
+        BrokerModelInstallRequest[] snapshot,
+        CancellationToken cancellationToken)
+    {
         ModelStatusCommandSuccess status;
         try
         {
@@ -219,7 +342,7 @@ public sealed class BrokerModelInstaller : IDisposable
             status = Parse<ModelStatusCommandSuccess>(
                 process.StandardOutput,
                 indeterminateIfInvalid: false);
-            ValidateStatus(status, snapshot[0].CatalogVersion);
+            ValidateStatus(status, trust.CatalogVersion);
         }
         catch (CommandFailure failure)
         {
@@ -227,7 +350,6 @@ public sealed class BrokerModelInstaller : IDisposable
         }
 
         var installed = status.InstalledModels.ToHashSet(StringComparer.Ordinal);
-        var pending = status.PendingPullModels.ToHashSet(StringComparer.Ordinal);
         var results = new List<BrokerModelInstallResult>(snapshot.Length);
 
         foreach (var request in snapshot)
@@ -237,14 +359,14 @@ public sealed class BrokerModelInstaller : IDisposable
             var pullCompleted = false;
             try
             {
-                if (!installed.Contains(action.Model) && !pending.Contains(action.Model))
+                if (!installed.Contains(action.Model))
                 {
                     pullAttempted = true;
                     var pull = await RunAsync(
                         [
                             "run", "localai", "model", "pull",
                             "--model", action.Model,
-                            "--catalog-version", request.CatalogVersion,
+                            "--catalog-version", trust.CatalogVersion,
                         ],
                         mayChangeExternalState: true,
                         cancellationToken);
@@ -254,8 +376,9 @@ public sealed class BrokerModelInstaller : IDisposable
                             pull.StandardOutput,
                             indeterminateIfInvalid: true),
                         action.Model,
-                        request.CatalogVersion);
+                        trust.CatalogVersion);
                     pullCompleted = true;
+                    installed.Add(action.Model);
                 }
 
                 var preflight = await RunAsync(
@@ -264,6 +387,7 @@ public sealed class BrokerModelInstaller : IDisposable
                         "--model", action.Model,
                         "--context", action.ContextSize.ToString(
                             System.Globalization.CultureInfo.InvariantCulture),
+                        "--catalog-version", trust.CatalogVersion,
                     ],
                     mayChangeExternalState: true,
                     cancellationToken);
@@ -272,7 +396,11 @@ public sealed class BrokerModelInstaller : IDisposable
                     var rejected = Parse<ModelPreflightCommandRejected>(
                         preflight.StandardOutput,
                         indeterminateIfInvalid: true);
-                    ValidateRejection(rejected, action.Model, action.ContextSize);
+                    ValidateRejection(
+                        rejected,
+                        action.Model,
+                        action.ContextSize,
+                        trust.CatalogVersion);
                     results.Add(Rejected(request, pullAttempted, pullCompleted));
                     continue;
                 }
@@ -284,7 +412,11 @@ public sealed class BrokerModelInstaller : IDisposable
                 var proof = Parse<ModelPreflightCommandSuccess>(
                     preflight.StandardOutput,
                     indeterminateIfInvalid: true);
-                ValidateProofIdentity(proof, action.Model, action.ContextSize);
+                ValidateProofIdentity(
+                    proof,
+                    action.Model,
+                    action.ContextSize,
+                    trust.CatalogVersion);
                 if (proof.SizeBytes <= 0 ||
                     proof.SizeVramBytes != proof.SizeBytes ||
                     !proof.FullyResident)
@@ -550,12 +682,17 @@ public sealed class BrokerModelInstaller : IDisposable
     private static void ValidateProofIdentity(
         ModelPreflightCommandSuccess response,
         string model,
-        int contextTokens)
+        int contextTokens,
+        string catalogVersion)
     {
         if (response.SchemaVersion != 1 || !response.Accepted ||
             !string.Equals(response.Operation, "preflight", StringComparison.Ordinal) ||
             !string.Equals(response.Model, model, StringComparison.Ordinal) ||
             response.ContextTokens != contextTokens ||
+            !string.Equals(
+                response.CatalogVersion,
+                catalogVersion,
+                StringComparison.Ordinal) ||
             response.VerifiedAtUtc == default ||
             response.VerifiedAtUtc.Offset != TimeSpan.Zero)
         {
@@ -569,12 +706,17 @@ public sealed class BrokerModelInstaller : IDisposable
     private static void ValidateRejection(
         ModelPreflightCommandRejected response,
         string model,
-        int contextTokens)
+        int contextTokens,
+        string catalogVersion)
     {
         if (response.SchemaVersion != 1 || response.Accepted ||
             !string.Equals(response.Operation, "preflight", StringComparison.Ordinal) ||
             !string.Equals(response.Model, model, StringComparison.Ordinal) ||
             response.ContextTokens != contextTokens ||
+            !string.Equals(
+                response.CatalogVersion,
+                catalogVersion,
+                StringComparison.Ordinal) ||
             !string.Equals(
                 response.Code,
                 "residency_rejected",
@@ -644,8 +786,7 @@ public sealed class BrokerModelInstaller : IDisposable
             if (!action.Selected || !action.ConsentGranted ||
                 !IsSafeIdentifier(action.ActionId) ||
                 !IsSafeModel(action.Model) ||
-                !LocalContextTiers.IsSupported(action.ContextSize) ||
-                !IsSafeCatalogVersion(request.CatalogVersion))
+                !LocalContextTiers.IsSupported(action.ContextSize))
             {
                 throw new ArgumentException("A model request is invalid.", nameof(requests));
             }
@@ -657,16 +798,36 @@ public sealed class BrokerModelInstaller : IDisposable
                 .Distinct(StringComparer.Ordinal).Count() != snapshot.Length ||
             snapshot.Select(request =>
                     (request.Action.Model, request.Action.ContextSize))
-                .Distinct().Count() != snapshot.Length ||
-            snapshot.Select(request => request.CatalogVersion)
-                .Distinct(StringComparer.Ordinal).Count() > 1)
+                .Distinct().Count() != snapshot.Length)
         {
             throw new ArgumentException(
-                "Model requests contain duplicates or mixed catalog versions.",
+                "Model requests contain duplicates.",
                 nameof(requests));
         }
 
         return snapshot;
+    }
+
+    private static void ValidateSignedSelections(
+        IReadOnlyList<BrokerModelInstallRequest> requests,
+        IReadOnlyList<ManifestModel> models)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        foreach (var request in requests)
+        {
+            var matches = models.Count(model =>
+                string.Equals(
+                    model.Name,
+                    request.Action.Model,
+                    StringComparison.Ordinal) &&
+                model.ContextTokens == request.Action.ContextSize);
+            if (matches != 1)
+            {
+                throw new ArgumentException(
+                    "The selected model is not uniquely present in the signed release manifest.",
+                    nameof(requests));
+            }
+        }
     }
 
     private static void ValidateChoices(BrokerModelInstallRequest request)
@@ -820,6 +981,19 @@ public sealed class BrokerModelInstaller : IDisposable
             _ => BrokerModelInstallOutcome.Failed,
         };
 
+    private static BrokerModelInstallResult InvalidateTrust(
+        BrokerModelInstallResult model) =>
+        new(
+            model.ActionId,
+            model.Model,
+            model.ContextTokens,
+            BrokerModelInstallOutcome.Failed,
+            model.PullAttempted,
+            model.PullCompleted,
+            true,
+            [],
+            "release_trust_failure");
+
     private static BrokerModelInstallBatchResult Batch(
         IReadOnlyList<BrokerModelInstallResult> models,
         BrokerModelBatchStopReason stopReason,
@@ -851,6 +1025,37 @@ public sealed class BrokerModelInstaller : IDisposable
         public void Revalidate() => launcher.Revalidate();
 
         public void Dispose() => launcher.Dispose();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private sealed class VerifiedModelInstallTrust : IModelInstallTrust
+    {
+        private readonly VerifiedPackage package;
+        private readonly string binRoot;
+        private readonly string versionDirectory;
+        private readonly TimeSpan timeout;
+
+        public VerifiedModelInstallTrust(
+            VerifiedPackage package,
+            string binRoot,
+            TimeSpan timeout)
+        {
+            this.package = package;
+            this.binRoot = binRoot;
+            this.timeout = timeout;
+            CatalogVersion = package.Manifest.ModelCatalogVersion;
+            versionDirectory = package.Manifest.VersionDirectory;
+            Models = package.Manifest.Models;
+        }
+
+        public string CatalogVersion { get; }
+
+        public IReadOnlyList<ManifestModel> Models { get; }
+
+        public void RevalidatePackage() => package.Revalidate();
+
+        public IActiveVersionBatchLease AcquireActiveVersion() =>
+            ActiveVersionBatchLease.Acquire(binRoot, versionDirectory, timeout);
     }
 
     private sealed class CommandFailure(

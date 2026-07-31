@@ -32,6 +32,7 @@ public sealed record ReleaseManifest
         int schemaVersion,
         string releaseVersion,
         string versionDirectory,
+        string modelCatalogVersion,
         int protocolVersion,
         string buildCompatibilityId,
         Uri packageUri,
@@ -43,6 +44,7 @@ public sealed record ReleaseManifest
         SchemaVersion = schemaVersion;
         ReleaseVersion = releaseVersion;
         VersionDirectory = versionDirectory;
+        ModelCatalogVersion = modelCatalogVersion;
         ProtocolVersion = protocolVersion;
         BuildCompatibilityId = buildCompatibilityId;
         PackageUri = packageUri;
@@ -57,6 +59,8 @@ public sealed record ReleaseManifest
     public string ReleaseVersion { get; }
 
     public string VersionDirectory { get; }
+
+    public string ModelCatalogVersion { get; }
 
     public int ProtocolVersion { get; }
 

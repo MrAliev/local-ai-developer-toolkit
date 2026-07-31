@@ -127,11 +127,13 @@ public static class LocalLmTools
     public static async Task<string> LocalModelPreflight(
         ModelManagementTasks tasks,
         string model,
+        string catalogVersion,
         int contextTokens = 2048,
         CancellationToken cancellationToken = default) =>
         Serialize(await tasks.PreflightAsync(
             model,
             contextTokens,
+            catalogVersion,
             cancellationToken));
 
     [McpServerTool(Name = "local_models_sync")]

@@ -91,13 +91,15 @@ public sealed class BrokerLocalModelClient(IBrokerClient broker) : ILocalModelCl
     public Task<LocalJobResult<LocalModelPreflightOutput>> PreflightModelAsync(
         string model,
         int contextTokens,
+        string catalogVersion,
         CancellationToken cancellationToken = default) =>
         broker.ExecuteAsync<LocalModelPreflightOutput>(
             LocalJobRequestFactory.CreateModelPreflight(
-                $"local-lm:model-control:preflight:{model}:{contextTokens}",
+                $"local-lm:model-control:preflight:{catalogVersion}:{model}:{contextTokens}",
                 LocalJobPriority.Interactive,
                 model,
-                contextTokens),
+                contextTokens,
+                catalogVersion),
             cancellationToken);
 
     public Task<LocalJobResult<ModelMaintenanceJobOutput>> PullModelAsync(

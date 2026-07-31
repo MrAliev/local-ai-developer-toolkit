@@ -7,7 +7,7 @@ namespace LocalAi.Broker.Tests;
 public sealed class BrokerPayloadContractTests
 {
     [Fact]
-    public void Model_preflight_payload_requires_only_model_and_context()
+    public void Model_preflight_payload_requires_only_model_context_and_catalog()
     {
         var payload = JsonSerializer.Deserialize<ModelControlJobPayload>(
             """
@@ -19,7 +19,8 @@ public sealed class BrokerPayloadContractTests
               "WorkflowId": null,
               "Outcome": null,
               "TaskMetrics": null,
-              "ContextTokens": 2048
+              "ContextTokens": 2048,
+              "CatalogVersion": "signed-7"
             }
             """,
             LocalAiJson.Strict);
@@ -27,7 +28,55 @@ public sealed class BrokerPayloadContractTests
         Assert.NotNull(payload);
         Assert.Equal("translategemma:12b", payload.Model);
         Assert.Equal(2048, payload.ContextTokens);
+        Assert.Equal("signed-7", payload.CatalogVersion);
         Assert.Null(payload.Profile);
+    }
+
+    [Fact]
+    public void Model_preflight_payload_rejects_missing_catalog()
+    {
+        Assert.ThrowsAny<Exception>(() =>
+            JsonSerializer.Deserialize<ModelControlJobPayload>(
+                """
+                {
+                  "Operation": "Preflight",
+                  "Profile": null,
+                  "Model": "translategemma:12b",
+                  "OwnerAction": null,
+                  "WorkflowId": null,
+                  "Outcome": null,
+                  "TaskMetrics": null,
+                  "ContextTokens": 2048,
+                  "CatalogVersion": null
+                }
+                """,
+                LocalAiJson.Strict));
+    }
+
+    [Fact]
+    public void Model_control_catalog_is_for_preflight_only()
+    {
+        Assert.Throws<ArgumentException>(() => new ModelControlJobPayload(
+            ModelControlOperation.Status,
+            profile: null,
+            model: null,
+            ownerAction: null,
+            catalogVersion: "signed-7"));
+
+        Assert.Throws<ArgumentException>(() => new ModelControlJobPayload(
+            ModelControlOperation.Preflight,
+            profile: null,
+            model: "translategemma:12b",
+            ownerAction: null,
+            contextTokens: 2048,
+            catalogVersion: "../unsafe"));
+
+        Assert.Throws<ArgumentException>(() => new ModelControlJobPayload(
+            ModelControlOperation.ExperimentReport,
+            LocalTaskProfile.PlainTranslation,
+            "translategemma:12b",
+            ownerAction: null,
+            catalogVersion: "signed-7"));
     }
 
     public static TheoryData<Type> PayloadTypes =>

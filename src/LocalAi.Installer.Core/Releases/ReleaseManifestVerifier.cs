@@ -117,6 +117,7 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
             writer.WriteNumber("SchemaVersion", manifest.SchemaVersion);
             writer.WriteString("ReleaseVersion", manifest.ReleaseVersion);
             writer.WriteString("VersionDirectory", manifest.VersionDirectory);
+            writer.WriteString("ModelCatalogVersion", manifest.ModelCatalogVersion);
             writer.WriteNumber("ProtocolVersion", manifest.ProtocolVersion);
             writer.WriteString("BuildCompatibilityId", manifest.BuildCompatibilityId);
             writer.WriteString("PackageUri", manifest.PackageUri.AbsoluteUri);
@@ -155,6 +156,7 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
         RequireExactProperties(
             root,
             "SchemaVersion", "ReleaseVersion", "VersionDirectory",
+            "ModelCatalogVersion",
             "ProtocolVersion", "BuildCompatibilityId", "PackageUri",
             "PackageSize", "PackageSha256", "RequiresAuthenticode", "Models");
 
@@ -188,6 +190,7 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
             RequireInt32(root, "SchemaVersion"),
             RequireString(root, "ReleaseVersion"),
             RequireString(root, "VersionDirectory"),
+            RequireString(root, "ModelCatalogVersion"),
             RequireInt32(root, "ProtocolVersion"),
             RequireString(root, "BuildCompatibilityId"),
             uri,
@@ -204,6 +207,7 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
             !SafeReleaseVersion().IsMatch(manifest.ReleaseVersion) ||
             !SafeVersionDirectory().IsMatch(manifest.VersionDirectory) ||
             manifest.VersionDirectory is "." or ".." ||
+            !SafeCatalogVersion().IsMatch(manifest.ModelCatalogVersion) ||
             manifest.ProtocolVersion <= 0 ||
             string.IsNullOrWhiteSpace(manifest.BuildCompatibilityId) ||
             manifest.BuildCompatibilityId.Length > 128 ||
@@ -366,6 +370,9 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
 
     [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$")]
     private static partial Regex SafeCompatibilityId();
+
+    [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$")]
+    private static partial Regex SafeCatalogVersion();
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")]
     private static partial Regex SafeModelName();

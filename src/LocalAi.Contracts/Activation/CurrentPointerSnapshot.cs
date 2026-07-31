@@ -44,6 +44,12 @@ public sealed class CurrentPointerSnapshot
         return ReadPath(lease.CurrentPath);
     }
 
+    public static CurrentPointerSnapshot Read(ActivationSharedLease lease)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        return ReadPath(lease.CurrentPath);
+    }
+
     private static CurrentPointerSnapshot ReadPath(string currentPath)
     {
         if (!File.Exists(currentPath))

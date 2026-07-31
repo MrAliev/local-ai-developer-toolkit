@@ -526,6 +526,7 @@ public sealed class ReleasePackageVerifier
         var required = new HashSet<string>(
             [
                 "SchemaVersion", "ReleaseVersion", "VersionDirectory",
+                "ModelCatalogVersion",
                 "ProtocolVersion", "BuildCompatibilityId",
             ],
             StringComparer.Ordinal);
@@ -544,6 +545,8 @@ public sealed class ReleasePackageVerifier
             !string.Equals(root.GetProperty("ReleaseVersion").GetString(), manifest.ReleaseVersion, StringComparison.Ordinal) ||
             root.GetProperty("VersionDirectory").ValueKind != JsonValueKind.String ||
             !string.Equals(root.GetProperty("VersionDirectory").GetString(), manifest.VersionDirectory, StringComparison.Ordinal) ||
+            root.GetProperty("ModelCatalogVersion").ValueKind != JsonValueKind.String ||
+            !string.Equals(root.GetProperty("ModelCatalogVersion").GetString(), manifest.ModelCatalogVersion, StringComparison.Ordinal) ||
             root.GetProperty("ProtocolVersion").ValueKind != JsonValueKind.Number ||
             root.GetProperty("ProtocolVersion").GetInt32() != manifest.ProtocolVersion ||
             root.GetProperty("ProtocolVersion").GetInt32() != BrokerCompatibilityContract.ProtocolVersion ||
@@ -555,7 +558,7 @@ public sealed class ReleasePackageVerifier
         }
 
         var canonical = Encoding.UTF8.GetBytes(
-            $"{{\"SchemaVersion\":1,\"ReleaseVersion\":{JsonSerializer.Serialize(manifest.ReleaseVersion)},\"VersionDirectory\":{JsonSerializer.Serialize(manifest.VersionDirectory)},\"ProtocolVersion\":{manifest.ProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"BuildCompatibilityId\":{JsonSerializer.Serialize(manifest.BuildCompatibilityId)}}}");
+            $"{{\"SchemaVersion\":1,\"ReleaseVersion\":{JsonSerializer.Serialize(manifest.ReleaseVersion)},\"VersionDirectory\":{JsonSerializer.Serialize(manifest.VersionDirectory)},\"ModelCatalogVersion\":{JsonSerializer.Serialize(manifest.ModelCatalogVersion)},\"ProtocolVersion\":{manifest.ProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"BuildCompatibilityId\":{JsonSerializer.Serialize(manifest.BuildCompatibilityId)}}}");
         if (!bytes.AsSpan().SequenceEqual(canonical))
         {
             throw Failure();

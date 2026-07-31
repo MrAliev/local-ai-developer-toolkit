@@ -67,24 +67,59 @@ public sealed class ModelCommandTests
         var client = new RecordingClient
         {
             PreflightResult = Result(new LocalModelPreflightOutput(
-                "qwen3.5:9b", 8192, 123, 123, true, VerifiedUtc)),
+                "qwen3.5:9b", 8192, "signed-7", 123, 123, true, VerifiedUtc)),
         };
         using var output = new StringWriter();
 
         var exitCode = await ModelCommand.ExecuteAsync(
-            ["preflight", "--model", "qwen3.5:9b", "--context", "8192"],
+            ["preflight", "--model", "qwen3.5:9b", "--context", "8192",
+             "--catalog-version", "signed-7"],
             client,
             output,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(ModelCommand.SuccessExitCode, exitCode);
-        Assert.Equal(["preflight:qwen3.5:9b:8192"], client.Calls);
+        Assert.Equal(["preflight:qwen3.5:9b:8192:signed-7"], client.Calls);
         Assert.Equal(
             "{\"schemaVersion\":1,\"operation\":\"preflight\",\"accepted\":true," +
-            "\"model\":\"qwen3.5:9b\",\"contextTokens\":8192,\"sizeBytes\":123," +
+            "\"model\":\"qwen3.5:9b\",\"contextTokens\":8192," +
+            "\"catalogVersion\":\"signed-7\",\"sizeBytes\":123," +
             "\"sizeVramBytes\":123,\"fullyResident\":true," +
             "\"verifiedAtUtc\":\"2026-07-31T08:09:10+00:00\"}" + Environment.NewLine,
             output.ToString());
+    }
+
+    public static TheoryData<LocalModelPreflightOutput> InvalidPreflightProofs => new()
+    {
+        { new LocalModelPreflightOutput("other:9b", 8192, "signed-7", 123, 123, true, VerifiedUtc) },
+        { new LocalModelPreflightOutput("qwen3.5:9b", 2048, "signed-7", 123, 123, true, VerifiedUtc) },
+        { new LocalModelPreflightOutput("qwen3.5:9b", 8192, "stale", 123, 123, true, VerifiedUtc) },
+        { new LocalModelPreflightOutput("qwen3.5:9b", 8192, "signed-7", 0, 0, true, VerifiedUtc) },
+        { new LocalModelPreflightOutput("qwen3.5:9b", 8192, "signed-7", 123, 122, true, VerifiedUtc) },
+        { new LocalModelPreflightOutput("qwen3.5:9b", 8192, "signed-7", 123, 123, false, VerifiedUtc) },
+        { new LocalModelPreflightOutput("qwen3.5:9b", 8192, "signed-7", 123, 123, true, default) },
+        { new LocalModelPreflightOutput("qwen3.5:9b", 8192, "signed-7", 123, 123, true,
+            new DateTimeOffset(2026, 7, 31, 11, 9, 10, TimeSpan.FromHours(3))) },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidPreflightProofs))]
+    public async Task Preflight_rejects_semantically_invalid_proof_before_accepted_true(
+        LocalModelPreflightOutput proof)
+    {
+        var client = new RecordingClient { PreflightResult = Result(proof) };
+        using var output = new StringWriter();
+
+        var exitCode = await ModelCommand.ExecuteAsync(
+            ["preflight", "--model", "qwen3.5:9b", "--context", "8192",
+             "--catalog-version", "signed-7"],
+            client,
+            output,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(ModelCommand.SuccessExitCode, exitCode);
+        Assert.DoesNotContain("\"accepted\":true", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(proof.Model == "other:9b" ? "other:9b" : "never-secret", output.ToString(), StringComparison.Ordinal);
     }
 
     public static TheoryData<string[]> InvalidArguments => new()
@@ -103,6 +138,9 @@ public sealed class ModelCommandTests
         { ["preflight", "--model", "safe:1", "--context", "+2048"] },
         { ["preflight", "--model", "safe:1", "--context", "٢٠٤٨"] },
         { ["preflight", "--model", "safe:1", "--context", "2048", "extra"] },
+        { ["preflight", "--model", "safe:1", "--context", "2048"] },
+        { ["preflight", "--model", "safe:1", "--context", "2048", "--catalog-version", "../1"] },
+        { ["preflight", "--catalog-version", "1", "--model", "safe:1", "--context", "2048"] },
     };
 
     [Theory]
@@ -135,16 +173,18 @@ public sealed class ModelCommandTests
         using var output = new StringWriter();
 
         var exitCode = await ModelCommand.ExecuteAsync(
-            ["preflight", "--model", "qwen3.5:9b", "--context", "2048"],
+            ["preflight", "--model", "qwen3.5:9b", "--context", "2048",
+             "--catalog-version", "signed-7"],
             client,
             output,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(ModelCommand.RejectedExitCode, exitCode);
-        Assert.Equal(["preflight:qwen3.5:9b:2048"], client.Calls);
+        Assert.Equal(["preflight:qwen3.5:9b:2048:signed-7"], client.Calls);
         Assert.Equal(
             "{\"schemaVersion\":1,\"operation\":\"preflight\",\"accepted\":false," +
             "\"model\":\"qwen3.5:9b\",\"contextTokens\":2048," +
+            "\"catalogVersion\":\"signed-7\"," +
             "\"code\":\"residency_rejected\"}" + Environment.NewLine,
             output.ToString());
         Assert.DoesNotContain("aaaaaaaa", output.ToString(), StringComparison.Ordinal);
@@ -220,7 +260,8 @@ public sealed class ModelCommandTests
         using var output = new StringWriter();
 
         var exitCode = await ModelCommand.ExecuteProductionAsync(
-            ["preflight", "--model", "qwen3.5:9b", "--context", "2048"],
+            ["preflight", "--model", "qwen3.5:9b", "--context", "2048",
+             "--catalog-version", "signed-7"],
             token =>
             {
                 factoryCalled = true;
@@ -355,9 +396,10 @@ public sealed class ModelCommandTests
         public Task<LocalJobResult<LocalModelPreflightOutput>> PreflightModelAsync(
             string model,
             int contextTokens,
+            string catalogVersion,
             CancellationToken cancellationToken = default)
         {
-            Calls.Add($"preflight:{model}:{contextTokens}");
+            Calls.Add($"preflight:{model}:{contextTokens}:{catalogVersion}");
             Tokens.Add(cancellationToken);
             return Complete(PreflightResult!);
         }

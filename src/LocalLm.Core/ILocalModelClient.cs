@@ -33,9 +33,8 @@ public interface ILocalModelClient
     Task<LocalJobResult<LocalModelPreflightOutput>> PreflightModelAsync(
         string model,
         int contextTokens,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException(
-            "Model preflight is not supported by this client.");
+        string catalogVersion,
+        CancellationToken cancellationToken = default);
 
     Task<LocalJobResult<ModelMaintenanceJobOutput>> PullModelAsync(
         string model,

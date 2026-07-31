@@ -174,7 +174,7 @@ public sealed class StagingRootSecurityTests : IDisposable
         var package = CreatePackage();
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var manifest = new ReleaseManifest(
-            1, "1.2.3", "1.2.3",
+            1, "1.2.3", "1.2.3", "signed-7",
             BrokerCompatibilityContract.ProtocolVersion,
             BrokerCompatibilityContract.BuildCompatibilityId,
             new Uri("https://example.invalid/package.zip"),
@@ -210,7 +210,7 @@ public sealed class StagingRootSecurityTests : IDisposable
         var package = CreatePackage();
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var manifest = new ReleaseManifest(
-            1, "1.2.3", "1.2.3",
+            1, "1.2.3", "1.2.3", "signed-7",
             BrokerCompatibilityContract.ProtocolVersion,
             BrokerCompatibilityContract.BuildCompatibilityId,
             new Uri("https://example.invalid/package.zip"),
@@ -263,7 +263,7 @@ public sealed class StagingRootSecurityTests : IDisposable
         var package = CreatePackage();
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var manifest = new ReleaseManifest(
-            1, "1.2.3", "1.2.3",
+            1, "1.2.3", "1.2.3", "signed-7",
             BrokerCompatibilityContract.ProtocolVersion,
             BrokerCompatibilityContract.BuildCompatibilityId,
             new Uri("https://example.invalid/package.zip"),

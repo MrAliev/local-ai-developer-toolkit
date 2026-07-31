@@ -140,12 +140,7 @@ public static class ActivationCoordinator
         using var gate = AcquireStartupGate(canonicalRoot, startupTimeout);
         try
         {
-            var stream = new FileStream(
-                Path.Combine(canonicalRoot, "current.lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.ReadWrite);
-            return new ActivationSharedLease(canonicalRoot, stream);
+            return AcquireShared(gate);
         }
         catch (IOException exception)
         {
@@ -158,6 +153,28 @@ public static class ActivationCoordinator
 
     public static ActivationSharedLease AcquireShared(string binRoot) =>
         AcquireShared(binRoot, TimeSpan.FromSeconds(30));
+
+    public static ActivationSharedLease AcquireShared(
+        ActivationStartupGateLease gate)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        try
+        {
+            var stream = new FileStream(
+                Path.Combine(gate.BinRoot, "current.lock"),
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.ReadWrite);
+            return new ActivationSharedLease(gate.BinRoot, stream);
+        }
+        catch (IOException exception)
+        {
+            throw new ActivationCoordinationException(
+                "version_in_use",
+                "The active LocalAi version is currently in use.",
+                exception);
+        }
+    }
 
     public static string CanonicalRoot(string binRoot) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(binRoot));
@@ -240,6 +257,7 @@ public sealed class ActivationSharedLease : IDisposable
     }
 
     public string BinRoot { get; }
+    public string CurrentPath => Path.Combine(BinRoot, "current.json");
 
     public void Dispose() => Interlocked.Exchange(ref stream, null)?.Dispose();
 }

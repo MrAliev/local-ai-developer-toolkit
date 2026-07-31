@@ -1,21 +1,24 @@
 using System.Text.Json;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Models;
 using LocalAi.Installer.Core.Planning;
+using LocalAi.Installer.Core.Releases;
 
 namespace LocalAi.Installer.Core.Tests;
 
-public sealed class BrokerModelInstallerTests
+public sealed class BrokerModelInstallerTests : IDisposable
 {
     private static readonly DateTimeOffset VerifiedUtc =
         new(2026, 7, 31, 8, 9, 10, TimeSpan.Zero);
     private readonly InstallationLayout layout =
         InstallationLayout.FromLocalAppData(@"C:\LocalAppData");
+    private readonly List<string> activationRoots = [];
 
     [Fact]
-    public void Public_api_requires_task_six_lease_and_verified_launcher_metadata()
+    public void Public_api_requires_task_six_lease_and_live_verified_package()
     {
         Assert.False(typeof(ITrustedStableLauncher).IsPublic);
 
@@ -24,7 +27,7 @@ public sealed class BrokerModelInstallerTests
             [
                 typeof(IProcessRunner),
                 typeof(InstallationLayoutLease),
-                typeof(LocalAi.Installer.Core.Releases.VerifiedPackageFile),
+                typeof(VerifiedPackage),
                 typeof(TimeSpan),
             ],
             constructor.GetParameters().Select(parameter => parameter.ParameterType));
@@ -57,7 +60,7 @@ public sealed class BrokerModelInstallerTests
         Assert.Equal(
             [
                 new[] { "run", "localai", "model", "status" },
-                new[] { "run", "localai", "model", "preflight", "--model", "qwen3.5:9b", "--context", "8192" },
+                new[] { "run", "localai", "model", "preflight", "--model", "qwen3.5:9b", "--context", "8192", "--catalog-version", "signed-7" },
             ],
             runner.Calls.Select(call => call.Arguments));
         Assert.All(runner.Calls, call => Assert.Equal(layout.LauncherPath, call.Executable));
@@ -89,18 +92,59 @@ public sealed class BrokerModelInstallerTests
             [
                 "run localai model status",
                 "run localai model pull --model model-a --catalog-version signed-7",
-                "run localai model preflight --model model-a --context 2048",
+                "run localai model preflight --model model-a --context 2048 --catalog-version signed-7",
                 "run localai model pull --model model-b --catalog-version signed-7",
-                "run localai model preflight --model model-b --context 4096",
+                "run localai model preflight --model model-b --context 4096 --catalog-version signed-7",
             ],
             runner.Calls.Select(call => string.Join(' ', call.Arguments)));
     }
 
     [Fact]
-    public async Task Pending_model_skips_duplicate_pull_but_is_preflighted()
+    public async Task Same_model_at_multiple_signed_contexts_pulls_once_and_preflights_each_context()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status([], [], "signed-7")),
+            Success(Pull("model-a", "signed-7")),
+            Success(Preflight("model-a", 2048, 80, 80, true)),
+            Success(Preflight("model-a", 8192, 80, 80, true)));
+        var installer = Installer(runner, Launcher());
+
+        var result = await installer.InstallAsync(
+            [
+                Request("a", "model-a", 2048, "signed-7"),
+                Request("b", "model-a", 8192, "signed-7"),
+            ],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, result.Models.Count);
+        Assert.True(result.Models[0].PullCompleted);
+        Assert.False(result.Models[1].PullAttempted);
+        Assert.Single(runner.Calls, call =>
+            call.Arguments.Contains("pull", StringComparer.Ordinal));
+        Assert.Equal(2, runner.Calls.Count(call =>
+            call.Arguments.Contains("preflight", StringComparer.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Selection_absent_from_signed_manifest_stops_before_status()
+    {
+        var runner = new RecordingProcessRunner();
+        var installer = Installer(runner, Launcher());
+
+        var result = await installer.InstallAsync(
+            [Request("a", "model-z", 2048, "signed-7")],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BrokerModelBatchStopReason.LauncherTrustFailure, result.StopReason);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public async Task Pending_model_is_still_pulled_from_current_signed_catalog_then_preflighted()
     {
         var runner = new RecordingProcessRunner(
             Success(Status([], ["model-a"], "signed-7")),
+            Success(Pull("model-a", "signed-7")),
             Success(Preflight("model-a", 2048, 80, 80, true)));
         var installer = Installer(runner, Launcher());
 
@@ -109,7 +153,7 @@ public sealed class BrokerModelInstallerTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal(BrokerModelInstallOutcome.Accepted, Assert.Single(result.Models).Outcome);
-        Assert.DoesNotContain(
+        Assert.Contains(
             runner.Calls,
             call => call.Arguments.Contains("pull", StringComparer.Ordinal));
     }
@@ -119,7 +163,6 @@ public sealed class BrokerModelInstallerTests
     [InlineData(true, false, "a", "model-a", "signed-7")]
     [InlineData(true, true, "", "model-a", "signed-7")]
     [InlineData(true, true, "a", "../unsafe", "signed-7")]
-    [InlineData(true, true, "a", "model-a", "../unsafe")]
     public async Task Invalid_or_unconsented_request_runs_no_command(
         bool selected,
         bool consent,
@@ -196,7 +239,7 @@ public sealed class BrokerModelInstallerTests
             new ProcessResult(
                 3,
                 Json(new ModelPreflightCommandRejected(
-                    1, "preflight", false, "model-a", 2048, "residency_rejected")),
+                    1, "preflight", false, "model-a", 2048, "signed-7", "residency_rejected")),
                 string.Empty,
                 false,
                 false));
@@ -338,6 +381,7 @@ public sealed class BrokerModelInstallerTests
                 true,
                 "model-b",
                 4096,
+                "signed-7",
                 100,
                 100,
                 true,
@@ -369,6 +413,7 @@ public sealed class BrokerModelInstallerTests
             runner,
             launcher,
             layout,
+            Trust(),
             TimeSpan.FromMinutes(5));
 
         var result = await installer.InstallAsync(
@@ -412,18 +457,83 @@ public sealed class BrokerModelInstallerTests
         var runner = new RecordingProcessRunner();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => new BrokerModelInstaller(
-            runner, Launcher(), layout, TimeSpan.Zero));
+            runner, Launcher(), layout, Trust(), TimeSpan.Zero));
         Assert.Throws<ArgumentOutOfRangeException>(() => new BrokerModelInstaller(
-            runner, Launcher(), layout, TimeSpan.FromMinutes(31)));
+            runner, Launcher(), layout, Trust(), TimeSpan.FromMinutes(31)));
         Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public void Active_version_batch_lease_requires_exact_signed_version()
+    {
+        var root = CreateActivationRoot("v1");
+
+        Assert.Throws<CurrentPointerChangedException>(() =>
+            ActiveVersionBatchLease.Acquire(root, "v2", TimeSpan.Zero));
+    }
+
+    [Fact]
+    public void Active_version_batch_lease_blocks_activation_allows_child_shared_and_detects_drift()
+    {
+        var root = CreateActivationRoot("v1");
+        using var batch = ActiveVersionBatchLease.Acquire(
+            root,
+            "v1",
+            TimeSpan.FromSeconds(1));
+
+        using (ActivationCoordinator.AcquireShared(root, TimeSpan.FromSeconds(1)))
+        {
+            var failure = Assert.Throws<ActivationCoordinationException>(() =>
+                ActivationCoordinator.AcquireExclusive(root, TimeSpan.Zero));
+            Assert.Equal("version_in_use", failure.Code);
+        }
+
+        File.WriteAllBytes(
+            Path.Combine(root, "current.json"),
+            CurrentPointerSnapshot.CreateCanonicalBytes("v2"));
+        Assert.Throws<CurrentPointerChangedException>(batch.Revalidate);
+    }
+
+    private string CreateActivationRoot(string version)
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "localai-model-install-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        activationRoots.Add(root);
+        File.WriteAllBytes(
+            Path.Combine(root, "current.json"),
+            CurrentPointerSnapshot.CreateCanonicalBytes(version));
+        return root;
+    }
+
+    public void Dispose()
+    {
+        foreach (var root in activationRoots)
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     private BrokerModelInstaller Installer(
         RecordingProcessRunner runner,
         RecordingLauncher launcher) =>
-        new(runner, launcher, layout, TimeSpan.FromMinutes(5));
+        new(runner, launcher, layout, Trust(), TimeSpan.FromMinutes(5));
 
     private RecordingLauncher Launcher() => new(layout.LauncherPath);
+
+    private static RecordingTrust Trust() => new(
+        "signed-7",
+        [
+            new ManifestModel("model-a", 2048, 100, 100),
+            new ManifestModel("model-a", 8192, 100, 100),
+            new ManifestModel("model-b", 2048, 100, 100),
+            new ManifestModel("model-b", 4096, 100, 100),
+            new ManifestModel("qwen3.5:9b", 8192, 100, 100),
+        ]);
 
     private static BrokerModelInstallRequest Request(
         string actionId,
@@ -435,7 +545,6 @@ public sealed class BrokerModelInstallerTests
         IReadOnlyList<ModelRecommendationChoice>? choices = null) =>
         new(
             new ModelInstallAction(actionId, model, context, selected, consent),
-            catalogVersion,
             choices ?? [Choice(model, context, 100, 100, enabled: true)]);
 
     private static ModelRecommendationChoice Choice(
@@ -480,6 +589,7 @@ public sealed class BrokerModelInstallerTests
             true,
             model,
             context,
+            "signed-7",
             size,
             sizeVram,
             fullyResident,
@@ -496,6 +606,23 @@ public sealed class BrokerModelInstallerTests
         public string CanonicalPath { get; } = canonicalPath;
         public int RevalidationCount { get; private set; }
         public void Revalidate() => RevalidationCount++;
+    }
+
+    private sealed class RecordingTrust(
+        string catalogVersion,
+        IReadOnlyList<ManifestModel> models) : IModelInstallTrust
+    {
+        public string CatalogVersion { get; } = catalogVersion;
+        public IReadOnlyList<ManifestModel> Models { get; } = models;
+        public void RevalidatePackage() { }
+        public IActiveVersionBatchLease AcquireActiveVersion() =>
+            new RecordingActiveVersionLease();
+    }
+
+    private sealed class RecordingActiveVersionLease : IActiveVersionBatchLease
+    {
+        public void Revalidate() { }
+        public void Dispose() { }
     }
 
     private sealed class RecordingProcessRunner(params ProcessResult[] results) : IProcessRunner
