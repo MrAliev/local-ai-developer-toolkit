@@ -95,10 +95,24 @@ The raw JSON files were written to those temporary paths for local review and we
 committed. They are ephemeral and may no longer exist after normal temporary-file
 cleanup. The adapter is not a product execution path.
 
+The original four artifacts predated the corrected snippet-line field: they retained
+each hit's exact `sourceCommit`, path, start/end range, and the evaluator's fixed
+12-line snippet limit, but not the snippet text itself. The correction therefore
+reconstructed every snippet from that immutable Git commit using the same bounds as
+`SearchEngine`, then applied the committed `SearchEvaluation.CountSourceLines`
+implementation. It wrote sibling `*-corrected.json` files with a `sourceLines` value
+on every hit and a recomputed aggregate, leaving the originals untouched. This
+deterministic transformation did not request embeddings or change the original
+quality, character, or latency observations.
+
 ## Measured facts
 
 Quality and exposure counts were identical within each two-run mode. The table therefore
 uses either run for deterministic metrics and shows latency separately.
+
+`Source lines` counts the source lines actually present in the returned snippets,
+including blank source lines. It excludes the synthetic truncation ellipsis and counts
+the synthetic snippet-unavailable diagnostic as zero.
 
 | Metric | No floor, runs 1/2 | Profile, cold/warm | Change |
 |---|---:|---:|---:|
@@ -107,7 +121,7 @@ uses either run for deterministic metrics and shows latency separately.
 | Mean first relevant rank | 4.388889 | 4.388889 | 0 |
 | No-answer false positives | 6/6 (rate 1.0) | 6/6 (rate 1.0) | 0 |
 | Response characters | 151,071 | 147,651 | -3,420 (-2.26%) |
-| Source lines | 10,966 | 10,568 | -398 (-3.63%) |
+| Source lines | 2,517 | 2,499 | -18 (-0.72%) |
 | Chunk reads | 240 | 238 | -2 (-0.83%) |
 | Distinct file reads per case, summed | 156 | 152 | -4 (-2.56%) |
 
@@ -160,6 +174,9 @@ cannot be separated from this data.
 - `responseCharacters` measures the evaluator's rendered path, metadata, and snippet
   payload. It excludes MCP nonce wrappers and opaque chunk IDs, so it is suitable for
   this A/B comparison but is not an end-to-end MCP transport byte count.
+- The original raw artifacts did not retain snippet text. Their corrected source-line
+  counts are deterministic reconstructions from the recorded immutable commit, path,
+  line range, and 12-line limit; future evaluator output records the count directly.
 - Only one cold profile run and one immediate warm profile run were captured. Both
   reconstructed no-floor runs were warm.
 - A prior manual operator note, whose raw cold/warm JSON is unavailable, recorded the

@@ -215,9 +215,78 @@ public sealed class SearchEvaluationTests
         Assert.Equal(hit.VectorScore, evaluationHit.VectorScore);
         Assert.Equal(hit.LexicalScore, evaluationHit.LexicalScore);
         Assert.Equal(hit.Score, evaluationHit.FusedScore);
+        Assert.Equal(2, evaluationHit.SourceLines);
         Assert.Equal(
             SearchEvaluation.RenderHit(hit).Length,
             evaluationHit.ResponseCharacters);
+    }
+
+    [Fact]
+    public void Truncated_snippets_count_only_exposed_source_lines()
+    {
+        var snippet = string.Join(
+            "\n",
+            Enumerable.Range(1, 12).Select(line => $"line {line}")) +
+            "\n    ...";
+        var hit = EvaluationHit(
+            "A.cs",
+            "A",
+            10,
+            200,
+            snippet);
+
+        var evaluationHit = SearchEvaluation.FromSearchHit(hit);
+
+        Assert.Equal(12, evaluationHit.SourceLines);
+    }
+
+    [Fact]
+    public void Non_truncated_snippets_count_every_exposed_source_line()
+    {
+        var evaluationHit = SearchEvaluation.FromSearchHit(
+            EvaluationHit(
+                "A.cs",
+                "A",
+                10,
+                12,
+                "first\n\nthird"));
+
+        Assert.Equal(3, evaluationHit.SourceLines);
+    }
+
+    [Fact]
+    public void Metrics_sum_captured_snippet_lines_instead_of_full_chunk_ranges()
+    {
+        var corpus = new SearchEvaluationCorpus(
+            1,
+            [
+                Case("answer", "query", "A.cs", "A"),
+                new SearchEvaluationCase("none", "unrelated", "no-answer", true, [])
+            ]);
+        var hit = SearchEvaluation.FromSearchHit(
+            EvaluationHit(
+                "A.cs",
+                "A",
+                1,
+                100,
+                "first\nsecond\n    ..."));
+        var observations = new[]
+        {
+            new SearchEvaluationObservation(
+                "answer",
+                [hit],
+                TimeSpan.Zero,
+                null),
+            new SearchEvaluationObservation(
+                "none",
+                [],
+                TimeSpan.Zero,
+                null)
+        };
+
+        var metrics = SearchEvaluation.Measure(corpus, observations);
+
+        Assert.Equal(2, metrics.SourceLines);
     }
 
     [Fact]
@@ -279,7 +348,32 @@ public sealed class SearchEvaluationTests
         int startLine,
         int endLine,
         int responseCharacters) =>
-        new(path, symbol, startLine, endLine, responseCharacters);
+        new(
+            path,
+            symbol,
+            startLine,
+            endLine,
+            responseCharacters,
+            SourceLines: Math.Max(0, endLine - startLine + 1));
+
+    private static SearchHit EvaluationHit(
+        string path,
+        string symbol,
+        int startLine,
+        int endLine,
+        string snippet) =>
+        new(
+            path,
+            startLine,
+            endLine,
+            CodeSearch.Core.Chunking.ChunkKind.Method,
+            symbol,
+            $"void {symbol}()",
+            "Example",
+            0.75f,
+            3,
+            0.01,
+            snippet);
 
     private static string RepositoryRoot()
     {

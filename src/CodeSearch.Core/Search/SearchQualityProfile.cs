@@ -192,6 +192,7 @@ public sealed record SearchEvaluationHit(
     int StartLine,
     int EndLine,
     int ResponseCharacters,
+    int SourceLines,
     float VectorScore = 0,
     double LexicalScore = 0,
     double FusedScore = 0);
@@ -233,6 +234,7 @@ public static class SearchEvaluation
             hit.StartLine,
             hit.EndLine,
             RenderHit(hit).Length,
+            CountSourceLines(hit.Snippet),
             hit.VectorScore,
             hit.LexicalScore,
             hit.Score);
@@ -310,7 +312,7 @@ public static class SearchEvaluation
             estimate.Point,
             estimate.LowerBound,
             estimate.UpperBound,
-            allHits.Sum(item => Math.Max(0, item.EndLine - item.StartLine + 1)),
+            allHits.Sum(item => item.SourceLines),
             allHits.Length,
             observations.Sum(item =>
                 item.Hits.Select(hit => NormalizePath(hit.Path))
@@ -318,6 +320,41 @@ public static class SearchEvaluation
                     .Count()),
             observations.Sum(item => item.Elapsed.TotalMilliseconds),
             queueWaits.Length == 0 ? null : queueWaits.Sum());
+    }
+
+    public static int CountSourceLines(string snippet)
+    {
+        ArgumentNullException.ThrowIfNull(snippet);
+        if (snippet.Length == 0 ||
+            string.Equals(
+                snippet,
+                "(file changed since indexing - snippet unavailable)",
+                StringComparison.Ordinal))
+        {
+            return 0;
+        }
+
+        const string truncationMarker = "\n    ...";
+        var sourceLength = snippet.EndsWith(
+            truncationMarker,
+            StringComparison.Ordinal)
+            ? snippet.Length - truncationMarker.Length
+            : snippet.Length;
+        if (sourceLength == 0)
+        {
+            return 0;
+        }
+
+        var lines = 1;
+        for (var index = 0; index < sourceLength; index++)
+        {
+            if (snippet[index] == '\n')
+            {
+                lines++;
+            }
+        }
+
+        return lines;
     }
 
     public static TokenEstimate EstimateTokens(int characters)
