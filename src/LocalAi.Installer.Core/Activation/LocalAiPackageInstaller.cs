@@ -566,6 +566,39 @@ public sealed class LocalAiPackageInstaller
                 "Activation failed and the prior version was restored.");
         }
 
+        var pointerAfterRollbackFailure = ReadPointerLockedOrNull(layout);
+        if (pointerAfterRollbackFailure is not null &&
+            PointersEqual(pointerAfterRollbackFailure, priorPointer))
+        {
+            return RestorePriorLauncherUnderPointerLock(
+                layout,
+                version,
+                priorVersion!,
+                priorPointer,
+                versionPath,
+                launcherBackup,
+                publishedVersion,
+                targetExisted,
+                "Rollback selected the prior version despite a process failure; the prior launcher was restored.");
+        }
+
+        if (pointerAfterRollbackFailure is null ||
+            !pointerAfterRollbackFailure.Exists ||
+            !pointerAfterRollbackFailure.IsCanonical ||
+            !string.Equals(pointerAfterRollbackFailure.Version, version, StringComparison.Ordinal) ||
+            !pointerAfterRollbackFailure.RawBytes.SequenceEqual(
+                CurrentPointerSnapshot.CreateCanonicalBytes(version)))
+        {
+            return new(
+                LocalAiPackageInstallStatus.Indeterminate,
+                version,
+                priorVersion,
+                versionPath,
+                launcherBackup.Metadata,
+                "Rollback failed and the current-version pointer is indeterminate; no launcher mutation was attempted.",
+                publishedVersion && !targetExisted);
+        }
+
         return new(
             LocalAiPackageInstallStatus.RollbackFailed,
             version,

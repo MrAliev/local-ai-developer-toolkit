@@ -811,6 +811,53 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
             result.Reason);
     }
 
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("termination")]
+    [InlineData("io")]
+    public async Task Rollback_commit_is_honored_even_when_rollback_process_reports_failure(
+        string failure)
+    {
+        var priorLauncher = System.Text.Encoding.UTF8.GetBytes("prior-launcher");
+        CreateExisting("v1", priorLauncher);
+        using var package = Package("v2");
+        var calls = 0;
+        var runner = new RecordingRunner((_, arguments, _, _) =>
+        {
+            calls++;
+            WritePointer(arguments[1]);
+            if (calls == 1)
+            {
+                return Task.FromResult(new ProcessResult(17, "", "", false, false));
+            }
+
+            return failure switch
+            {
+                "timeout" => Task.FromResult(new ProcessResult(null, "", "", true, false)),
+                "termination" => throw new ProcessTerminationException(
+                    42,
+                    ProcessTerminationCause.Timeout,
+                    "rollback terminated"),
+                "io" => throw new IOException("rollback native failure"),
+                _ => throw new InvalidOperationException(),
+            };
+        });
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.RolledBack, result.Status);
+        Assert.Equal("v1", ReadPointerVersion(layout.CurrentPointerPath));
+        Assert.Equal(priorLauncher, File.ReadAllBytes(layout.LauncherPath));
+        Assert.Equal(2, runner.Calls.Count);
+        Assert.Equal(
+            "Rollback selected the prior version despite a process failure; the prior launcher was restored.",
+            result.Reason);
+    }
+
     [Fact]
     public async Task Upgrade_failure_before_pointer_change_restores_launcher_without_rewriting_pointer()
     {
