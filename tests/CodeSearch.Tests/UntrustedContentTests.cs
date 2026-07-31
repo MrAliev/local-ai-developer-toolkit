@@ -82,9 +82,31 @@ public sealed class UntrustedContentTests
     }
 
     [Fact]
+    public void Wrap_escapes_remaining_c0_del_and_c1_origin_controls()
+    {
+        const string origin = "before\u0000\u001B\u001F\u007F\u0085\u009Fafter";
+
+        var wrapped = UntrustedContent.Wrap(
+            "source",
+            origin,
+            new SequenceNonceSource(FirstNonce));
+
+        Assert.StartsWith(
+            $"<untrusted-content id=\"{FirstNonce}\" " +
+            "origin=\"before&#0;&#27;&#31;&#127;&#133;&#159;after\">",
+            wrapped,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001B", wrapped, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u007F", wrapped, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u0085", wrapped, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Wrap_preserves_content_character_for_character()
     {
-        const string content = "\r\n\tA\u030A \u00C5 \uD83D\uDE80 & < > \" ' \0";
+        const string content =
+            "\r\n\tA\u030A \u00C5 \uD83D\uDE80 & < > \" ' " +
+            "\u0000\u001B\u007F\u0085";
 
         var wrapped = UntrustedContent.Wrap(
             content,
@@ -117,6 +139,22 @@ public sealed class UntrustedContentTests
         Assert.Contains(content, wrapped, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Wrap_fails_clearly_after_ten_colliding_nonce_attempts()
+    {
+        var source = new AlwaysCollidingNonceSource(FirstNonce);
+
+        var error = Assert.Throws<InvalidOperationException>(
+            () => UntrustedContent.Wrap(
+                $"hostile {FirstNonce} collision",
+                "search_code",
+                source));
+
+        Assert.Equal(10, source.CallCount);
+        Assert.Contains("96-bit nonce", error.Message, StringComparison.Ordinal);
+        Assert.Contains("after 10 attempts", error.Message, StringComparison.Ordinal);
+    }
+
     private static string ExtractNonce(string wrapped) =>
         Regex.Match(wrapped, "id=\"([0-9a-f]{24})\"").Groups[1].Value;
 
@@ -132,6 +170,26 @@ public sealed class UntrustedContentTests
         {
             CallCount++;
             _nonces.Dequeue().CopyTo(nonce);
+        }
+    }
+
+    private sealed class AlwaysCollidingNonceSource(string nonceText)
+        : IUntrustedContentNonceSource
+    {
+        private readonly byte[] _nonce = Convert.FromHexString(nonceText);
+
+        public int CallCount { get; private set; }
+
+        public void Fill(Span<byte> nonce)
+        {
+            CallCount++;
+            if (CallCount > 10)
+            {
+                throw new InvalidOperationException(
+                    "Test nonce source was called too many times.");
+            }
+
+            _nonce.CopyTo(nonce);
         }
     }
 }

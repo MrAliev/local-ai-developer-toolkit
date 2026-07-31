@@ -11,6 +11,7 @@ public interface IUntrustedContentNonceSource
 public static class UntrustedContent
 {
     private const int NonceByteCount = 12;
+    private const int MaxNonceAttempts = 10;
     private static readonly IUntrustedContentNonceSource CryptographicNonceSource =
         new RandomNumberGeneratorNonceSource();
 
@@ -24,13 +25,24 @@ public static class UntrustedContent
 
         nonceSource ??= CryptographicNonceSource;
         Span<byte> nonceBytes = stackalloc byte[NonceByteCount];
-        string nonce;
-        do
+        string? nonce = null;
+        for (var attempt = 0; attempt < MaxNonceAttempts; attempt++)
         {
             nonceSource.Fill(nonceBytes);
-            nonce = Convert.ToHexStringLower(nonceBytes);
+            var candidate = Convert.ToHexStringLower(nonceBytes);
+            if (!content.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                nonce = candidate;
+                break;
+            }
         }
-        while (content.Contains(nonce, StringComparison.OrdinalIgnoreCase));
+
+        if (nonce is null)
+        {
+            throw new InvalidOperationException(
+                $"Could not generate a {NonceByteCount * 8}-bit nonce absent from " +
+                $"content after {MaxNonceAttempts} attempts.");
+        }
 
         return new StringBuilder(
                 content.Length +
@@ -54,18 +66,46 @@ public static class UntrustedContent
         var escaped = new StringBuilder(value.Length);
         foreach (var character in value)
         {
-            escaped.Append(character switch
+            switch (character)
             {
-                '&' => "&amp;",
-                '<' => "&lt;",
-                '>' => "&gt;",
-                '"' => "&quot;",
-                '\'' => "&#39;",
-                '\r' => "&#13;",
-                '\n' => "&#10;",
-                '\t' => "&#9;",
-                _ => character.ToString()
-            });
+                case '&':
+                    escaped.Append("&amp;");
+                    break;
+                case '<':
+                    escaped.Append("&lt;");
+                    break;
+                case '>':
+                    escaped.Append("&gt;");
+                    break;
+                case '"':
+                    escaped.Append("&quot;");
+                    break;
+                case '\'':
+                    escaped.Append("&#39;");
+                    break;
+                case '\r':
+                    escaped.Append("&#13;");
+                    break;
+                case '\n':
+                    escaped.Append("&#10;");
+                    break;
+                case '\t':
+                    escaped.Append("&#9;");
+                    break;
+                default:
+                    if (char.IsControl(character))
+                    {
+                        escaped.Append("&#")
+                            .Append((int)character)
+                            .Append(';');
+                    }
+                    else
+                    {
+                        escaped.Append(character);
+                    }
+
+                    break;
+            }
         }
 
         return escaped.ToString();
