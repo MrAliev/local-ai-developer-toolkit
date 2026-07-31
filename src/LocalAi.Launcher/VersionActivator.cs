@@ -1,4 +1,7 @@
 using LocalAi.Contracts.Activation;
+using System.ComponentModel;
+using System.Text;
+using System.Text.Json;
 
 namespace LocalAi.Launcher;
 
@@ -116,11 +119,32 @@ public sealed class VersionActivator
         {
             throw new LauncherException(exception.Code, exception.Message);
         }
+        catch (Exception exception) when (
+            exception is CurrentPointerException or JsonException or DecoderFallbackException)
+        {
+            throw new LauncherException(
+                "current_pointer_invalid",
+                "The LocalAi current-version pointer is invalid.");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or Win32Exception)
+        {
+            throw new LauncherException(
+                "activation_failed",
+                "LocalAi activation failed.");
+        }
         finally
         {
-            if (File.Exists(temporaryPath))
+            try
             {
-                File.Delete(temporaryPath);
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or Win32Exception)
+            {
             }
         }
     }

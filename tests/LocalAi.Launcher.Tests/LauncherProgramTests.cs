@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using LocalAi.Contracts.Activation;
 
 namespace LocalAi.Launcher.Tests;
 
@@ -88,6 +89,47 @@ public sealed class LauncherProgramTests
         Assert.Equal(0, exitCode);
         Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
         Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Theory]
+    [InlineData("malformed")]
+    [InlineData("oversized")]
+    [InlineData("invalid-utf8")]
+    public async Task Activate_sanitizes_invalid_pointer_without_raw_content_or_path(
+        string failure)
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        var bytes = failure switch
+        {
+            "malformed" => System.Text.Encoding.UTF8.GetBytes("{ raw-secret"),
+            "oversized" => Enumerable.Repeat(
+                (byte)'X',
+                CurrentPointerSnapshot.MaximumBytes + 1).ToArray(),
+            "invalid-utf8" => new byte[] { 0xC3, 0x28 },
+            _ => throw new InvalidOperationException(),
+        };
+        File.WriteAllBytes(install.CurrentPath, bytes);
+        using var error = new StringWriter();
+
+        var exitCode = await LauncherProgram.RunAsync(
+            [
+                "activate",
+                "v2",
+                "--if-current-sha256",
+                Convert.ToHexString(SHA256.HashData(bytes)),
+            ],
+            install.BinRoot,
+            @"C:\LocalAi\bin\launcher\localai-launcher.exe",
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(
+            "current_pointer_invalid: The LocalAi current-version pointer is invalid." +
+            Environment.NewLine,
+            error.ToString());
+        Assert.DoesNotContain(install.CurrentPath, error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("raw-secret", error.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]
