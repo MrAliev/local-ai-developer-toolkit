@@ -210,6 +210,90 @@ public sealed class InstallationLayoutLease : IDisposable
         }
     }
 
+    public RetainedInstalledVersion LockInstalledVersion(
+        string version,
+        IEnumerable<VerifiedPackageFile> expectedFiles)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!LocalAiVersionName.IsSafe(version))
+        {
+            throw Failure();
+        }
+
+        var expected = expectedFiles.ToDictionary(
+            file => file.RelativePath,
+            StringComparer.Ordinal);
+        if (!expected.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(
+                LocalAiPackageLayout.VersionRequiredFiles))
+        {
+            throw Failure();
+        }
+
+        Revalidate();
+        var versionPath = Path.Combine(Layout.VersionsRoot, version);
+        if (!directories.Any(directory => string.Equals(
+                directory.CanonicalPath,
+                versionPath,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            throw Failure();
+        }
+
+        var files = new List<RetainedInstalledVersion.FileEvidence>();
+        try
+        {
+            foreach (var name in LocalAiPackageLayout.VersionRequiredFiles)
+            {
+                var path = Path.Combine(versionPath, name);
+                var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    64 * 1024,
+                    FileOptions.RandomAccess);
+                try
+                {
+                    ValidateFileHandle(stream, path);
+                    files.Add(new(
+                        stream,
+                        path,
+                        WindowsStagingRootLease.GetIdentity(stream.SafeFileHandle),
+                        expected[name]));
+                    stream = null!;
+                }
+                finally
+                {
+                    stream?.Dispose();
+                }
+            }
+
+            var retained = new RetainedInstalledVersion(this, versionPath, files);
+            try
+            {
+                retained.Revalidate();
+                files = null!;
+                return retained;
+            }
+            catch
+            {
+                retained.Dispose();
+                files = null!;
+                throw;
+            }
+        }
+        finally
+        {
+            if (files is not null)
+            {
+                foreach (var file in files)
+                {
+                    file.Stream.Dispose();
+                }
+            }
+        }
+    }
+
     public static InstallationLayoutLease Acquire(
         InstallationLayout layout,
         bool requireFreshInstallerTree = false)
@@ -886,6 +970,71 @@ public sealed class InstallationLayoutLease : IDisposable
             uint desiredAccess,
             [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
             uint options);
+    }
+
+    public sealed class RetainedInstalledVersion : IDisposable
+    {
+        private readonly InstallationLayoutLease owner;
+        private readonly IReadOnlyList<FileEvidence> files;
+        private bool disposed;
+
+        internal RetainedInstalledVersion(
+            InstallationLayoutLease owner,
+            string canonicalPath,
+            IReadOnlyList<FileEvidence> files)
+        {
+            this.owner = owner;
+            this.files = files;
+            CanonicalPath = Path.GetFullPath(canonicalPath);
+        }
+
+        public string CanonicalPath { get; }
+
+        public void Revalidate()
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            owner.Revalidate();
+            ValidateExactVersionDirectory(
+                CanonicalPath,
+                LocalAiPackageLayout.VersionRequiredFiles);
+            foreach (var file in files)
+            {
+                ValidateFileHandle(file.Stream, file.CanonicalPath);
+                var actualIdentity = WindowsStagingRootLease.GetIdentity(file.Stream.SafeFileHandle);
+                if (actualIdentity != file.Identity || file.Stream.Length != file.Expected.Length)
+                {
+                    throw Failure();
+                }
+
+                file.Stream.Position = 0;
+                var hash = Convert.ToHexString(SHA256.HashData(file.Stream));
+                file.Stream.Position = 0;
+                if (!string.Equals(hash, file.Expected.Sha256, StringComparison.Ordinal))
+                {
+                    throw Failure();
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+            foreach (var file in files)
+            {
+                file.Stream.Dispose();
+            }
+        }
+
+        internal sealed record FileEvidence(
+            FileStream Stream,
+            string CanonicalPath,
+            WindowsStagingRootLease.FileIdentity Identity,
+            VerifiedPackageFile Expected);
     }
 
     private static class NativeDirectory

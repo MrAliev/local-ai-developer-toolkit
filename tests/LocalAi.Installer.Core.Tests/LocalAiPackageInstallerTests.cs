@@ -35,12 +35,13 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     public async Task Fresh_install_publishes_version_and_launcher_then_activates_exact_path()
     {
         using var package = Package("v1");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
         var runner = new RecordingRunner((_, _, _, _) =>
         {
+            AssertInstalledVersionFilesLocked(layout, "v1");
             WritePointer("v1");
             return Task.FromResult(new ProcessResult(0, "", "", false, false));
         });
-        var layout = InstallationLayout.FromLocalAppData(localAppData);
         var installer = new LocalAiPackageInstaller(
             runner,
             new ExistingLocalAiInspector(new SystemFileSystemProbe()),
@@ -430,12 +431,13 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     {
         CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"), packageContent: true);
         using var package = Package("v1");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
         var runner = new RecordingRunner((_, arguments, _, _) =>
         {
+            AssertInstalledVersionFilesLocked(layout, "v1");
             WritePointer(arguments[1]);
             return Task.FromResult(new ProcessResult(0, "", "", false, false));
         });
-        var layout = InstallationLayout.FromLocalAppData(localAppData);
 
         var result = await Installer(runner).InstallAsync(package, layout, TestContext.Current.CancellationToken);
 
@@ -444,6 +446,31 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.DoesNotContain(
             Directory.EnumerateDirectories(layout.VersionsRoot),
             path => Path.GetFileName(path).StartsWith(".install-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Version_allowlist_drift_during_launcher_handoff_never_reports_activation()
+    {
+        using var package = Package("v1");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var extra = Path.Combine(layout.VersionsRoot, "v1", "unexpected.txt");
+        var runner = new RecordingRunner((_, _, _, _) =>
+        {
+            File.WriteAllText(extra, "foreign");
+            WritePointer("v1");
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.ManualRecoveryRequired, result.Status);
+        Assert.Equal("foreign", File.ReadAllText(extra));
+        Assert.DoesNotContain(
+            result.Status,
+            new[] { LocalAiPackageInstallStatus.Installed, LocalAiPackageInstallStatus.AlreadyInstalled });
     }
 
     [Fact]
@@ -986,6 +1013,25 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
 
     private static byte[] Content(string name) =>
         System.Text.Encoding.UTF8.GetBytes("verified:" + name);
+
+    private void AssertInstalledVersionFilesLocked(InstallationLayout layout, string version)
+    {
+        foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
+        {
+            var path = Path.Combine(layout.VersionsRoot, version, file);
+            Assert.True(Record.Exception(() => File.WriteAllText(path, "tampered"))
+                is IOException or UnauthorizedAccessException);
+            Assert.True(Record.Exception(() => File.Delete(path))
+                is IOException or UnauthorizedAccessException);
+            var replacement = Path.Combine(
+                localAppData,
+                "replacement-" + Guid.NewGuid().ToString("N"));
+            File.WriteAllText(replacement, "replacement");
+            Assert.True(Record.Exception(() => File.Move(replacement, path, overwrite: true))
+                is IOException or UnauthorizedAccessException);
+            File.Delete(replacement);
+        }
+    }
 
     private static string ReadPointerVersion(string path)
     {

@@ -268,6 +268,7 @@ public sealed class LocalAiPackageInstaller
         string? launcherTemporary = null;
         var publishedVersion = false;
         var launcherReplaced = false;
+        InstallationLayoutLease.RetainedInstalledVersion? retainedVersion = null;
         InstallationLayoutLease.RetainedLauncherBackup? launcherBackup = null;
         try
         {
@@ -316,6 +317,12 @@ public sealed class LocalAiPackageInstaller
                 }
             }
 
+            retainedVersion = layoutLease.LockInstalledVersion(
+                version,
+                LocalAiPackageLayout.VersionRequiredFiles.Select(file => FileMetadata(package, file)));
+            retainedVersion.Revalidate();
+            package.Revalidate();
+
             if (File.Exists(layout.LauncherPath))
             {
                 launcherBackup = layoutLease.CreateLauncherBackup();
@@ -353,6 +360,8 @@ public sealed class LocalAiPackageInstaller
                     FileMetadata(package, LocalAiPackageLayout.StableLauncherFile));
                 try
                 {
+                    retainedVersion.Revalidate();
+                    package.Revalidate();
                     trustedLauncher.Revalidate();
                     result = await processRunner.RunAsync(
                             trustedLauncher.CanonicalPath,
@@ -369,6 +378,8 @@ public sealed class LocalAiPackageInstaller
                 finally
                 {
                     trustedLauncher.Revalidate();
+                    retainedVersion.Revalidate();
+                    package.Revalidate();
                 }
             }
 
@@ -380,6 +391,7 @@ public sealed class LocalAiPackageInstaller
                         package,
                         layout,
                         layoutLease,
+                        retainedVersion!,
                         version,
                         priorPointer,
                         versionPath,
@@ -412,6 +424,7 @@ public sealed class LocalAiPackageInstaller
                         package,
                         layout,
                         layoutLease,
+                        retainedVersion!,
                         version,
                         priorPointer,
                         versionPath,
@@ -426,6 +439,7 @@ public sealed class LocalAiPackageInstaller
         finally
         {
             launcherBackup?.Dispose();
+            retainedVersion?.Dispose();
         }
     }
 
@@ -445,6 +459,7 @@ public sealed class LocalAiPackageInstaller
         VerifiedPackage package,
         InstallationLayout layout,
         InstallationLayoutLease layoutLease,
+        InstallationLayoutLease.RetainedInstalledVersion retainedVersion,
         string version,
         CurrentPointerSnapshot priorPointer,
         string versionPath,
@@ -509,10 +524,13 @@ public sealed class LocalAiPackageInstaller
         ProcessResult? rollback = null;
         try
         {
+            retainedVersion.Revalidate();
+            package.Revalidate();
             using var trustedLauncher = layoutLease.LockLauncher(
                 FileMetadata(package, LocalAiPackageLayout.StableLauncherFile));
             try
             {
+                retainedVersion.Revalidate();
                 rollback = await processRunner.RunAsync(
                         trustedLauncher.CanonicalPath,
                         ActivationArguments(priorVersion!, actualPointer),
@@ -523,6 +541,8 @@ public sealed class LocalAiPackageInstaller
             finally
             {
                 trustedLauncher.Revalidate();
+                retainedVersion.Revalidate();
+                package.Revalidate();
             }
         }
         catch (Exception exception) when (
