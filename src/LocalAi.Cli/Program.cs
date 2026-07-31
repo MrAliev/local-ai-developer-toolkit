@@ -1,5 +1,16 @@
 using LocalAi.Cli;
+using LocalAi.Broker.Client;
+using LocalLm.Core;
 using System.Text.Json;
+
+if (args is ["model", .. var modelArguments])
+{
+    return await ModelCommand.ExecuteAsync(
+        modelArguments,
+        new BrokerLocalModelClient(BrokerClientFactory.CreateDefault()),
+        Console.Out,
+        CancellationToken.None);
+}
 
 if (args is ["native", var operation, ..])
 {
@@ -106,6 +117,8 @@ if (args is ["hooks", "install", ..])
 
 Console.Error.WriteLine(
     "Usage: localai native <operation> [--request file] | " +
+    "localai model status | localai model pull --model <model> --catalog-version <version> | " +
+    "localai model preflight --model <model> --context <tokens> | " +
     "localai repo status [git-common-dir] | localai bootstrap --dry-run | " +
     "localai sync [--root dir] | localai hooks install [--root dir]");
 return 2;
