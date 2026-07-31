@@ -40,8 +40,9 @@ internal static class BrokerProgram
             process.Id,
             startedAt,
             DateTimeOffset.UtcNow,
-            2,
-            brokerAssemblyPath);
+            BrokerCompatibilityContract.HostStateSchemaVersion,
+            brokerAssemblyPath,
+            BrokerCompatibilityContract.Current);
         var stateStore = new BrokerRuntimeStateStore(runtimeRoot);
         stateStore.Publish(owner);
 
