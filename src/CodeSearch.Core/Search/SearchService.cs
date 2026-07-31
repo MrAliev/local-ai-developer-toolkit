@@ -74,13 +74,17 @@ public sealed class SearchService
 {
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<string, IEmbeddingClient> _embeddingClientFactory;
+    private readonly Func<string, CancellationToken, Task<string>> _sourceTextReader;
 
-    public SearchService(Func<string, IEmbeddingClient>? embeddingClientFactory = null)
+    public SearchService(
+        Func<string, IEmbeddingClient>? embeddingClientFactory = null,
+        Func<string, CancellationToken, Task<string>>? sourceTextReader = null)
     {
         _embeddingClientFactory = embeddingClientFactory ??
             (model => new BrokerEmbeddingClient(
                 model,
                 BrokerClientFactory.CreateDefault()));
+        _sourceTextReader = sourceTextReader ?? File.ReadAllTextAsync;
     }
 
     public IEmbeddingClient CreateEmbeddingClient(string model) =>
@@ -206,8 +210,26 @@ public sealed class SearchService
         }
 
         ct.ThrowIfCancellationRequested();
-        var lines = SourceLines.Split(
-            await File.ReadAllTextAsync(fullPath, ct));
+        var sourceText = await _sourceTextReader(fullPath, ct);
+        if (!CanonicalIndexText.Hash(sourceText).AsSpan().SequenceEqual(
+                searchable.FileHashAt(requested.Ordinal)))
+        {
+            throw new SearchChunkResolutionException(
+                "stale_source_content",
+                "stale_source_content: The source file no longer matches the indexed content.");
+        }
+
+        var currentIdentity = RuntimeIndexLayout.Inspect(workingRoot);
+        SearchChunkResolver.ValidateSnapshot(
+            requested,
+            new SearchChunkId(
+                currentIdentity.RepositoryId,
+                baseIndex.GenerationId,
+                currentIdentity.HeadTree,
+                currentIdentity.DirtyHash,
+                requested.Ordinal));
+
+        var lines = SourceLines.Split(sourceText);
         if (meta.StartLine < 1 ||
             meta.EndLine < meta.StartLine ||
             meta.EndLine > lines.Length)

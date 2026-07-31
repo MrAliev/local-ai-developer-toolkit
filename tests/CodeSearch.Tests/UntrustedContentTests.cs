@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
@@ -360,7 +362,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
                 new IndexedFile
                 {
                     RelPath = "Example.cs",
-                    Hash = new byte[32],
+                    Hash = IndexedHash(),
                     ChunkStart = 0,
                     ChunkCount = 2
                 }
@@ -372,6 +374,15 @@ public sealed class UntrustedContentMcpTests : IDisposable
             ],
             Vectors = [1f, 0f, 1f, 0f]
         };
+
+    private byte[] IndexedHash()
+    {
+        var canonical = File.ReadAllText(Path.Combine(_root, "Example.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Replace("\n", "\r\n", StringComparison.Ordinal);
+        return SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+    }
 
     private static ChunkMeta Meta(
         string symbol,

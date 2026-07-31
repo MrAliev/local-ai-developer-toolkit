@@ -15,6 +15,7 @@ public interface ISearchableIndex
     int ChunkCount { get; }
     ChunkMeta ChunkAt(int index);
     string PathOf(int index);
+    ReadOnlySpan<byte> FileHashAt(int index);
     ReadOnlySpan<float> VectorAt(int index);
 }
 
@@ -128,6 +129,11 @@ public sealed class CompositeIndex : ISearchableIndex
     public string PathOf(int index) => index < _overlay.Chunks.Count
         ? _overlay.Files[_overlay.Chunks[index].FileIndex].RelPath
         : _base.Files[_base.Chunks[_visibleBaseChunks[index - _overlay.Chunks.Count]].FileIndex].RelPath;
+
+    public ReadOnlySpan<byte> FileHashAt(int index) => index < _overlay.Chunks.Count
+        ? _overlay.Files[_overlay.Chunks[index].FileIndex].Hash
+        : _base.Files[
+            _base.Chunks[_visibleBaseChunks[index - _overlay.Chunks.Count]].FileIndex].Hash;
 
     public ReadOnlySpan<float> VectorAt(int index) => index < _overlay.Chunks.Count
         ? _overlay.VectorAt(index)

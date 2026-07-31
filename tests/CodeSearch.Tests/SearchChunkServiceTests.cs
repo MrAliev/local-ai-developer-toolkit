@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Indexing;
@@ -131,6 +132,53 @@ public sealed class SearchChunkServiceTests : IDisposable
                 TestContext.Current.CancellationToken));
 
         Assert.Equal("stale_source_range", error.Code);
+    }
+
+    [Fact]
+    public async Task Refuses_source_content_mutated_during_resolution()
+    {
+        var service = new SearchService(
+            sourceTextReader: async (path, cancellationToken) =>
+            {
+                await File.WriteAllTextAsync(
+                    path,
+                    "changed one\r\nchanged two\r\nchanged three\r\n",
+                    cancellationToken);
+                return await File.ReadAllTextAsync(path, cancellationToken);
+            });
+
+        var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
+            () => service.GetChunkAsync(
+                CurrentId().Encode(),
+                _root,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("stale_source_content", error.Code);
+    }
+
+    [Fact]
+    public async Task Revalidates_the_worktree_after_a_hash_valid_read()
+    {
+        var service = new SearchService(
+            sourceTextReader: async (path, cancellationToken) =>
+            {
+                var indexedText = await File.ReadAllTextAsync(
+                    path,
+                    cancellationToken);
+                await File.AppendAllTextAsync(
+                    path,
+                    "// changed after read\r\n",
+                    cancellationToken);
+                return indexedText;
+            });
+
+        var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
+            () => service.GetChunkAsync(
+                CurrentId().Encode(),
+                _root,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("stale_overlay", error.Code);
     }
 
     [Fact]
@@ -397,7 +445,7 @@ public sealed class SearchChunkServiceTests : IDisposable
                 new IndexedFile
                 {
                     RelPath = relPath,
-                    Hash = new byte[32],
+                    Hash = IndexedHash(relPath),
                     ChunkStart = 0,
                     ChunkCount = 1
                 }
@@ -417,6 +465,21 @@ public sealed class SearchChunkServiceTests : IDisposable
             ],
             Vectors = [1f, 0f]
         };
+
+    private byte[] IndexedHash(string relPath)
+    {
+        var path = Path.GetFullPath(Path.Combine(_root, relPath));
+        if (!File.Exists(path))
+        {
+            return new byte[32];
+        }
+
+        var canonical = File.ReadAllText(path)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Replace("\n", "\r\n", StringComparison.Ordinal);
+        return SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+    }
 
     private static void CreateDirectoryLink(string linkPath, string targetPath)
     {
