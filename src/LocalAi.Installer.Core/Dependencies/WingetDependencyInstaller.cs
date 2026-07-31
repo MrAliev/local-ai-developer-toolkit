@@ -31,7 +31,23 @@ public enum DependencyInstallOutcome
     ExternalStateIndeterminate,
     InstallFailed,
     RedetectionMissing,
+    VerifiedInstalledWithProcessIssue,
     VerifiedSuccess,
+}
+
+public enum DependencyProcessDisposition
+{
+    NotStarted,
+    Succeeded,
+    Cancelled,
+    TimedOut,
+    TerminationUnverified,
+    ElevationRequired,
+    Failed,
+    RebootRequired,
+    RebootInitiated,
+    AlreadyInstalled,
+    ConcurrentInstallation,
 }
 
 public sealed record OfficialInstallerOffer(
@@ -50,7 +66,8 @@ public sealed record DependencyInstallResult(
     int? ExitCode,
     string? Reason,
     bool StandardOutputTruncated,
-    bool StandardErrorTruncated);
+    bool StandardErrorTruncated,
+    DependencyProcessDisposition ProcessDisposition);
 
 public sealed class WingetDependencyInstaller
 {
@@ -237,82 +254,45 @@ public sealed class WingetDependencyInstaller
                 reason: "Final WinGet trust validation failed.");
         }
 
-        ProcessResult processResult;
+        ProcessObservation process;
         try
         {
-            processResult = await _processRunner.RunAsync(
+            var processResult = await _processRunner.RunAsync(
                     revalidated.Executable.CanonicalPath,
                     BuildArguments(dependency, action.Version),
                     InstallTimeout,
                     cancellationToken)
                 .ConfigureAwait(false);
+            process = Observe(processResult);
         }
         catch (ProcessTerminationException)
         {
-            return Result(
+            process = new ProcessObservation(
                 DependencyInstallOutcome.ExternalStateIndeterminate,
-                action,
-                dependency,
-                before,
-                reason: "WinGet process termination could not be verified.");
+                DependencyProcessDisposition.TerminationUnverified,
+                null,
+                "WinGet process termination could not be verified.");
         }
         catch (OperationCanceledException)
         {
-            return Result(
+            process = new ProcessObservation(
                 DependencyInstallOutcome.ExternalStateIndeterminate,
-                action,
-                dependency,
-                before,
-                reason: "WinGet execution was cancelled after launch.");
+                DependencyProcessDisposition.Cancelled,
+                null,
+                "WinGet execution was cancelled after launch.");
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
             System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            return Result(
+            process = new ProcessObservation(
                 DependencyInstallOutcome.InstallFailed,
-                action,
-                dependency,
-                before,
-                reason: "Trusted WinGet execution failed.");
+                DependencyProcessDisposition.Failed,
+                null,
+                "Trusted WinGet execution failed.");
         }
 
-        if (processResult.TimedOut)
-        {
-            return Result(
-                DependencyInstallOutcome.TimedOut,
-                action,
-                dependency,
-                before,
-                processResult: processResult,
-                reason: "The WinGet installation timed out.");
-        }
-
-        if (processResult.Cancelled)
-        {
-            return Result(
-                DependencyInstallOutcome.ExternalStateIndeterminate,
-                action,
-                dependency,
-                before,
-                processResult: processResult,
-                reason: "WinGet execution ended with indeterminate external state.");
-        }
-
-        var failure = ClassifyExitCode(processResult.ExitCode);
-        if (failure is not null)
-        {
-            return Result(
-                failure.Value,
-                action,
-                dependency,
-                before,
-                exitCode: processResult.ExitCode,
-                processResult: processResult,
-                reason: FailureReason(failure.Value));
-        }
-
-        var redetection = await RedetectAfterSuccessAsync(dependency)
+        var redetection = await RedetectAfterProcessAsync(dependency)
             .ConfigureAwait(false);
         if (!redetection.Completed)
         {
@@ -321,8 +301,9 @@ public sealed class WingetDependencyInstaller
                 action,
                 dependency,
                 before,
-                exitCode: processResult.ExitCode,
-                processResult: processResult,
+                exitCode: process.Result?.ExitCode,
+                processResult: process.Result,
+                processDisposition: process.Disposition,
                 reason: "Post-install dependency state could not be determined.");
         }
 
@@ -330,14 +311,19 @@ public sealed class WingetDependencyInstaller
         if (!IsRecognized(after, dependency, action.Version))
         {
             return Result(
-                DependencyInstallOutcome.RedetectionMissing,
+                process.Outcome == DependencyInstallOutcome.VerifiedSuccess
+                    ? DependencyInstallOutcome.RedetectionMissing
+                    : process.Outcome,
                 action,
                 dependency,
                 before,
                 after,
-                exitCode: processResult.ExitCode,
-                processResult: processResult,
-                reason: "The dependency was not recognized after WinGet completed.");
+                exitCode: process.Result?.ExitCode,
+                processResult: process.Result,
+                processDisposition: process.Disposition,
+                reason: process.Outcome == DependencyInstallOutcome.VerifiedSuccess
+                    ? "The dependency was not recognized after WinGet completed."
+                    : process.Reason);
         }
 
         var effect = new NonTransactionalEffect(
@@ -346,17 +332,23 @@ public sealed class WingetDependencyInstaller
             $"{dependency.DisplayName} {action.Version} was installed externally; " +
             "this installer does not automatically uninstall or roll back that package.");
         return Result(
-            DependencyInstallOutcome.VerifiedSuccess,
+            process.Disposition == DependencyProcessDisposition.Succeeded
+                ? DependencyInstallOutcome.VerifiedSuccess
+                : DependencyInstallOutcome.VerifiedInstalledWithProcessIssue,
             action,
             dependency,
             before,
             after,
             effect: effect,
-            exitCode: processResult.ExitCode,
-            processResult: processResult);
+            exitCode: process.Result?.ExitCode,
+            processResult: process.Result,
+            processDisposition: process.Disposition,
+            reason: process.Disposition == DependencyProcessDisposition.Succeeded
+                ? null
+                : process.Reason);
     }
 
-    private async Task<RedetectionAttempt> RedetectAfterSuccessAsync(
+    private async Task<RedetectionAttempt> RedetectAfterProcessAsync(
         DependencyDefinition dependency)
     {
         for (var attempt = 0; attempt < 2; attempt++)
@@ -497,13 +489,46 @@ public sealed class WingetDependencyInstaller
                 character is '.' or '-' or '_');
     }
 
-    private static DependencyInstallOutcome? ClassifyExitCode(int? exitCode)
+    private static ProcessObservation Observe(ProcessResult result)
     {
-        if (exitCode == 0)
+        if (result.TimedOut)
         {
-            return null;
+            return new ProcessObservation(
+                DependencyInstallOutcome.TimedOut,
+                DependencyProcessDisposition.TimedOut,
+                result,
+                "The WinGet installation timed out.");
         }
 
+        if (result.Cancelled)
+        {
+            return new ProcessObservation(
+                DependencyInstallOutcome.ExternalStateIndeterminate,
+                DependencyProcessDisposition.Cancelled,
+                result,
+                "WinGet execution ended with indeterminate external state.");
+        }
+
+        if (result.ExitCode == 0)
+        {
+            return new ProcessObservation(
+                DependencyInstallOutcome.VerifiedSuccess,
+                DependencyProcessDisposition.Succeeded,
+                result,
+                null);
+        }
+
+        var outcome = ClassifyExitCode(result.ExitCode);
+        var disposition = ClassifyDisposition(result.ExitCode, outcome);
+        return new ProcessObservation(
+            outcome,
+            disposition,
+            result,
+            FailureReason(disposition));
+    }
+
+    private static DependencyInstallOutcome ClassifyExitCode(int? exitCode)
+    {
         return exitCode switch
         {
             1223 or unchecked((int)0x800704C7) or
@@ -518,16 +543,43 @@ public sealed class WingetDependencyInstaller
         };
     }
 
-    private static string FailureReason(
+    private static DependencyProcessDisposition ClassifyDisposition(
+        int? exitCode,
         DependencyInstallOutcome outcome) =>
-        outcome switch
+        exitCode switch
         {
-            DependencyInstallOutcome.ProcessCancelled =>
+            unchecked((int)0x8A150109) or
+            unchecked((int)0x8A15010A) =>
+                DependencyProcessDisposition.RebootRequired,
+            unchecked((int)0x8A15010B) =>
+                DependencyProcessDisposition.RebootInitiated,
+            unchecked((int)0x8A15010D) =>
+                DependencyProcessDisposition.AlreadyInstalled,
+            unchecked((int)0x8A150102) =>
+                DependencyProcessDisposition.ConcurrentInstallation,
+            _ when outcome == DependencyInstallOutcome.ProcessCancelled =>
+                DependencyProcessDisposition.Cancelled,
+            _ when outcome == DependencyInstallOutcome.ElevationRequired =>
+                DependencyProcessDisposition.ElevationRequired,
+            _ => DependencyProcessDisposition.Failed,
+        };
+
+    private static string FailureReason(
+        DependencyProcessDisposition disposition) =>
+        disposition switch
+        {
+            DependencyProcessDisposition.Cancelled =>
                 "WinGet reported that installation was cancelled.",
-            DependencyInstallOutcome.ElevationRequired =>
+            DependencyProcessDisposition.ElevationRequired =>
                 "WinGet reported that administrator privileges are required.",
-            DependencyInstallOutcome.ElevationDenied =>
-                "WinGet reported that elevation was denied.",
+            DependencyProcessDisposition.RebootRequired =>
+                "WinGet reported that a reboot is required.",
+            DependencyProcessDisposition.RebootInitiated =>
+                "WinGet reported that a reboot was initiated.",
+            DependencyProcessDisposition.AlreadyInstalled =>
+                "WinGet reported that the dependency is already installed.",
+            DependencyProcessDisposition.ConcurrentInstallation =>
+                "WinGet reported that another installation is in progress.",
             _ => "WinGet installation failed.",
         };
 
@@ -548,6 +600,8 @@ public sealed class WingetDependencyInstaller
         NonTransactionalEffect? effect = null,
         int? exitCode = null,
         ProcessResult? processResult = null,
+        DependencyProcessDisposition processDisposition =
+            DependencyProcessDisposition.NotStarted,
         string? reason = null) =>
         new(
             outcome,
@@ -560,9 +614,16 @@ public sealed class WingetDependencyInstaller
             exitCode,
             reason,
             processResult?.StandardOutputTruncated ?? false,
-            processResult?.StandardErrorTruncated ?? false);
+            processResult?.StandardErrorTruncated ?? false,
+            processDisposition);
 
     private sealed record RedetectionAttempt(
         bool Completed,
         DependencySnapshot? Snapshot);
+
+    private sealed record ProcessObservation(
+        DependencyInstallOutcome Outcome,
+        DependencyProcessDisposition Disposition,
+        ProcessResult? Result,
+        string? Reason);
 }

@@ -321,7 +321,7 @@ public sealed class WingetDependencyInstallerTests
     }
 
     [Fact]
-    public async Task Runner_reported_cancellation_marks_external_state_indeterminate()
+    public async Task Runner_reported_cancellation_still_journals_verified_install()
     {
         var context = NewContext(
             new ProcessResult(null, "", "", TimedOut: false, Cancelled: true));
@@ -329,12 +329,15 @@ public sealed class WingetDependencyInstallerTests
         var result = await InstallGitAsync(context);
 
         Assert.Equal(
-            DependencyInstallOutcome.ExternalStateIndeterminate,
+            DependencyInstallOutcome.VerifiedInstalledWithProcessIssue,
             result.Outcome);
+        Assert.Equal(
+            DependencyProcessDisposition.Cancelled,
+            result.ProcessDisposition);
         Assert.Equal(Missing("Git"), result.Before);
         Assert.Single(context.ProcessCalls);
-        Assert.Empty(context.Detector.PackageIds);
-        Assert.Null(result.NonTransactionalEffect);
+        Assert.Single(context.Detector.PackageIds);
+        Assert.NotNull(result.NonTransactionalEffect);
     }
 
     [Fact]
@@ -356,6 +359,9 @@ public sealed class WingetDependencyInstallerTests
             cancellation.Token);
 
         Assert.Equal(DependencyInstallOutcome.VerifiedSuccess, result.Outcome);
+        Assert.Equal(
+            DependencyProcessDisposition.Succeeded,
+            result.ProcessDisposition);
         Assert.Equal(1, runner.CallCount);
         Assert.Single(detector.PackageIds);
         Assert.NotNull(result.NonTransactionalEffect);
@@ -371,14 +377,19 @@ public sealed class WingetDependencyInstallerTests
     public async Task Official_or_wrapped_process_cancellation_is_distinct(
         int exitCode)
     {
-        var context = NewContext(FailedProcess(exitCode));
+        var context = NewContext(
+            FailedProcess(exitCode),
+            new RecordingDependencyRedetector(Missing("Git")));
 
         var result = await InstallGitAsync(context);
 
         Assert.Equal(
             DependencyInstallOutcome.ProcessCancelled,
             result.Outcome);
-        AssertFailedWithoutRedetection(context, result);
+        Assert.Equal(
+            DependencyProcessDisposition.Cancelled,
+            result.ProcessDisposition);
+        AssertFailedAfterRedetection(context, result);
     }
 
     [Theory]
@@ -389,12 +400,17 @@ public sealed class WingetDependencyInstallerTests
         int exitCode,
         DependencyInstallOutcome expected)
     {
-        var context = NewContext(FailedProcess(exitCode));
+        var context = NewContext(
+            FailedProcess(exitCode),
+            new RecordingDependencyRedetector(Missing("Git")));
 
         var result = await InstallGitAsync(context);
 
         Assert.Equal(expected, result.Outcome);
-        AssertFailedWithoutRedetection(context, result);
+        Assert.Equal(
+            DependencyProcessDisposition.ElevationRequired,
+            result.ProcessDisposition);
+        AssertFailedAfterRedetection(context, result);
     }
 
     [Theory]
@@ -403,28 +419,61 @@ public sealed class WingetDependencyInstallerTests
     public async Task Generic_access_denied_is_not_claimed_to_be_a_UAC_refusal(
         int exitCode)
     {
-        var context = NewContext(FailedProcess(exitCode));
+        var context = NewContext(
+            FailedProcess(exitCode),
+            new RecordingDependencyRedetector(Missing("Git")));
 
         var result = await InstallGitAsync(context);
 
         Assert.Equal(DependencyInstallOutcome.InstallFailed, result.Outcome);
-        AssertFailedWithoutRedetection(context, result);
+        Assert.Equal(
+            DependencyProcessDisposition.Failed,
+            result.ProcessDisposition);
+        AssertFailedAfterRedetection(context, result);
     }
 
     [Fact]
-    public async Task Timeout_is_distinct_and_does_not_redetect()
+    public async Task Timeout_still_journals_verified_install()
     {
         var context = NewContext(
             new ProcessResult(null, "", "", TimedOut: true, Cancelled: false));
 
         var result = await InstallGitAsync(context);
 
-        Assert.Equal(DependencyInstallOutcome.TimedOut, result.Outcome);
-        AssertFailedWithoutRedetection(context, result);
+        Assert.Equal(
+            DependencyInstallOutcome.VerifiedInstalledWithProcessIssue,
+            result.Outcome);
+        Assert.Equal(
+            DependencyProcessDisposition.TimedOut,
+            result.ProcessDisposition);
+        Assert.Single(context.ProcessCalls);
+        Assert.Single(context.Detector.PackageIds);
+        Assert.NotNull(result.NonTransactionalEffect);
+    }
+
+    [Theory]
+    [InlineData(true, false, DependencyInstallOutcome.TimedOut, DependencyProcessDisposition.TimedOut)]
+    [InlineData(false, true, DependencyInstallOutcome.ExternalStateIndeterminate, DependencyProcessDisposition.Cancelled)]
+    public async Task Timeout_or_runner_cancellation_without_detection_preserves_process_classification(
+        bool timedOut,
+        bool cancelled,
+        DependencyInstallOutcome expectedOutcome,
+        DependencyProcessDisposition expectedDisposition)
+    {
+        var context = NewContext(
+            new ProcessResult(null, "", "", timedOut, cancelled),
+            new RecordingDependencyRedetector(Missing("Git")));
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(expectedOutcome, result.Outcome);
+        Assert.Equal(expectedDisposition, result.ProcessDisposition);
+        Assert.Single(context.Detector.PackageIds);
+        Assert.Null(result.NonTransactionalEffect);
     }
 
     [Fact]
-    public async Task Unverified_process_termination_marks_external_state_indeterminate()
+    public async Task Unverified_process_termination_still_journals_verified_install()
     {
         var runner = new RecordingProcessRunner(
             new ProcessTerminationException(
@@ -436,14 +485,19 @@ public sealed class WingetDependencyInstallerTests
         var result = await InstallGitAsync(context);
 
         Assert.Equal(
-            DependencyInstallOutcome.ExternalStateIndeterminate,
+            DependencyInstallOutcome.VerifiedInstalledWithProcessIssue,
             result.Outcome);
+        Assert.Equal(
+            DependencyProcessDisposition.TerminationUnverified,
+            result.ProcessDisposition);
         Assert.Equal(Missing("Git"), result.Before);
-        AssertFailedWithoutRedetection(context, result);
+        Assert.Single(context.ProcessCalls);
+        Assert.Single(context.Detector.PackageIds);
+        Assert.NotNull(result.NonTransactionalEffect);
     }
 
     [Fact]
-    public async Task Cancellation_exception_after_launch_marks_external_state_indeterminate()
+    public async Task Cancellation_exception_after_launch_still_journals_verified_install()
     {
         using var cancellation = new CancellationTokenSource();
         var runner = new CancellingExceptionProcessRunner(cancellation);
@@ -456,23 +510,73 @@ public sealed class WingetDependencyInstallerTests
             cancellation.Token);
 
         Assert.Equal(
-            DependencyInstallOutcome.ExternalStateIndeterminate,
+            DependencyInstallOutcome.VerifiedInstalledWithProcessIssue,
             result.Outcome);
+        Assert.Equal(
+            DependencyProcessDisposition.Cancelled,
+            result.ProcessDisposition);
         Assert.Single(context.ProcessCalls);
         Assert.Equal(Missing("Git"), result.Before);
-        Assert.Null(result.NonTransactionalEffect);
+        Assert.Single(context.Detector.PackageIds);
+        Assert.NotNull(result.NonTransactionalEffect);
     }
 
     [Fact]
-    public async Task Generic_nonzero_exit_is_an_install_failure()
+    public async Task Generic_nonzero_exit_still_journals_verified_install()
     {
         var context = NewContext(FailedProcess(42));
 
         var result = await InstallGitAsync(context);
 
-        Assert.Equal(DependencyInstallOutcome.InstallFailed, result.Outcome);
+        Assert.Equal(
+            DependencyInstallOutcome.VerifiedInstalledWithProcessIssue,
+            result.Outcome);
+        Assert.Equal(
+            DependencyProcessDisposition.Failed,
+            result.ProcessDisposition);
         Assert.Equal(42, result.ExitCode);
-        AssertFailedWithoutRedetection(context, result);
+        Assert.Single(context.ProcessCalls);
+        Assert.Single(context.Detector.PackageIds);
+        Assert.NotNull(result.NonTransactionalEffect);
+    }
+
+    [Theory]
+    [InlineData(unchecked((int)0x8A150109), DependencyProcessDisposition.RebootRequired)]
+    [InlineData(unchecked((int)0x8A15010A), DependencyProcessDisposition.RebootRequired)]
+    [InlineData(unchecked((int)0x8A15010B), DependencyProcessDisposition.RebootInitiated)]
+    [InlineData(unchecked((int)0x8A15010D), DependencyProcessDisposition.AlreadyInstalled)]
+    [InlineData(unchecked((int)0x8A150102), DependencyProcessDisposition.ConcurrentInstallation)]
+    public async Task Official_install_disposition_is_preserved_when_dependency_is_missing(
+        int exitCode,
+        DependencyProcessDisposition expectedDisposition)
+    {
+        var context = NewContext(
+            FailedProcess(exitCode),
+            new RecordingDependencyRedetector(Missing("Git")));
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(DependencyInstallOutcome.InstallFailed, result.Outcome);
+        Assert.Equal(expectedDisposition, result.ProcessDisposition);
+        Assert.Single(context.Detector.PackageIds);
+        Assert.Null(result.NonTransactionalEffect);
+    }
+
+    [Fact]
+    public async Task Already_installed_code_with_exact_redetection_is_journaled()
+    {
+        var context = NewContext(
+            FailedProcess(unchecked((int)0x8A15010D)));
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(
+            DependencyInstallOutcome.VerifiedInstalledWithProcessIssue,
+            result.Outcome);
+        Assert.Equal(
+            DependencyProcessDisposition.AlreadyInstalled,
+            result.ProcessDisposition);
+        Assert.NotNull(result.NonTransactionalEffect);
     }
 
     [Fact]
@@ -487,7 +591,9 @@ public sealed class WingetDependencyInstallerTests
             Cancelled: false,
             StandardOutputTruncated: true,
             StandardErrorTruncated: true);
-        var context = NewContext(process);
+        var context = NewContext(
+            process,
+            new RecordingDependencyRedetector(Missing("Git")));
 
         var result = await InstallGitAsync(context);
 
@@ -505,6 +611,7 @@ public sealed class WingetDependencyInstallerTests
     {
         const string secret = "C:\\secret\\private-token";
         var context = NewContext(
+            detector: new RecordingDependencyRedetector(Missing("Git")),
             runner: new RecordingProcessRunner(
                 new IOException(secret)));
 
@@ -746,12 +853,12 @@ public sealed class WingetDependencyInstallerTests
         Assert.Null(result.NonTransactionalEffect);
     }
 
-    private static void AssertFailedWithoutRedetection(
+    private static void AssertFailedAfterRedetection(
         TestContextData context,
         DependencyInstallResult result)
     {
         Assert.Single(context.ProcessCalls);
-        Assert.Empty(context.Detector.PackageIds);
+        Assert.Single(context.Detector.PackageIds);
         Assert.Null(result.NonTransactionalEffect);
     }
 
