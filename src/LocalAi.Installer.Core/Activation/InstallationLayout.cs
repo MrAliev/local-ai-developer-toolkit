@@ -19,7 +19,8 @@ public sealed class InstallationLayout
         LauncherDirectory = Path.Combine(BinRoot, "launcher");
         LauncherPath = Path.Combine(LauncherDirectory, LocalAi.Contracts.LocalAiPackageLayout.StableLauncherFile);
         CurrentPointerPath = Path.Combine(BinRoot, "current.json");
-        InstallerBackupsRoot = Path.Combine(BinRoot, "installer-backups");
+        InstallerDirectory = Path.Combine(Root, "installer");
+        InstallerBackupsRoot = Path.Combine(InstallerDirectory, "backups");
     }
 
     public string LocalAppData { get; }
@@ -29,6 +30,7 @@ public sealed class InstallationLayout
     public string LauncherDirectory { get; }
     public string LauncherPath { get; }
     public string CurrentPointerPath { get; }
+    public string InstallerDirectory { get; }
     public string InstallerBackupsRoot { get; }
 
     public static InstallationLayout CreateDefault()

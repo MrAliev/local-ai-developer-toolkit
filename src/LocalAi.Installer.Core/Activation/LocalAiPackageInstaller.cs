@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Runtime.Versioning;
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Diagnosis;
@@ -28,9 +29,12 @@ public sealed record LocalAiPackageInstallResult(
     string? PriorVersion,
     string VersionPath,
     LauncherBackupMetadata? LauncherBackup,
-    string? Reason)
+    string? Reason,
+    bool InactivePublishedVersionRetained = false)
 {
     public string? LauncherBackupPath => LauncherBackup?.Path;
+    public string? InactivePublishedVersionPath =>
+        InactivePublishedVersionRetained ? VersionPath : null;
 }
 
 public sealed class LocalAiPackageInstaller
@@ -95,6 +99,12 @@ public sealed class LocalAiPackageInstaller
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentNullException.ThrowIfNull(layout);
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "LocalAi package installation is available only on Windows.");
+        }
+
         ValidatePackageContract(package);
         var existing = inspector.Inspect(layout.LocalAppData);
         var version = package.Manifest.VersionDirectory;
@@ -127,38 +137,46 @@ public sealed class LocalAiPackageInstaller
         var priorVersion = priorPointer.Version;
 
         package.Revalidate();
-        if (existing.State == ExistingLocalAiState.Absent)
+        InstallationLayoutLease layoutLease;
+        try
         {
-            if (Directory.Exists(layout.Root) || File.Exists(layout.Root))
-            {
-                return new(
-                    LocalAiPackageInstallStatus.Refused,
-                    version,
-                    null,
-                    versionPath,
-                    null,
-                    "The existing LocalAi layout is unrecognized.");
-            }
+            layoutLease = InstallationLayoutLease.Acquire(layout);
+        }
+        catch (LocalAiPackageInstallationException)
+        {
+            return new(
+                LocalAiPackageInstallStatus.Refused,
+                version,
+                priorVersion,
+                versionPath,
+                null,
+                "The existing LocalAi layout is unrecognized.");
+        }
 
-            EnsureFreshLayout(layout);
-        }
-        else
+        using (layoutLease)
         {
-            try
-            {
-                ValidateRecognizedLayout(layout);
-            }
-            catch (LocalAiPackageInstallationException)
-            {
-                return new(
-                    LocalAiPackageInstallStatus.Refused,
+            return await InstallUnderLayoutLeaseAsync(
+                    package,
+                    layout,
+                    layoutLease,
                     version,
-                    priorVersion,
                     versionPath,
-                    null,
-                    "The existing LocalAi layout is unrecognized.");
-            }
+                    priorVersion,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private async Task<LocalAiPackageInstallResult> InstallUnderLayoutLeaseAsync(
+        VerifiedPackage package,
+        InstallationLayout layout,
+        InstallationLayoutLease layoutLease,
+        string version,
+        string versionPath,
+        string? priorVersion,
+        CancellationToken cancellationToken)
+    {
 
         var targetExisted = Directory.Exists(versionPath);
         if (targetExisted && !ValidateExactVersion(package, versionPath))
@@ -166,13 +184,12 @@ public sealed class LocalAiPackageInstaller
             return new(
                 LocalAiPackageInstallStatus.ImmutableConflict,
                 version,
-                existing.Version,
+                priorVersion,
                 versionPath,
                 null,
                 "The immutable target version already exists with different content.");
         }
 
-        string? temporaryVersion = null;
         string? launcherTemporary = null;
         var publishedVersion = false;
         var launcherReplaced = false;
@@ -181,25 +198,28 @@ public sealed class LocalAiPackageInstaller
         {
             if (!targetExisted)
             {
-                temporaryVersion = CreateUniqueDirectory(layout.VersionsRoot, ".install-");
+                using var temporaryVersion = layoutLease.CreateVersionTemporary();
                 foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
                 {
-                    await CopyVerifiedAsync(package, file, Path.Combine(temporaryVersion, file), cancellationToken)
+                    await CopyVerifiedAsync(
+                            package,
+                            file,
+                            Path.Combine(temporaryVersion.CanonicalPath, file),
+                            cancellationToken)
                         .ConfigureAwait(false);
                 }
 
-                ValidateExactDirectory(temporaryVersion, LocalAiPackageLayout.VersionRequiredFiles);
+                ValidateExactDirectory(
+                    temporaryVersion.CanonicalPath,
+                    LocalAiPackageLayout.VersionRequiredFiles);
                 package.Revalidate();
                 try
                 {
-                    Directory.Move(temporaryVersion, versionPath);
-                    temporaryVersion = null;
+                    temporaryVersion.PublishAbsent(version);
                     publishedVersion = true;
                 }
-                catch (IOException) when (Directory.Exists(versionPath))
+                catch (LocalAiPackageInstallationException) when (Directory.Exists(versionPath))
                 {
-                    Directory.Delete(temporaryVersion!, recursive: true);
-                    temporaryVersion = null;
                     if (!ValidateExactVersion(package, versionPath))
                     {
                         return new(
@@ -212,6 +232,7 @@ public sealed class LocalAiPackageInstaller
                     }
 
                     targetExisted = true;
+                    layoutLease.RegisterPublishedVersion(version);
                 }
 
                 if (!ValidateExactVersion(package, versionPath))
@@ -315,16 +336,6 @@ public sealed class LocalAiPackageInstaller
                     .ConfigureAwait(false);
             }
 
-            if (temporaryVersion is not null && Directory.Exists(temporaryVersion))
-            {
-                Directory.Delete(temporaryVersion, recursive: true);
-            }
-
-            if (publishedVersion && !string.Equals(ReadPointer(layout.CurrentPointerPath), version, StringComparison.Ordinal))
-            {
-                Directory.Delete(versionPath, recursive: true);
-            }
-
             throw;
         }
     }
@@ -360,19 +371,14 @@ public sealed class LocalAiPackageInstaller
                     null,
                     versionPath,
                     launcherBackup,
-                    "Activation may have changed the current version; manual recovery is required.");
+                    "Activation may have changed the current version; manual recovery is required.",
+                    publishedVersion && !targetExisted);
             }
 
-            CleanupNewVersion(versionPath, publishedVersion, targetExisted);
             if (File.Exists(layout.LauncherPath))
             {
                 File.Delete(layout.LauncherPath);
             }
-
-            DeleteOwnedDirectoryIfEmpty(layout.LauncherDirectory);
-            DeleteOwnedDirectoryIfEmpty(layout.VersionsRoot);
-            DeleteOwnedDirectoryIfEmpty(layout.BinRoot);
-            DeleteOwnedDirectoryIfEmpty(layout.Root);
 
             return new(
                 LocalAiPackageInstallStatus.RolledBack,
@@ -380,7 +386,8 @@ public sealed class LocalAiPackageInstaller
                 null,
                 versionPath,
                 launcherBackup,
-                "Activation failed before a current version was selected.");
+                "Activation failed before a current version was selected.",
+                publishedVersion && !targetExisted);
         }
 
         if (launcherBackup is null)
@@ -412,14 +419,14 @@ public sealed class LocalAiPackageInstaller
 
         if (string.Equals(actualVersion, priorVersion, StringComparison.Ordinal))
         {
-            CleanupNewVersion(versionPath, publishedVersion, targetExisted);
             return new(
                 LocalAiPackageInstallStatus.RolledBack,
                 version,
                 priorVersion,
                 versionPath,
                 launcherBackup,
-                "Activation failed and the prior version remained selected.");
+                "Activation failed and the prior version remained selected.",
+                publishedVersion && !targetExisted);
         }
 
         ProcessResult? rollback = null;
@@ -441,14 +448,14 @@ public sealed class LocalAiPackageInstaller
         if (rollback is { ExitCode: 0, TimedOut: false, Cancelled: false } &&
             string.Equals(ReadPointer(layout.CurrentPointerPath), priorVersion, StringComparison.Ordinal))
         {
-            CleanupNewVersion(versionPath, publishedVersion, targetExisted);
             return new(
                 LocalAiPackageInstallStatus.RolledBack,
                 version,
                 priorVersion,
                 versionPath,
                 launcherBackup,
-                "Activation failed and the prior version was restored.");
+                "Activation failed and the prior version was restored.",
+                publishedVersion && !targetExisted);
         }
 
         return new(
@@ -490,29 +497,6 @@ public sealed class LocalAiPackageInstaller
         using var right = new FileStream(rightPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         return left.Length == right.Length &&
                CryptographicOperations.FixedTimeEquals(SHA256.HashData(left), SHA256.HashData(right));
-    }
-
-    private static void CleanupNewVersion(string versionPath, bool publishedVersion, bool targetExisted)
-    {
-        if (publishedVersion && !targetExisted && Directory.Exists(versionPath))
-        {
-            ValidateExactDirectory(versionPath, LocalAiPackageLayout.VersionRequiredFiles);
-            Directory.Delete(versionPath, recursive: true);
-        }
-    }
-
-    private static void DeleteOwnedDirectoryIfEmpty(string path)
-    {
-        if (!Directory.Exists(path))
-        {
-            return;
-        }
-
-        ValidateDirectory(path);
-        if (!Directory.EnumerateFileSystemEntries(path).Any())
-        {
-            Directory.Delete(path, recursive: false);
-        }
     }
 
     private static bool ValidateExactVersion(VerifiedPackage package, string versionPath)

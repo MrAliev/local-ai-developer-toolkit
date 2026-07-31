@@ -3,6 +3,7 @@ using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Releases;
+using System.Runtime.Versioning;
 
 namespace LocalAi.Installer.Core.Tests;
 
@@ -12,6 +13,11 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Path.GetTempPath(),
         "LocalAiPackageInstallerTests",
         Guid.NewGuid().ToString("N"));
+
+    public LocalAiPackageInstallerTests()
+    {
+        Directory.CreateDirectory(localAppData);
+    }
 
     [Fact]
     public void Package_layout_keeps_stable_launcher_outside_version_files()
@@ -123,6 +129,137 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task Runtime_siblings_under_LocalAi_root_are_preserved()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var runtime = Path.Combine(layout.Root, "runtime");
+        Directory.CreateDirectory(runtime);
+        File.WriteAllText(Path.Combine(runtime, "broker.lock"), "keep");
+        using var package = Package("v2");
+        var runner = new RecordingRunner((_, arguments, _, _) =>
+        {
+            WritePointer(arguments[1]);
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Installed, result.Status);
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(runtime, "broker.lock")));
+    }
+
+    [Theory]
+    [InlineData("unexpected.bin")]
+    [InlineData("CON")]
+    public async Task File_shaped_entries_under_versions_are_refused(string name)
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var unexpected = Path.Combine(layout.VersionsRoot, name);
+        File.WriteAllText(unexpected, "keep");
+        using var package = Package("v2");
+        var runner = new RecordingRunner((_, _, _, _) => throw new InvalidOperationException());
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Refused, result.Status);
+        Assert.Empty(runner.Calls);
+        Assert.Equal("keep", File.ReadAllText(unexpected));
+    }
+
+    [Fact]
+    public async Task Existing_version_with_extra_entry_is_refused_without_mutation()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var extra = Path.Combine(layout.VersionsRoot, "v1", "unexpected.txt");
+        File.WriteAllText(extra, "keep");
+        using var package = Package("v2");
+        var runner = new RecordingRunner((_, _, _, _) => throw new InvalidOperationException());
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Refused, result.Status);
+        Assert.Empty(runner.Calls);
+        Assert.Equal("keep", File.ReadAllText(extra));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Layout_lease_atomically_creates_and_blocks_root_rename()
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+
+        using var lease = InstallationLayoutLease.Acquire(layout);
+
+        Assert.True(Directory.Exists(layout.VersionsRoot));
+        Assert.True(Directory.Exists(layout.LauncherDirectory));
+        Assert.True(Directory.Exists(layout.InstallerBackupsRoot));
+        Assert.ThrowsAny<IOException>(() =>
+            Directory.Move(layout.Root, layout.Root + ".moved"));
+        lease.Revalidate();
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Layout_lease_refuses_file_collision_without_replacing_it()
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        File.WriteAllText(layout.Root, "winner");
+
+        Assert.Throws<LocalAiPackageInstallationException>(() =>
+            InstallationLayoutLease.Acquire(layout));
+
+        Assert.Equal("winner", File.ReadAllText(layout.Root));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Layout_lease_refuses_unsafe_version_directory_without_deleting_it()
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var unsafeVersion = Path.Combine(layout.VersionsRoot, "CON");
+        Directory.CreateDirectory(unsafeVersion);
+
+        Assert.Throws<LocalAiPackageInstallationException>(() =>
+            InstallationLayoutLease.Acquire(layout));
+
+        Assert.True(Directory.Exists(unsafeVersion));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Layout_version_temporary_publishes_absent_and_retains_identity()
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        using var lease = InstallationLayoutLease.Acquire(layout);
+        using var temporary = lease.CreateVersionTemporary();
+        foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
+        {
+            File.WriteAllBytes(Path.Combine(temporary.CanonicalPath, file), Content(file));
+        }
+
+        temporary.PublishAbsent("v1");
+
+        var versionPath = Path.Combine(layout.VersionsRoot, "v1");
+        Assert.Equal(versionPath, temporary.CanonicalPath);
+        Assert.True(Directory.Exists(versionPath));
+        Assert.ThrowsAny<IOException>(() =>
+            Directory.Move(versionPath, versionPath + ".moved"));
+        lease.Revalidate();
+    }
+
+    [Fact]
     public async Task Exact_existing_version_is_idempotent_but_still_updates_launcher()
     {
         CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"), packageContent: true);
@@ -200,7 +337,10 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.Equal(LocalAiPackageInstallStatus.RolledBack, result.Status);
         Assert.Equal(priorLauncher, File.ReadAllBytes(layout.LauncherPath));
         Assert.Equal("v1", ReadPointerVersion(layout.CurrentPointerPath));
-        Assert.False(Directory.Exists(Path.Combine(layout.VersionsRoot, "v2")));
+        Assert.True(Directory.Exists(Path.Combine(layout.VersionsRoot, "v2")));
+        Assert.Equal(
+            Path.Combine(layout.VersionsRoot, "v2"),
+            result.InactivePublishedVersionPath);
         Assert.Equal(2, runner.Calls.Count);
     }
 
@@ -306,9 +446,12 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         var result = await Installer(runner).InstallAsync(package, layout, TestContext.Current.CancellationToken);
 
         Assert.Equal(expected, result.Status);
-        Assert.Equal(pointerChanged, Directory.Exists(Path.Combine(layout.VersionsRoot, "v1")));
+        Assert.True(Directory.Exists(Path.Combine(layout.VersionsRoot, "v1")));
+        Assert.Equal(
+            Path.Combine(layout.VersionsRoot, "v1"),
+            result.InactivePublishedVersionPath);
         Assert.Equal(pointerChanged, File.Exists(layout.LauncherPath));
-        Assert.Equal(pointerChanged, Directory.Exists(layout.Root));
+        Assert.True(Directory.Exists(layout.Root));
     }
 
     [Fact]

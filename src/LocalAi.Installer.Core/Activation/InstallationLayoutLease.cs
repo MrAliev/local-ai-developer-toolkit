@@ -1,0 +1,830 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Security.Cryptography;
+using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
+using LocalAi.Installer.Core.Releases;
+using Microsoft.Win32.SafeHandles;
+
+namespace LocalAi.Installer.Core.Activation;
+
+[SupportedOSPlatform("windows")]
+public sealed class InstallationLayoutLease : IDisposable
+{
+    private readonly List<DirectoryEvidence> directories;
+    private readonly List<VersionTemporary> versionTemporaries = [];
+    private bool disposed;
+
+    private InstallationLayoutLease(
+        InstallationLayout layout,
+        List<DirectoryEvidence> directories)
+    {
+        Layout = layout;
+        this.directories = directories;
+    }
+
+    public InstallationLayout Layout { get; }
+
+    public VersionTemporary CreateVersionTemporary()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        Revalidate();
+        var versions = EvidenceFor(Layout.VersionsRoot);
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            var name = ".install-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(16)) + ".tmp";
+            var path = Path.Combine(Layout.VersionsRoot, name);
+            try
+            {
+                var handle = NativeDirectory.CreateExclusive(versions.Handle, name, path);
+                var temporary = new VersionTemporary(this, handle, path);
+                versionTemporaries.Add(temporary);
+                Revalidate();
+                return temporary;
+            }
+            catch (LocalAiPackageInstallationException) when (Directory.Exists(path) || File.Exists(path))
+            {
+            }
+        }
+
+        throw Failure();
+    }
+
+    public static InstallationLayoutLease Acquire(InstallationLayout layout)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "Protected LocalAi installation layout is available only on Windows.");
+        }
+
+        var directories = new List<DirectoryEvidence>();
+        try
+        {
+            var localAppData = NativeDirectory.OpenAbsolute(layout.LocalAppData);
+            directories.Add(Evidence(localAppData, layout.LocalAppData));
+            var root = NativeDirectory.OpenOrCreate(
+                localAppData,
+                "LocalAi",
+                layout.Root);
+            directories.Add(Evidence(root.Handle, layout.Root));
+            ValidateRootShape(layout.Root);
+            var bin = NativeDirectory.OpenOrCreate(root.Handle, "bin", layout.BinRoot);
+            directories.Add(Evidence(bin.Handle, layout.BinRoot));
+            ValidateBinNames(layout.BinRoot);
+
+            var versions = NativeDirectory.OpenOrCreate(
+                bin.Handle,
+                "versions",
+                layout.VersionsRoot);
+            directories.Add(Evidence(versions.Handle, layout.VersionsRoot));
+            var launcher = NativeDirectory.OpenOrCreate(
+                bin.Handle,
+                "launcher",
+                layout.LauncherDirectory);
+            directories.Add(Evidence(launcher.Handle, layout.LauncherDirectory));
+            var installer = NativeDirectory.OpenOrCreate(
+                root.Handle,
+                "installer",
+                layout.InstallerDirectory);
+            directories.Add(Evidence(installer.Handle, layout.InstallerDirectory));
+            ValidateExactNames(layout.InstallerDirectory, ["backups"]);
+            var backups = NativeDirectory.OpenOrCreate(
+                installer.Handle,
+                "backups",
+                layout.InstallerBackupsRoot);
+            directories.Add(Evidence(backups.Handle, layout.InstallerBackupsRoot));
+
+            ValidateBinShape(layout);
+            ValidateInstallerShape(layout);
+            foreach (var entry in Directory.EnumerateFileSystemEntries(layout.VersionsRoot))
+            {
+                var name = Path.GetFileName(entry);
+                if (!Directory.Exists(entry) || !LocalAiVersionName.IsSafe(name))
+                {
+                    throw Failure();
+                }
+
+                ValidateExactVersionDirectory(
+                    entry,
+                    LocalAiPackageLayout.VersionRequiredFiles);
+
+                var versionHandle = NativeDirectory.OpenExisting(
+                    versions.Handle,
+                    name,
+                    entry);
+                directories.Add(Evidence(versionHandle, entry));
+            }
+
+            var result = new InstallationLayoutLease(layout, directories);
+            directories = null!;
+            result.Revalidate();
+            return result;
+        }
+        catch (LocalAiPackageInstallationException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+            Win32Exception or System.Security.SecurityException or
+            ArgumentException or NotSupportedException)
+        {
+            throw Failure();
+        }
+        finally
+        {
+            if (directories is not null)
+            {
+                foreach (var directory in directories.AsEnumerable().Reverse())
+                {
+                    directory.Handle.Dispose();
+                }
+            }
+        }
+    }
+
+    public void Revalidate()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        foreach (var directory in directories)
+        {
+            var identity = WindowsStagingRootLease.GetIdentity(directory.Handle);
+            if (identity != directory.Identity ||
+                identity.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                !identity.Attributes.HasFlag(FileAttributes.Directory) ||
+                !string.Equals(
+                    WindowsStagingRootLease.GetFinalPath(directory.Handle),
+                    directory.CanonicalPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw Failure();
+            }
+        }
+
+        ValidateRootShape(Layout.Root);
+        ValidateBinShape(Layout);
+        ValidateInstallerShape(Layout);
+        var expectedVersions = directories
+            .Where(directory => IsBelow(directory.CanonicalPath, Layout.VersionsRoot))
+            .Select(directory => Path.GetFileName(directory.CanonicalPath))
+            .Concat(versionTemporaries.Select(temporary => Path.GetFileName(temporary.CanonicalPath)))
+            .ToHashSet(StringComparer.Ordinal);
+        var actualVersions = Directory.EnumerateFileSystemEntries(Layout.VersionsRoot)
+            .Select(path => Path.GetFileName(path)!)
+            .ToArray();
+        if (!expectedVersions.SetEquals(actualVersions))
+        {
+            throw Failure();
+        }
+
+        foreach (var directory in directories.Where(directory =>
+                     IsBelow(directory.CanonicalPath, Layout.VersionsRoot)))
+        {
+            ValidateExactVersionDirectory(
+                directory.CanonicalPath,
+                LocalAiPackageLayout.VersionRequiredFiles);
+        }
+    }
+
+    public void RegisterPublishedVersion(string version)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!LocalAiVersionName.IsSafe(version))
+        {
+            throw Failure();
+        }
+
+        var versions = directories.Single(directory =>
+            string.Equals(
+                directory.CanonicalPath,
+                Layout.VersionsRoot,
+                StringComparison.OrdinalIgnoreCase));
+        var expectedPath = Path.Combine(Layout.VersionsRoot, version);
+        var handle = NativeDirectory.OpenExisting(
+            versions.Handle,
+            version,
+            expectedPath);
+        try
+        {
+            directories.Add(Evidence(handle, expectedPath));
+            handle = null!;
+            Revalidate();
+        }
+        finally
+        {
+            handle?.Dispose();
+        }
+    }
+
+    private DirectoryEvidence EvidenceFor(string canonicalPath) =>
+        directories.Single(directory => string.Equals(
+            directory.CanonicalPath,
+            canonicalPath,
+            StringComparison.OrdinalIgnoreCase));
+
+    private void Publish(VersionTemporary temporary, string version)
+    {
+        if (!versionTemporaries.Contains(temporary) || !LocalAiVersionName.IsSafe(version))
+        {
+            throw Failure();
+        }
+
+        Revalidate();
+        ValidateExactVersionDirectory(
+            temporary.CanonicalPath,
+            LocalAiPackageLayout.VersionRequiredFiles);
+        var targetPath = Path.Combine(Layout.VersionsRoot, version);
+        NativeDirectory.Rename(
+            temporary.Handle,
+            EvidenceFor(Layout.VersionsRoot).Handle,
+            version);
+        temporary.MarkPublished(targetPath);
+        versionTemporaries.Remove(temporary);
+        directories.Add(Evidence(temporary.Handle, targetPath));
+        Revalidate();
+    }
+
+    private void Cleanup(VersionTemporary temporary)
+    {
+        if (!versionTemporaries.Remove(temporary))
+        {
+            return;
+        }
+
+        temporary.Revalidate();
+        foreach (var entry in Directory.EnumerateFileSystemEntries(temporary.CanonicalPath))
+        {
+            var attributes = File.GetAttributes(entry);
+            if (attributes.HasFlag(FileAttributes.Directory) ||
+                attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                temporary.Handle.Dispose();
+                return;
+            }
+
+            File.Delete(entry);
+        }
+
+        temporary.Revalidate();
+        NativeDirectory.DeleteEmpty(temporary.Handle);
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        foreach (var directory in directories.AsEnumerable().Reverse())
+        {
+            directory.Handle.Dispose();
+        }
+    }
+
+    private static void ValidateExactVersionDirectory(
+        string directory,
+        IEnumerable<string> requiredFiles)
+    {
+        ValidateDirectoryPath(directory);
+        var required = requiredFiles.ToHashSet(StringComparer.Ordinal);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+        {
+            if (!required.Remove(Path.GetFileName(entry)))
+            {
+                throw Failure();
+            }
+
+            ValidateOptionalFile(entry);
+        }
+
+        if (required.Count != 0)
+        {
+            throw Failure();
+        }
+    }
+
+    private static DirectoryEvidence Evidence(SafeFileHandle handle, string expectedPath)
+    {
+        WindowsStagingRootLease.ValidateDirectoryHandle(handle, expectedPath);
+        var identity = WindowsStagingRootLease.GetIdentity(handle);
+        if (identity.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            handle.Dispose();
+            throw Failure();
+        }
+
+        return new(
+            handle,
+            identity,
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(expectedPath)));
+    }
+
+    private static void ValidateBinNames(string binRoot)
+    {
+        if (!Directory.Exists(binRoot))
+        {
+            throw Failure();
+        }
+
+        var allowed = new HashSet<string>(
+            ["versions", "launcher", "current.json", "current.lock"],
+            StringComparer.Ordinal);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(binRoot))
+        {
+            if (!allowed.Contains(Path.GetFileName(entry)))
+            {
+                throw Failure();
+            }
+        }
+    }
+
+    private static void ValidateBinShape(InstallationLayout layout)
+    {
+        ValidateExactNames(
+            layout.BinRoot,
+            ["versions", "launcher", "current.json", "current.lock"]);
+        ValidateDirectoryPath(layout.VersionsRoot);
+        ValidateDirectoryPath(layout.LauncherDirectory);
+        ValidateOptionalFile(layout.CurrentPointerPath);
+        ValidateOptionalFile(Path.Combine(layout.BinRoot, "current.lock"));
+    }
+
+    private static void ValidateRootShape(string root)
+    {
+        foreach (var entry in Directory.EnumerateFileSystemEntries(root))
+        {
+            var name = Path.GetFileName(entry);
+            if (name is "bin" or "installer")
+            {
+                continue;
+            }
+
+            ValidateDirectoryPath(entry);
+        }
+    }
+
+    private static void ValidateInstallerShape(InstallationLayout layout)
+    {
+        ValidateExactNames(layout.InstallerDirectory, ["backups"]);
+        ValidateDirectoryPath(layout.InstallerBackupsRoot);
+    }
+
+    private static void ValidateExactNames(string directory, IEnumerable<string> allowed)
+    {
+        var allowedNames = new HashSet<string>(allowed, StringComparer.Ordinal);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+        {
+            if (!allowedNames.Contains(Path.GetFileName(entry)))
+            {
+                throw Failure();
+            }
+        }
+    }
+
+    private static void ValidateDirectoryPath(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            throw Failure();
+        }
+
+        var attributes = File.GetAttributes(path);
+        if (!attributes.HasFlag(FileAttributes.Directory) ||
+            attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw Failure();
+        }
+    }
+
+    private static void ValidateOptionalFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            if (Directory.Exists(path))
+            {
+                throw Failure();
+            }
+
+            return;
+        }
+
+        var attributes = File.GetAttributes(path);
+        if (attributes.HasFlag(FileAttributes.Directory) ||
+            attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw Failure();
+        }
+    }
+
+    private static bool IsBelow(string path, string root)
+    {
+        var prefix = Path.TrimEndingDirectorySeparator(root) +
+                     Path.DirectorySeparatorChar;
+        return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static LocalAiPackageInstallationException Failure() =>
+        new("The LocalAi installation layout is unsafe.");
+
+    private sealed record DirectoryEvidence(
+        SafeFileHandle Handle,
+        WindowsStagingRootLease.FileIdentity Identity,
+        string CanonicalPath);
+
+    public sealed class VersionTemporary : IDisposable
+    {
+        private readonly InstallationLayoutLease owner;
+        private readonly WindowsStagingRootLease.FileIdentity identity;
+        private bool published;
+        private bool disposed;
+
+        internal VersionTemporary(
+            InstallationLayoutLease owner,
+            SafeFileHandle handle,
+            string canonicalPath)
+        {
+            this.owner = owner;
+            Handle = handle;
+            CanonicalPath = Path.GetFullPath(canonicalPath);
+            identity = WindowsStagingRootLease.GetIdentity(handle);
+            Revalidate();
+        }
+
+        public string CanonicalPath { get; private set; }
+        internal SafeFileHandle Handle { get; }
+
+        public void PublishAbsent(string version)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (published)
+            {
+                throw Failure();
+            }
+
+            owner.Publish(this, version);
+        }
+
+        internal void MarkPublished(string canonicalPath)
+        {
+            CanonicalPath = Path.GetFullPath(canonicalPath);
+            published = true;
+        }
+
+        internal void Revalidate()
+        {
+            if (WindowsStagingRootLease.GetIdentity(Handle) != identity ||
+                !string.Equals(
+                    WindowsStagingRootLease.GetFinalPath(Handle),
+                    CanonicalPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw Failure();
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+            if (!published)
+            {
+                owner.Cleanup(this);
+                Handle.Dispose();
+            }
+        }
+    }
+
+    private static class NativeDirectory
+    {
+        private const uint FileListDirectory = 0x00000001;
+        private const uint FileReadAttributes = 0x00000080;
+        private const uint Delete = 0x00010000;
+        private const uint ReadControl = 0x00020000;
+        private const uint Synchronize = 0x00100000;
+        private const uint FileAttributeNormal = 0x00000080;
+        private const uint FileShareRead = 0x00000001;
+        private const uint FileShareWrite = 0x00000002;
+        private const uint FileOpen = 1;
+        private const uint FileCreate = 2;
+        private const uint FileOpenIf = 3;
+        private const uint FileDirectoryFile = 0x00000001;
+        private const uint FileSynchronousIoNonalert = 0x00000020;
+        private const uint FileOpenReparsePoint = 0x00200000;
+        private const uint ObjCaseInsensitive = 0x00000040;
+        private const uint OpenExistingDisposition = 3;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+        private const uint FileFlagOpenReparsePoint = 0x00200000;
+
+        public static SafeFileHandle OpenAbsolute(string path)
+        {
+            var handle = CreateFileW(
+                path,
+                FileListDirectory | FileReadAttributes | ReadControl | Synchronize,
+                FileShare.Read | FileShare.Write,
+                IntPtr.Zero,
+                OpenExistingDisposition,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                handle.Dispose();
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            return handle;
+        }
+
+        public static OpenedDirectory OpenOrCreate(
+            SafeFileHandle parent,
+            string name,
+            string expectedPath) =>
+            OpenRelative(parent, name, expectedPath, FileOpenIf);
+
+        public static SafeFileHandle OpenExisting(
+            SafeFileHandle parent,
+            string name,
+            string expectedPath) =>
+            OpenRelative(parent, name, expectedPath, FileOpen).Handle;
+
+        public static SafeFileHandle CreateExclusive(
+            SafeFileHandle parent,
+            string name,
+            string expectedPath) =>
+            OpenRelative(
+                parent,
+                name,
+                expectedPath,
+                FileCreate,
+                FileListDirectory | FileReadAttributes | Delete | ReadControl | Synchronize).Handle;
+
+        private static OpenedDirectory OpenRelative(
+            SafeFileHandle parent,
+            string name,
+            string expectedPath,
+            uint disposition,
+            uint desiredAccess = FileListDirectory | FileReadAttributes | ReadControl | Synchronize)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name is "." or ".." ||
+                name.IndexOfAny(['\\', '/', ':']) >= 0)
+            {
+                throw Failure();
+            }
+
+            var nameBuffer = IntPtr.Zero;
+            var namePointer = IntPtr.Zero;
+            var descriptorPointer = IntPtr.Zero;
+            var nativeHandle = IntPtr.Zero;
+            var parentRef = false;
+            try
+            {
+                nameBuffer = Marshal.StringToHGlobalUni(name);
+                var unicode = new UnicodeString
+                {
+                    Length = checked((ushort)(name.Length * sizeof(char))),
+                    MaximumLength = checked((ushort)((name.Length + 1) * sizeof(char))),
+                    Buffer = nameBuffer,
+                };
+                namePointer = Marshal.AllocHGlobal(Marshal.SizeOf<UnicodeString>());
+                Marshal.StructureToPtr(unicode, namePointer, false);
+                var descriptor = SecurityDescriptor();
+                descriptorPointer = Marshal.AllocHGlobal(descriptor.Length);
+                Marshal.Copy(descriptor, 0, descriptorPointer, descriptor.Length);
+                parent.DangerousAddRef(ref parentRef);
+                var attributes = new ObjectAttributes
+                {
+                    Length = Marshal.SizeOf<ObjectAttributes>(),
+                    RootDirectory = parent.DangerousGetHandle(),
+                    ObjectName = namePointer,
+                    Attributes = ObjCaseInsensitive,
+                    SecurityDescriptor = descriptorPointer,
+                };
+                var status = NtCreateFile(
+                    out nativeHandle,
+                    desiredAccess,
+                    ref attributes,
+                    out var io,
+                    IntPtr.Zero,
+                    FileAttributeNormal,
+                    FileShareRead | FileShareWrite,
+                    disposition,
+                    FileDirectoryFile | FileSynchronousIoNonalert | FileOpenReparsePoint,
+                    IntPtr.Zero,
+                    0);
+                if (status < 0 || nativeHandle is 0 or -1)
+                {
+                    throw Failure();
+                }
+
+                var handle = new SafeFileHandle(nativeHandle, ownsHandle: true);
+                nativeHandle = IntPtr.Zero;
+                WindowsStagingRootLease.ValidateDirectoryHandle(handle, expectedPath);
+                return new(handle, io.Information.ToUInt64() == 2);
+            }
+            finally
+            {
+                if (nativeHandle is not 0 and not -1)
+                {
+                    new SafeFileHandle(nativeHandle, ownsHandle: true).Dispose();
+                }
+
+                if (parentRef)
+                {
+                    parent.DangerousRelease();
+                }
+
+                if (descriptorPointer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(descriptorPointer);
+                }
+
+                if (namePointer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(namePointer);
+                }
+
+                if (nameBuffer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(nameBuffer);
+                }
+            }
+        }
+
+        public static void Rename(
+            SafeFileHandle handle,
+            SafeFileHandle targetParent,
+            string targetName)
+        {
+            if (string.IsNullOrWhiteSpace(targetName) || targetName is "." or ".." ||
+                targetName.IndexOfAny(['\\', '/', ':']) >= 0)
+            {
+                throw Failure();
+            }
+
+            var bytes = System.Text.Encoding.Unicode.GetBytes(targetName);
+            var rootOffset = IntPtr.Size == 8 ? 8 : 4;
+            var lengthOffset = rootOffset + IntPtr.Size;
+            var nameOffset = lengthOffset + sizeof(uint);
+            var buffer = Marshal.AllocHGlobal(nameOffset + bytes.Length);
+            var parentRef = false;
+            try
+            {
+                for (var index = 0; index < nameOffset; index++)
+                {
+                    Marshal.WriteByte(buffer, index, 0);
+                }
+
+                targetParent.DangerousAddRef(ref parentRef);
+                Marshal.WriteIntPtr(buffer, rootOffset, targetParent.DangerousGetHandle());
+                Marshal.WriteInt32(buffer, lengthOffset, bytes.Length);
+                Marshal.Copy(bytes, 0, buffer + nameOffset, bytes.Length);
+                var status = NtSetInformationFile(
+                    handle,
+                    out _,
+                    buffer,
+                    (uint)(nameOffset + bytes.Length),
+                    10);
+                if (status < 0)
+                {
+                    throw Failure();
+                }
+            }
+            finally
+            {
+                if (parentRef)
+                {
+                    targetParent.DangerousRelease();
+                }
+
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        public static void DeleteEmpty(SafeFileHandle handle)
+        {
+            var disposition = new FileDispositionInformation { DeleteFile = true };
+            if (!SetFileInformationByHandle(
+                    handle,
+                    4,
+                    ref disposition,
+                    (uint)Marshal.SizeOf<FileDispositionInformation>()))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+
+        private static byte[] SecurityDescriptor()
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var user = identity.User ?? throw Failure();
+            var security = new DirectorySecurity();
+            security.SetOwner(user);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            const InheritanceFlags inheritance =
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+            security.AddAccessRule(new FileSystemAccessRule(
+                user,
+                FileSystemRights.FullControl,
+                inheritance,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                FileSystemRights.FullControl,
+                inheritance,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+                FileSystemRights.FullControl,
+                inheritance,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            return security.GetSecurityDescriptorBinaryForm();
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(
+            string fileName,
+            uint desiredAccess,
+            FileShare shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtCreateFile(
+            out IntPtr fileHandle,
+            uint desiredAccess,
+            ref ObjectAttributes objectAttributes,
+            out IoStatusBlock ioStatusBlock,
+            IntPtr allocationSize,
+            uint fileAttributes,
+            uint shareAccess,
+            uint createDisposition,
+            uint createOptions,
+            IntPtr eaBuffer,
+            uint eaLength);
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtSetInformationFile(
+            SafeFileHandle fileHandle,
+            out IoStatusBlock ioStatusBlock,
+            IntPtr fileInformation,
+            uint length,
+            int fileInformationClass);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetFileInformationByHandle(
+            SafeFileHandle fileHandle,
+            int fileInformationClass,
+            ref FileDispositionInformation fileInformation,
+            uint bufferSize);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileDispositionInformation
+        {
+            [MarshalAs(UnmanagedType.Bool)]
+            public bool DeleteFile;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct UnicodeString
+        {
+            public ushort Length;
+            public ushort MaximumLength;
+            public IntPtr Buffer;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ObjectAttributes
+        {
+            public int Length;
+            public IntPtr RootDirectory;
+            public IntPtr ObjectName;
+            public uint Attributes;
+            public IntPtr SecurityDescriptor;
+            public IntPtr SecurityQualityOfService;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoStatusBlock
+        {
+            public IntPtr Status;
+            public UIntPtr Information;
+        }
+
+        internal sealed record OpenedDirectory(SafeFileHandle Handle, bool Created);
+    }
+}
