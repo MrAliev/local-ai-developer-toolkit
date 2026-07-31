@@ -1,4 +1,5 @@
 ﻿using System.Windows;
+using LocalAi.Installer.ViewModels;
 
 namespace LocalAi.Installer;
 
@@ -24,5 +25,6 @@ public partial class MainWindow : Window
 
     private void OnRunClicked(object sender, RoutedEventArgs e)
     {
+        viewModel.Run();
     }
 }
