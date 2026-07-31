@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+    <ProjectReference Include="..\LocalAi.Launcher\LocalAi.Launcher.csproj" />
+    <ProjectReference Include="..\LocalLm.Core\LocalLm.Core.csproj" />
+  </ItemGroup>
+</Project>
