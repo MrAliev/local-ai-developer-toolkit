@@ -754,6 +754,44 @@ public sealed class ReleasePackageVerifierTests : IDisposable
     }
 
     [Fact]
+    public void Verify_allows_same_model_name_at_distinct_supported_contexts()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var original = CreateManifest([1, 2, 3]);
+        var manifest = new ReleaseManifest(
+            original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
+            original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
+            [
+                new ManifestModel("model:latest", 2048, 1, 1),
+                new ManifestModel("model:latest", 4096, 1, 2),
+            ]);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+
+        var verified = new ReleaseManifestVerifier(key.ExportSubjectPublicKeyInfo())
+            .Verify(json, Sign(key, json));
+
+        Assert.Equal(2, verified.Models.Count);
+    }
+
+    [Fact]
+    public void Verify_rejects_case_insensitive_duplicate_model_name_and_context()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var original = CreateManifest([1, 2, 3]);
+        var manifest = new ReleaseManifest(
+            original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
+            original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
+            [
+                new ManifestModel("model:latest", 2048, 1, 1),
+                new ManifestModel("MODEL:latest", 2048, 1, 2),
+            ]);
+        Assert.Throws<ReleaseVerificationException>(() =>
+            ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest));
+    }
+
+    [Fact]
     public async Task VerifyAsync_requires_new_local_non_reparse_staging_root()
     {
         Directory.CreateDirectory(tempRoot);

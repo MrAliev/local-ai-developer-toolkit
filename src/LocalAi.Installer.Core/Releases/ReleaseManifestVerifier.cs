@@ -220,13 +220,16 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
             throw InvalidManifest();
         }
 
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var modelOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var model in manifest.Models)
         {
+            var normalizedName = model?.Name?.Normalize(NormalizationForm.FormC) ?? string.Empty;
+            var optionKey = $"{normalizedName}\u001F{model?.ContextTokens}";
             if (model is null ||
+                string.IsNullOrWhiteSpace(model.Name) ||
                 !SafeModelName().IsMatch(model.Name) ||
-                !names.Add(model.Name.Normalize(NormalizationForm.FormC)) ||
-                model.Name != model.Name.Normalize(NormalizationForm.FormC) ||
+                !modelOptions.Add(optionKey) ||
+                model.Name != normalizedName ||
                 !IsSupportedContext(model.ContextTokens) ||
                 model.DownloadSize is <= 0 or > MaximumModelSize ||
                 model.EstimatedVramBytes is <= 0 or > MaximumModelSize)
