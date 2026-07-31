@@ -5,6 +5,63 @@ using System.Text.Json.Serialization.Metadata;
 
 namespace CodeSearch.Core.Search;
 
+public sealed record SearchQualityProfile(
+    string Model,
+    float MinVectorScore,
+    string CorpusVersion,
+    string GenerationId,
+    int CaseCount,
+    DateTimeOffset CalibratedAtUtc,
+    string SelectionRule)
+{
+    private static readonly IReadOnlyDictionary<string, SearchQualityProfile> Profiles =
+        new Dictionary<string, SearchQualityProfile>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["qwen3-embedding:8b-q8_0"] = new(
+                "qwen3-embedding:8b-q8_0",
+                0.43f,
+                "schema1:sha256:d675331cb7008a67a7335c5a1f2aba85e382974b71b1473e34b9e4685f0d7a52",
+                "399fcc0b53b35ede05dc64f1a84cbc3bfc6bf382bdd2de7d71f2f9dc1ae8debc",
+                24,
+                new DateTimeOffset(2026, 7, 30, 23, 55, 0, TimeSpan.Zero),
+                "Lowest conservative hundredth above every observed no-answer vector score " +
+                "(maximum 0.426) without excluding an observed relevant score " +
+                "(minimum 0.508); recall@10 is therefore not reduced by the floor.")
+        };
+
+    public static SearchQualityProfile Require(string model)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        if (Profiles.TryGetValue(model, out var profile))
+        {
+            return profile;
+        }
+
+        throw new SearchNotReadyException(
+            $"Semantic relevance threshold not calibrated for embedding model '{model}'.");
+    }
+
+    public static SearchOptions Resolve(string model, SearchOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.AllowUncalibratedModelForEvaluation)
+        {
+            return options;
+        }
+
+        var profile = Require(model);
+        if (options.MinVectorScore is { } requested &&
+            requested != profile.MinVectorScore)
+        {
+            throw new SearchNotReadyException(
+                $"MinVectorScore {requested} does not match the calibrated threshold " +
+                $"{profile.MinVectorScore} for '{model}'. Only evaluation may opt out.");
+        }
+
+        return options with { MinVectorScore = profile.MinVectorScore };
+    }
+}
+
 public sealed record SearchEvaluationTarget(
     string Path,
     string? Symbol);

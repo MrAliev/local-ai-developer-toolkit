@@ -110,6 +110,82 @@ public class SearchEngineTests : IDisposable
     }
 
     [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    [InlineData(-1.01f)]
+    [InlineData(1.01f)]
+    public void Rejects_invalid_vector_score_floors(float floor)
+    {
+        var options = new SearchOptions { MinVectorScore = floor };
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => SearchEngine.Search(
+                _index,
+                Unit(1, 0, 0),
+                "anything",
+                options,
+                _root));
+    }
+
+    [Fact]
+    public void Excludes_below_floor_vectors_before_ranking()
+    {
+        var hits = SearchEngine.Search(
+            _index,
+            Unit(1, 0, 0),
+            "unrelated",
+            new SearchOptions { TopK = 10, MinVectorScore = 0.99f },
+            _root);
+
+        var hit = Assert.Single(hits);
+        Assert.Equal("PaymentService.Charge", hit.Symbol);
+    }
+
+    [Fact]
+    public void Includes_a_vector_exactly_at_the_floor()
+    {
+        var hits = SearchEngine.Search(
+            _index,
+            Unit(1, 0, 0),
+            "unrelated",
+            new SearchOptions { TopK = 10, MinVectorScore = 1f },
+            _root);
+
+        Assert.Contains(hits, hit => hit.Symbol == "PaymentService.Charge");
+    }
+
+    [Fact]
+    public void Lexical_match_survives_when_its_vector_is_below_the_floor()
+    {
+        var hits = SearchEngine.Search(
+            _index,
+            Unit(1, 0, 0),
+            "where is TrustSetFlags",
+            new SearchOptions { TopK = 10, MinVectorScore = 1f },
+            _root);
+
+        var lexical = Assert.Single(
+            hits,
+            hit => hit.Symbol == "RobotScenario.TrustSetFlags");
+        Assert.Equal(0, lexical.VectorScore);
+        Assert.True(lexical.LexicalScore > 0);
+    }
+
+    [Fact]
+    public void No_answer_can_return_zero_hits()
+    {
+        var hits = SearchEngine.Search(
+            _index,
+            Unit(0, 1, 0),
+            "unrelated",
+            new SearchOptions { TopK = 10, MinVectorScore = 1f },
+            _root);
+
+        Assert.Empty(hits);
+    }
+
+    [Theory]
     [InlineData("GetRobotScenarioState", "Robot")]
     [InlineData("GetRobotScenarioState", "Scenario")]
     [InlineData("order_payment_confirmed", "payment")]

@@ -154,12 +154,13 @@ async Task<int> EvaluateAsync(Dictionary<string, string> opts)
         return Fail("evaluate needs --cases <json>");
     }
 
-    if (!opts.ContainsKey("no-floor"))
+    if (opts.ContainsKey("no-floor") && opts.ContainsKey("profile"))
     {
         return Fail(
-            "evaluate currently needs --no-floor; calibrated profile mode is enabled after baseline calibration.");
+            "evaluate accepts either --no-floor or --profile, not both.");
     }
 
+    var noFloor = opts.ContainsKey("no-floor");
     var root = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root"));
     var corpus = SearchEvaluationCorpus.Load(Path.GetFullPath(casesPath));
     SearchEvaluationCorpus.ValidateAgainstSource(corpus, root);
@@ -170,7 +171,8 @@ async Task<int> EvaluateAsync(Dictionary<string, string> opts)
     var searchOptions = new SearchOptions
     {
         TopK = 10,
-        MaxPerFile = 3
+        MaxPerFile = 3,
+        AllowUncalibratedModelForEvaluation = noFloor
     };
     var observations = new List<SearchEvaluationObservation>(corpus.Cases.Count);
 
@@ -191,7 +193,7 @@ async Task<int> EvaluateAsync(Dictionary<string, string> opts)
     var output = new
     {
         schemaVersion = 1,
-        mode = "no-floor",
+        mode = noFloor ? "no-floor" : "profile",
         corpusSchemaVersion = corpus.SchemaVersion,
         caseCount = corpus.Cases.Count,
         repository = status.RepositoryRoot,
@@ -314,7 +316,7 @@ static int PrintUsage()
           codesearch overlay [--root <dir>] [--index <base>] [--overlay <file>]
           codesearch search   --query "<text>" [--root <dir>] [--top N] [--kind Type|Method|Text|File]
                               [--path <substring>] [--per-file N] [--no-instruct]
-          codesearch evaluate --cases <json> [--root <dir>] --no-floor [--no-instruct]
+          codesearch evaluate --cases <json> [--root <dir>] [--profile|--no-floor] [--no-instruct]
           codesearch status  [--root <dir>]
           codesearch scan    [--root <dir>]
 

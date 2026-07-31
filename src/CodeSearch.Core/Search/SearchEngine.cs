@@ -18,6 +18,15 @@ public sealed record SearchOptions
     public int MaxPerFile { get; init; } = 3;
 
     public int SnippetLines { get; init; } = 12;
+
+    /// <summary>
+    /// Vector candidates below this cosine score never receive an RRF rank. Null is reserved for
+    /// the explicit historical no-floor evaluation mode.
+    /// </summary>
+    public float? MinVectorScore { get; init; }
+
+    /// <summary>Only the deterministic evaluator may bypass a calibrated model profile.</summary>
+    public bool AllowUncalibratedModelForEvaluation { get; init; }
 }
 
 public sealed record SearchHit(
@@ -65,6 +74,7 @@ public static class SearchEngine
     public static IReadOnlyList<SearchHit> Search(
         ISearchableIndex index, float[] queryVector, string queryText, SearchOptions options, string root)
     {
+        Validate(options);
         if (queryVector.Length != index.Dim)
         {
             throw new InvalidOperationException(
@@ -80,9 +90,31 @@ public static class SearchEngine
 
         var vectorScores = ScoreVectors(index, queryVector, candidates);
         var lexicalScores = ScoreLexically(index, queryText, candidates);
-        var fused = Fuse(candidates, vectorScores, lexicalScores);
+        var eligibleVectorScores = options.MinVectorScore is { } floor
+            ? vectorScores
+                .Where(pair => pair.Value >= floor)
+                .ToDictionary(pair => pair.Key, pair => pair.Value)
+            : vectorScores;
+        var fused = Fuse(eligibleVectorScores, lexicalScores);
 
         return Materialize(index, root, fused, vectorScores, lexicalScores, options);
+    }
+
+    private static void Validate(SearchOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.MinVectorScore is not { } floor)
+        {
+            return;
+        }
+
+        if (!float.IsFinite(floor) || floor is < -1 or > 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                floor,
+                "MinVectorScore must be finite and within [-1, 1].");
+        }
     }
 
     private static List<int> Filter(ISearchableIndex index, SearchOptions options)
@@ -246,12 +278,14 @@ public static class SearchEngine
     }
 
     private static List<int> Fuse(
-        List<int> candidates, Dictionary<int, float> vectorScores, Dictionary<int, double> lexicalScores)
+        Dictionary<int, float> vectorScores,
+        Dictionary<int, double> lexicalScores)
     {
         var fused = new Dictionary<int, double>();
 
-        var byVector = candidates
-            .OrderByDescending(i => vectorScores[i])
+        var byVector = vectorScores
+            .OrderByDescending(pair => pair.Value)
+            .Select(pair => pair.Key)
             .Take(CandidatesPerSignal);
 
         var rank = 0;

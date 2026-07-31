@@ -220,6 +220,47 @@ public sealed class SearchEvaluationTests
             evaluationHit.ResponseCharacters);
     }
 
+    [Fact]
+    public void Calibrated_profile_records_the_measured_threshold_and_provenance()
+    {
+        var profile = SearchQualityProfile.Require("qwen3-embedding:8b-q8_0");
+
+        Assert.Equal(0.43f, profile.MinVectorScore);
+        Assert.Equal(24, profile.CaseCount);
+        Assert.Equal(
+            "399fcc0b53b35ede05dc64f1a84cbc3bfc6bf382bdd2de7d71f2f9dc1ae8debc",
+            profile.GenerationId);
+        Assert.Contains("no-answer", profile.SelectionRule);
+        Assert.Contains("recall@10", profile.SelectionRule);
+    }
+
+    [Fact]
+    public void Unknown_model_fails_closed_without_evaluation_opt_out()
+    {
+        var error = Assert.Throws<SearchNotReadyException>(
+            () => SearchQualityProfile.Resolve(
+                "unknown-embedding-model",
+                new SearchOptions()));
+
+        Assert.Contains(
+            "threshold not calibrated",
+            error.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Evaluation_can_explicitly_opt_out_for_an_unknown_model()
+    {
+        var options = SearchQualityProfile.Resolve(
+            "unknown-embedding-model",
+            new SearchOptions
+            {
+                AllowUncalibratedModelForEvaluation = true
+            });
+
+        Assert.Null(options.MinVectorScore);
+    }
+
     private static SearchEvaluationCase Case(
         string id,
         string query,

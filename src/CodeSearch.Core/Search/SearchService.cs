@@ -105,6 +105,7 @@ public sealed class SearchService
         var baseIndex = Load(indexPath);
 
         var searchable = Compose(baseIndex, workingRoot);
+        var resolvedOptions = SearchQualityProfile.Resolve(baseIndex.Model, options);
 
         // The model is read out of the index header rather than configured at the call site.
         // Embedding a query with a different model than the index was built with silently returns
@@ -120,7 +121,12 @@ public sealed class SearchService
 
         // The raw query - not the instruction-wrapped prompt - drives lexical scoring, otherwise
         // words from the instruction itself would match chunk names.
-        return SearchEngine.Search(searchable, vector, query, options, workingRoot);
+        return SearchEngine.Search(
+            searchable,
+            vector,
+            query,
+            resolvedOptions,
+            workingRoot);
     }
 
     private static string QueryDeduplicationKey(CodeIndex index, string prompt)
