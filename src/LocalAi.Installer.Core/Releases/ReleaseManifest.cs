@@ -72,9 +72,33 @@ public sealed record ReleaseManifest
     public IReadOnlyList<ManifestModel> Models { get; }
 }
 
-public sealed record VerifiedPackage(
-    ReleaseManifest Manifest,
-    string StagingRoot);
+public sealed class VerifiedPackage : IDisposable
+{
+    private IStagingRootLease? stagingLease;
+
+    internal VerifiedPackage(
+        ReleaseManifest manifest,
+        IStagingRootLease stagingLease)
+    {
+        Manifest = manifest;
+        this.stagingLease = stagingLease;
+        StagingRoot = stagingLease.CanonicalPath;
+    }
+
+    public ReleaseManifest Manifest { get; }
+
+    public string StagingRoot { get; }
+
+    public void RevalidateStagingRoot() =>
+        (stagingLease ?? throw new ObjectDisposedException(nameof(VerifiedPackage)))
+            .Revalidate();
+
+    public void Dispose()
+    {
+        var lease = Interlocked.Exchange(ref stagingLease, null);
+        lease?.Dispose();
+    }
+}
 
 public sealed class ReleaseVerificationException : Exception
 {

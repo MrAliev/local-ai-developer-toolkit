@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -24,7 +25,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var auth = new RecordingAuthenticodeVerifier(true);
         var verifier = CreateVerifier(key, package, auth);
 
-        var verified = await verifier.VerifyAsync(
+        using var verified = await verifier.VerifyAsync(
             json,
             signature,
             StagingPath(),
@@ -219,6 +220,102 @@ public sealed class ReleasePackageVerifierTests : IDisposable
     }
 
     [Fact]
+    public async Task VerifyAsync_rejects_encrypted_and_data_descriptor_flags()
+    {
+        foreach (var flag in new ushort[] { 0x0001, 0x0008 })
+        {
+            var package = MutateFirstEntry(CreatePackage(), (bytes, local, central, _) =>
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(local + 6), flag);
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(central + 8), flag);
+            });
+            await AssertPackageRejected(package);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyAsync_rejects_entry_count_and_aggregate_size_limits()
+    {
+        var count = MutateFirstEntry(CreatePackage(), (bytes, _, _, eocd) =>
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(eocd + 8), 300);
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(eocd + 10), 300);
+        });
+        await AssertPackageRejected(count);
+
+        var aggregate = CreatePackage();
+        foreach (var central in FindAllSignatures(aggregate, 0x02014B50))
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                aggregate.AsSpan(central + 20),
+                7_000_000);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                aggregate.AsSpan(central + 24),
+                700_000_000);
+        }
+
+        await AssertPackageRejected(aggregate);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_rejects_unsupported_method_and_zip64()
+    {
+        var method = MutateFirstEntry(CreatePackage(), (bytes, local, central, _) =>
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(local + 8), 99);
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(central + 10), 99);
+        });
+        await AssertPackageRejected(method);
+
+        var zip64 = MutateFirstEntry(CreatePackage(), (bytes, _, _, eocd) =>
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(eocd + 8), ushort.MaxValue);
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(eocd + 10), ushort.MaxValue);
+        });
+        await AssertPackageRejected(zip64);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_rejects_per_file_size_limit()
+    {
+        var package = MutateFirstEntry(CreatePackage(), (bytes, _, central, _) =>
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                bytes.AsSpan(central + 24),
+                1024U * 1024 * 1024 + 1));
+        await AssertPackageRejected(package);
+    }
+
+    [Theory]
+    [InlineData("flags")]
+    [InlineData("method")]
+    [InlineData("size")]
+    [InlineData("name")]
+    public async Task VerifyAsync_rejects_local_and_central_header_contradictions(
+        string field)
+    {
+        var package = MutateFirstEntry(CreatePackage(), (bytes, local, _, _) =>
+        {
+            switch (field)
+            {
+                case "flags":
+                    BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(local + 6), 0x0800);
+                    break;
+                case "method":
+                    BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(local + 8), 8);
+                    break;
+                case "size":
+                    BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(local + 22), 99);
+                    break;
+                case "name":
+                    bytes[local + 30] = bytes[local + 30] == (byte)'x' ? (byte)'y' : (byte)'x';
+                    break;
+            }
+        });
+
+        await AssertPackageRejected(package);
+    }
+
+    [Fact]
     public async Task VerifyAsync_rejects_zip_bomb_ratio()
     {
         await AssertPackageRejected(CreatePackage(
@@ -241,6 +338,15 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         string entryName)
     {
         await AssertPackageRejected(CreatePackage(extraEntry: entryName));
+    }
+
+    [Fact]
+    public async Task VerifyAsync_rejects_file_directory_conflicts_and_unicode_aliases()
+    {
+        await AssertPackageRejected(CreatePackage(
+            extraEntries: ["node", "node/child"]));
+        await AssertPackageRejected(CreatePackage(
+            extraEntries: ["café.txt", "café.txt"]));
     }
 
     [Theory]
@@ -311,7 +417,9 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             new ReleaseManifestVerifier(key.ExportSubjectPublicKeyInfo()),
             new MemoryReleaseClient(package),
             authenticode ?? new RecordingAuthenticodeVerifier(true),
-            "Approved Publisher");
+            new AuthenticodePublisherPolicy(
+                "CN=Approved Publisher, O=LocalAi, C=US",
+                new string('A', 64)));
 
     private static ReleaseManifest CreateManifest(
         byte[] package,
@@ -340,7 +448,8 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         byte[]? extraContent = null,
         int? externalAttributes = null,
         bool duplicateRequiredFile = false,
-        (string Property, string Value)? metadataOverride = null)
+        (string Property, string Value)? metadataOverride = null,
+        IReadOnlyList<string>? extraEntries = null)
     {
         using var stream = new MemoryStream();
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
@@ -391,6 +500,11 @@ public sealed class ReleasePackageVerifierTests : IDisposable
                 using var output = entry.Open();
                 output.Write(extraContent ?? [1, 2, 3]);
             }
+
+            foreach (var additional in extraEntries ?? [])
+            {
+                WriteEntry(archive, additional, [1]);
+            }
         }
 
         return stream.ToArray();
@@ -401,6 +515,34 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         var entry = archive.CreateEntry(name, CompressionLevel.NoCompression);
         using var output = entry.Open();
         output.Write(content);
+    }
+
+    private static byte[] MutateFirstEntry(
+        byte[] package,
+        Action<byte[], int, int, int> mutation)
+    {
+        var local = FindSignature(package, 0x04034B50);
+        var central = FindSignature(package, 0x02014B50);
+        var eocd = FindSignature(package, 0x06054B50);
+        mutation(package, local, central, eocd);
+        return package;
+    }
+
+    private static int FindSignature(byte[] bytes, uint signature) =>
+        FindAllSignatures(bytes, signature).First();
+
+    private static IReadOnlyList<int> FindAllSignatures(byte[] bytes, uint signature)
+    {
+        var result = new List<int>();
+        for (var index = 0; index <= bytes.Length - sizeof(uint); index++)
+        {
+            if (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(index)) == signature)
+            {
+                result.Add(index);
+            }
+        }
+
+        return result;
     }
 
     private string StagingPath()
@@ -443,7 +585,9 @@ public sealed class ReleasePackageVerifierTests : IDisposable
     {
         public List<string> Paths { get; } = [];
 
-        public bool IsTrusted(string path, string approvedPublisher)
+        public bool IsTrusted(
+            string path,
+            AuthenticodePublisherPolicy publisherPolicy)
         {
             Paths.Add(path);
             return failAfter is { } count ? Paths.Count <= count : result;

@@ -31,13 +31,29 @@ public sealed class ReleasePackageVerifier
     private readonly ReleaseManifestVerifier manifestVerifier;
     private readonly IReleaseClient releaseClient;
     private readonly IAuthenticodeVerifier authenticodeVerifier;
-    private readonly string approvedPublisher;
+    private readonly AuthenticodePublisherPolicy publisherPolicy;
+    private readonly IStagingRootFactory stagingRootFactory;
 
     public ReleasePackageVerifier(
         ReleaseManifestVerifier manifestVerifier,
         IReleaseClient releaseClient,
         IAuthenticodeVerifier authenticodeVerifier,
-        string approvedPublisher)
+        AuthenticodePublisherPolicy publisherPolicy)
+        : this(
+            manifestVerifier,
+            releaseClient,
+            authenticodeVerifier,
+            publisherPolicy,
+            new WindowsStagingRootFactory())
+    {
+    }
+
+    internal ReleasePackageVerifier(
+        ReleaseManifestVerifier manifestVerifier,
+        IReleaseClient releaseClient,
+        IAuthenticodeVerifier authenticodeVerifier,
+        AuthenticodePublisherPolicy publisherPolicy,
+        IStagingRootFactory stagingRootFactory)
     {
         this.manifestVerifier = manifestVerifier ??
             throw new ArgumentNullException(nameof(manifestVerifier));
@@ -45,8 +61,10 @@ public sealed class ReleasePackageVerifier
             throw new ArgumentNullException(nameof(releaseClient));
         this.authenticodeVerifier = authenticodeVerifier ??
             throw new ArgumentNullException(nameof(authenticodeVerifier));
-        ArgumentException.ThrowIfNullOrWhiteSpace(approvedPublisher);
-        this.approvedPublisher = approvedPublisher;
+        this.publisherPolicy = publisherPolicy ??
+            throw new ArgumentNullException(nameof(publisherPolicy));
+        this.stagingRootFactory = stagingRootFactory ??
+            throw new ArgumentNullException(nameof(stagingRootFactory));
     }
 
     public async Task<VerifiedPackage> VerifyAsync(
@@ -56,49 +74,43 @@ public sealed class ReleasePackageVerifier
         CancellationToken cancellationToken = default)
     {
         var manifest = manifestVerifier.Verify(manifestJson.Span, signature.Span);
-        var canonicalRoot = ValidateNewStagingRoot(stagingRoot);
-        var ownsRoot = false;
+        IStagingRootLease? stagingLease = null;
         try
         {
-            Directory.CreateDirectory(canonicalRoot);
-            ownsRoot = true;
-            EnsureSafeRoot(canonicalRoot);
+            stagingLease = stagingRootFactory.CreateExclusive(stagingRoot);
+            var canonicalRoot = stagingLease.CanonicalPath;
+            stagingLease.Revalidate();
             var archivePath = Path.Combine(canonicalRoot, ".package.zip");
             await DownloadAndHashAsync(
                 manifest,
                 archivePath,
                 cancellationToken).ConfigureAwait(false);
-            EnsureSafeRoot(canonicalRoot);
+            stagingLease.Revalidate();
 
             var entries = InspectArchive(archivePath);
             await ExtractAsync(
                 archivePath,
-                canonicalRoot,
+                stagingLease,
                 entries,
                 cancellationToken).ConfigureAwait(false);
             File.Delete(archivePath);
-            EnsureSafeRoot(canonicalRoot);
+            stagingLease.Revalidate();
             ValidateMetadata(manifest, canonicalRoot);
             ValidateFinalLayout(canonicalRoot);
             ValidateAuthenticode(manifest, canonicalRoot);
-            return new VerifiedPackage(manifest, canonicalRoot);
+            stagingLease.Revalidate();
+            var verified = new VerifiedPackage(manifest, stagingLease);
+            stagingLease = null;
+            return verified;
         }
         catch (OperationCanceledException)
         {
-            if (ownsRoot)
-            {
-                TryDeleteOwnedRoot(canonicalRoot);
-            }
-
+            CleanupOwned(stagingLease);
             throw;
         }
         catch (ReleaseVerificationException)
         {
-            if (ownsRoot)
-            {
-                TryDeleteOwnedRoot(canonicalRoot);
-            }
-
+            CleanupOwned(stagingLease);
             throw;
         }
         catch (Exception exception) when (
@@ -106,11 +118,7 @@ public sealed class ReleasePackageVerifier
             InvalidDataException or ArgumentException or NotSupportedException or
             CryptographicException or JsonException or DecoderFallbackException)
         {
-            if (ownsRoot)
-            {
-                TryDeleteOwnedRoot(canonicalRoot);
-            }
-
+            CleanupOwned(stagingLease);
             throw Failure();
         }
     }
@@ -203,7 +211,7 @@ public sealed class ReleasePackageVerifier
             var disk = BinaryPrimitives.ReadUInt16LittleEndian(header[34..]);
             var externalAttributes = BinaryPrimitives.ReadUInt32LittleEndian(header[38..]);
             var localOffset = BinaryPrimitives.ReadUInt32LittleEndian(header[42..]);
-            if ((flags & ~0x0808) != 0 ||
+            if ((flags & ~0x0800) != 0 ||
                 method is not (0 or 8) ||
                 disk != 0 ||
                 compressed == uint.MaxValue ||
@@ -248,7 +256,15 @@ public sealed class ReleasePackageVerifier
             totalUncompressed = checked(totalUncompressed + uncompressed);
             if (totalUncompressed > MaximumTotalUncompressedSize ||
                 !entries.TryAdd(name, new CentralEntry(
-                    name, compressed, uncompressed, method, externalAttributes)))
+                    name,
+                    nameBytes,
+                    flags,
+                    method,
+                    BinaryPrimitives.ReadUInt32LittleEndian(header[16..]),
+                    compressed,
+                    uncompressed,
+                    externalAttributes,
+                    localOffset)))
             {
                 throw Failure();
             }
@@ -258,6 +274,8 @@ public sealed class ReleasePackageVerifier
         {
             throw Failure();
         }
+
+        ValidateLocalHeaders(stream, entries.Values, eocd.DirectoryOffset);
 
         var approved = new HashSet<string>(
             LocalAiPackageLayout.RequiredFiles.Append(PackageMetadataFileName),
@@ -270,12 +288,90 @@ public sealed class ReleasePackageVerifier
         return entries;
     }
 
+    private static void ValidateLocalHeaders(
+        FileStream stream,
+        IEnumerable<CentralEntry> entries,
+        long centralDirectoryOffset)
+    {
+        var offsets = new HashSet<long>();
+        var ranges = new List<(long Start, long End)>();
+        Span<byte> header = stackalloc byte[30];
+        foreach (var entry in entries)
+        {
+            if (!offsets.Add(entry.LocalHeaderOffset))
+            {
+                throw Failure();
+            }
+
+            stream.Position = entry.LocalHeaderOffset;
+            ReadExactly(stream, header);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(header) != 0x04034B50)
+            {
+                throw Failure();
+            }
+
+            var flags = BinaryPrimitives.ReadUInt16LittleEndian(header[6..]);
+            var method = BinaryPrimitives.ReadUInt16LittleEndian(header[8..]);
+            var crc = BinaryPrimitives.ReadUInt32LittleEndian(header[14..]);
+            var compressed = BinaryPrimitives.ReadUInt32LittleEndian(header[18..]);
+            var uncompressed = BinaryPrimitives.ReadUInt32LittleEndian(header[22..]);
+            var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(header[26..]);
+            var extraLength = BinaryPrimitives.ReadUInt16LittleEndian(header[28..]);
+            if (flags != entry.Flags ||
+                method != entry.CompressionMethod ||
+                crc != entry.Crc32 ||
+                compressed != entry.CompressedSize ||
+                uncompressed != entry.UncompressedSize ||
+                nameLength != entry.RawName.Length)
+            {
+                throw Failure();
+            }
+
+            var rawName = new byte[nameLength];
+            ReadExactly(stream, rawName);
+            if (!rawName.AsSpan().SequenceEqual(entry.RawName))
+            {
+                throw Failure();
+            }
+
+            var extra = new byte[extraLength];
+            ReadExactly(stream, extra);
+            RejectUnsupportedExtraFields(extra);
+            var dataStart = stream.Position;
+            var dataEnd = checked(dataStart + entry.CompressedSize);
+            if (dataEnd > centralDirectoryOffset ||
+                ranges.Any(range =>
+                    entry.LocalHeaderOffset < range.End && dataEnd > range.Start))
+            {
+                throw Failure();
+            }
+
+            ranges.Add((entry.LocalHeaderOffset, dataEnd));
+        }
+
+        var ordered = ranges.OrderBy(range => range.Start).ToArray();
+        if (ordered.Length == 0 || ordered[0].Start != 0 ||
+            ordered[^1].End != centralDirectoryOffset)
+        {
+            throw Failure();
+        }
+
+        for (var index = 1; index < ordered.Length; index++)
+        {
+            if (ordered[index - 1].End != ordered[index].Start)
+            {
+                throw Failure();
+            }
+        }
+    }
+
     private static async Task ExtractAsync(
         string archivePath,
-        string stagingRoot,
+        IStagingRootLease stagingLease,
         IReadOnlyDictionary<string, CentralEntry> inspected,
         CancellationToken cancellationToken)
     {
+        var stagingRoot = stagingLease.CanonicalPath;
         using var archive = ZipFile.OpenRead(archivePath);
         if (archive.Entries.Count != inspected.Count)
         {
@@ -293,7 +389,7 @@ public sealed class ReleasePackageVerifier
                 throw Failure();
             }
 
-            EnsureSafeRoot(stagingRoot);
+            stagingLease.Revalidate();
             var destinationPath = Path.GetFullPath(Path.Combine(stagingRoot, entry.FullName));
             EnsureContained(destinationPath, stagingRoot);
             await using var source = entry.Open();
@@ -331,11 +427,7 @@ public sealed class ReleasePackageVerifier
                 throw Failure();
             }
 
-            EnsureSafeRoot(stagingRoot);
-            if (File.GetAttributes(destinationPath).HasFlag(FileAttributes.ReparsePoint))
-            {
-                throw Failure();
-            }
+            stagingLease.ValidateCreatedFile(output.SafeFileHandle, destinationPath);
         }
     }
 
@@ -441,68 +533,7 @@ public sealed class ReleasePackageVerifier
         {
             if (!authenticodeVerifier.IsTrusted(
                     Path.Combine(stagingRoot, file),
-                    approvedPublisher))
-            {
-                throw Failure();
-            }
-        }
-    }
-
-    private static string ValidateNewStagingRoot(string stagingRoot)
-    {
-        try
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(stagingRoot);
-            if (!Path.IsPathFullyQualified(stagingRoot) ||
-                stagingRoot.StartsWith(@"\\", StringComparison.Ordinal) ||
-                stagingRoot.StartsWith(@"\\?\", StringComparison.Ordinal) ||
-                stagingRoot.StartsWith(@"\\.\", StringComparison.Ordinal))
-            {
-                throw Failure();
-            }
-
-            var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(stagingRoot));
-            if (!string.Equals(
-                    fullPath,
-                    Path.TrimEndingDirectorySeparator(stagingRoot),
-                    StringComparison.OrdinalIgnoreCase) ||
-                Directory.Exists(fullPath) || File.Exists(fullPath))
-            {
-                throw Failure();
-            }
-
-            EnsureNoReparseAncestors(Path.GetDirectoryName(fullPath)!);
-            return fullPath;
-        }
-        catch (ReleaseVerificationException)
-        {
-            throw;
-        }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or
-            ArgumentException or NotSupportedException)
-        {
-            throw Failure();
-        }
-    }
-
-    private static void EnsureSafeRoot(string stagingRoot)
-    {
-        if (!Directory.Exists(stagingRoot) ||
-            File.GetAttributes(stagingRoot).HasFlag(FileAttributes.ReparsePoint))
-        {
-            throw Failure();
-        }
-
-        EnsureNoReparseAncestors(stagingRoot);
-    }
-
-    private static void EnsureNoReparseAncestors(string path)
-    {
-        for (var current = new DirectoryInfo(path); current is not null; current = current.Parent)
-        {
-            if (current.Exists &&
-                current.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                    publisherPolicy))
             {
                 throw Failure();
             }
@@ -616,18 +647,25 @@ public sealed class ReleasePackageVerifier
         }
     }
 
-    private static void TryDeleteOwnedRoot(string root)
+    private static void CleanupOwned(IStagingRootLease? lease)
     {
+        if (lease is null)
+        {
+            return;
+        }
+
         try
         {
-            if (Directory.Exists(root))
-            {
-                Directory.Delete(root, recursive: true);
-            }
+            lease.Cleanup();
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException)
+            exception is IOException or UnauthorizedAccessException or
+            ReleaseVerificationException or ObjectDisposedException)
         {
+        }
+        finally
+        {
+            lease.Dispose();
         }
     }
 
@@ -636,10 +674,14 @@ public sealed class ReleasePackageVerifier
 
     private sealed record CentralEntry(
         string Name,
+        byte[] RawName,
+        ushort Flags,
+        ushort CompressionMethod,
+        uint Crc32,
         long CompressedSize,
         long UncompressedSize,
-        ushort CompressionMethod,
-        uint ExternalAttributes);
+        uint ExternalAttributes,
+        long LocalHeaderOffset);
 
     private readonly record struct EndOfCentralDirectory(
         int EntryCount,
