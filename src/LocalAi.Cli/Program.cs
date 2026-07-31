@@ -131,10 +131,5 @@ if (args is ["hooks", "install", ..])
     return 0;
 }
 
-Console.Error.WriteLine(
-    "Usage: localai native <operation> [--request file] | " +
-    "localai model status | localai model pull --model <model> --catalog-version <version> | " +
-    "localai model preflight --model <model> --context <tokens> | " +
-    "localai repo status [git-common-dir] | localai bootstrap --dry-run | " +
-    "localai sync [--root dir] | localai hooks install [--root dir]");
+Console.Error.WriteLine(CliUsage.Text);
 return 2;

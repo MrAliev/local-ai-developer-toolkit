@@ -89,6 +89,42 @@ public sealed class ModelCommandTests
             output.ToString());
     }
 
+    [Fact]
+    public async Task Shipped_usage_lists_exact_model_forms_and_preflight_form_is_executable()
+    {
+        Assert.Contains("localai model status", CliUsage.Text, StringComparison.Ordinal);
+        Assert.Contains(
+            "localai model pull --model <model> --catalog-version <version>",
+            CliUsage.Text,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "localai model preflight --model <model> --context <tokens> " +
+            "--catalog-version <version>",
+            CliUsage.Text,
+            StringComparison.Ordinal);
+        var arguments = CliUsage.ModelPreflight
+            .Replace("localai model ", string.Empty, StringComparison.Ordinal)
+            .Replace("<model>", "qwen3.5:9b", StringComparison.Ordinal)
+            .Replace("<tokens>", "2048", StringComparison.Ordinal)
+            .Replace("<version>", "signed-7", StringComparison.Ordinal)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var client = new RecordingClient
+        {
+            PreflightResult = Result(new LocalModelPreflightOutput(
+                "qwen3.5:9b", 2048, "signed-7", 123, 123, true, VerifiedUtc)),
+        };
+        using var output = new StringWriter();
+
+        var exitCode = await ModelCommand.ExecuteAsync(
+            arguments,
+            client,
+            output,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ModelCommand.SuccessExitCode, exitCode);
+        Assert.Equal(["preflight:qwen3.5:9b:2048:signed-7"], client.Calls);
+    }
+
     public static TheoryData<LocalModelPreflightOutput> InvalidPreflightProofs => new()
     {
         { new LocalModelPreflightOutput("other:9b", 8192, "signed-7", 123, 123, true, VerifiedUtc) },
