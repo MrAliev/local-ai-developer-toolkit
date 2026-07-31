@@ -915,6 +915,29 @@ public sealed class InstallerPlanTests
         data.Add(PlanPathKind.AgentConfig, @"C:\folder\AUX.zip");
         data.Add(PlanPathKind.AgentConfig, @"C:\folder\COM1");
         data.Add(PlanPathKind.AgentInstructions, @"C:\folder\LPT9.md");
+
+        var extendedAliases = new[]
+        {
+            "COM\u00B9",
+            "COM\u00B2",
+            "COM\u00B3",
+            "LPT\u00B9",
+            "LPT\u00B2",
+            "LPT\u00B3",
+            "CONIN$",
+            "CONOUT$",
+        };
+        foreach (var alias in extendedAliases)
+        {
+            foreach (var pathKind in Enum.GetValues<PlanPathKind>())
+            {
+                data.Add(pathKind, $@"C:\{alias}");
+                data.Add(
+                    pathKind,
+                    $@"C:\folder\{alias.ToLowerInvariant()}.txt");
+            }
+        }
+
         return data;
     }
 

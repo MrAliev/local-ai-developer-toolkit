@@ -516,16 +516,24 @@ public sealed class InstallerPlanBuilder
         if (baseName.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
             baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
             baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
-            baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+            baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase) ||
+            baseName.Equals("CONIN$", StringComparison.OrdinalIgnoreCase) ||
+            baseName.Equals("CONOUT$", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
         return baseName.Length == 4 &&
-               baseName[3] is >= '1' and <= '9' &&
+               IsReservedPortNumber(baseName[3]) &&
                (baseName.StartsWith("COM", StringComparison.OrdinalIgnoreCase) ||
                 baseName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase));
     }
+
+    private static bool IsReservedPortNumber(char character) =>
+        character is >= '1' and <= '9' or
+            '\u00B9' or // superscript one
+            '\u00B2' or // superscript two
+            '\u00B3';   // superscript three
 
     private static void RequireAbsent(string? value, string parameterName)
     {
