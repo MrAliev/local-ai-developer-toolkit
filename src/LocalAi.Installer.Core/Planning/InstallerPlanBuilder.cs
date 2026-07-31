@@ -48,7 +48,7 @@ public sealed class InstallerPlanBuilder
         ValidateDependencies(dependencySnapshot);
         var packageSnapshot = ValidatePackage(package);
         ValidateModels(modelSnapshot);
-        ValidateAgents(agentSnapshot);
+        agentSnapshot = ValidateAgents(agentSnapshot);
         ValidateUniqueActionIds(
             dependencySnapshot,
             packageSnapshot,
@@ -117,7 +117,7 @@ public sealed class InstallerPlanBuilder
             package.ActionId);
         return package with
         {
-            PackagePath = CanonicalizePackagePath(
+            PackagePath = CanonicalizeWindowsPath(
                 package.PackagePath,
                 nameof(package.PackagePath)),
         };
@@ -164,12 +164,14 @@ public sealed class InstallerPlanBuilder
         }
     }
 
-    private static void ValidateAgents(
+    private static AgentConfigurationAction[] ValidateAgents(
         IReadOnlyList<AgentConfigurationAction> agents)
     {
         var kinds = new HashSet<AgentKind>();
-        foreach (var action in agents)
+        var validatedAgents = new AgentConfigurationAction[agents.Count];
+        for (var index = 0; index < agents.Count; index++)
         {
+            var action = agents[index];
             ArgumentNullException.ThrowIfNull(action);
             ValidateActionId(action.ActionId);
             if (!Enum.IsDefined(action.AgentKind))
@@ -197,7 +199,7 @@ public sealed class InstallerPlanBuilder
             }
 
             ValidateConsent(action.Selected, action.ConsentGranted, action.ActionId);
-            ValidateAgentPaths(action);
+            validatedAgents[index] = CanonicalizeAgentPaths(action);
 
             if (!kinds.Add(action.AgentKind))
             {
@@ -206,32 +208,45 @@ public sealed class InstallerPlanBuilder
                     nameof(agents));
             }
         }
+
+        return validatedAgents;
     }
 
-    private static void ValidateAgentPaths(AgentConfigurationAction action)
+    private static AgentConfigurationAction CanonicalizeAgentPaths(
+        AgentConfigurationAction action)
     {
         switch (action.Choice)
         {
             case AgentIntegrationChoice.McpOnly:
-                ValidateAbsolutePath(action.ConfigPath, nameof(action.ConfigPath));
                 RequireAbsent(action.InstructionsPath, nameof(action.InstructionsPath));
-                break;
+                return action with
+                {
+                    ConfigPath = CanonicalizeWindowsPath(
+                        action.ConfigPath,
+                        nameof(action.ConfigPath)),
+                };
             case AgentIntegrationChoice.InstructionsOnly:
                 RequireAbsent(action.ConfigPath, nameof(action.ConfigPath));
-                ValidateAbsolutePath(
-                    action.InstructionsPath,
-                    nameof(action.InstructionsPath));
-                break;
+                return action with
+                {
+                    InstructionsPath = CanonicalizeWindowsPath(
+                        action.InstructionsPath,
+                        nameof(action.InstructionsPath)),
+                };
             case AgentIntegrationChoice.McpAndInstructions:
-                ValidateAbsolutePath(action.ConfigPath, nameof(action.ConfigPath));
-                ValidateAbsolutePath(
-                    action.InstructionsPath,
-                    nameof(action.InstructionsPath));
-                break;
+                return action with
+                {
+                    ConfigPath = CanonicalizeWindowsPath(
+                        action.ConfigPath,
+                        nameof(action.ConfigPath)),
+                    InstructionsPath = CanonicalizeWindowsPath(
+                        action.InstructionsPath,
+                        nameof(action.InstructionsPath)),
+                };
             case AgentIntegrationChoice.NoChange:
                 RequireAbsent(action.ConfigPath, nameof(action.ConfigPath));
                 RequireAbsent(action.InstructionsPath, nameof(action.InstructionsPath));
-                break;
+                return action with { };
             default:
                 throw new ArgumentOutOfRangeException(nameof(action.Choice));
         }
@@ -441,19 +456,7 @@ public sealed class InstallerPlanBuilder
         }
     }
 
-    private static void ValidateAbsolutePath(
-        string? path,
-        string parameterName)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
-        {
-            throw new ArgumentException(
-                $"{parameterName} must be a fully qualified path.",
-                parameterName);
-        }
-    }
-
-    private static string CanonicalizePackagePath(
+    private static string CanonicalizeWindowsPath(
         string? path,
         string parameterName)
     {
@@ -476,7 +479,8 @@ public sealed class InstallerPlanBuilder
                 segment is "." or ".." ||
                 segment.EndsWith('.') ||
                 segment.EndsWith(' ') ||
-                segment.Any(IsInvalidWindowsFileNameCharacter))
+                segment.Any(IsInvalidWindowsFileNameCharacter) ||
+                IsReservedDosDeviceSegment(segment))
             {
                 throw new ArgumentException(
                     $"{parameterName} contains an invalid or ambiguous Windows path segment.",
@@ -500,6 +504,28 @@ public sealed class InstallerPlanBuilder
     private static bool IsInvalidWindowsFileNameCharacter(char character) =>
         char.IsControl(character) ||
         character is '<' or '>' or ':' or '"' or '|' or '?' or '*';
+
+    private static bool IsReservedDosDeviceSegment(string segment)
+    {
+        var extensionSeparator = segment.IndexOf('.');
+        var baseName = (extensionSeparator < 0
+                ? segment
+                : segment[..extensionSeparator])
+            .TrimEnd(' ', '.');
+
+        if (baseName.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
+            baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
+            baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
+            baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return baseName.Length == 4 &&
+               baseName[3] is >= '1' and <= '9' &&
+               (baseName.StartsWith("COM", StringComparison.OrdinalIgnoreCase) ||
+                baseName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase));
+    }
 
     private static void RequireAbsent(string? value, string parameterName)
     {

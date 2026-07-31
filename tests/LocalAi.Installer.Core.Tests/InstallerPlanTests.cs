@@ -680,6 +680,74 @@ public sealed class InstallerPlanTests
         Assert.Equal(@"C:\Packages\LocalAi.zip", plan.Package.PackagePath);
     }
 
+    [Theory]
+    [InlineData(AgentPathKind.Config, @"C:\bad|config.toml")]
+    [InlineData(AgentPathKind.Config, @"C:\folder\..\config.toml")]
+    [InlineData(AgentPathKind.Config, @"C:\folder.\config.toml")]
+    [InlineData(AgentPathKind.Config, @"C:\folder \config.toml")]
+    [InlineData(AgentPathKind.Instructions, @"C:\bad|AGENTS.md")]
+    [InlineData(AgentPathKind.Instructions, @"C:\folder\..\AGENTS.md")]
+    [InlineData(AgentPathKind.Instructions, @"C:\folder.\AGENTS.md")]
+    [InlineData(AgentPathKind.Instructions, @"C:\folder \AGENTS.md")]
+    public void Ambiguous_or_invalid_agent_paths_are_rejected(
+        AgentPathKind pathKind,
+        string path)
+    {
+        var input = WithAgentPath(ValidInput(), pathKind, path);
+
+        Assert.Throws<ArgumentException>(() => Build(input));
+    }
+
+    [Fact]
+    public void Agent_paths_are_canonicalized_once_into_the_plan()
+    {
+        var input = ValidInput() with
+        {
+            Agents =
+            [
+                new(
+                    "agent.codex",
+                    AgentKind.Codex,
+                    AgentIntegrationChoice.McpAndInstructions,
+                    @"c:\Users\test\.codex\config.toml",
+                    @"d:\Repositories\project\AGENTS.md",
+                    true,
+                    true),
+            ],
+        };
+
+        var plan = Build(input);
+
+        Assert.Equal(
+            @"C:\Users\test\.codex\config.toml",
+            plan.Agents[0].ConfigPath);
+        Assert.Equal(
+            @"D:\Repositories\project\AGENTS.md",
+            plan.Agents[0].InstructionsPath);
+    }
+
+    [Theory]
+    [MemberData(nameof(ReservedWindowsDevicePaths))]
+    public void Reserved_windows_device_segments_are_rejected(
+        PlanPathKind pathKind,
+        string path)
+    {
+        var input = pathKind switch
+        {
+            PlanPathKind.Package => ValidInput() with
+            {
+                Package = ValidInput().Package with { PackagePath = path },
+            },
+            PlanPathKind.AgentConfig =>
+                WithAgentPath(ValidInput(), AgentPathKind.Config, path),
+            PlanPathKind.AgentInstructions =>
+                WithAgentPath(ValidInput(), AgentPathKind.Instructions, path),
+            _ => throw new ArgumentOutOfRangeException(nameof(pathKind)),
+        };
+
+        Assert.Throws<ArgumentException>(() => Build(input));
+    }
+
     [Fact]
     public void Semantically_duplicate_effects_are_rejected()
     {
@@ -828,6 +896,28 @@ public sealed class InstallerPlanTests
         return data;
     }
 
+    public static TheoryData<PlanPathKind, string> ReservedWindowsDevicePaths()
+    {
+        var data = new TheoryData<PlanPathKind, string>();
+        var names = new List<string> { "CON", "PRN", "AUX", "NUL" };
+        names.AddRange(Enumerable.Range(1, 9).Select(index => $"COM{index}"));
+        names.AddRange(Enumerable.Range(1, 9).Select(index => $"LPT{index}"));
+
+        foreach (var name in names)
+        {
+            data.Add(PlanPathKind.Package, $@"C:\{name}");
+            data.Add(
+                PlanPathKind.Package,
+                $@"C:\folder\{name.ToLowerInvariant()}.txt");
+        }
+
+        data.Add(PlanPathKind.Package, @"C:\con .txt");
+        data.Add(PlanPathKind.AgentConfig, @"C:\folder\AUX.zip");
+        data.Add(PlanPathKind.AgentConfig, @"C:\folder\COM1");
+        data.Add(PlanPathKind.AgentInstructions, @"C:\folder\LPT9.md");
+        return data;
+    }
+
     private static InstallerPlan Build(
         PlanInput input,
         InstallerPlanBuilder? builder = null) =>
@@ -841,6 +931,37 @@ public sealed class InstallerPlanTests
 
     private static InstallerPlanBuilder NewBuilder() =>
         new(new FixedTimeProvider(ExpectedCreatedAt), () => ExpectedPlanId);
+
+    private static PlanInput WithAgentPath(
+        PlanInput input,
+        AgentPathKind pathKind,
+        string path) =>
+        input with
+        {
+            Agents =
+            [
+                pathKind switch
+                {
+                    AgentPathKind.Config => new AgentConfigurationAction(
+                        "agent.codex",
+                        AgentKind.Codex,
+                        AgentIntegrationChoice.McpOnly,
+                        path,
+                        null,
+                        true,
+                        true),
+                    AgentPathKind.Instructions => new AgentConfigurationAction(
+                        "agent.codex",
+                        AgentKind.Codex,
+                        AgentIntegrationChoice.InstructionsOnly,
+                        null,
+                        path,
+                        true,
+                        true),
+                    _ => throw new ArgumentOutOfRangeException(nameof(pathKind)),
+                },
+            ],
+        };
 
     private static PlanInput ValidInput() =>
         new(
@@ -920,6 +1041,19 @@ public sealed class InstallerPlanTests
         DependencyVersion,
         PackageVersion,
         ModelReference,
+    }
+
+    public enum AgentPathKind
+    {
+        Config,
+        Instructions,
+    }
+
+    public enum PlanPathKind
+    {
+        Package,
+        AgentConfig,
+        AgentInstructions,
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
