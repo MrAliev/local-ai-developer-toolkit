@@ -4,7 +4,7 @@
 
 **Goal:** Build a self-contained Windows 10/11 x64 WPF installer that diagnoses prerequisites, installs consented dependencies, verifies and activates LocalAi releases, recommends and validates local models through the shared FIFO broker, and safely configures supported agents.
 
-**Architecture:** `LocalAi.Installer.Core` owns immutable plans and every side effect behind narrow interfaces; `LocalAi.Installer` is a thin WPF shell whose view models render plans and collect explicit consent. Existing `VersionActivator`, `BrokerLocalModelClient`, and LocalAi contracts remain authoritative for activation and model work, while installer-owned journals make LocalAi/configuration mutations resumable and reversible.
+**Architecture:** `LocalAi.Installer.Core` owns immutable plans and every side effect behind narrow interfaces; `LocalAi.Installer` is a thin WPF shell whose view models render plans and collect explicit consent. The self-contained installer does not take runtime assembly references on executable projects: it invokes the packaged stable launcher with exact argument arrays, while the launched LocalAi CLI reuses `VersionActivator`, `BrokerLocalModelClient`, and LocalAi contracts. Installer-owned journals make LocalAi/configuration mutations resumable and reversible.
 
 **Tech Stack:** .NET 10, C# 14, WPF, xUnit v3, `System.Text.Json`, `HttpClient`, Windows DXGI/WinTrust interop, existing LocalAi launcher/broker/contracts.
 
@@ -38,7 +38,7 @@
 - `src/LocalAi.Installer.Core/Releases/ReleasePackageVerifier.cs` — HTTPS, signature, SHA-256, Authenticode, and layout gates.
 - `src/LocalAi.Installer.Core/Activation/LocalAiPackageInstaller.cs` — fresh version staging and existing launcher activation.
 - `src/LocalAi.Installer.Core/Models/ModelRecommendationEngine.cs` — deterministic VRAM tiers.
-- `src/LocalAi.Installer.Core/Models/BrokerModelInstaller.cs` — broker-only pull and preflight.
+- `src/LocalAi.Installer.Core/Models/BrokerModelInstaller.cs` — broker-only pull and preflight through exact stable-launcher/LocalAi CLI commands.
 - `src/LocalAi.Installer.Core/Agents/ManagedInstructionBlock.cs` — uniquely marked Markdown block editing.
 - `src/LocalAi.Installer.Core/Agents/CodexConfigurationAdapter.cs` — supported Codex TOML sections and `~/.codex/AGENTS.md`.
 - `src/LocalAi.Installer.Core/Agents/ClaudeConfigurationAdapter.cs` — supported Claude user MCP JSON and `~/.claude/CLAUDE.md`.
@@ -99,8 +99,11 @@ Core references:
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
-    <ProjectReference Include="..\LocalAi.Launcher\LocalAi.Launcher.csproj" />
-    <ProjectReference Include="..\LocalLm.Core\LocalLm.Core.csproj" />
+    <!-- Executable graphs are build-order-only; runtime use is through the stable launcher. -->
+    <ProjectReference Include="..\LocalAi.Launcher\LocalAi.Launcher.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\LocalLm.Core\LocalLm.Core.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 </Project>
 ```
@@ -352,7 +355,7 @@ Expected: missing activation types.
 
 - [ ] **Step 3: Implement minimal installer**
 
-Copy a verified staging tree exactly once into `bin\versions\<version>`, validate it with `VersionResolver`, back up the stable launcher, and call the existing `VersionActivator`. Never update files inside an existing version directory.
+Copy a verified staging tree exactly once into `bin\versions\<version>`, validate its required layout, back up the stable launcher, and invoke `localai-launcher.exe activate <version> --stop-running` through `IProcessRunner`. The launcher remains the sole owner of `VersionActivator`; read back `current.json`. Never update files inside an existing version directory.
 
 - [ ] **Step 4: Run GREEN**
 
@@ -399,18 +402,24 @@ git commit -m "feat(installer): recommend models from dedicated VRAM"
 
 **Files:**
 - Create: `src/LocalAi.Installer.Core/Models/BrokerModelInstaller.cs`
+- Modify: `src/LocalAi.Cli/Program.cs`
+- Create: `src/LocalAi.Cli/ModelCommand.cs`
 - Test: `tests/LocalAi.Installer.Core.Tests/BrokerModelInstallerTests.cs`
+- Test: `tests/LocalLm.Tests/ModelCommandTests.cs`
 
 - [ ] **Step 1: Write RED tests**
 
-Use a recording fake `ILocalModelClient` and prove:
+Use a recording fake `ILocalModelClient` for the new LocalAi CLI command and a
+recording fake `IProcessRunner` for Installer Core. Prove:
 
 - status, pull, and preflight are the only model calls;
 - pulls use the signed catalog version;
 - every selected model is preflighted with its selected context;
 - failed full-VRAM/zero-offload proof rejects the model and offers a smaller context/model;
 - cancellation stops subsequent work;
-- no process or HTTP abstraction is reachable from this service.
+- Installer Core launches only the stable launcher with `run localai model ...`;
+- the LocalAi CLI maps status/pull/preflight only to `ILocalModelClient`;
+- no direct Ollama process or HTTP abstraction is reachable.
 
 - [ ] **Step 2: Run RED**
 
@@ -418,7 +427,11 @@ Expected: missing broker model installer.
 
 - [ ] **Step 3: Implement using existing APIs**
 
-Compose `BrokerLocalModelClient`/`ILocalModelClient`; rely on broker preflight output and existing rejection semantics. Do not add an Ollama transport to the installer.
+Add strict JSON `localai model status|pull|preflight` commands that compose
+`BrokerLocalModelClient`/`ILocalModelClient`. Installer Core invokes those
+commands through the stable launcher, parses strict responses, and relies on
+existing broker preflight rejection semantics. Do not add an Ollama transport
+or executable reference to the installer.
 
 - [ ] **Step 4: Run GREEN**
 

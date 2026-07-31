@@ -4,7 +4,12 @@
 
 **Цель:** создать самодостаточный WPF-установщик для Windows 10/11 x64, который диагностирует зависимости, устанавливает выбранные пользователем компоненты, проверяет и активирует релизы LocalAi, рекомендует модели по VRAM, проверяет их только через общий FIFO broker и безопасно настраивает поддерживаемых агентов.
 
-**Архитектура:** вся политика и побочные эффекты находятся в тестируемом `LocalAi.Installer.Core`; `LocalAi.Installer` остаётся тонкой WPF-оболочкой. Для активации и моделей повторно используются существующие `VersionActivator`, `BrokerLocalModelClient` и контракты LocalAi, а журнал установщика обеспечивает возобновление и rollback.
+**Архитектура:** вся политика и побочные эффекты находятся в тестируемом
+`LocalAi.Installer.Core`; `LocalAi.Installer` остаётся тонкой WPF-оболочкой.
+Self-contained installer не получает runtime assembly references на executable
+projects: он вызывает packaged stable launcher точными массивами аргументов, а
+запущенный LocalAi CLI повторно использует `VersionActivator`,
+`BrokerLocalModelClient` и контракты. Журнал обеспечивает resume и rollback.
 
 **Стек:** .NET 10, C# 14, WPF, xUnit v3, `System.Text.Json`, `HttpClient`, Windows DXGI/WinTrust, существующие launcher/broker/contracts.
 
@@ -80,7 +85,12 @@ git commit -m "feat(installer): verify signed release packages"
 
 ### 6. Immutable staging и activation
 
-Создать `LocalAiPackageInstaller` и `InstallationLayout`. Копировать проверенный пакет ровно один раз в новый `bin\versions\<version>`, валидировать через `VersionResolver`, сохранять launcher и активировать существующим `VersionActivator`. Существующий version-directory не изменять.
+Создать `LocalAiPackageInstaller` и `InstallationLayout`. Копировать проверенный
+пакет ровно один раз в новый `bin\versions\<version>`, проверять required layout,
+сохранять launcher и вызывать
+`localai-launcher.exe activate <version> --stop-running` через `IProcessRunner`.
+`VersionActivator` остаётся внутри launcher; после команды обязательно прочитать
+`current.json`. Существующий version-directory не изменять.
 
 Коммит:
 
@@ -100,7 +110,13 @@ git commit -m "feat(installer): recommend models from dedicated VRAM"
 
 ### 8. Модели только через broker
 
-Создать `BrokerModelInstaller` поверх существующего `ILocalModelClient`. Recording fake должен доказать, что используются только status/pull/preflight, catalog version сохраняется, каждый выбор проходит preflight, а отсутствие `size_vram == size` отклоняет модель и предлагает меньший context/model.
+Добавить в LocalAi CLI строгие JSON-команды
+`model status|pull|preflight`, которые внутри используют существующий
+`ILocalModelClient`. `BrokerModelInstaller` вызывает их только через stable
+launcher (`run localai model ...`). Recording fakes должны доказать точные
+аргументы, сохранение catalog version, preflight каждого выбора и отклонение
+модели без full-VRAM/zero-offload proof. Installer не получает executable
+assembly reference и не имеет Ollama transport.
 
 Коммит:
 
