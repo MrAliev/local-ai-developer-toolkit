@@ -37,11 +37,11 @@ public sealed partial class ModelRecommendationEngine
             gpu.State,
             eligibleAdapters,
             manualAdapterStableId);
-        var duplicateKeys = FindDuplicateModelKeys(models!);
+        var familyErrors = FindModelFamilyErrors(models!);
         var choices = models!
             .Select(model => CreateChoice(
                 model,
-                duplicateKeys.Contains(SemanticKey(model)),
+                familyErrors.GetValueOrDefault(SemanticName(model)),
                 adapterSelection.Adapter,
                 adapterSelection.Status))
             .OrderBy(choice => choice.RequiredBytes)
@@ -92,7 +92,8 @@ public sealed partial class ModelRecommendationEngine
         if (duplicate is not null)
         {
             throw new ArgumentException(
-                $"GPU snapshot contains duplicate StableId '{duplicate.Key}'.",
+                FormattableString.Invariant(
+                    $"GPU snapshot contains duplicate StableId '{duplicate.Key}'."),
                 nameof(gpu));
         }
 
@@ -112,11 +113,13 @@ public sealed partial class ModelRecommendationEngine
                 ? new AdapterSelection(
                     AdapterSelectionStatus.InvalidManualSelection,
                     null,
-                    $"Manual GPU adapter '{manualStableId}' is not an eligible exact StableId selection; no fallback was used.")
+                    FormattableString.Invariant(
+                        $"Manual GPU adapter '{manualStableId}' is not an eligible exact StableId selection; no fallback was used."))
                 : new AdapterSelection(
                     AdapterSelectionStatus.Selected,
                     selected,
-                    $"Using manually selected dedicated GPU adapter '{selected.StableId}'.");
+                    FormattableString.Invariant(
+                        $"Using manually selected dedicated GPU adapter '{selected.StableId}'."));
         }
 
         var defaultAdapter = eligible
@@ -128,7 +131,8 @@ public sealed partial class ModelRecommendationEngine
             return new AdapterSelection(
                 AdapterSelectionStatus.Selected,
                 defaultAdapter,
-                $"Using dedicated GPU adapter '{defaultAdapter.StableId}' with the largest dedicated local VRAM.");
+                FormattableString.Invariant(
+                    $"Using dedicated GPU adapter '{defaultAdapter.StableId}' with the largest dedicated local VRAM."));
         }
 
         return new AdapterSelection(
@@ -136,12 +140,13 @@ public sealed partial class ModelRecommendationEngine
             null,
             state == ObservationState.Available
                 ? "No eligible non-software GPU adapter with dedicated local VRAM is available."
-                : $"GPU observation state is {state}; no eligible dedicated GPU adapter is available.");
+                : FormattableString.Invariant(
+                    $"GPU observation state is {state}; no eligible dedicated GPU adapter is available."));
     }
 
     private ModelRecommendationChoice CreateChoice(
         ManifestModel model,
-        bool isDuplicate,
+        string? familyError,
         GpuAdapterSnapshot? adapter,
         AdapterSelectionStatus adapterStatus)
     {
@@ -162,13 +167,14 @@ public sealed partial class ModelRecommendationEngine
             out var totalOverflow);
         var overflow = contextOverflow || runtimeOverflow || totalOverflow;
         var available = adapter?.DedicatedLocalBytes ?? 0;
-        var invalidReason = ValidateModel(model, isDuplicate);
+        var invalidReason = ValidateModel(model, familyError);
 
         string explanation;
         var enabled = false;
         if (invalidReason is not null)
         {
-            explanation = $"Disabled: invalid signed model metadata ({invalidReason}).";
+            explanation = FormattableString.Invariant(
+                $"Disabled: invalid signed model metadata ({invalidReason}).");
         }
         else if (overflow)
         {
@@ -182,7 +188,8 @@ public sealed partial class ModelRecommendationEngine
         }
         else if (required > available)
         {
-            explanation = $"Disabled: estimated required bytes exceed selected-adapter dedicated VRAM by {required - available}; broker preflight is required for proof.";
+            explanation = FormattableString.Invariant(
+                $"Disabled: estimated required bytes exceed selected-adapter dedicated VRAM by {required - available}; broker preflight is required for proof.");
         }
         else
         {
@@ -204,7 +211,9 @@ public sealed partial class ModelRecommendationEngine
             explanation);
     }
 
-    private static string? ValidateModel(ManifestModel model, bool isDuplicate)
+    private static string? ValidateModel(
+        ManifestModel model,
+        string? familyError)
     {
         if (string.IsNullOrWhiteSpace(model.Name) ||
             model.Name != model.Name.Normalize(NormalizationForm.FormC) ||
@@ -228,25 +237,46 @@ public sealed partial class ModelRecommendationEngine
             return "invalid base VRAM estimate";
         }
 
-        return isDuplicate
-            ? "duplicate semantic model name and context"
-            : null;
+        return familyError;
     }
 
-    private static HashSet<string> FindDuplicateModelKeys(
+    private static Dictionary<string, string> FindModelFamilyErrors(
         IReadOnlyList<ManifestModel> models)
     {
-        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var model in models)
+        var errors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var family in models.GroupBy(
+            SemanticName,
+            StringComparer.OrdinalIgnoreCase))
         {
-            var key = SemanticKey(model);
-            counts[key] = counts.GetValueOrDefault(key) + 1;
+            var variants = family.ToArray();
+            var contexts = new HashSet<int>();
+            string? error = null;
+            if (variants.Any(model => !contexts.Add(model.ContextTokens)))
+            {
+                error = "duplicate semantic model name and context";
+            }
+            else if (variants.Any(model =>
+                !string.Equals(model.Name, variants[0].Name, StringComparison.Ordinal)))
+            {
+                error = "inconsistent model-name casing across context variants";
+            }
+            else if (variants.Any(model => model.DownloadSize != variants[0].DownloadSize))
+            {
+                error = "inconsistent download size across context variants";
+            }
+            else if (variants.Any(model =>
+                model.EstimatedVramBytes != variants[0].EstimatedVramBytes))
+            {
+                error = "inconsistent base VRAM estimate across context variants";
+            }
+
+            if (error is not null)
+            {
+                errors.Add(family.Key, error);
+            }
         }
 
-        return counts
-            .Where(pair => pair.Value > 1)
-            .Select(pair => pair.Key)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return errors;
     }
 
     private static ManualSelection SelectManualModel(
@@ -269,7 +299,8 @@ public sealed partial class ModelRecommendationEngine
             return new ManualSelection(
                 ManualModelSelectionStatus.Ambiguous,
                 null,
-                $"Manual model selection '{requested.Name}' at context {requested.ContextTokens.ToString(CultureInfo.InvariantCulture)} is ambiguous because the signed catalog contains semantic duplicates.");
+                FormattableString.Invariant(
+                    $"Manual model selection '{requested.Name}' at context {requested.ContextTokens} is ambiguous because the signed catalog contains semantic duplicates."));
         }
 
         var exact = choices.SingleOrDefault(choice =>
@@ -279,17 +310,19 @@ public sealed partial class ModelRecommendationEngine
             ? new ManualSelection(
                 ManualModelSelectionStatus.Unknown,
                 null,
-                $"Manual model selection '{requested.Name}' at context {requested.ContextTokens.ToString(CultureInfo.InvariantCulture)} is unknown; no fallback was used.")
+                FormattableString.Invariant(
+                    $"Manual model selection '{requested.Name}' at context {requested.ContextTokens} is unknown; no fallback was used."))
             : new ManualSelection(
                 ManualModelSelectionStatus.Selected,
                 exact,
                 exact.IsEnabled
                     ? "The exact manual model choice is enabled as an estimate; broker preflight is required for proof."
-                    : $"The exact manual model choice is preserved but disabled: {exact.Explanation}");
+                    : FormattableString.Invariant(
+                        $"The exact manual model choice is preserved but disabled: {exact.Explanation}"));
     }
 
-    private static string SemanticKey(ManifestModel model) =>
-        $"{(model.Name ?? string.Empty).Normalize(NormalizationForm.FormC)}\u001F{model.ContextTokens.ToString(CultureInfo.InvariantCulture)}";
+    private static string SemanticName(ManifestModel model) =>
+        (model.Name ?? string.Empty).Normalize(NormalizationForm.FormC);
 
     private static bool IsSupportedContext(int value) =>
         value is >= 2048 and <= 262144 && (value & (value - 1)) == 0;

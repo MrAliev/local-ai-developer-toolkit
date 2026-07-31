@@ -1,3 +1,4 @@
+using System.Globalization;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Models;
 using LocalAi.Installer.Core.Releases;
@@ -207,11 +208,12 @@ public sealed class ModelRecommendationEngineTests
             AvailableGpu(Gpu("gpu", 100_000)),
             [
                 Model("z", 2048, 2_049),
-                Model("a", 4096, 1),
+                Model("a", 4096, 2_049),
                 Model("a", 2048, 2_049),
             ],
-            new ModelMemoryReservePolicy(1, 1));
+            new ModelMemoryReservePolicy(1, 0));
 
+        Assert.All(result.Choices, choice => Assert.True(choice.IsEnabled));
         Assert.Equal(
             [("a", 2048), ("a", 4096), ("z", 2048)],
             result.Choices.Select(choice => (choice.Name, choice.ContextTokens)));
@@ -242,7 +244,7 @@ public sealed class ModelRecommendationEngineTests
             AvailableGpu(Gpu("gpu", 100_000)),
             [
                 Model("same-model", 2048, 1_000),
-                Model("same-model", 4096, 2_000),
+                Model("same-model", 4096, 1_000),
             ],
             manualModel: new ModelSelection("same-model", 4096));
 
@@ -250,7 +252,8 @@ public sealed class ModelRecommendationEngineTests
         Assert.NotNull(result.ManualChoice);
         Assert.Equal("same-model", result.ManualChoice.Name);
         Assert.Equal(4096, result.ManualChoice.ContextTokens);
-        Assert.Equal(2_000UL, result.ManualChoice.SignedBaseEstimateBytes);
+        Assert.Equal(1_000UL, result.ManualChoice.SignedBaseEstimateBytes);
+        Assert.Equal(9_292UL, result.ManualChoice.RequiredBytes);
     }
 
     [Fact]
@@ -271,7 +274,7 @@ public sealed class ModelRecommendationEngineTests
     {
         var result = Recommend(
             AvailableGpu(Gpu("gpu", 10_000)),
-            [Model("model", 2048, 1), Model("MODEL", 2048, 2)],
+            [Model("model", 2048, 1), Model("model", 2048, 1)],
             manualModel: new ModelSelection("model", 2048));
 
         Assert.All(result.Choices, choice =>
@@ -281,6 +284,50 @@ public sealed class ModelRecommendationEngineTests
         });
         Assert.Equal(ManualModelSelectionStatus.Ambiguous, result.ManualSelectionStatus);
         Assert.Null(result.ManualChoice);
+    }
+
+    [Theory]
+    [InlineData("MODEL", 1, 1_000, "casing")]
+    [InlineData("model", 2, 1_000, "download size")]
+    [InlineData("model", 1, 2_000, "base VRAM")]
+    public void Inconsistent_model_family_metadata_disables_every_context_variant(
+        string secondName,
+        long secondDownloadSize,
+        long secondBaseVramBytes,
+        string expectedReason)
+    {
+        var result = Recommend(
+            AvailableGpu(Gpu("gpu", 100_000)),
+            [
+                new ManifestModel("model", 2048, 1, 1_000),
+                new ManifestModel(secondName, 4096, secondDownloadSize, secondBaseVramBytes),
+            ]);
+
+        Assert.All(result.Choices, choice =>
+        {
+            Assert.False(choice.IsEnabled);
+            Assert.Contains(expectedReason, choice.Explanation);
+        });
+        Assert.Null(result.Minimal);
+        Assert.Null(result.Recommended);
+        Assert.Null(result.Extended);
+    }
+
+    [Fact]
+    public void Recommendation_explanations_are_identical_across_cultures()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            var russian = CaptureExplanations(TestCulture("ru-RU", "minus-ru"));
+            var arabic = CaptureExplanations(TestCulture("ar-SA", "minus-ar"));
+
+            Assert.Equal(russian, arabic);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
     }
 
     [Theory]
@@ -357,6 +404,35 @@ public sealed class ModelRecommendationEngineTests
         ModelSelection? manualModel = null) =>
         new ModelRecommendationEngine(policy ?? TestPolicy).Recommend(
             gpu, catalog, manualAdapterStableId, manualModel);
+
+    private static string[] CaptureExplanations(CultureInfo culture)
+    {
+        CultureInfo.CurrentCulture = culture;
+        var result = Recommend(
+            AvailableGpu(Gpu("gpu", 5_000)),
+            [Model("model", 2048, 805)],
+            manualModel: new ModelSelection("unknown", 4096));
+        return
+        [
+            result.AdapterSelectionExplanation,
+            Assert.Single(result.Choices).Explanation,
+            result.ManualSelectionExplanation,
+        ];
+    }
+
+    private static CultureInfo TestCulture(string name, string negativeSign)
+    {
+        try
+        {
+            return new CultureInfo(name);
+        }
+        catch (CultureNotFoundException)
+        {
+            var fallback = (CultureInfo)CultureInfo.InvariantCulture.Clone();
+            fallback.NumberFormat.NegativeSign = negativeSign;
+            return fallback;
+        }
+    }
 
     private static GpuSnapshot AvailableGpu(params GpuAdapterSnapshot[] adapters) =>
         new(ObservationState.Available, adapters, null);

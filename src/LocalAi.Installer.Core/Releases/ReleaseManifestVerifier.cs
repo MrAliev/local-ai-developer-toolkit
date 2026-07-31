@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
@@ -221,10 +222,17 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
         }
 
         var modelOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var modelFamilies = new Dictionary<
+            string,
+            (string Name, long DownloadSize, long EstimatedVramBytes)>(
+                StringComparer.OrdinalIgnoreCase);
         foreach (var model in manifest.Models)
         {
             var normalizedName = model?.Name?.Normalize(NormalizationForm.FormC) ?? string.Empty;
-            var optionKey = $"{normalizedName}\u001F{model?.ContextTokens}";
+            var optionKey = string.Concat(
+                normalizedName,
+                "\u001F",
+                model?.ContextTokens.ToString(CultureInfo.InvariantCulture));
             if (model is null ||
                 string.IsNullOrWhiteSpace(model.Name) ||
                 !SafeModelName().IsMatch(model.Name) ||
@@ -235,6 +243,22 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
                 model.EstimatedVramBytes is <= 0 or > MaximumModelSize)
             {
                 throw InvalidManifest();
+            }
+
+            if (modelFamilies.TryGetValue(normalizedName, out var family))
+            {
+                if (!string.Equals(family.Name, model.Name, StringComparison.Ordinal) ||
+                    family.DownloadSize != model.DownloadSize ||
+                    family.EstimatedVramBytes != model.EstimatedVramBytes)
+                {
+                    throw InvalidManifest();
+                }
+            }
+            else
+            {
+                modelFamilies.Add(
+                    normalizedName,
+                    (model.Name, model.DownloadSize, model.EstimatedVramBytes));
             }
         }
     }

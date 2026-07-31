@@ -763,8 +763,8 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
             original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
             [
-                new ManifestModel("model:latest", 2048, 1, 1),
-                new ManifestModel("model:latest", 4096, 1, 2),
+                new ManifestModel("model:latest", 2048, 7, 11),
+                new ManifestModel("model:latest", 4096, 7, 11),
             ]);
         var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
 
@@ -775,7 +775,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
     }
 
     [Fact]
-    public void Verify_rejects_case_insensitive_duplicate_model_name_and_context()
+    public void Verify_rejects_exact_duplicate_model_name_and_context()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var original = CreateManifest([1, 2, 3]);
@@ -785,8 +785,62 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
             [
                 new ManifestModel("model:latest", 2048, 1, 1),
-                new ManifestModel("MODEL:latest", 2048, 1, 2),
+                new ManifestModel("model:latest", 2048, 1, 1),
             ]);
+        Assert.Throws<ReleaseVerificationException>(() =>
+            ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest));
+    }
+
+    [Fact]
+    public void Verify_rejects_model_family_casing_mismatch_across_contexts()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var original = CreateManifest([1, 2, 3]);
+        var manifest = new ReleaseManifest(
+            original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
+            original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
+            [
+                new ManifestModel("model:latest", 2048, 7, 11),
+                new ManifestModel("MODEL:latest", 4096, 7, 11),
+            ]);
+
+        Assert.Throws<ReleaseVerificationException>(() =>
+            ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest));
+    }
+
+    [Fact]
+    public void Verify_rejects_model_family_download_size_mismatch_across_contexts()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var original = CreateManifest([1, 2, 3]);
+        var manifest = new ReleaseManifest(
+            original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
+            original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
+            [
+                new ManifestModel("model:latest", 2048, 7, 11),
+                new ManifestModel("model:latest", 4096, 8, 11),
+            ]);
+
+        Assert.Throws<ReleaseVerificationException>(() =>
+            ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest));
+    }
+
+    [Fact]
+    public void Verify_rejects_model_family_base_vram_mismatch_across_contexts()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var original = CreateManifest([1, 2, 3]);
+        var manifest = new ReleaseManifest(
+            original.SchemaVersion, original.ReleaseVersion, original.VersionDirectory,
+            original.ProtocolVersion, original.BuildCompatibilityId, original.PackageUri,
+            original.PackageSize, original.PackageSha256, original.RequiresAuthenticode,
+            [
+                new ManifestModel("model:latest", 2048, 7, 11),
+                new ManifestModel("model:latest", 4096, 7, 12),
+            ]);
+
         Assert.Throws<ReleaseVerificationException>(() =>
             ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest));
     }
