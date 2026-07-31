@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
+using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
 
 namespace LocalAi.Installer.Core.Diagnosis;
@@ -9,16 +10,6 @@ namespace LocalAi.Installer.Core.Diagnosis;
 public sealed partial class ExistingLocalAiInspector(IFileSystemProbe fileSystem)
 {
     private static readonly JsonSerializerOptions StrictJson = CreateJsonOptions();
-    private static readonly IReadOnlyList<string> RequiredFiles =
-    [
-        "localai.exe",
-        "codesearch.exe",
-        "codesearch-mcp.exe",
-        "locallm-mcp.exe",
-        "LocalAi.Broker.dll",
-        "LocalAi.Contracts.dll",
-    ];
-
     public ExistingLocalAiSnapshot Inspect(string localAppData)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(localAppData);
@@ -67,7 +58,7 @@ public sealed partial class ExistingLocalAiInspector(IFileSystemProbe fileSystem
             var physicalVersionPath = fileSystem.ResolvePhysicalPath(versionPath);
             EnsureBelow(physicalVersionPath, physicalVersionsRoot);
             var physicalRequiredFiles = new List<(string Logical, string Physical)>();
-            foreach (var requiredFile in RequiredFiles)
+            foreach (var requiredFile in LocalAiPackageLayout.RequiredFiles)
             {
                 var requiredPath = Path.Combine(versionPath, requiredFile);
                 if (!fileSystem.FileExists(requiredPath))

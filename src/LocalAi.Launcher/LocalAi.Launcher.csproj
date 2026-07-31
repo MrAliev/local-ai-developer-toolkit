@@ -3,4 +3,7 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>localai-launcher</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+  </ItemGroup>
 </Project>
