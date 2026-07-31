@@ -22,7 +22,8 @@ internal interface IModelInstallTrust
     string CatalogVersion { get; }
     IReadOnlyList<ManifestModel> Models { get; }
     void RevalidatePackage();
-    IActiveVersionBatchLease AcquireActiveVersion();
+    IActiveVersionBatchLease AcquireActiveVersion(
+        CancellationToken cancellationToken);
 }
 
 internal interface IActiveVersionBatchLease : IDisposable
@@ -50,17 +51,25 @@ internal sealed class ActiveVersionBatchLease : IActiveVersionBatchLease
     public static ActiveVersionBatchLease Acquire(
         string binRoot,
         string versionDirectory,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         using var startupGate = ActivationCoordinator.AcquireStartupGate(
             binRoot,
-            timeout);
+            timeout,
+            cancellationToken);
         var snapshot = CurrentPointerSnapshot.Read(startupGate);
         ValidateExpected(snapshot, versionDirectory);
         ActivationSharedLease? shared = null;
         try
         {
-            shared = ActivationCoordinator.AcquireShared(startupGate);
+            var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
+            var remaining = elapsed >= timeout ? TimeSpan.Zero : timeout - elapsed;
+            shared = ActivationCoordinator.AcquireShared(
+                startupGate,
+                remaining,
+                cancellationToken);
             var result = new ActiveVersionBatchLease(
                 shared,
                 snapshot,
@@ -294,8 +303,27 @@ public sealed class BrokerModelInstaller : IDisposable
         try
         {
             trust.RevalidatePackage();
-            ValidateSignedSelections(snapshot, trust.Models);
-            activeVersion = trust.AcquireActiveVersion();
+            ValidateSignedRequests(snapshot, trust.Models);
+            activeVersion = trust.AcquireActiveVersion(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            activeVersion?.Dispose();
+            return Batch(
+                [],
+                BrokerModelBatchStopReason.Cancelled,
+                false,
+                "cancelled");
+        }
+        catch (ActivationCoordinationException exception) when (
+            exception.Code is "activation_timeout" or "version_in_use")
+        {
+            activeVersion?.Dispose();
+            return Batch(
+                [],
+                BrokerModelBatchStopReason.TimedOut,
+                false,
+                "active_version_lease_timeout");
         }
         catch (Exception)
         {
@@ -646,10 +674,7 @@ public sealed class BrokerModelInstaller : IDisposable
             !string.Equals(response.Operation, "status", StringComparison.Ordinal) ||
             !string.Equals(response.CatalogVersion, catalogVersion, StringComparison.Ordinal) ||
             !ValidModelList(response.InstalledModels) ||
-            !ValidModelList(response.PendingPullModels) ||
-            response.InstalledModels.Intersect(
-                response.PendingPullModels,
-                StringComparer.Ordinal).Any())
+            !ValidModelList(response.PendingPullModels))
         {
             throw Failure(
                 BrokerModelBatchStopReason.ProtocolFailure,
@@ -808,7 +833,7 @@ public sealed class BrokerModelInstaller : IDisposable
         return snapshot;
     }
 
-    private static void ValidateSignedSelections(
+    private static void ValidateSignedRequests(
         IReadOnlyList<BrokerModelInstallRequest> requests,
         IReadOnlyList<ManifestModel> models)
     {
@@ -827,7 +852,61 @@ public sealed class BrokerModelInstaller : IDisposable
                     "The selected model is not uniquely present in the signed release manifest.",
                     nameof(requests));
             }
+
+            foreach (var choice in request.FallbackChoices)
+            {
+                var manifest = models.SingleOrDefault(model =>
+                    string.Equals(
+                        model.Name,
+                        choice.Name,
+                        StringComparison.Ordinal) &&
+                    model.ContextTokens == choice.ContextTokens);
+                if (manifest is null ||
+                    manifest.DownloadSize <= 0 ||
+                    manifest.EstimatedVramBytes <= 0 ||
+                    choice.SignedDownloadSizeBytes != (ulong)manifest.DownloadSize ||
+                    choice.SignedBaseEstimateBytes != (ulong)manifest.EstimatedVramBytes ||
+                    !IsCurrentRecommendation(choice))
+                {
+                    throw new ArgumentException(
+                        "A model recommendation choice does not match the signed release manifest.",
+                        nameof(requests));
+                }
+            }
+
+            if (request.FallbackChoices
+                    .Select(choice => choice.AvailableDedicatedBytes)
+                    .Distinct()
+                    .Count() != 1)
+            {
+                throw new ArgumentException(
+                    "Model recommendation choices do not share one adapter budget.",
+                    nameof(requests));
+            }
         }
+    }
+
+    private static bool IsCurrentRecommendation(ModelRecommendationChoice choice)
+    {
+        var policy = ModelMemoryReservePolicy.ConservativeProduction;
+        var contextReserve = checked(
+            (ulong)choice.ContextTokens * policy.ContextBytesPerToken);
+        var required = checked(
+            choice.SignedBaseEstimateBytes +
+            policy.FixedRuntimeReserveBytes +
+            contextReserve);
+        var fits = required <= choice.AvailableDedicatedBytes;
+        return choice.RuntimeReserveBytes == policy.FixedRuntimeReserveBytes &&
+            choice.ContextReserveBytes == contextReserve &&
+            choice.RequiredBytes == required &&
+            choice.HeadroomBytes == (fits
+                ? choice.AvailableDedicatedBytes - required
+                : 0) &&
+            choice.OverBudgetBytes == (fits
+                ? 0
+                : required - choice.AvailableDedicatedBytes) &&
+            choice.IsEnabled == fits &&
+            !string.IsNullOrWhiteSpace(choice.Explanation);
     }
 
     private static void ValidateChoices(BrokerModelInstallRequest request)
@@ -1054,8 +1133,13 @@ public sealed class BrokerModelInstaller : IDisposable
 
         public void RevalidatePackage() => package.Revalidate();
 
-        public IActiveVersionBatchLease AcquireActiveVersion() =>
-            ActiveVersionBatchLease.Acquire(binRoot, versionDirectory, timeout);
+        public IActiveVersionBatchLease AcquireActiveVersion(
+            CancellationToken cancellationToken) =>
+            ActiveVersionBatchLease.Acquire(
+                binRoot,
+                versionDirectory,
+                timeout,
+                cancellationToken);
     }
 
     private sealed class CommandFailure(

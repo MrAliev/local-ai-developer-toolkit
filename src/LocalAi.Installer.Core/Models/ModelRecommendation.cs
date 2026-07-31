@@ -54,6 +54,7 @@ public sealed class ModelRecommendationChoice
     internal ModelRecommendationChoice(
         string name,
         int contextTokens,
+        ulong signedDownloadSizeBytes,
         ulong signedBaseEstimateBytes,
         ulong runtimeReserveBytes,
         ulong contextReserveBytes,
@@ -66,6 +67,7 @@ public sealed class ModelRecommendationChoice
     {
         Name = name;
         ContextTokens = contextTokens;
+        SignedDownloadSizeBytes = signedDownloadSizeBytes;
         SignedBaseEstimateBytes = signedBaseEstimateBytes;
         RuntimeReserveBytes = runtimeReserveBytes;
         ContextReserveBytes = contextReserveBytes;
@@ -80,6 +82,8 @@ public sealed class ModelRecommendationChoice
     public string Name { get; }
 
     public int ContextTokens { get; }
+
+    public ulong SignedDownloadSizeBytes { get; }
 
     public ulong SignedBaseEstimateBytes { get; }
 

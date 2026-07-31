@@ -38,7 +38,7 @@ internal interface ISecureNamedMutexFactory
 
 internal interface ISecureNamedMutex : IDisposable
 {
-    bool WaitOne(TimeSpan timeout);
+    bool WaitOne(TimeSpan timeout, CancellationToken cancellationToken);
     void Release();
 }
 
@@ -55,13 +55,30 @@ internal sealed class SecureNamedMutexFactory : ISecureNamedMutexFactory
     {
         private readonly Mutex mutex = new(false, name);
 
-        public bool WaitOne(TimeSpan timeout)
+        public bool WaitOne(
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
         {
             try
             {
-                return mutex.WaitOne(timeout);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!cancellationToken.CanBeCanceled)
+                {
+                    return mutex.WaitOne(timeout);
+                }
+
+                var result = WaitHandle.WaitAny(
+                    [mutex, cancellationToken.WaitHandle],
+                    timeout);
+                if (result == 1)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
+                return result == 0;
             }
-            catch (AbandonedMutexException)
+            catch (AbandonedMutexException exception) when (
+                exception.MutexIndex is 0 or -1)
             {
                 return true;
             }
@@ -128,19 +145,47 @@ internal sealed class WindowsSecureNamedMutex : ISecureNamedMutex
         }
     }
 
-    public bool WaitOne(TimeSpan timeout)
+    public bool WaitOne(
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
-        var milliseconds = timeout == Timeout.InfiniteTimeSpan
-            ? uint.MaxValue
-            : checked((uint)Math.Ceiling(timeout.TotalMilliseconds));
-        var result = WaitForSingleObject(handle, milliseconds);
-        return result switch
+        cancellationToken.ThrowIfCancellationRequested();
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        while (true)
         {
-            WaitObject0 or WaitAbandoned => true,
-            WaitTimeout => false,
-            WaitFailed => throw new Win32Exception(Marshal.GetLastWin32Error()),
-            _ => throw new Win32Exception("Unexpected named mutex wait result."),
-        };
+            cancellationToken.ThrowIfCancellationRequested();
+            var remaining = timeout == Timeout.InfiniteTimeSpan
+                ? TimeSpan.FromMilliseconds(25)
+                : timeout - System.Diagnostics.Stopwatch.GetElapsedTime(started);
+            if (remaining < TimeSpan.Zero)
+            {
+                remaining = TimeSpan.Zero;
+            }
+
+            var slice = remaining > TimeSpan.FromMilliseconds(25)
+                ? TimeSpan.FromMilliseconds(25)
+                : remaining;
+            var milliseconds = checked((uint)Math.Ceiling(slice.TotalMilliseconds));
+            var result = WaitForSingleObject(handle, milliseconds);
+            switch (result)
+            {
+                case WaitObject0:
+                case WaitAbandoned:
+                    return true;
+                case WaitFailed:
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                case WaitTimeout:
+                    if (timeout != Timeout.InfiniteTimeSpan &&
+                        System.Diagnostics.Stopwatch.GetElapsedTime(started) >= timeout)
+                    {
+                        return false;
+                    }
+
+                    break;
+                default:
+                    throw new Win32Exception("Unexpected named mutex wait result.");
+            }
+        }
     }
 
     public void Release()

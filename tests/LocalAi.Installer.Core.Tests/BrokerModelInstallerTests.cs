@@ -159,6 +159,122 @@ public sealed class BrokerModelInstallerTests : IDisposable
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Installed_and_pending_overlap_is_valid_and_installed_model_skips_pull(
+        bool requestedModelOverlaps)
+    {
+        var installed = requestedModelOverlaps
+            ? new[] { "model-a" }
+            : new[] { "model-a", "model-b" };
+        var pending = requestedModelOverlaps
+            ? new[] { "model-a" }
+            : new[] { "model-b" };
+        var runner = new RecordingProcessRunner(
+            Success(Status(installed, pending, "signed-7")),
+            Success(Preflight("model-a", 2048, 80, 80, true)));
+        var installer = Installer(runner, Launcher());
+
+        var result = await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7")],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BrokerModelBatchStopReason.None, result.StopReason);
+        Assert.Equal(BrokerModelInstallOutcome.Accepted, Assert.Single(result.Models).Outcome);
+        Assert.DoesNotContain(runner.Calls, call =>
+            call.Arguments.Contains("pull", StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("foreign-model", 2048, 100)]
+    [InlineData("MODEL-A", 2048, 100)]
+    public async Task Foreign_stale_or_case_changed_fallback_choice_stops_before_status(
+        string fallbackModel,
+        int fallbackContext,
+        ulong fallbackBaseEstimate)
+    {
+        var runner = new RecordingProcessRunner();
+        var choices = new[]
+        {
+            Choice("model-a", 2048, 100),
+            Choice(fallbackModel, fallbackContext, fallbackBaseEstimate),
+        };
+        var installer = Installer(runner, Launcher());
+
+        var result = await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7", choices: choices)],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BrokerModelBatchStopReason.LauncherTrustFailure, result.StopReason);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Theory]
+    [InlineData(99, 100)]
+    [InlineData(100, 99)]
+    public async Task Selected_choice_with_different_release_estimates_stops_before_status(
+        ulong baseEstimate,
+        ulong downloadSize)
+    {
+        var runner = new RecordingProcessRunner();
+        var installer = Installer(runner, Launcher());
+        var choices = new[]
+        {
+            Choice(
+                "model-a",
+                2048,
+                baseEstimate,
+                downloadSize: downloadSize),
+        };
+
+        var result = await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7", choices: choices)],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BrokerModelBatchStopReason.LauncherTrustFailure, result.StopReason);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Theory]
+    [InlineData("runtime")]
+    [InlineData("required")]
+    [InlineData("adapter")]
+    public async Task Internally_inconsistent_recommendation_stops_before_status(
+        string corruption)
+    {
+        var runner = new RecordingProcessRunner();
+        var selected = Choice("model-a", 2048, 100);
+        var fallback = Choice("model-b", 2048, 60);
+        var corrupted = corruption switch
+        {
+            "runtime" => CopyChoice(
+                fallback,
+                runtimeReserveBytes: fallback.RuntimeReserveBytes - 1),
+            "required" => CopyChoice(
+                fallback,
+                requiredBytes: fallback.RequiredBytes + 1),
+            "adapter" => CopyChoice(
+                fallback,
+                availableDedicatedBytes: fallback.AvailableDedicatedBytes - 1,
+                headroomBytes: fallback.HeadroomBytes - 1),
+            _ => throw new InvalidOperationException(),
+        };
+        var installer = Installer(runner, Launcher());
+
+        var result = await installer.InstallAsync(
+            [Request(
+                "a",
+                "model-a",
+                2048,
+                "signed-7",
+                choices: [selected, corrupted])],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BrokerModelBatchStopReason.LauncherTrustFailure, result.StopReason);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Theory]
     [InlineData(false, true, "a", "model-a", "signed-7")]
     [InlineData(true, false, "a", "model-a", "signed-7")]
     [InlineData(true, true, "", "model-a", "signed-7")]
@@ -208,11 +324,10 @@ public sealed class BrokerModelInstallerTests : IDisposable
     {
         var choices = new[]
         {
-            Choice("model-a", 2048, 70, 100, enabled: true),
-            Choice("model-b", 2048, 60, 100, enabled: true),
-            Choice("model-a", 8192, 100, 100, enabled: true),
-            Choice("model-c", 2048, 120, 100, enabled: false),
-            Choice("model-d", 2048, 110, 100, enabled: true),
+            Choice("model-a", 2048, 100),
+            Choice("model-b", 2048, 60),
+            Choice("model-a", 8192, 100),
+            Choice("model-d", 2048, 110),
         };
         var runner = new RecordingProcessRunner(
             Success(Status(["model-a"], [], "signed-7")),
@@ -226,7 +341,7 @@ public sealed class BrokerModelInstallerTests : IDisposable
         var model = Assert.Single(result.Models);
         Assert.Equal(BrokerModelInstallOutcome.RejectedResidency, model.Outcome);
         Assert.Equal(
-            [("model-a", 2048), ("model-b", 2048)],
+            [("model-a", 2048), ("model-b", 2048), ("model-d", 2048)],
             model.FallbackSuggestions.Select(choice => (choice.Model, choice.ContextTokens)));
         Assert.False(model.NoFallbackAvailable);
     }
@@ -469,7 +584,11 @@ public sealed class BrokerModelInstallerTests : IDisposable
         var root = CreateActivationRoot("v1");
 
         Assert.Throws<CurrentPointerChangedException>(() =>
-            ActiveVersionBatchLease.Acquire(root, "v2", TimeSpan.Zero));
+            ActiveVersionBatchLease.Acquire(
+                root,
+                "v2",
+                TimeSpan.Zero,
+                TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -479,12 +598,19 @@ public sealed class BrokerModelInstallerTests : IDisposable
         using var batch = ActiveVersionBatchLease.Acquire(
             root,
             "v1",
-            TimeSpan.FromSeconds(1));
+            TimeSpan.FromSeconds(1),
+            TestContext.Current.CancellationToken);
 
-        using (ActivationCoordinator.AcquireShared(root, TimeSpan.FromSeconds(1)))
+        using (ActivationCoordinator.AcquireShared(
+                   root,
+                   TimeSpan.FromSeconds(1),
+                   TestContext.Current.CancellationToken))
         {
             var failure = Assert.Throws<ActivationCoordinationException>(() =>
-                ActivationCoordinator.AcquireExclusive(root, TimeSpan.Zero));
+                ActivationCoordinator.AcquireExclusive(
+                    root,
+                    TimeSpan.Zero,
+                    TestContext.Current.CancellationToken));
             Assert.Equal("version_in_use", failure.Code);
         }
 
@@ -492,6 +618,127 @@ public sealed class BrokerModelInstallerTests : IDisposable
             Path.Combine(root, "current.json"),
             CurrentPointerSnapshot.CreateCanonicalBytes("v2"));
         Assert.Throws<CurrentPointerChangedException>(batch.Revalidate);
+    }
+
+    [Fact]
+    public async Task Cancellation_while_activation_gate_is_blocked_stops_before_process_calls()
+    {
+        var root = CreateActivationRoot("v1");
+        var blocker = HoldStartupGateAsync(
+            root,
+            TestContext.Current.CancellationToken);
+        await blocker.Held;
+        using var cancellation = new CancellationTokenSource();
+        cancellation.CancelAfter(TimeSpan.FromMilliseconds(75));
+        var runner = new RecordingProcessRunner();
+        var trust = Trust();
+        trust.Acquire = token => ActiveVersionBatchLease.Acquire(
+            root,
+            "v1",
+            TimeSpan.FromSeconds(5),
+            token);
+        var installer = Installer(runner, Launcher(), trust);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        BrokerModelInstallBatchResult result;
+        try
+        {
+            result = await installer.InstallAsync(
+                [Request("a", "model-a", 2048, "signed-7")],
+                cancellation.Token);
+        }
+        finally
+        {
+            blocker.Release();
+            await blocker.Completion;
+        }
+
+        stopwatch.Stop();
+        Assert.Equal(BrokerModelBatchStopReason.Cancelled, result.StopReason);
+        Assert.Equal("cancelled", result.Code);
+        Assert.Empty(runner.Calls);
+        Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+        using var reacquired = ActivationCoordinator.AcquireStartupGate(
+            root,
+            TimeSpan.Zero,
+            TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Activation_gate_timeout_is_distinct_and_stops_before_process_calls()
+    {
+        var root = CreateActivationRoot("v1");
+        var blocker = HoldStartupGateAsync(
+            root,
+            TestContext.Current.CancellationToken);
+        await blocker.Held;
+        var runner = new RecordingProcessRunner();
+        var trust = Trust();
+        trust.Acquire = token => ActiveVersionBatchLease.Acquire(
+            root,
+            "v1",
+            TimeSpan.FromMilliseconds(75),
+            token);
+        var installer = Installer(runner, Launcher(), trust);
+
+        BrokerModelInstallBatchResult result;
+        try
+        {
+            result = await installer.InstallAsync(
+                [Request("a", "model-a", 2048, "signed-7")],
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            blocker.Release();
+            await blocker.Completion;
+        }
+
+        Assert.Equal(BrokerModelBatchStopReason.TimedOut, result.StopReason);
+        Assert.Equal("active_version_lease_timeout", result.Code);
+        Assert.Empty(runner.Calls);
+        using var reacquired = ActivationCoordinator.AcquireStartupGate(
+            root,
+            TimeSpan.Zero,
+            TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Cancellation_while_current_lock_is_blocked_releases_gate_and_stops_processes()
+    {
+        var root = CreateActivationRoot("v1");
+        var lockPath = Path.Combine(root, "current.lock");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.CancelAfter(TimeSpan.FromMilliseconds(75));
+        var runner = new RecordingProcessRunner();
+        var trust = Trust();
+        trust.Acquire = token => ActiveVersionBatchLease.Acquire(
+            root,
+            "v1",
+            TimeSpan.FromSeconds(5),
+            token);
+        var installer = Installer(runner, Launcher(), trust);
+        BrokerModelInstallBatchResult result;
+
+        using (new FileStream(
+                   lockPath,
+                   FileMode.OpenOrCreate,
+                   FileAccess.ReadWrite,
+                   FileShare.None))
+        {
+            result = await installer.InstallAsync(
+                [Request("a", "model-a", 2048, "signed-7")],
+                cancellation.Token);
+        }
+
+        Assert.Equal(BrokerModelBatchStopReason.Cancelled, result.StopReason);
+        Assert.Equal("cancelled", result.Code);
+        Assert.Empty(runner.Calls);
+        using var acquired = ActiveVersionBatchLease.Acquire(
+            root,
+            "v1",
+            TimeSpan.Zero,
+            TestContext.Current.CancellationToken);
     }
 
     private string CreateActivationRoot(string version)
@@ -507,6 +754,26 @@ public sealed class BrokerModelInstallerTests : IDisposable
         return root;
     }
 
+    private static GateBlocker HoldStartupGateAsync(
+        string root,
+        CancellationToken cancellationToken)
+    {
+        var held = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = Task.Run(() =>
+        {
+            using var gate = ActivationCoordinator.AcquireStartupGate(
+                root,
+                TimeSpan.FromSeconds(1),
+                cancellationToken);
+            held.SetResult();
+            release.Task.GetAwaiter().GetResult();
+        });
+        return new GateBlocker(held.Task, completion, release.SetResult);
+    }
+
     public void Dispose()
     {
         foreach (var root in activationRoots)
@@ -520,8 +787,9 @@ public sealed class BrokerModelInstallerTests : IDisposable
 
     private BrokerModelInstaller Installer(
         RecordingProcessRunner runner,
-        RecordingLauncher launcher) =>
-        new(runner, launcher, layout, Trust(), TimeSpan.FromMinutes(5));
+        RecordingLauncher launcher,
+        RecordingTrust? trust = null) =>
+        new(runner, launcher, layout, trust ?? Trust(), TimeSpan.FromMinutes(5));
 
     private RecordingLauncher Launcher() => new(layout.LauncherPath);
 
@@ -530,8 +798,10 @@ public sealed class BrokerModelInstallerTests : IDisposable
         [
             new ManifestModel("model-a", 2048, 100, 100),
             new ManifestModel("model-a", 8192, 100, 100),
-            new ManifestModel("model-b", 2048, 100, 100),
-            new ManifestModel("model-b", 4096, 100, 100),
+            new ManifestModel("model-b", 2048, 100, 60),
+            new ManifestModel("model-b", 4096, 100, 60),
+            new ManifestModel("model-c", 2048, 100, 120),
+            new ManifestModel("model-d", 2048, 100, 110),
             new ManifestModel("qwen3.5:9b", 8192, 100, 100),
         ]);
 
@@ -545,26 +815,67 @@ public sealed class BrokerModelInstallerTests : IDisposable
         IReadOnlyList<ModelRecommendationChoice>? choices = null) =>
         new(
             new ModelInstallAction(actionId, model, context, selected, consent),
-            choices ?? [Choice(model, context, 100, 100, enabled: true)]);
+            choices ?? [Choice(
+                model,
+                context,
+                SignedBaseEstimate(model))]);
+
+    private static ulong SignedBaseEstimate(string model) => model switch
+    {
+        "model-b" => 60,
+        "model-c" => 120,
+        "model-d" => 110,
+        _ => 100,
+    };
 
     private static ModelRecommendationChoice Choice(
         string model,
         int context,
-        ulong required,
-        ulong available,
-        bool enabled) =>
-        new(
+        ulong signedBaseEstimate,
+        ulong downloadSize = 100)
+    {
+        var policy = ModelMemoryReservePolicy.ConservativeProduction;
+        var contextReserve = checked((ulong)context * policy.ContextBytesPerToken);
+        var required = checked(
+            signedBaseEstimate +
+            policy.FixedRuntimeReserveBytes +
+            contextReserve);
+        const ulong available = 4UL * 1024 * 1024 * 1024;
+        var enabled = required <= available;
+        return new(
             model,
             context,
-            required,
-            0,
-            0,
+            downloadSize,
+            signedBaseEstimate,
+            policy.FixedRuntimeReserveBytes,
+            contextReserve,
             required,
             available,
             available >= required ? available - required : 0,
             available >= required ? 0 : required - available,
             enabled,
             "test choice");
+    }
+
+    private static ModelRecommendationChoice CopyChoice(
+        ModelRecommendationChoice choice,
+        ulong? runtimeReserveBytes = null,
+        ulong? requiredBytes = null,
+        ulong? availableDedicatedBytes = null,
+        ulong? headroomBytes = null) =>
+        new(
+            choice.Name,
+            choice.ContextTokens,
+            choice.SignedDownloadSizeBytes,
+            choice.SignedBaseEstimateBytes,
+            runtimeReserveBytes ?? choice.RuntimeReserveBytes,
+            choice.ContextReserveBytes,
+            requiredBytes ?? choice.RequiredBytes,
+            availableDedicatedBytes ?? choice.AvailableDedicatedBytes,
+            headroomBytes ?? choice.HeadroomBytes,
+            choice.OverBudgetBytes,
+            choice.IsEnabled,
+            choice.Explanation);
 
     private static string Status(
         IReadOnlyList<string> installed,
@@ -614,9 +925,11 @@ public sealed class BrokerModelInstallerTests : IDisposable
     {
         public string CatalogVersion { get; } = catalogVersion;
         public IReadOnlyList<ManifestModel> Models { get; } = models;
+        public Func<CancellationToken, IActiveVersionBatchLease>? Acquire { get; set; }
         public void RevalidatePackage() { }
-        public IActiveVersionBatchLease AcquireActiveVersion() =>
-            new RecordingActiveVersionLease();
+        public IActiveVersionBatchLease AcquireActiveVersion(
+            CancellationToken cancellationToken) =>
+            Acquire?.Invoke(cancellationToken) ?? new RecordingActiveVersionLease();
     }
 
     private sealed class RecordingActiveVersionLease : IActiveVersionBatchLease
@@ -645,6 +958,11 @@ public sealed class BrokerModelInstallerTests : IDisposable
         string Executable,
         IReadOnlyList<string> Arguments,
         TimeSpan Timeout);
+
+    private sealed record GateBlocker(
+        Task Held,
+        Task Completion,
+        Action Release);
 
     private sealed class TerminatingProcessRunner(
         ProcessResult first,

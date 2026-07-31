@@ -190,7 +190,8 @@ public sealed class VersionActivatorTests
             Path.Combine(install.BinRoot, "current.lock"));
         using var gate = ActivationCoordinator.AcquireStartupGate(
             install.BinRoot,
-            TimeSpan.FromSeconds(1));
+            TimeSpan.FromSeconds(1),
+            TestContext.Current.CancellationToken);
         using var started = new ManualResetEventSlim();
         var activation = Task.Run(() =>
         {

@@ -220,7 +220,7 @@ internal sealed class InstallerTransactionLease : IDisposable
                     var slice = remaining > TimeSpan.FromMilliseconds(25)
                         ? TimeSpan.FromMilliseconds(25)
                         : remaining;
-                    owns = mutex.WaitOne(slice);
+                    owns = mutex.WaitOne(slice, CancellationToken.None);
                 }
 
                 ready.TrySetResult();

@@ -9,7 +9,13 @@ public static class ActivationCoordinator
 
     public static ActivationExclusiveLease AcquireExclusive(
         string binRoot,
-        TimeSpan timeout)
+        TimeSpan timeout) =>
+        AcquireExclusive(binRoot, timeout, CancellationToken.None);
+
+    public static ActivationExclusiveLease AcquireExclusive(
+        string binRoot,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(binRoot);
         if (timeout < TimeSpan.Zero)
@@ -18,11 +24,15 @@ public static class ActivationCoordinator
         }
 
         var started = Stopwatch.GetTimestamp();
-        var gate = AcquireStartupGate(binRoot, timeout);
+        var gate = AcquireStartupGate(binRoot, timeout, cancellationToken);
         try
         {
             var remaining = Remaining(timeout, started);
-            var result = AcquireExclusive(gate, remaining, ownsGate: true);
+            var result = AcquireExclusive(
+                gate,
+                remaining,
+                cancellationToken,
+                ownsGate: true);
             gate = null!;
             return result;
         }
@@ -35,12 +45,33 @@ public static class ActivationCoordinator
     public static ActivationStartupGateLease AcquireStartupGate(
         string binRoot,
         TimeSpan timeout) =>
-        AcquireStartupGate(binRoot, timeout, SecureNamedMutexFactory.Instance);
+        AcquireStartupGate(binRoot, timeout, CancellationToken.None);
+
+    public static ActivationStartupGateLease AcquireStartupGate(
+        string binRoot,
+        TimeSpan timeout,
+        CancellationToken cancellationToken) =>
+        AcquireStartupGate(
+            binRoot,
+            timeout,
+            SecureNamedMutexFactory.Instance,
+            cancellationToken);
 
     internal static ActivationStartupGateLease AcquireStartupGate(
         string binRoot,
         TimeSpan timeout,
-        ISecureNamedMutexFactory mutexFactory)
+        ISecureNamedMutexFactory mutexFactory) =>
+        AcquireStartupGate(
+            binRoot,
+            timeout,
+            mutexFactory,
+            CancellationToken.None);
+
+    internal static ActivationStartupGateLease AcquireStartupGate(
+        string binRoot,
+        TimeSpan timeout,
+        ISecureNamedMutexFactory mutexFactory,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(binRoot);
         ArgumentNullException.ThrowIfNull(mutexFactory);
@@ -54,7 +85,7 @@ public static class ActivationCoordinator
         try
         {
             mutex = mutexFactory.Create(MutexName(canonicalRoot));
-            if (!mutex.WaitOne(timeout))
+            if (!mutex.WaitOne(timeout, cancellationToken))
             {
                 throw new ActivationCoordinationException(
                     "activation_timeout",
@@ -87,11 +118,18 @@ public static class ActivationCoordinator
     public static ActivationExclusiveLease AcquireExclusive(
         ActivationStartupGateLease gate,
         TimeSpan timeout) =>
-        AcquireExclusive(gate, timeout, ownsGate: false);
+        AcquireExclusive(gate, timeout, CancellationToken.None);
+
+    public static ActivationExclusiveLease AcquireExclusive(
+        ActivationStartupGateLease gate,
+        TimeSpan timeout,
+        CancellationToken cancellationToken) =>
+        AcquireExclusive(gate, timeout, cancellationToken, ownsGate: false);
 
     private static ActivationExclusiveLease AcquireExclusive(
         ActivationStartupGateLease gate,
         TimeSpan timeout,
+        CancellationToken cancellationToken,
         bool ownsGate)
     {
         ArgumentNullException.ThrowIfNull(gate);
@@ -104,6 +142,7 @@ public static class ActivationCoordinator
         var lockPath = Path.Combine(gate.BinRoot, "current.lock");
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var stream = new FileStream(
@@ -120,7 +159,8 @@ public static class ActivationCoordinator
             }
             catch (IOException) when (Remaining(timeout, started) > TimeSpan.Zero)
             {
-                Thread.Sleep(Minimum(Remaining(timeout, started), TimeSpan.FromMilliseconds(25)));
+                cancellationToken.WaitHandle.WaitOne(
+                    Minimum(Remaining(timeout, started), TimeSpan.FromMilliseconds(25)));
             }
             catch (IOException exception)
             {
@@ -134,45 +174,69 @@ public static class ActivationCoordinator
 
     public static ActivationSharedLease AcquireShared(
         string binRoot,
-        TimeSpan startupTimeout)
+        TimeSpan startupTimeout) =>
+        AcquireShared(binRoot, startupTimeout, CancellationToken.None);
+
+    public static ActivationSharedLease AcquireShared(
+        string binRoot,
+        TimeSpan startupTimeout,
+        CancellationToken cancellationToken)
     {
         var canonicalRoot = CanonicalRoot(binRoot);
-        using var gate = AcquireStartupGate(canonicalRoot, startupTimeout);
-        try
-        {
-            return AcquireShared(gate);
-        }
-        catch (IOException exception)
-        {
-            throw new ActivationCoordinationException(
-                "version_in_use",
-                "The active LocalAi version is currently in use.",
-                exception);
-        }
+        var started = Stopwatch.GetTimestamp();
+        using var gate = AcquireStartupGate(
+            canonicalRoot,
+            startupTimeout,
+            cancellationToken);
+        return AcquireShared(
+            gate,
+            Remaining(startupTimeout, started),
+            cancellationToken);
     }
 
     public static ActivationSharedLease AcquireShared(string binRoot) =>
         AcquireShared(binRoot, TimeSpan.FromSeconds(30));
 
     public static ActivationSharedLease AcquireShared(
-        ActivationStartupGateLease gate)
+        ActivationStartupGateLease gate) =>
+        AcquireShared(gate, TimeSpan.Zero, CancellationToken.None);
+
+    public static ActivationSharedLease AcquireShared(
+        ActivationStartupGateLease gate,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(gate);
-        try
+        if (timeout < TimeSpan.Zero)
         {
-            var stream = new FileStream(
-                Path.Combine(gate.BinRoot, "current.lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.ReadWrite);
-            return new ActivationSharedLease(gate.BinRoot, stream);
+            throw new ArgumentOutOfRangeException(nameof(timeout));
         }
-        catch (IOException exception)
+
+        var started = Stopwatch.GetTimestamp();
+        while (true)
         {
-            throw new ActivationCoordinationException(
-                "version_in_use",
-                "The active LocalAi version is currently in use.",
-                exception);
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var stream = new FileStream(
+                    Path.Combine(gate.BinRoot, "current.lock"),
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.ReadWrite);
+                return new ActivationSharedLease(gate.BinRoot, stream);
+            }
+            catch (IOException) when (Remaining(timeout, started) > TimeSpan.Zero)
+            {
+                cancellationToken.WaitHandle.WaitOne(
+                    Minimum(Remaining(timeout, started), TimeSpan.FromMilliseconds(25)));
+            }
+            catch (IOException exception)
+            {
+                throw new ActivationCoordinationException(
+                    "version_in_use",
+                    "The active LocalAi version is currently in use.",
+                    exception);
+            }
         }
     }
 

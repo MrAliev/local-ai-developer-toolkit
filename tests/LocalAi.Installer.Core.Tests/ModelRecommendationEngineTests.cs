@@ -50,6 +50,7 @@ public sealed class ModelRecommendationEngineTests
 
         var choice = Assert.Single(result.Choices);
         Assert.Equal("gpu-a", result.SelectedAdapter!.StableId);
+        Assert.Equal(1UL, choice.SignedDownloadSizeBytes);
         Assert.Equal(800UL, choice.SignedBaseEstimateBytes);
         Assert.Equal(100UL, choice.RuntimeReserveBytes);
         Assert.Equal(4096UL, choice.ContextReserveBytes);

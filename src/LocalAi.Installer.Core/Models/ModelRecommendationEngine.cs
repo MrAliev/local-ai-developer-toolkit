@@ -200,6 +200,7 @@ public sealed partial class ModelRecommendationEngine
         return new ModelRecommendationChoice(
             model.Name ?? string.Empty,
             model.ContextTokens,
+            model.DownloadSize > 0 ? (ulong)model.DownloadSize : 0,
             baseEstimate,
             reservePolicy.FixedRuntimeReserveBytes,
             contextReserve,

@@ -47,7 +47,8 @@ public sealed class VersionLeaseTests : IDisposable
             ActivationCoordinator.AcquireStartupGate(
                 _root,
                 TimeSpan.Zero,
-                factory));
+                factory,
+                TestContext.Current.CancellationToken));
 
         Assert.Equal("activation_unavailable", error.Code);
         Assert.DoesNotContain("hostile", error.Message, StringComparison.OrdinalIgnoreCase);
@@ -62,7 +63,8 @@ public sealed class VersionLeaseTests : IDisposable
         using var gate = ActivationCoordinator.AcquireStartupGate(
             _root,
             TimeSpan.Zero,
-            factory);
+            factory,
+            TestContext.Current.CancellationToken);
 
         Assert.StartsWith(@"Local\LocalAi.Launcher.Activation.", factory.Name, StringComparison.Ordinal);
         Assert.Equal(1, held.WaitCount);
@@ -125,7 +127,9 @@ public sealed class VersionLeaseTests : IDisposable
         public int WaitCount { get; private set; }
         public int ReleaseCount { get; private set; }
 
-        public bool WaitOne(TimeSpan timeout)
+        public bool WaitOne(
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
         {
             WaitCount++;
             return waitResult;
