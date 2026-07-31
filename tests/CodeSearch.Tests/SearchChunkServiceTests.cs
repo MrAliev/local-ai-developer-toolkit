@@ -134,6 +134,43 @@ public sealed class SearchChunkServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Refuses_an_indexed_path_outside_the_repository()
+    {
+        var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
+        CreateIndex(
+                _identity,
+                _generation,
+                Path.Combine("..", "Outside.cs"),
+                1,
+                1)
+            .Save(store.IndexPath(_generation.Id));
+
+        var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
+            () => new SearchService().GetChunkAsync(
+                CurrentId().Encode(),
+                _root,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("unsafe_chunk_path", error.Code);
+    }
+
+    [Fact]
+    public async Task Refuses_a_missing_indexed_source_with_an_explicit_diagnostic()
+    {
+        var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
+        CreateIndex(_identity, _generation, "Missing.cs", 1, 1)
+            .Save(store.IndexPath(_generation.Id));
+
+        var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
+            () => new SearchService().GetChunkAsync(
+                CurrentId().Encode(),
+                _root,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal("chunk_source_missing", error.Code);
+    }
+
+    [Fact]
     public async Task Refuses_a_reparse_point_directory_before_reading_outside_the_repository()
     {
         var outsideRoot = Path.Combine(

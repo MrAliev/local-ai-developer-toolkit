@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
@@ -101,6 +102,95 @@ public class SearchEngineTests : IDisposable
 
         Assert.Contains("payments line 1", hits[0].Snippet);
         Assert.DoesNotContain("payments line 20", hits[0].Snippet);
+    }
+
+    [Fact]
+    public void Snippets_refuse_a_reparse_point_component_outside_the_repository()
+    {
+        var outsideRoot = Path.Combine(
+            Path.GetTempPath(),
+            "codesearch-snippet-outside-" + Guid.NewGuid().ToString("N"));
+        var linkPath = Path.Combine(_root, "Linked");
+        Directory.CreateDirectory(outsideRoot);
+        File.WriteAllText(
+            Path.Combine(outsideRoot, "External.cs"),
+            "external secret\n");
+        try
+        {
+            CreateDirectoryLink(linkPath, outsideRoot);
+            var index = SingleFileIndex(Path.Combine("Linked", "External.cs"));
+
+            var hit = Assert.Single(SearchEngine.Search(
+                index,
+                Unit(1, 0, 0),
+                "external",
+                new SearchOptions { TopK = 1 },
+                _root));
+
+            Assert.Equal(
+                "(file changed since indexing - snippet unavailable)",
+                hit.Snippet);
+            Assert.DoesNotContain("external secret", hit.Snippet, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(linkPath))
+            {
+                Directory.Delete(linkPath);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Snippets_refuse_lexical_paths_outside_the_repository()
+    {
+        var outsidePath = Path.Combine(
+            Path.GetDirectoryName(_root)!,
+            "codesearch-snippet-outside-" + Guid.NewGuid().ToString("N") + ".cs");
+        File.WriteAllText(outsidePath, "external lexical secret\n");
+        try
+        {
+            var index = SingleFileIndex(Path.GetRelativePath(_root, outsidePath));
+
+            var hit = Assert.Single(SearchEngine.Search(
+                index,
+                Unit(1, 0, 0),
+                "external",
+                new SearchOptions { TopK = 1 },
+                _root));
+
+            Assert.Equal(
+                "(file changed since indexing - snippet unavailable)",
+                hit.Snippet);
+            Assert.DoesNotContain(
+                "external lexical secret",
+                hit.Snippet,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(outsidePath);
+        }
+    }
+
+    [Fact]
+    public void Missing_source_files_produce_an_unavailable_snippet()
+    {
+        var hit = Assert.Single(SearchEngine.Search(
+            SingleFileIndex("Missing.cs"),
+            Unit(1, 0, 0),
+            "missing",
+            new SearchOptions { TopK = 1 },
+            _root));
+
+        Assert.Equal(
+            "(file changed since indexing - snippet unavailable)",
+            hit.Snippet);
     }
 
     [Fact]
@@ -241,6 +331,67 @@ public class SearchEngineTests : IDisposable
             StartLine = start,
             EndLine = end,
         };
+
+    private CodeIndex SingleFileIndex(string relPath) =>
+        new()
+        {
+            Dim = 3,
+            Model = "test-model",
+            Root = _root,
+            GitCommit = "abc123",
+            RepositoryId = "repository",
+            GenerationId = "generation",
+            GitTree = "tree",
+            IndexedAtUtc = DateTime.UtcNow,
+            Files =
+            [
+                new IndexedFile
+                {
+                    RelPath = relPath,
+                    Hash = new byte[32],
+                    ChunkStart = 0,
+                    ChunkCount = 1
+                }
+            ],
+            Chunks =
+            [
+                Meta(
+                    0,
+                    ChunkKind.Type,
+                    "External",
+                    "class External",
+                    1,
+                    1)
+            ],
+            Vectors = [1f, 0f, 0f]
+        };
+
+    private static void CreateDirectoryLink(string linkPath, string targetPath)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return;
+        }
+
+        var start = new ProcessStartInfo(
+            Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("/d");
+        start.ArgumentList.Add("/c");
+        start.ArgumentList.Add("mklink");
+        start.ArgumentList.Add("/J");
+        start.ArgumentList.Add(linkPath);
+        start.ArgumentList.Add(targetPath);
+        using var process = Process.Start(start)!;
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+    }
 
     private static float[] Unit(params float[] values)
     {

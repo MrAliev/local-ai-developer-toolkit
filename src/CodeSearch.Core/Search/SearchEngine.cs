@@ -377,13 +377,25 @@ public static class SearchEngine
     {
         if (!cache.TryGetValue(relPath, out var lines))
         {
-            try
-            {
-                lines = SourceLines.Split(File.ReadAllText(Path.Combine(root, relPath)));
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            if (!SafeSourcePath.TryResolveFile(
+                    root,
+                    relPath,
+                    out var fullPath,
+                    out _))
             {
                 lines = [];
+            }
+            else
+            {
+                try
+                {
+                    lines = SourceLines.Split(File.ReadAllText(fullPath));
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException)
+                {
+                    lines = [];
+                }
             }
 
             cache[relPath] = lines;

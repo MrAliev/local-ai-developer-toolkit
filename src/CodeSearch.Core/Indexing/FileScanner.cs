@@ -32,7 +32,7 @@ public static class FileScanner
                 .Split('\0', StringSplitOptions.RemoveEmptyEntries)
                 .Select(path => path.Replace('/', Path.DirectorySeparatorChar))
                 .Where(path => ChunkerFactory.IsIndexable(path))
-                .Where(path => IsWithinSizeLimit(Path.Combine(rootFull, path)))
+                .Where(path => IsSafeIndexableFile(rootFull, path))
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
@@ -42,6 +42,14 @@ public static class FileScanner
         results.Sort(StringComparer.OrdinalIgnoreCase);
         return results;
     }
+
+    private static bool IsSafeIndexableFile(string rootFull, string relativePath) =>
+        SafeSourcePath.TryResolveFile(
+            rootFull,
+            relativePath,
+            out var fullPath,
+            out _) &&
+        IsWithinSizeLimit(fullPath);
 
     private static bool IsWithinSizeLimit(string path)
     {
@@ -70,32 +78,42 @@ public static class FileScanner
 
         foreach (var entry in entries)
         {
-            if (Directory.Exists(entry))
+            var relativePath = Path.GetRelativePath(rootFull, entry);
+            if (!SafeSourcePath.TryResolveExisting(
+                    rootFull,
+                    relativePath,
+                    out var safeEntry,
+                    out _))
             {
-                var name = Path.GetFileName(entry);
+                continue;
+            }
+
+            if (Directory.Exists(safeEntry))
+            {
+                var name = Path.GetFileName(safeEntry);
                 if (ExcludedDirectories.Contains(name))
                 {
                     continue;
                 }
 
                 if (name.Equals("worktrees", StringComparison.OrdinalIgnoreCase) &&
-                    Path.GetFileName(Path.GetDirectoryName(entry))?.Equals(".claude", StringComparison.OrdinalIgnoreCase) == true)
+                    Path.GetFileName(Path.GetDirectoryName(safeEntry))?.Equals(".claude", StringComparison.OrdinalIgnoreCase) == true)
                 {
                     continue;
                 }
 
-                Walk(rootFull, entry, results);
+                Walk(rootFull, safeEntry, results);
                 continue;
             }
 
-            if (!ChunkerFactory.IsIndexable(entry))
+            if (!ChunkerFactory.IsIndexable(relativePath))
             {
                 continue;
             }
 
             try
             {
-                if (new FileInfo(entry).Length > ChunkLimits.MaxFileBytes)
+                if (new FileInfo(safeEntry).Length > ChunkLimits.MaxFileBytes)
                 {
                     continue;
                 }
@@ -105,7 +123,7 @@ public static class FileScanner
                 continue;
             }
 
-            results.Add(Path.GetRelativePath(rootFull, entry));
+            results.Add(relativePath);
         }
     }
 }

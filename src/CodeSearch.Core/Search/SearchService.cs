@@ -183,22 +183,15 @@ public sealed class SearchService
 
         var meta = searchable.ChunkAt(requested.Ordinal);
         var relPath = searchable.PathOf(requested.Ordinal);
-        var fullRoot = Path.GetFullPath(workingRoot)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var fullPath = Path.GetFullPath(Path.Combine(fullRoot, relPath));
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        if (!fullPath.StartsWith(
-                fullRoot + Path.DirectorySeparatorChar,
-                comparison))
+        if (!SafeSourcePath.TryResolveFile(
+                workingRoot,
+                relPath,
+                out var fullPath,
+                out var pathFailure))
         {
-            throw new SearchChunkResolutionException(
-                "unsafe_chunk_path",
-                "unsafe_chunk_path: The indexed source path escapes the repository root.");
+            throw SourcePathError(pathFailure);
         }
 
-        RejectReparsePoints(fullRoot, fullPath);
         ct.ThrowIfCancellationRequested();
         var lines = SourceLines.Split(
             await File.ReadAllTextAsync(fullPath, ct));
@@ -238,24 +231,24 @@ public sealed class SearchService
         }
     }
 
-    private static void RejectReparsePoints(string fullRoot, string fullPath)
-    {
-        var relativePath = Path.GetRelativePath(fullRoot, fullPath);
-        var currentPath = fullRoot;
-        foreach (var component in relativePath.Split(
-                     [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-                     StringSplitOptions.RemoveEmptyEntries))
+    private static SearchChunkResolutionException SourcePathError(
+        SourcePathFailure failure) =>
+        failure switch
         {
-            currentPath = Path.Combine(currentPath, component);
-            if ((File.GetAttributes(currentPath) & FileAttributes.ReparsePoint) != 0)
-            {
-                throw new SearchChunkResolutionException(
-                    "unsafe_chunk_reparse_point",
-                    "unsafe_chunk_reparse_point: The indexed source path contains a " +
-                    "symbolic link or reparse point.");
-            }
-        }
-    }
+            SourcePathFailure.OutsideRoot => new(
+                "unsafe_chunk_path",
+                "unsafe_chunk_path: The indexed source path escapes the repository root."),
+            SourcePathFailure.ReparsePoint => new(
+                "unsafe_chunk_reparse_point",
+                "unsafe_chunk_reparse_point: The indexed source path contains a " +
+                "symbolic link or reparse point."),
+            SourcePathFailure.Missing => new(
+                "chunk_source_missing",
+                "chunk_source_missing: The indexed source file no longer exists."),
+            _ => new(
+                "chunk_source_unavailable",
+                "chunk_source_unavailable: The indexed source file is unavailable.")
+        };
 
     private static string QueryDeduplicationKey(CodeIndex index, string prompt)
     {
