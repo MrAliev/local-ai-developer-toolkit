@@ -5,7 +5,7 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <!-- Required while Installer.Core reuses the Launcher executable as a library; tracked for a later library split. -->
+    <!-- xUnit v3 Testing Platform tests intentionally reference the self-contained WPF executable. -->
     <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
   <ItemGroup>

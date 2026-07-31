@@ -46,6 +46,35 @@ public sealed class SolutionShapeTests
         Assert.Equal("false", invariantGlobalization);
     }
 
+    [Theory]
+    [InlineData("ValidateExecutableReferencesMatchSelfContained")]
+    [InlineData("_GetChildProjectCopyToPublishDirectoryItems")]
+    public void Wpf_project_avoids_broad_executable_reference_workarounds(string propertyName)
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var project = XDocument.Load(
+            Path.Combine(repositoryRoot, "src", "LocalAi.Installer", "LocalAi.Installer.csproj"));
+
+        Assert.Empty(project.Descendants(propertyName));
+    }
+
+    [Theory]
+    [InlineData("../LocalAi.Launcher/LocalAi.Launcher.csproj")]
+    [InlineData("../LocalLm.Core/LocalLm.Core.csproj")]
+    public void Core_executable_dependency_references_are_build_order_only(string expectedProjectPath)
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var project = XDocument.Load(
+            Path.Combine(repositoryRoot, "src", "LocalAi.Installer.Core", "LocalAi.Installer.Core.csproj"));
+        var projectReference = project
+            .Descendants("ProjectReference")
+            .Single(reference =>
+                reference.Attribute("Include")?.Value.Replace('\\', '/') == expectedProjectPath);
+
+        Assert.Equal("false", projectReference.Attribute("ReferenceOutputAssembly")?.Value);
+        Assert.Equal("false", projectReference.Attribute("Private")?.Value);
+    }
+
     private static string FindRepositoryRoot()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -6,10 +6,6 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <!-- Required while Installer.Core reuses the Launcher executable as a library; tracked for a later library split. -->
-    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
-    <!-- Publish resolved assemblies without duplicate child executable apphosts and runtime configuration files. -->
-    <_GetChildProjectCopyToPublishDirectoryItems>false</_GetChildProjectCopyToPublishDirectoryItems>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\LocalAi.Installer.Core\LocalAi.Installer.Core.csproj" />
