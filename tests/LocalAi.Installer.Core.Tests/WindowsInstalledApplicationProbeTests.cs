@@ -122,20 +122,28 @@ public sealed class WindowsInstalledApplicationProbeTests
         var directory = @"C:\Users\person\AppData\Local\Programs\Ollama";
         var path = Path.Combine(directory, "ollama.exe");
         var uninstaller = Path.Combine(directory, "unins000.exe");
-        var probe = CreateProbe(
-            new UninstallEntrySnapshot(
-                "{official}_is1",
-                "Ollama version 0.32.5",
-                "0.32.5",
-                directory + Path.DirectorySeparatorChar,
-                uninstaller,
-                $"\"{uninstaller}\""),
-            new ExecutableIdentitySnapshot(
-                path,
-                true,
-                null,
-                null,
-                null));
+        var probe = new WindowsInstalledApplicationProbe(
+            new FakeUninstallEntrySource(
+            [
+                new UninstallEntrySnapshot(
+                    "{official}_is1",
+                    "Ollama version 0.32.5",
+                    "0.32.5",
+                    directory + Path.DirectorySeparatorChar,
+                    uninstaller,
+                    $"\"{uninstaller}\""),
+            ]),
+            new FakeExecutableIdentityProbe(
+            [
+                new ExecutableIdentitySnapshot(
+                    path,
+                    true,
+                    null,
+                    null,
+                    null),
+            ]),
+            new FakePhysicalPathResolver(),
+            [directory]);
 
         var result = await probe.FindOllamaAsync(
             TestContext.Current.CancellationToken);
@@ -150,21 +158,115 @@ public sealed class WindowsInstalledApplicationProbeTests
     {
         var directory = @"C:\Programs\Ollama";
         var path = Path.Combine(directory, "ollama.exe");
-        var probe = CreateProbe(
-            new UninstallEntrySnapshot(
-                "ollama",
-                "Ollama version 1.2.3-rc.1",
-                null,
-                directory,
-                null,
-                null),
-            new ExecutableIdentitySnapshot(path, true, null, null, null));
+        var probe = new WindowsInstalledApplicationProbe(
+            new FakeUninstallEntrySource(
+            [
+                new UninstallEntrySnapshot(
+                    "ollama",
+                    "Ollama version 1.2.3-rc.1",
+                    null,
+                    directory,
+                    null,
+                    null),
+            ]),
+            new FakeExecutableIdentityProbe(
+            [
+                new ExecutableIdentitySnapshot(
+                    path,
+                    true,
+                    null,
+                    null,
+                    null),
+            ]),
+            new FakePhysicalPathResolver(),
+            [directory]);
 
         var result = await probe.FindOllamaAsync(
             TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
         Assert.Equal("1.2.3-rc.1", result.DetectedVersion);
+    }
+
+    [Fact]
+    public async Task Rejects_blank_PE_metadata_outside_approved_official_directories()
+    {
+        var directory = @"C:\Fake\Ollama";
+        var path = Path.Combine(directory, "ollama.exe");
+        var probe = CreateProbe(
+            new UninstallEntrySnapshot(
+                "ollama",
+                "Ollama version 0.32.5",
+                "0.32.5",
+                directory,
+                path,
+                $"\"{path}\" uninstall"),
+            new ExecutableIdentitySnapshot(
+                path,
+                true,
+                null,
+                null,
+                null));
+
+        var result = await probe.FindOllamaAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task Rejects_conflicting_display_version_and_display_name_suffix()
+    {
+        var directory = @"C:\Program Files\Ollama";
+        var path = Path.Combine(directory, "ollama.exe");
+        var probe = new WindowsInstalledApplicationProbe(
+            new FakeUninstallEntrySource(
+            [
+                new UninstallEntrySnapshot(
+                    "ollama",
+                    "Ollama version 0.32.5",
+                    "0.32.6",
+                    directory,
+                    null,
+                    null),
+            ]),
+            new FakeExecutableIdentityProbe(
+            [
+                new ExecutableIdentitySnapshot(path, true, null, null, null),
+            ]),
+            new FakePhysicalPathResolver(),
+            [directory]);
+
+        var result = await probe.FindOllamaAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task Rejects_conflicting_nonblank_file_version()
+    {
+        var directory = @"C:\Programs\Ollama";
+        var path = Path.Combine(directory, "ollama.exe");
+        var probe = CreateProbe(
+            new UninstallEntrySnapshot(
+                "ollama",
+                "Ollama version 0.32.5",
+                "0.32.5",
+                directory,
+                null,
+                null),
+            new ExecutableIdentitySnapshot(
+                path,
+                true,
+                "0.32.6.0",
+                "Ollama",
+                "ollama.exe"));
+
+        var result = await probe.FindOllamaAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
     }
 
     [Fact]

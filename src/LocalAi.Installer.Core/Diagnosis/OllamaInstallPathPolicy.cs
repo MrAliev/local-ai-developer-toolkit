@@ -20,7 +20,7 @@ internal sealed class OllamaInstallPathPolicy
             .ToArray());
     }
 
-    public IReadOnlyList<string> GetTrustedDirectories(
+    public IReadOnlyList<string> GetCandidateDirectories(
         UninstallEntrySnapshot entry) =>
         Array.AsReadOnly(
             GetEntryDirectories(entry)
@@ -28,10 +28,10 @@ internal sealed class OllamaInstallPathPolicy
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray());
 
-    public bool IsTrustedPhysicalPath(
+    public bool IsCandidatePhysicalPath(
         string candidate,
         string identityPath,
-        IEnumerable<string> trustedDirectories)
+        IEnumerable<string> candidateDirectories)
     {
         try
         {
@@ -52,18 +52,62 @@ internal sealed class OllamaInstallPathPolicy
             }
 
             var executableDirectory = Path.GetDirectoryName(identityPhysical);
-            foreach (var trustedDirectory in trustedDirectories)
+            foreach (var candidateDirectory in candidateDirectories)
             {
                 try
                 {
-                    var trustedPhysical =
+                    var candidateDirectoryPhysical =
                         _physicalPathResolver.ResolvePhysicalPath(
-                            trustedDirectory);
+                            candidateDirectory);
                     if (string.Equals(
                             Path.TrimEndingDirectorySeparator(
                                 Path.GetFullPath(executableDirectory!)),
                             Path.TrimEndingDirectorySeparator(
-                                Path.GetFullPath(trustedPhysical)),
+                                Path.GetFullPath(candidateDirectoryPhysical)),
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception exception) when (IsPathFailure(exception))
+                {
+                }
+            }
+        }
+        catch (Exception exception) when (IsPathFailure(exception))
+        {
+        }
+
+        return false;
+    }
+
+    public bool IsApprovedOfficialPhysicalPath(string identityPath)
+    {
+        try
+        {
+            var identityPhysical =
+                _physicalPathResolver.ResolvePhysicalPath(identityPath);
+            if (!string.Equals(
+                    Path.GetFileName(identityPhysical),
+                    "ollama.exe",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var executableDirectory = Path.GetDirectoryName(identityPhysical);
+            foreach (var approvedDirectory in _approvedDirectories)
+            {
+                try
+                {
+                    var approvedPhysical =
+                        _physicalPathResolver.ResolvePhysicalPath(
+                            approvedDirectory);
+                    if (string.Equals(
+                            Path.TrimEndingDirectorySeparator(
+                                Path.GetFullPath(executableDirectory!)),
+                            Path.TrimEndingDirectorySeparator(
+                                Path.GetFullPath(approvedPhysical)),
                             StringComparison.OrdinalIgnoreCase))
                     {
                         return true;

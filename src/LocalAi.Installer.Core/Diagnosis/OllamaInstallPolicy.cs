@@ -24,25 +24,31 @@ internal sealed class OllamaInstallPolicy
             return null;
         }
 
-        var trustedDirectories = _paths.GetTrustedDirectories(entry);
-        foreach (var candidate in trustedDirectories.Select(
+        var candidateDirectories = _paths.GetCandidateDirectories(entry);
+        foreach (var candidate in candidateDirectories.Select(
                      directory => Path.Combine(directory, "ollama.exe")))
         {
             var identity = executableIdentity.Inspect(candidate);
-            if (!IsCompatibleOllamaMetadata(identity) ||
-                !_paths.IsTrustedPhysicalPath(
+            if (!_paths.IsCandidatePhysicalPath(
                     candidate,
                     identity.Path,
-                    trustedDirectories))
+                    candidateDirectories) ||
+                !IsTrustedOllamaIdentity(identity))
             {
                 continue;
             }
 
-            var detectedVersion =
-                OllamaVersionPolicy.Validate(entry.DisplayVersion) ??
-                OllamaVersionPolicy.Validate(identity.FileVersion) ??
-                displayNameVersion;
-            if (detectedVersion is null)
+            if (!_paths.IsApprovedOfficialPhysicalPath(identity.Path) &&
+                !HasStrongOllamaIdentity(identity))
+            {
+                continue;
+            }
+
+            if (!OllamaVersionPolicy.TryResolveConsistentVersion(
+                    entry.DisplayVersion,
+                    identity.FileVersion,
+                    displayNameVersion,
+                    out var detectedVersion))
             {
                 continue;
             }
@@ -59,7 +65,7 @@ internal sealed class OllamaInstallPolicy
         return null;
     }
 
-    private static bool IsCompatibleOllamaMetadata(
+    private static bool IsTrustedOllamaIdentity(
         ExecutableIdentitySnapshot identity)
     {
         if (!identity.Exists ||
@@ -86,4 +92,15 @@ internal sealed class OllamaInstallPolicy
                    "ollama.exe",
                    StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool HasStrongOllamaIdentity(
+        ExecutableIdentitySnapshot identity) =>
+        string.Equals(
+            identity.ProductName?.Trim(),
+            "Ollama",
+            StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(
+            identity.OriginalFileName?.Trim(),
+            "ollama.exe",
+            StringComparison.OrdinalIgnoreCase);
 }
