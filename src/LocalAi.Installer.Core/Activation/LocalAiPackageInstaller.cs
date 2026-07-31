@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Runtime.Versioning;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Releases;
@@ -16,6 +17,7 @@ public enum LocalAiPackageInstallStatus
     RolledBack,
     RollbackFailed,
     ManualRecoveryRequired,
+    Indeterminate,
 }
 
 public sealed record LauncherBackupMetadata(
@@ -33,6 +35,7 @@ public sealed record LocalAiPackageInstallResult(
     bool InactivePublishedVersionRetained = false)
 {
     public string? LauncherBackupPath => LauncherBackup?.Path;
+    public string NewVersionPath => VersionPath;
     public string? InactivePublishedVersionPath =>
         InactivePublishedVersionRetained ? VersionPath : null;
 }
@@ -120,22 +123,6 @@ public sealed class LocalAiPackageInstaller
                 "The existing LocalAi installation is unrecognized.");
         }
 
-        var priorPointer = CapturePointer(layout.CurrentPointerPath);
-        if ((existing.State == ExistingLocalAiState.Compatible &&
-             (!priorPointer.Valid || !string.Equals(priorPointer.Version, existing.Version, StringComparison.Ordinal))) ||
-            (existing.State == ExistingLocalAiState.Absent && priorPointer.Exists))
-        {
-            return new(
-                LocalAiPackageInstallStatus.Refused,
-                version,
-                existing.Version,
-                versionPath,
-                null,
-                "The current-version pointer changed during installation preparation.");
-        }
-
-        var priorVersion = priorPointer.Version;
-
         package.Revalidate();
         InstallationLayoutLease layoutLease;
         try
@@ -147,7 +134,7 @@ public sealed class LocalAiPackageInstaller
             return new(
                 LocalAiPackageInstallStatus.Refused,
                 version,
-                priorVersion,
+                existing.Version,
                 versionPath,
                 null,
                 "The existing LocalAi layout is unrecognized.");
@@ -155,13 +142,45 @@ public sealed class LocalAiPackageInstaller
 
         using (layoutLease)
         {
+            CurrentPointerSnapshot priorPointer;
+            try
+            {
+                priorPointer = ReadPointerLocked(layout);
+            }
+            catch (Exception exception) when (
+                exception is CurrentPointerException or ActivationCoordinationException or
+                IOException or UnauthorizedAccessException)
+            {
+                return new(
+                    LocalAiPackageInstallStatus.Refused,
+                    version,
+                    existing.Version,
+                    versionPath,
+                    null,
+                    "The current-version pointer is invalid or unavailable.");
+            }
+
+            if ((existing.State == ExistingLocalAiState.Compatible &&
+                 (!priorPointer.Exists || !priorPointer.IsCanonical ||
+                  !string.Equals(priorPointer.Version, existing.Version, StringComparison.Ordinal))) ||
+                (existing.State == ExistingLocalAiState.Absent && priorPointer.Exists))
+            {
+                return new(
+                    LocalAiPackageInstallStatus.Refused,
+                    version,
+                    existing.Version,
+                    versionPath,
+                    null,
+                    "The current-version pointer changed during installation preparation.");
+            }
+
             return await InstallUnderLayoutLeaseAsync(
                     package,
                     layout,
                     layoutLease,
                     version,
                     versionPath,
-                    priorVersion,
+                    priorPointer,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -174,10 +193,10 @@ public sealed class LocalAiPackageInstaller
         InstallationLayoutLease layoutLease,
         string version,
         string versionPath,
-        string? priorVersion,
+        CurrentPointerSnapshot priorPointer,
         CancellationToken cancellationToken)
     {
-
+        var priorVersion = priorPointer.Version;
         var targetExisted = Directory.Exists(versionPath);
         if (targetExisted && !ValidateExactVersion(package, versionPath))
         {
@@ -281,7 +300,7 @@ public sealed class LocalAiPackageInstaller
                     trustedLauncher.Revalidate();
                     result = await processRunner.RunAsync(
                             trustedLauncher.CanonicalPath,
-                            ["activate", version, "--stop-running"],
+                            ActivationArguments(version, priorPointer),
                             activationTimeout,
                             cancellationToken)
                         .ConfigureAwait(false);
@@ -299,12 +318,14 @@ public sealed class LocalAiPackageInstaller
 
             if (activationException is not null || result is null ||
                 result.ExitCode != 0 || result.TimedOut || result.Cancelled ||
-                !string.Equals(ReadPointer(layout.CurrentPointerPath), version, StringComparison.Ordinal))
+                !IsCanonicalPointer(ReadPointerLockedOrNull(layout), version))
             {
                 return await RecoverActivationFailureAsync(
+                        package,
                         layout,
+                        layoutLease,
                         version,
-                        priorVersion,
+                        priorPointer,
                         versionPath,
                         launcherBackup,
                         publishedVersion,
@@ -332,9 +353,11 @@ public sealed class LocalAiPackageInstaller
             if (launcherReplaced)
             {
                 return await RecoverActivationFailureAsync(
+                        package,
                         layout,
+                        layoutLease,
                         version,
-                        priorVersion,
+                        priorPointer,
                         versionPath,
                         launcherBackup,
                         publishedVersion,
@@ -357,19 +380,23 @@ public sealed class LocalAiPackageInstaller
         return InstallAsync(package, layout, cancellationToken);
     }
 
+    [SupportedOSPlatform("windows")]
     private async Task<LocalAiPackageInstallResult> RecoverActivationFailureAsync(
+        VerifiedPackage package,
         InstallationLayout layout,
+        InstallationLayoutLease layoutLease,
         string version,
-        string? priorVersion,
+        CurrentPointerSnapshot priorPointer,
         string versionPath,
         LauncherBackupMetadata? launcherBackup,
         bool publishedVersion,
         bool targetExisted)
     {
-        var actualVersion = ReadPointer(layout.CurrentPointerPath);
-        if (priorVersion is null)
+        var priorVersion = priorPointer.Version;
+        var actualPointer = ReadPointerLockedOrNull(layout);
+        if (!priorPointer.Exists)
         {
-            if (File.Exists(layout.CurrentPointerPath))
+            if (actualPointer is null || actualPointer.Exists)
             {
                 return new(
                     LocalAiPackageInstallStatus.ManualRecoveryRequired,
@@ -407,61 +434,72 @@ public sealed class LocalAiPackageInstaller
                 "The prior stable launcher could not be restored.");
         }
 
-        try
+        if (actualPointer is not null && PointersEqual(actualPointer, priorPointer))
         {
-            RestoreLauncher(layout.LauncherPath, launcherBackup.Path);
-        }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or LocalAiPackageInstallationException)
-        {
-            return new(
-                LocalAiPackageInstallStatus.RollbackFailed,
+            return RestorePriorLauncher(
+                layout,
                 version,
-                priorVersion,
+                priorVersion!,
                 versionPath,
                 launcherBackup,
-                "The prior stable launcher could not be restored.");
+                publishedVersion,
+                targetExisted,
+                "Activation failed and the prior version remained selected.");
         }
 
-        if (string.Equals(actualVersion, priorVersion, StringComparison.Ordinal))
+        var expectedNewPointer = CurrentPointerSnapshot.CreateCanonicalBytes(version);
+        if (actualPointer is null || !actualPointer.Exists || !actualPointer.IsCanonical ||
+            !string.Equals(actualPointer.Version, version, StringComparison.Ordinal) ||
+            !actualPointer.RawBytes.SequenceEqual(expectedNewPointer))
         {
             return new(
-                LocalAiPackageInstallStatus.RolledBack,
+                LocalAiPackageInstallStatus.Indeterminate,
                 version,
                 priorVersion,
                 versionPath,
                 launcherBackup,
-                "Activation failed and the prior version remained selected.",
+                "The current-version pointer changed to an unrelated state; no recovery mutation was attempted.",
                 publishedVersion && !targetExisted);
         }
 
         ProcessResult? rollback = null;
         try
         {
-            ValidateFile(layout.LauncherPath);
-            rollback = await processRunner.RunAsync(
-                    layout.LauncherPath,
-                    ["activate", priorVersion, "--stop-running"],
-                    activationTimeout,
-                    CancellationToken.None)
-                .ConfigureAwait(false);
+            using var trustedLauncher = layoutLease.LockLauncher(
+                FileMetadata(package, LocalAiPackageLayout.StableLauncherFile));
+            try
+            {
+                rollback = await processRunner.RunAsync(
+                        trustedLauncher.CanonicalPath,
+                        ActivationArguments(priorVersion!, actualPointer),
+                        activationTimeout,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                trustedLauncher.Revalidate();
+            }
         }
         catch (Exception exception) when (
-            exception is ProcessTerminationException or OperationCanceledException)
+            exception is ProcessTerminationException or OperationCanceledException or
+            LocalAiPackageInstallationException)
         {
         }
 
+        var restoredPointer = ReadPointerLockedOrNull(layout);
         if (rollback is { ExitCode: 0, TimedOut: false, Cancelled: false } &&
-            string.Equals(ReadPointer(layout.CurrentPointerPath), priorVersion, StringComparison.Ordinal))
+            restoredPointer is not null && PointersEqual(restoredPointer, priorPointer))
         {
-            return new(
-                LocalAiPackageInstallStatus.RolledBack,
+            return RestorePriorLauncher(
+                layout,
                 version,
-                priorVersion,
+                priorVersion!,
                 versionPath,
                 launcherBackup,
-                "Activation failed and the prior version was restored.",
-                publishedVersion && !targetExisted);
+                publishedVersion,
+                targetExisted,
+                "Activation failed and the prior version was restored.");
         }
 
         return new(
@@ -471,6 +509,42 @@ public sealed class LocalAiPackageInstaller
             versionPath,
             launcherBackup,
             "Activation and rollback both failed; manual recovery is required.");
+    }
+
+    private static LocalAiPackageInstallResult RestorePriorLauncher(
+        InstallationLayout layout,
+        string version,
+        string priorVersion,
+        string versionPath,
+        LauncherBackupMetadata launcherBackup,
+        bool publishedVersion,
+        bool targetExisted,
+        string reason)
+    {
+        try
+        {
+            RestoreLauncher(layout.LauncherPath, launcherBackup.Path);
+            return new(
+                LocalAiPackageInstallStatus.RolledBack,
+                version,
+                priorVersion,
+                versionPath,
+                launcherBackup,
+                reason,
+                publishedVersion && !targetExisted);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+            LocalAiPackageInstallationException)
+        {
+            return new(
+                LocalAiPackageInstallStatus.RollbackFailed,
+                version,
+                priorVersion,
+                versionPath,
+                launcherBackup,
+                "The prior stable launcher could not be restored.");
+        }
     }
 
     private static void RestoreLauncher(string launcherPath, string backupPath)
@@ -825,68 +899,50 @@ public sealed class LocalAiPackageInstaller
         }
     }
 
-    private static PointerSnapshot CapturePointer(string path)
+    private CurrentPointerSnapshot ReadPointerLocked(InstallationLayout layout)
     {
-        if (!File.Exists(path))
-        {
-            return new(false, true, null, Array.Empty<byte>());
-        }
+        using var activationLease = ActivationCoordinator.AcquireExclusive(
+            layout.BinRoot,
+            activationTimeout);
+        return CurrentPointerSnapshot.Read(activationLease);
+    }
 
-        byte[] bytes = [];
+    private CurrentPointerSnapshot? ReadPointerLockedOrNull(InstallationLayout layout)
+    {
         try
         {
-            bytes = File.ReadAllBytes(path);
-            if (bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }))
-            {
-                return new(true, false, null, bytes);
-            }
-
-            using var document = System.Text.Json.JsonDocument.Parse(bytes, new System.Text.Json.JsonDocumentOptions
-            {
-                AllowTrailingCommas = false,
-                CommentHandling = System.Text.Json.JsonCommentHandling.Disallow,
-                MaxDepth = 2,
-            });
-            var root = document.RootElement;
-            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
-            {
-                return new(true, false, null, bytes);
-            }
-
-            var names = root.EnumerateObject().Select(property => property.Name).ToArray();
-            if (names.Length != 2 || names.Distinct(StringComparer.Ordinal).Count() != 2 ||
-                !names.Contains("schemaVersion", StringComparer.Ordinal) ||
-                !names.Contains("version", StringComparer.Ordinal) ||
-                root.GetProperty("schemaVersion").GetInt32() != 1 ||
-                root.GetProperty("version").ValueKind != System.Text.Json.JsonValueKind.String)
-            {
-                return new(true, false, null, bytes);
-            }
-
-            var version = root.GetProperty("version").GetString();
-            return IsSafeVersion(version)
-                ? new(true, true, version, bytes)
-                : new(true, false, null, bytes);
+            return ReadPointerLocked(layout);
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or
-            InvalidOperationException or FormatException or OverflowException)
+            exception is CurrentPointerException or CurrentPointerChangedException or
+            ActivationCoordinationException or IOException or UnauthorizedAccessException)
         {
-            return new(true, false, null, bytes);
+            return null;
         }
     }
 
-    private static string? ReadPointer(string path)
-    {
-        var snapshot = CapturePointer(path);
-        return snapshot.Valid ? snapshot.Version : null;
-    }
+    private static IReadOnlyList<string> ActivationArguments(
+        string version,
+        CurrentPointerSnapshot expected) =>
+        expected.Exists
+            ? [
+                "activate", version, "--stop-running", "--if-current-sha256",
+                expected.Sha256Hex,
+            ]
+            : ["activate", version, "--stop-running", "--if-current-missing"];
 
-    private sealed record PointerSnapshot(
-        bool Exists,
-        bool Valid,
-        string? Version,
-        IReadOnlyList<byte> Bytes);
+    private static bool IsCanonicalPointer(
+        CurrentPointerSnapshot? pointer,
+        string version) =>
+        pointer is { Exists: true, IsCanonical: true } &&
+        string.Equals(pointer.Version, version, StringComparison.Ordinal) &&
+        pointer.RawBytes.SequenceEqual(CurrentPointerSnapshot.CreateCanonicalBytes(version));
+
+    private static bool PointersEqual(
+        CurrentPointerSnapshot left,
+        CurrentPointerSnapshot right) =>
+        left.Exists == right.Exists &&
+        left.RawBytes.SequenceEqual(right.RawBytes);
 }
 
 public sealed class LocalAiPackageInstallationException(string message) : Exception(message);

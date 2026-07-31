@@ -60,7 +60,9 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
         var call = Assert.Single(runner.Calls);
         Assert.Equal(layout.LauncherPath, call.Executable);
-        Assert.Equal(["activate", "v1", "--stop-running"], call.Arguments);
+        Assert.Equal(
+            ["activate", "v1", "--stop-running", "--if-current-missing"],
+            call.Arguments);
         Assert.Equal(TimeSpan.FromSeconds(5), call.Timeout);
     }
 
@@ -76,6 +78,7 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
             return Task.FromResult(new ProcessResult(0, "", "", false, false));
         });
         var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var priorPointer = File.ReadAllBytes(layout.CurrentPointerPath);
         var installer = Installer(runner);
 
         var result = await installer.InstallAsync(package, layout, TestContext.Current.CancellationToken);
@@ -89,6 +92,13 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(priorLauncher)),
             result.LauncherBackup.Sha256);
         Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
+        var call = Assert.Single(runner.Calls);
+        Assert.Equal(
+            [
+                "activate", "v2", "--stop-running", "--if-current-sha256",
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(priorPointer)),
+            ],
+            call.Arguments);
         Assert.True(Directory.Exists(Path.Combine(layout.VersionsRoot, "v1")));
         Assert.True(Directory.Exists(Path.Combine(layout.VersionsRoot, "v2")));
     }
@@ -365,18 +375,32 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         using var package = Package("v2");
         var layout = InstallationLayout.FromLocalAppData(localAppData);
         var attempt = 0;
+        var priorPointer = File.ReadAllBytes(layout.CurrentPointerPath);
+        var expectedNewPointer = LocalAi.Contracts.Activation.CurrentPointerSnapshot.CreateCanonicalBytes("v2");
         var runner = new RecordingRunner((executable, arguments, _, _) =>
         {
             attempt++;
             Assert.Equal(layout.LauncherPath, executable);
             if (attempt == 1)
             {
+                Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
+                Assert.Equal(
+                    [
+                        "activate", "v2", "--stop-running", "--if-current-sha256",
+                        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(priorPointer)),
+                    ],
+                    arguments);
                 WritePointer("v2");
                 return Task.FromResult(new ProcessResult(17, "", "", false, false));
             }
 
-            Assert.Equal(priorLauncher, File.ReadAllBytes(layout.LauncherPath));
-            Assert.Equal(["activate", "v1", "--stop-running"], arguments);
+            Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
+            Assert.Equal(
+                [
+                    "activate", "v1", "--stop-running", "--if-current-sha256",
+                    Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(expectedNewPointer)),
+                ],
+                arguments);
             WritePointer("v1");
             return Task.FromResult(new ProcessResult(0, "", "", false, false));
         });
@@ -391,6 +415,112 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
             Path.Combine(layout.VersionsRoot, "v2"),
             result.InactivePublishedVersionPath);
         Assert.Equal(2, runner.Calls.Count);
+    }
+
+    [Fact]
+    public async Task Third_pointer_after_failed_activation_is_indeterminate_and_never_clobbered()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var runner = new RecordingRunner((_, _, _, _) =>
+        {
+            WritePointer("v3");
+            return Task.FromResult(new ProcessResult(17, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Indeterminate, result.Status);
+        Assert.Equal("v3", ReadPointerVersion(layout.CurrentPointerPath));
+        Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
+        Assert.Single(runner.Calls);
+    }
+
+    [Fact]
+    public async Task Same_version_raw_pointer_drift_after_failed_activation_is_indeterminate()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var drifted = System.Text.Encoding.UTF8.GetBytes(
+            "{ \"schemaVersion\": 1, \"version\": \"v2\" }");
+        var runner = new RecordingRunner((_, _, _, _) =>
+        {
+            File.WriteAllBytes(layout.CurrentPointerPath, drifted);
+            return Task.FromResult(new ProcessResult(17, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Indeterminate, result.Status);
+        Assert.Equal(drifted, File.ReadAllBytes(layout.CurrentPointerPath));
+        Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
+        Assert.Single(runner.Calls);
+    }
+
+    [Fact]
+    public async Task Rollback_requires_exact_prior_pointer_bytes_before_restoring_old_launcher()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var driftedPrior = System.Text.Encoding.UTF8.GetBytes(
+            "{ \"schemaVersion\": 1, \"version\": \"v1\" }");
+        var calls = 0;
+        var runner = new RecordingRunner((_, _, _, _) =>
+        {
+            calls++;
+            if (calls == 1)
+            {
+                WritePointer("v2");
+                return Task.FromResult(new ProcessResult(17, "", "", false, false));
+            }
+
+            File.WriteAllBytes(layout.CurrentPointerPath, driftedPrior);
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.RollbackFailed, result.Status);
+        Assert.Equal(driftedPrior, File.ReadAllBytes(layout.CurrentPointerPath));
+        Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
+        Assert.Equal(2, runner.Calls.Count);
+    }
+
+    [Fact]
+    public async Task Oversized_pointer_after_failed_activation_is_indeterminate_without_clobbering()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var oversized = Enumerable.Repeat((byte)'X',
+            LocalAi.Contracts.Activation.CurrentPointerSnapshot.MaximumBytes + 1).ToArray();
+        var runner = new RecordingRunner((_, _, _, _) =>
+        {
+            File.WriteAllBytes(layout.CurrentPointerPath, oversized);
+            return Task.FromResult(new ProcessResult(17, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Indeterminate, result.Status);
+        Assert.Equal(oversized, File.ReadAllBytes(layout.CurrentPointerPath));
+        Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(layout.LauncherPath));
+        Assert.Single(runner.Calls);
     }
 
     [Theory]
@@ -499,6 +629,7 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.Equal(
             Path.Combine(layout.VersionsRoot, "v1"),
             result.InactivePublishedVersionPath);
+        Assert.Equal(Path.Combine(layout.VersionsRoot, "v1"), result.NewVersionPath);
         Assert.Equal(pointerChanged, File.Exists(layout.LauncherPath));
         Assert.True(Directory.Exists(layout.Root));
     }
@@ -594,6 +725,30 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         var result = await Installer(runner).InstallAsync(package, layout, TestContext.Current.CancellationToken);
 
         Assert.Equal(LocalAiPackageInstallStatus.ManualRecoveryRequired, result.Status);
+    }
+
+    [Fact]
+    public async Task Noncanonical_prior_pointer_is_refused_before_any_mutation()
+    {
+        var priorLauncher = System.Text.Encoding.UTF8.GetBytes("prior-launcher");
+        CreateExisting("v1", priorLauncher);
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var priorPointer = System.Text.Encoding.UTF8.GetBytes(
+            "{ \"schemaVersion\": 1, \"version\": \"v1\" }");
+        File.WriteAllBytes(layout.CurrentPointerPath, priorPointer);
+        using var package = Package("v2");
+        var runner = new RecordingRunner((_, _, _, _) => throw new InvalidOperationException());
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Refused, result.Status);
+        Assert.Empty(runner.Calls);
+        Assert.Equal(priorPointer, File.ReadAllBytes(layout.CurrentPointerPath));
+        Assert.Equal(priorLauncher, File.ReadAllBytes(layout.LauncherPath));
+        Assert.False(Directory.Exists(Path.Combine(layout.VersionsRoot, "v2")));
     }
 
     [Fact]
