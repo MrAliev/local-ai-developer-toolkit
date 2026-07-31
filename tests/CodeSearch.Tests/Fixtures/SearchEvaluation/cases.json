@@ -1,0 +1,263 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "intent-broker-readiness",
+      "query": "where the broker starts automatically and waits until the shared host is ready",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/LocalAi.Broker.Client/BrokerProcess.cs",
+          "symbol": "BrokerProcess.EnsureRunningAsync"
+        }
+      ]
+    },
+    {
+      "id": "intent-runtime-acl",
+      "query": "how runtime ACLs are applied and verified for broker queue files",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/LocalAi.Broker/RuntimeAcl.cs",
+          "symbol": "RuntimeAcl.Ensure"
+        }
+      ]
+    },
+    {
+      "id": "intent-generation-publish",
+      "query": "where an immutable code index generation is published atomically",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/CodeSearch.Core/Indexing/GenerationStore.cs",
+          "symbol": "GenerationStore.PublishIndex"
+        }
+      ]
+    },
+    {
+      "id": "intent-overlay-path",
+      "query": "how the exact dirty worktree overlay path is computed from generation tree and content",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/CodeSearch.Core/Indexing/RuntimeIndexLayout.cs",
+          "symbol": "RuntimeIndexLayout.OverlayPath"
+        }
+      ]
+    },
+    {
+      "id": "intent-rank-fusion",
+      "query": "where vector similarity and lexical symbol ranks are fused",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/CodeSearch.Core/Search/SearchEngine.cs",
+          "symbol": "SearchEngine.Fuse"
+        }
+      ]
+    },
+    {
+      "id": "intent-broker-embeddings",
+      "query": "where embedding requests are submitted through the shared LocalAi broker",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/CodeSearch.Core/Embedding/BrokerEmbeddingClient.cs",
+          "symbol": "BrokerEmbeddingClient.EmbedAsync"
+        }
+      ]
+    },
+    {
+      "id": "intent-roslyn-members",
+      "query": "how C sharp executable members become symbol-level search chunks",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/CodeSearch.Core/Chunking/RoslynChunker.cs",
+          "symbol": "RoslynChunker.MemberChunks"
+        }
+      ]
+    },
+    {
+      "id": "intent-launcher-version",
+      "query": "where the launcher resolves an allowlisted tool from the active installed version",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/LocalAi.Launcher/VersionResolver.cs",
+          "symbol": "VersionResolver.Resolve"
+        }
+      ]
+    },
+    {
+      "id": "exact-broker-client-factory",
+      "query": "BrokerClientFactory.CreateDefault",
+      "category": "exact-symbol",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/LocalAi.Broker.Client/BrokerClientFactory.cs",
+          "symbol": "BrokerClientFactory.CreateDefault"
+        }
+      ]
+    },
+    {
+      "id": "exact-codesearch-sync",
+      "query": "CodeSearchSyncCommand.ExecuteAsync",
+      "category": "exact-symbol",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/LocalAi.Cli/CodeSearchSyncCommand.cs",
+          "symbol": "CodeSearchSyncCommand.ExecuteAsync"
+        }
+      ]
+    },
+    {
+      "id": "exact-query-prompt",
+      "query": "QueryPrompt.ForQuery",
+      "category": "exact-symbol",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/CodeSearch.Core/Embedding/QueryPrompt.cs",
+          "symbol": "QueryPrompt.ForQuery"
+        }
+      ]
+    },
+    {
+      "id": "exact-overlay-dirty",
+      "query": "OverlayPlanner.Dirty",
+      "category": "exact-symbol",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/CodeSearch.Core/Indexing/OverlayPlanner.cs",
+          "symbol": "OverlayPlanner.Dirty"
+        }
+      ]
+    },
+    {
+      "id": "exact-routing-catalog",
+      "query": "ModelRoutingCatalog.LoadEmbedded",
+      "category": "exact-symbol",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/LocalAi.Broker/ModelRoutingCatalog.cs",
+          "symbol": "ModelRoutingCatalog.LoadEmbedded"
+        }
+      ]
+    },
+    {
+      "id": "exact-dirty-content-hash",
+      "query": "DirtyCorpusPolicy.ComputeWorkingContentHash",
+      "category": "exact-symbol",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/CodeSearch.Core/Indexing/DirtyCorpusPolicy.cs",
+          "symbol": "DirtyCorpusPolicy.ComputeWorkingContentHash"
+        }
+      ]
+    },
+    {
+      "id": "text-vector-route",
+      "query": "which configured model handles vector embedding tasks",
+      "category": "generic-text",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "model-routing.json",
+          "symbol": null
+        }
+      ]
+    },
+    {
+      "id": "text-shared-fifo",
+      "query": "documentation for the durable machine-wide FIFO queue",
+      "category": "generic-text",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "README.md",
+          "symbol": null
+        }
+      ]
+    },
+    {
+      "id": "text-russian-install",
+      "query": "как установить LocalAi launcher и MCP клиенты",
+      "category": "generic-text",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "README.ru.md",
+          "symbol": null
+        }
+      ]
+    },
+    {
+      "id": "text-full-vram-policy",
+      "query": "design requirement that model weights and context fit fully in VRAM without offload",
+      "category": "generic-text",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "docs/superpowers/specs/2026-07-29-model-aware-routing-design.md",
+          "symbol": null
+        }
+      ]
+    },
+    {
+      "id": "none-kubernetes-ingress",
+      "query": "where does the production Kubernetes ingress configure a public TLS certificate",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    },
+    {
+      "id": "none-credit-card",
+      "query": "which service charges a customer credit card through Stripe",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    },
+    {
+      "id": "none-image-resize",
+      "query": "where are uploaded profile photos resized into thumbnails",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    },
+    {
+      "id": "none-postgres-migration",
+      "query": "which Entity Framework migration creates the customer orders table in PostgreSQL",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    },
+    {
+      "id": "none-email-reset",
+      "query": "how is a password reset email rendered and sent to users",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    },
+    {
+      "id": "none-websocket-chat",
+      "query": "where does the browser WebSocket chat reconnect after a network failure",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    }
+  ]
+}

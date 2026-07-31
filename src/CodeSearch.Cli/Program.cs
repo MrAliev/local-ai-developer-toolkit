@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
@@ -36,6 +38,7 @@ try
         "index" => await IndexAsync(options),
         "overlay" => await OverlayAsync(options),
         "search" => await SearchAsync(options),
+        "evaluate" => await EvaluateAsync(options),
         "status" => Status(options),
         "scan" => Scan(options),
         "-h" or "--help" or "help" => PrintUsage(),
@@ -143,6 +146,78 @@ async Task<int> SearchAsync(Dictionary<string, string> opts)
     return 0;
 }
 
+async Task<int> EvaluateAsync(Dictionary<string, string> opts)
+{
+    if (!opts.TryGetValue("cases", out var casesPath) ||
+        string.IsNullOrWhiteSpace(casesPath))
+    {
+        return Fail("evaluate needs --cases <json>");
+    }
+
+    if (!opts.ContainsKey("no-floor"))
+    {
+        return Fail(
+            "evaluate currently needs --no-floor; calibrated profile mode is enabled after baseline calibration.");
+    }
+
+    var root = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root"));
+    var corpus = SearchEvaluationCorpus.Load(Path.GetFullPath(casesPath));
+    SearchEvaluationCorpus.ValidateAgainstSource(corpus, root);
+    var service = new SearchService
+    {
+        UseQueryInstruction = !opts.ContainsKey("no-instruct")
+    };
+    var searchOptions = new SearchOptions
+    {
+        TopK = 10,
+        MaxPerFile = 3
+    };
+    var observations = new List<SearchEvaluationObservation>(corpus.Cases.Count);
+
+    foreach (var item in corpus.Cases)
+    {
+        var timer = Stopwatch.StartNew();
+        var hits = await service.SearchAsync(item.Query, root, searchOptions);
+        timer.Stop();
+        observations.Add(
+            new SearchEvaluationObservation(
+                item.Id,
+                hits.Select(SearchEvaluation.FromSearchHit).ToArray(),
+                timer.Elapsed,
+                null));
+    }
+
+    var status = service.Status(root);
+    var output = new
+    {
+        schemaVersion = 1,
+        mode = "no-floor",
+        corpusSchemaVersion = corpus.SchemaVersion,
+        caseCount = corpus.Cases.Count,
+        repository = status.RepositoryRoot,
+        generationId = CodeIndex.Load(status.IndexPath, withVectors: false).GenerationId,
+        model = status.Model,
+        brokerQueueWait = "unavailable: embedding client does not expose receipt telemetry",
+        tokenEstimator = new
+        {
+            point = "ceil(responseCharacters / 4)",
+            lowerBound = "ceil(responseCharacters / 6)",
+            upperBound = "ceil(responseCharacters / 3)"
+        },
+        metrics = SearchEvaluation.Measure(corpus, observations),
+        observations
+    };
+    Console.WriteLine(
+        JsonSerializer.Serialize(
+            output,
+            new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = true
+            }));
+    return 0;
+}
+
 int Status(Dictionary<string, string> opts)
 {
     var status = new SearchService().Status(opts.GetValueOrDefault("root"));
@@ -239,6 +314,7 @@ static int PrintUsage()
           codesearch overlay [--root <dir>] [--index <base>] [--overlay <file>]
           codesearch search   --query "<text>" [--root <dir>] [--top N] [--kind Type|Method|Text|File]
                               [--path <substring>] [--per-file N] [--no-instruct]
+          codesearch evaluate --cases <json> [--root <dir>] --no-floor [--no-instruct]
           codesearch status  [--root <dir>]
           codesearch scan    [--root <dir>]
 
