@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using LocalAi.Contracts;
@@ -9,6 +10,11 @@ namespace LocalAi.Installer.Core.Tests;
 
 public sealed class StagingRootSecurityTests : IDisposable
 {
+    private static readonly BigInteger P256Order = new(
+        Convert.FromHexString(
+            "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551"),
+        isUnsigned: true,
+        isBigEndian: true);
     private readonly string root = Path.Combine(
         Path.GetTempPath(),
         "LocalAi-staging-security-" + Guid.NewGuid().ToString("N"));
@@ -131,8 +137,7 @@ public sealed class StagingRootSecurityTests : IDisposable
         await Assert.ThrowsAsync<ReleaseVerificationException>(() =>
             verifier.VerifyAsync(
                 json,
-                key.SignData(json, HashAlgorithmName.SHA256,
-                    DSASignatureFormat.IeeeP1363FixedFieldConcatenation),
+                Sign(key, json),
                 staging,
                 TestContext.Current.CancellationToken));
 
@@ -168,8 +173,7 @@ public sealed class StagingRootSecurityTests : IDisposable
         await Assert.ThrowsAsync<ReleaseVerificationException>(() =>
             verifier.VerifyAsync(
                 json,
-                key.SignData(json, HashAlgorithmName.SHA256,
-                    DSASignatureFormat.IeeeP1363FixedFieldConcatenation),
+                Sign(key, json),
                 staging,
                 TestContext.Current.CancellationToken));
 
@@ -234,6 +238,28 @@ public sealed class StagingRootSecurityTests : IDisposable
         var entry = archive.CreateEntry(name, CompressionLevel.NoCompression);
         using var output = entry.Open();
         output.Write(bytes);
+    }
+
+    private static byte[] Sign(ECDsa key, byte[] payload)
+    {
+        var signature = key.SignData(
+            payload,
+            HashAlgorithmName.SHA256,
+            DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        var s = new BigInteger(
+            signature.AsSpan(32),
+            isUnsigned: true,
+            isBigEndian: true);
+        if (s > P256Order / 2)
+        {
+            var canonical = (P256Order - s).ToByteArray(
+                isUnsigned: true,
+                isBigEndian: true);
+            signature.AsSpan(32).Clear();
+            canonical.CopyTo(signature.AsSpan(64 - canonical.Length));
+        }
+
+        return signature;
     }
 
     public void Dispose()

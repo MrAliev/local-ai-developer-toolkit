@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -9,6 +10,11 @@ namespace LocalAi.Installer.Core.Releases;
 
 public sealed partial class ReleaseManifestVerifier : IDisposable
 {
+    private static readonly BigInteger P256Order = new(
+        Convert.FromHexString(
+            "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551"),
+        isUnsigned: true,
+        isBigEndian: true);
     private const int MaximumManifestBytes = 1024 * 1024;
     internal const long MaximumPackageSize = 4L * 1024 * 1024 * 1024;
     private const long MaximumModelSize = 1024L * 1024 * 1024 * 1024;
@@ -52,7 +58,7 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
         {
             if (manifestJson.IsEmpty || manifestJson.Length > MaximumManifestBytes ||
                 HasUtf8Bom(manifestJson) ||
-                signature.Length != 64)
+                !IsCanonicalP256Signature(signature))
             {
                 throw InvalidManifest();
             }
@@ -235,6 +241,25 @@ public sealed partial class ReleaseManifestVerifier : IDisposable
 
     private static bool HasUtf8Bom(ReadOnlySpan<byte> value) =>
         value.Length >= 3 && value[0] == 0xEF && value[1] == 0xBB && value[2] == 0xBF;
+
+    private static bool IsCanonicalP256Signature(ReadOnlySpan<byte> signature)
+    {
+        if (signature.Length != 64)
+        {
+            return false;
+        }
+
+        var r = new BigInteger(
+            signature[..32],
+            isUnsigned: true,
+            isBigEndian: true);
+        var s = new BigInteger(
+            signature[32..],
+            isUnsigned: true,
+            isBigEndian: true);
+        return r > BigInteger.Zero && r < P256Order &&
+            s > BigInteger.Zero && s <= P256Order / 2;
+    }
 
     private static void RequireObject(JsonElement value)
     {

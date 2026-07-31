@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using LocalAi.Contracts;
@@ -10,6 +11,11 @@ namespace LocalAi.Installer.Core.Tests;
 
 public sealed class ReleasePackageVerifierTests : IDisposable
 {
+    private static readonly BigInteger P256Order = new(
+        Convert.FromHexString(
+            "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551"),
+        isUnsigned: true,
+        isBigEndian: true);
     private readonly string tempRoot = Path.Combine(
         Path.GetTempPath(),
         "LocalAi-release-tests-" + Guid.NewGuid().ToString("N"));
@@ -125,6 +131,30 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             verifier.Verify(json, signature));
         Assert.Throws<ReleaseVerificationException>(() =>
             verifier.Verify(json, new byte[65]));
+    }
+
+    [Fact]
+    public void Verify_rejects_high_s_twin_of_valid_signature()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var manifest = CreateManifest([1, 2, 3]);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var lowSignature = Sign(key, json);
+        var highSignature = lowSignature.ToArray();
+        var lowS = new BigInteger(
+            lowSignature.AsSpan(32),
+            isUnsigned: true,
+            isBigEndian: true);
+        WriteScalar(P256Order - lowS, highSignature.AsSpan(32));
+
+        Assert.True(key.VerifyData(
+            json,
+            highSignature,
+            HashAlgorithmName.SHA256,
+            DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+        Assert.Throws<ReleaseVerificationException>(() =>
+            new ReleaseManifestVerifier(key.ExportSubjectPublicKeyInfo())
+                .Verify(json, highSignature));
     }
 
     [Fact]
@@ -478,11 +508,30 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             requiresAuthenticode,
             []);
 
-    private static byte[] Sign(ECDsa key, byte[] payload) =>
-        key.SignData(
+    private static byte[] Sign(ECDsa key, byte[] payload)
+    {
+        var signature = key.SignData(
             payload,
             HashAlgorithmName.SHA256,
             DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        var s = new BigInteger(
+            signature.AsSpan(32),
+            isUnsigned: true,
+            isBigEndian: true);
+        if (s > P256Order / 2)
+        {
+            WriteScalar(P256Order - s, signature.AsSpan(32));
+        }
+
+        return signature;
+    }
+
+    private static void WriteScalar(BigInteger value, Span<byte> destination)
+    {
+        var bytes = value.ToByteArray(isUnsigned: true, isBigEndian: true);
+        destination.Clear();
+        bytes.CopyTo(destination[^bytes.Length..]);
+    }
 
     private static byte[] CreatePackage(
         string? missingFile = null,
