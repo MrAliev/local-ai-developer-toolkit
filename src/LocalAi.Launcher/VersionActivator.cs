@@ -47,6 +47,7 @@ public sealed class VersionActivator
         CurrentPointerExpectation expectation)
     {
         ArgumentNullException.ThrowIfNull(expectation);
+        VersionResolver.ValidateVersionName(version);
         var temporaryPath = Path.Combine(
             _binRoot,
             $"current.{Guid.NewGuid():N}.tmp");

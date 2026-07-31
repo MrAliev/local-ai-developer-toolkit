@@ -92,6 +92,40 @@ public sealed class LauncherProgramTests
     }
 
     [Theory]
+    [InlineData("v1.")]
+    [InlineData("v1 ")]
+    [InlineData("CON")]
+    [InlineData("../v1")]
+    public async Task Activate_rejects_unsafe_target_with_sanitized_error(string version)
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v2"}""");
+        var before = File.ReadAllBytes(install.CurrentPath);
+        using var error = new StringWriter();
+
+        var exitCode = await LauncherProgram.RunAsync(
+            [
+                "activate",
+                version,
+                "--if-current-sha256",
+                Convert.ToHexString(SHA256.HashData(before)),
+                "--stop-running",
+            ],
+            install.BinRoot,
+            @"C:\LocalAi\bin\launcher\localai-launcher.exe",
+            error,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(
+            "version_path_invalid: The LocalAi version name is invalid." +
+            Environment.NewLine,
+            error.ToString());
+        Assert.DoesNotContain(version, error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(install.CurrentPath));
+    }
+
+    [Theory]
     [InlineData("malformed")]
     [InlineData("oversized")]
     [InlineData("invalid-utf8")]

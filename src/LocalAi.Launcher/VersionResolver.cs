@@ -1,3 +1,4 @@
+using LocalAi.Contracts.Activation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -121,16 +122,13 @@ public sealed class VersionResolver
         }
     }
 
-    private static void ValidateVersionName(string version)
+    internal static void ValidateVersionName(string? version)
     {
-        if (Path.IsPathRooted(version) ||
-            version is "." or ".." ||
-            version.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0 ||
-            !string.Equals(Path.GetFileName(version), version, StringComparison.Ordinal))
+        if (!LocalAiVersionName.IsSafe(version))
         {
             throw new LauncherException(
                 "version_path_invalid",
-                $"LocalAi version name '{version}' is invalid.");
+                "The LocalAi version name is invalid.");
         }
     }
 

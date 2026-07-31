@@ -127,6 +127,59 @@ public sealed class VersionActivatorTests
         Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
     }
 
+    [Theory]
+    [InlineData("v1.")]
+    [InlineData("v1 ")]
+    [InlineData("CON")]
+    [InlineData("../v1")]
+    public async Task Unsafe_target_is_rejected_before_lease_or_process_stop(string version)
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v2"}""");
+        var before = File.ReadAllBytes(install.CurrentPath);
+        var stopCount = 0;
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var holder = Task.Run(
+            () =>
+            {
+                using var gate = ActivationCoordinator.AcquireStartupGate(
+                    install.BinRoot,
+                    TimeSpan.FromSeconds(1));
+                held.Set();
+                release.Wait(TestContext.Current.CancellationToken);
+            },
+            TestContext.Current.CancellationToken);
+        held.Wait(TestContext.Current.CancellationToken);
+        var activator = new VersionActivator(
+            install.BinRoot,
+            new LocalAiProcessController(
+                static () => [],
+                (_, _) => stopCount++),
+            TimeSpan.Zero,
+            TimeSpan.Zero);
+
+        LauncherException error;
+        try
+        {
+            error = Assert.Throws<LauncherException>(() =>
+                activator.Activate(
+                    version,
+                    stopRunning: true,
+                    ExpectCurrent(before)));
+        }
+        finally
+        {
+            release.Set();
+            await holder;
+        }
+
+        Assert.Equal("version_path_invalid", error.Code);
+        Assert.Equal("The LocalAi version name is invalid.", error.Message);
+        Assert.Equal(0, stopCount);
+        Assert.Equal(before, File.ReadAllBytes(install.CurrentPath));
+    }
+
     [Fact]
     public async Task Startup_gate_and_current_lock_share_one_lease_timeout()
     {
