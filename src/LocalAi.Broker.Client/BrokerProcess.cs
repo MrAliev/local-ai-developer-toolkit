@@ -24,8 +24,6 @@ public sealed class BrokerProcess : IBrokerProcess
     private readonly TimeSpan _startupTimeout;
     private readonly string _arguments;
     private readonly string _startupSemaphoreName;
-    private readonly string _brokerAssemblyPath;
-    private readonly StringComparison _pathComparison;
 
     public BrokerProcess(
         string executablePath,
@@ -42,8 +40,7 @@ public sealed class BrokerProcess : IBrokerProcess
             timeProvider ?? TimeProvider.System,
             Task.Delay,
             startupTimeout,
-            BuildArguments(runtimeRoot, ollamaUrl),
-            executablePath)
+            BuildArguments(runtimeRoot, ollamaUrl))
     {
     }
 
@@ -60,8 +57,7 @@ public sealed class BrokerProcess : IBrokerProcess
             Start,
             TimeProvider.System,
             Task.Delay,
-            arguments: arguments,
-            brokerAssemblyPath: brokerAssembly);
+            arguments: arguments);
     }
 
     public BrokerProcess(
@@ -73,8 +69,7 @@ public sealed class BrokerProcess : IBrokerProcess
         TimeProvider timeProvider,
         Func<TimeSpan, CancellationToken, Task> delay,
         TimeSpan? startupTimeout = null,
-        string? arguments = null,
-        string? brokerAssemblyPath = null)
+        string? arguments = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
@@ -93,11 +88,6 @@ public sealed class BrokerProcess : IBrokerProcess
 
         _arguments = arguments ?? BuildArguments(_runtimeRoot, null);
         _startupSemaphoreName = CreateSemaphoreName(_runtimeRoot);
-        _brokerAssemblyPath = CanonicalizePath(
-            brokerAssemblyPath ?? executablePath);
-        _pathComparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
     }
 
     public async Task EnsureRunningAsync(CancellationToken cancellationToken = default)
@@ -105,9 +95,17 @@ public sealed class BrokerProcess : IBrokerProcess
         using var startupLock = await Task.Run(
             () => EnterSemaphore(cancellationToken),
             cancellationToken);
-        if (IsHealthy(_readState(_runtimeRoot)))
+        var observation = Observe(_readState(_runtimeRoot));
+        if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
         {
             return;
+        }
+
+        ThrowIfIncompatible(observation);
+        if (observation.Status != BrokerObservationStatus.AbsentOrStale)
+        {
+            throw new InvalidOperationException(
+                "Broker startup requires an absent or stale host state.");
         }
 
         _start(_executablePath, _arguments);
@@ -115,10 +113,13 @@ public sealed class BrokerProcess : IBrokerProcess
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (IsHealthy(_readState(_runtimeRoot)))
+            observation = Observe(_readState(_runtimeRoot));
+            if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
             {
                 return;
             }
+
+            ThrowIfIncompatible(observation);
 
             if (_timeProvider.GetUtcNow() >= deadline)
             {
@@ -133,26 +134,30 @@ public sealed class BrokerProcess : IBrokerProcess
     public static string StatePath(string runtimeRoot) =>
         Path.Combine(Path.GetFullPath(runtimeRoot), "host.json");
 
-    private bool IsHealthy(BrokerProcessState? state)
+    private BrokerObservation Observe(BrokerProcessState? state)
     {
-        if (state is not { SchemaVersion: 2 } ||
-            string.IsNullOrWhiteSpace(state.BrokerAssemblyPath) ||
-            _timeProvider.GetUtcNow() - state.HeartbeatAtUtc > TimeSpan.FromSeconds(5))
+        if (state is null)
         {
-            return false;
+            return new(
+                BrokerObservationStatus.AbsentOrStale,
+                "host state is absent or unreadable");
+        }
+
+        if (_timeProvider.GetUtcNow() - state.HeartbeatAtUtc > TimeSpan.FromSeconds(5))
+        {
+            return new(
+                BrokerObservationStatus.AbsentOrStale,
+                "host heartbeat is stale");
         }
 
         try
         {
-            if (!string.Equals(
-                    CanonicalizePath(state.BrokerAssemblyPath),
-                    _brokerAssemblyPath,
-                    _pathComparison))
+            if (!_isRunning(state))
             {
-                return false;
+                return new(
+                    BrokerObservationStatus.AbsentOrStale,
+                    "host process is not the recorded owner");
             }
-
-            return _isRunning(state);
         }
         catch (Exception exception) when (
             exception is Win32Exception or
@@ -161,7 +166,41 @@ public sealed class BrokerProcess : IBrokerProcess
             NotSupportedException or
             UnauthorizedAccessException)
         {
-            return false;
+            return new(
+                BrokerObservationStatus.AbsentOrStale,
+                "host process is not the recorded owner");
+        }
+
+        if (state.SchemaVersion != BrokerCompatibilityContract.HostStateSchemaVersion ||
+            !BrokerCompatibilityContract.IsCurrent(state.Compatibility))
+        {
+            return new(
+                BrokerObservationStatus.IncompatibleHealthy,
+                CompatibilityDetail(state));
+        }
+
+        if (string.IsNullOrWhiteSpace(state.BrokerAssemblyPath))
+        {
+            return new(
+                BrokerObservationStatus.IncompatibleHealthy,
+                "host assembly path is missing");
+        }
+
+        return new(
+            BrokerObservationStatus.CompatibleHealthy,
+            "host broker assembly path: " + state.BrokerAssemblyPath);
+    }
+
+    private static string CompatibilityDetail(BrokerProcessState state) =>
+        "host compatibility is incompatible: schema=" + state.SchemaVersion +
+        ", protocol=" + (state.Compatibility?.ProtocolVersion.ToString() ?? "missing") +
+        ", build=" + (state.Compatibility?.BuildCompatibilityId ?? "missing");
+
+    private static void ThrowIfIncompatible(BrokerObservation observation)
+    {
+        if (observation.Status == BrokerObservationStatus.IncompatibleHealthy)
+        {
+            throw new BrokerBootstrapException("broker_incompatible", observation.Detail);
         }
     }
 
@@ -234,20 +273,6 @@ public sealed class BrokerProcess : IBrokerProcess
     }
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
-
-    private static string CanonicalizePath(string path)
-    {
-        var fullPath = Path.GetFullPath(path);
-        if (!File.Exists(fullPath))
-        {
-            return fullPath;
-        }
-
-        FileSystemInfo info = new FileInfo(fullPath);
-        return (info.Attributes & FileAttributes.ReparsePoint) != 0
-            ? info.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fullPath
-            : fullPath;
-    }
 
     private SemaphoreLease EnterSemaphore(CancellationToken cancellationToken)
     {

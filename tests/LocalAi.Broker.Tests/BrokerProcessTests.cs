@@ -37,8 +37,9 @@ public sealed class BrokerProcessTests
                 42,
                 now.AddMinutes(-1),
                 now,
-                2,
-                BrokerAssemblyPath),
+                BrokerCompatibilityContract.HostStateSchemaVersion,
+                BrokerAssemblyPath,
+                BrokerCompatibilityContract.Current),
             state => state.ProcessId == 42 && state.StartedAtUtc == now.AddMinutes(-1),
             (_, _) =>
             {
@@ -54,7 +55,47 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
-    public async Task Matching_process_with_another_broker_assembly_is_replaced()
+    public async Task Compatible_broker_at_another_assembly_path_is_reused()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var developmentAssembly = Path.GetFullPath("development/LocalAi.Broker.dll");
+        var installedAssembly = Path.GetFullPath("installed/v1/LocalAi.Broker.dll");
+        var starts = 0;
+        var process = new BrokerProcess(
+            "dotnet",
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(
+                    42,
+                    now.AddMinutes(-1),
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    installedAssembly,
+                    BrokerCompatibilityContract.Current)
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    developmentAssembly,
+                    BrokerCompatibilityContract.Current),
+            state => state.ProcessId is 42 or 99,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask,
+            arguments: "\"" + developmentAssembly + "\" serve --runtime runtime");
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, starts);
+    }
+
+    [Fact]
+    public async Task Non_owner_process_is_replaced()
     {
         var now = DateTimeOffset.UtcNow;
         var starts = 0;
@@ -66,9 +107,47 @@ public sealed class BrokerProcessTests
                     42,
                     now,
                     now,
-                    2,
-                    Path.GetFullPath("another-version/LocalAi.Broker.dll"))
-                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    Path.GetFullPath("another-version/LocalAi.Broker.dll"),
+                    BrokerCompatibilityContract.Current)
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
+            state => state.ProcessId == 99,
+            (_, _) =>
+            {
+                starts++;
+                return 99;
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
+    public async Task Stale_legacy_state_is_replaced()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var starts = 0;
+        var process = new BrokerProcess(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => starts == 0
+                ? new BrokerProcessState(42, now, now.AddMinutes(-1), 1, BrokerAssemblyPath)
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
             state => state.ProcessId is 42 or 99,
             (_, _) =>
             {
@@ -84,7 +163,7 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
-    public async Task Schema_one_state_is_replaced()
+    public async Task Stale_state_with_invalid_broker_assembly_path_is_replaced()
     {
         var now = DateTimeOffset.UtcNow;
         var starts = 0;
@@ -92,33 +171,20 @@ public sealed class BrokerProcessTests
             BrokerAssemblyPath,
             "runtime",
             _ => starts == 0
-                ? new BrokerProcessState(42, now, now, 1, BrokerAssemblyPath)
-                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
-            state => state.ProcessId is 42 or 99,
-            (_, _) =>
-            {
-                starts++;
-                return 99;
-            },
-            TimeProvider.System,
-            static (_, _) => Task.CompletedTask);
-
-        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
-
-        Assert.Equal(1, starts);
-    }
-
-    [Fact]
-    public async Task Invalid_broker_assembly_path_is_replaced()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var starts = 0;
-        var process = new BrokerProcess(
-            BrokerAssemblyPath,
-            "runtime",
-            _ => starts == 0
-                ? new BrokerProcessState(42, now, now, 2, "\0")
-                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
+                ? new BrokerProcessState(
+                    42,
+                    now,
+                    now.AddMinutes(-1),
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    "\0",
+                    BrokerCompatibilityContract.Current)
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
             state => state.ProcessId is 42 or 99,
             (_, _) =>
             {
@@ -147,7 +213,13 @@ public sealed class BrokerProcessTests
                 reads++;
                 return reads < 3
                     ? null
-                    : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath);
+                    : new BrokerProcessState(
+                        99,
+                        now,
+                        now,
+                        BrokerCompatibilityContract.HostStateSchemaVersion,
+                        BrokerAssemblyPath,
+                        BrokerCompatibilityContract.Current);
             },
             state => state.ProcessId == 99,
             (_, _) =>
@@ -179,9 +251,16 @@ public sealed class BrokerProcessTests
                     42,
                     now.AddMinutes(-2),
                     now.AddMinutes(-1),
-                    2,
-                    BrokerAssemblyPath)
-                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current)
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
             state =>
             {
                 if (state.ProcessId == 42)
@@ -216,8 +295,20 @@ public sealed class BrokerProcessTests
             BrokerAssemblyPath,
             "runtime",
             _ => starts == 0
-                ? new BrokerProcessState(42, now, now, 2, BrokerAssemblyPath)
-                : new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath),
+                ? new BrokerProcessState(
+                    42,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current)
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
             state =>
             {
                 if (state.ProcessId == 42)
@@ -271,7 +362,13 @@ public sealed class BrokerProcessTests
             BrokerAssemblyPath,
             runtimeRoot,
             _ => ready
-                ? new BrokerProcessState(99, now, now, 2, BrokerAssemblyPath)
+                ? new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current)
                 : null,
             state => state.ProcessId == 99,
             (_, _) =>
