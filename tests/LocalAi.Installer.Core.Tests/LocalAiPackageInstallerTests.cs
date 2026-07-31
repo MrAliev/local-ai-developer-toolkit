@@ -67,6 +67,116 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task Concurrent_installers_serialize_before_reinspection_and_launcher_handoff()
+    {
+        using var packageA = Package("v1");
+        using var packageB = Package("v1");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var events = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstInspector = new RecordingInspector(
+            new ExistingLocalAiInspector(new SystemFileSystemProbe()),
+            () => events.Enqueue("A-inspect"));
+        var secondInspector = new RecordingInspector(
+            new ExistingLocalAiInspector(new SystemFileSystemProbe()),
+            () => events.Enqueue("B-inspect"));
+        var firstRunner = new RecordingRunner(async (_, arguments, _, _) =>
+        {
+            events.Enqueue("A-start");
+            firstStarted.SetResult();
+            await releaseFirst.Task;
+            WritePointer(arguments[1]);
+            events.Enqueue("A-end");
+            return new ProcessResult(0, "", "", false, false);
+        });
+        var secondRunner = new RecordingRunner((_, arguments, _, _) =>
+        {
+            events.Enqueue("B-start");
+            WritePointer(arguments[1]);
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+        var first = new LocalAiPackageInstaller(firstRunner, firstInspector, TimeSpan.FromSeconds(5));
+        var second = new LocalAiPackageInstaller(secondRunner, secondInspector, TimeSpan.FromSeconds(5));
+
+        var firstTask = first.InstallAsync(packageA, layout, TestContext.Current.CancellationToken);
+        await firstStarted.Task;
+        var secondTask = second.InstallAsync(packageB, layout, TestContext.Current.CancellationToken);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, secondInspector.CallCount);
+        Assert.False(secondTask.IsCompleted);
+        releaseFirst.SetResult();
+        var results = await Task.WhenAll(firstTask, secondTask);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Installed, results[0].Status);
+        Assert.Equal(LocalAiPackageInstallStatus.AlreadyInstalled, results[1].Status);
+        Assert.Equal(1, secondInspector.CallCount);
+        Assert.Equal(
+            ["A-inspect", "A-start", "A-end", "B-inspect", "B-start"],
+            events.ToArray());
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task Installer_transaction_timeout_returns_sanitized_busy_without_inspection()
+    {
+        using var package = Package("v1");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        using var held = InstallerTransactionLease.Acquire(
+            layout,
+            TimeSpan.FromSeconds(1),
+            CancellationToken.None);
+        var inspector = new RecordingInspector(
+            new ExistingLocalAiInspector(new SystemFileSystemProbe()));
+        var installer = new LocalAiPackageInstaller(
+            new RecordingRunner((_, _, _, _) => throw new InvalidOperationException()),
+            inspector,
+            TimeSpan.FromMilliseconds(50));
+
+        var result = await installer.InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Busy, result.Status);
+        Assert.Equal("Another LocalAi installation is already in progress.", result.Reason);
+        Assert.Equal(0, inspector.CallCount);
+        Assert.False(Directory.Exists(layout.Root));
+    }
+
+    [Fact]
+    public async Task Fresh_inspection_does_not_adopt_foreign_valid_bin_tree()
+    {
+        using var package = Package("v1");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var inspector = new DelegateInspector(_ =>
+        {
+            Directory.CreateDirectory(layout.VersionsRoot);
+            Directory.CreateDirectory(layout.LauncherDirectory);
+            return new ExistingLocalAiSnapshot(ExistingLocalAiState.Absent, null, null, null);
+        });
+        var runner = new RecordingRunner((_, _, _, _) => throw new InvalidOperationException());
+
+        var result = await new LocalAiPackageInstaller(runner, inspector, TimeSpan.FromSeconds(5))
+            .InstallAsync(package, layout, TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Refused, result.Status);
+        Assert.Empty(runner.Calls);
+        Assert.True(Directory.Exists(layout.VersionsRoot));
+        Assert.True(Directory.Exists(layout.LauncherDirectory));
+        Assert.False(Directory.Exists(layout.InstallerDirectory));
+        Assert.Equal(
+            ["launcher", "versions"],
+            Directory.EnumerateFileSystemEntries(layout.BinRoot)
+                .Select(path => Path.GetFileName(path)!)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
+        Assert.Empty(Directory.EnumerateFileSystemEntries(layout.VersionsRoot));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(layout.LauncherDirectory));
+    }
+
+    [Fact]
     public async Task Compatible_upgrade_backs_up_launcher_and_activates_new_version()
     {
         var priorLauncher = System.Text.Encoding.UTF8.GetBytes("prior-launcher");
@@ -877,6 +987,27 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     private sealed class ConstantInspector(ExistingLocalAiSnapshot snapshot) : IExistingLocalAiInspector
     {
         public ExistingLocalAiSnapshot Inspect(string localAppData) => snapshot;
+    }
+
+    private sealed class DelegateInspector(
+        Func<string, ExistingLocalAiSnapshot> inspect) : IExistingLocalAiInspector
+    {
+        public ExistingLocalAiSnapshot Inspect(string localAppData) => inspect(localAppData);
+    }
+
+    private sealed class RecordingInspector(
+        IExistingLocalAiInspector inner,
+        Action? onInspect = null) : IExistingLocalAiInspector
+    {
+        private int callCount;
+        public int CallCount => Volatile.Read(ref callCount);
+
+        public ExistingLocalAiSnapshot Inspect(string localAppData)
+        {
+            Interlocked.Increment(ref callCount);
+            onInspect?.Invoke();
+            return inner.Inspect(localAppData);
+        }
     }
 
     private sealed class MemoryPackageLease(IReadOnlyList<IRetainedStagingFile> files) : IStagingRootLease

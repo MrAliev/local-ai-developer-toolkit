@@ -79,7 +79,9 @@ public sealed class InstallationLayoutLease : IDisposable
         }
     }
 
-    public static InstallationLayoutLease Acquire(InstallationLayout layout)
+    public static InstallationLayoutLease Acquire(
+        InstallationLayout layout,
+        bool requireFreshInstallerTree = false)
     {
         ArgumentNullException.ThrowIfNull(layout);
         if (!OperatingSystem.IsWindows())
@@ -101,6 +103,11 @@ public sealed class InstallationLayoutLease : IDisposable
             ValidateRootShape(layout.Root);
             var bin = NativeDirectory.OpenOrCreate(root.Handle, "bin", layout.BinRoot);
             directories.Add(Evidence(bin.Handle, layout.BinRoot));
+            if (requireFreshInstallerTree && !bin.Created)
+            {
+                throw Failure();
+            }
+
             ValidateBinNames(layout.BinRoot);
 
             var versions = NativeDirectory.OpenOrCreate(
@@ -108,17 +115,27 @@ public sealed class InstallationLayoutLease : IDisposable
                 "versions",
                 layout.VersionsRoot);
             directories.Add(Evidence(versions.Handle, layout.VersionsRoot));
+            if (requireFreshInstallerTree && !versions.Created)
+            {
+                throw Failure();
+            }
+
             var launcher = NativeDirectory.OpenOrCreate(
                 bin.Handle,
                 "launcher",
                 layout.LauncherDirectory);
             directories.Add(Evidence(launcher.Handle, layout.LauncherDirectory));
+            if (requireFreshInstallerTree && !launcher.Created)
+            {
+                throw Failure();
+            }
+
             var installer = NativeDirectory.OpenOrCreate(
                 root.Handle,
                 "installer",
                 layout.InstallerDirectory);
             directories.Add(Evidence(installer.Handle, layout.InstallerDirectory));
-            ValidateExactNames(layout.InstallerDirectory, ["backups"]);
+            ValidateExactNames(layout.InstallerDirectory, ["backups", "transaction.lock"]);
             var backups = NativeDirectory.OpenOrCreate(
                 installer.Handle,
                 "backups",
@@ -398,8 +415,9 @@ public sealed class InstallationLayoutLease : IDisposable
 
     private static void ValidateInstallerShape(InstallationLayout layout)
     {
-        ValidateExactNames(layout.InstallerDirectory, ["backups"]);
+        ValidateExactNames(layout.InstallerDirectory, ["backups", "transaction.lock"]);
         ValidateDirectoryPath(layout.InstallerBackupsRoot);
+        ValidateOptionalFile(Path.Combine(layout.InstallerDirectory, "transaction.lock"));
     }
 
     private static void ValidateExactNames(string directory, IEnumerable<string> allowed)

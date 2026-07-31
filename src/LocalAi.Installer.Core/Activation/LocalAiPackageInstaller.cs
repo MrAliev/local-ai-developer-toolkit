@@ -18,6 +18,7 @@ public enum LocalAiPackageInstallStatus
     RollbackFailed,
     ManualRecoveryRequired,
     Indeterminate,
+    Busy,
 }
 
 public sealed record LauncherBackupMetadata(
@@ -75,8 +76,45 @@ public sealed class LocalAiPackageInstaller
     {
         try
         {
-            return await InstallCoreAsync(package, layout, cancellationToken)
-                .ConfigureAwait(false);
+            ArgumentNullException.ThrowIfNull(package);
+            ArgumentNullException.ThrowIfNull(layout);
+            if (!OperatingSystem.IsWindows())
+            {
+                throw new PlatformNotSupportedException(
+                    "LocalAi package installation is available only on Windows.");
+            }
+
+            ValidatePackageContract(package);
+            InstallerTransactionLease transaction;
+            try
+            {
+                transaction = await InstallerTransactionLease.AcquireAsync(
+                        layout,
+                        activationTimeout,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (InstallerTransactionBusyException)
+            {
+                var version = package.Manifest.VersionDirectory;
+                return new(
+                    LocalAiPackageInstallStatus.Busy,
+                    version,
+                    null,
+                    Path.Combine(layout.VersionsRoot, version),
+                    null,
+                    "Another LocalAi installation is already in progress.");
+            }
+
+            using (transaction)
+            {
+                return await InstallCoreAsync(
+                        package,
+                        layout,
+                        transaction,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
         catch (LocalAiPackageInstallationException)
         {
@@ -98,6 +136,7 @@ public sealed class LocalAiPackageInstaller
     private async Task<LocalAiPackageInstallResult> InstallCoreAsync(
         VerifiedPackage package,
         InstallationLayout layout,
+        InstallerTransactionLease transaction,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(package);
@@ -127,7 +166,9 @@ public sealed class LocalAiPackageInstaller
         InstallationLayoutLease layoutLease;
         try
         {
-            layoutLease = InstallationLayoutLease.Acquire(layout);
+            layoutLease = InstallationLayoutLease.Acquire(
+                layout,
+                requireFreshInstallerTree: existing.State == ExistingLocalAiState.Absent);
         }
         catch (LocalAiPackageInstallationException)
         {
@@ -142,6 +183,21 @@ public sealed class LocalAiPackageInstaller
 
         using (layoutLease)
         {
+            try
+            {
+                transaction.AttachLayout(layoutLease);
+            }
+            catch (IOException)
+            {
+                return new(
+                    LocalAiPackageInstallStatus.Busy,
+                    version,
+                    existing.Version,
+                    versionPath,
+                    null,
+                    "Another LocalAi installation is already in progress.");
+            }
+
             CurrentPointerSnapshot priorPointer;
             try
             {
