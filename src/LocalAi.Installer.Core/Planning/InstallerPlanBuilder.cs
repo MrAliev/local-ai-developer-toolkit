@@ -1,3 +1,4 @@
+using System.Text;
 using LocalAi.Installer.Core.Diagnosis;
 
 namespace LocalAi.Installer.Core.Planning;
@@ -92,7 +93,7 @@ public sealed class InstallerPlanBuilder
             ArgumentNullException.ThrowIfNull(action);
             ValidateActionId(action.ActionId);
             ValidateRequiredToken(action.PackageId, nameof(action.PackageId));
-            ValidateRequiredToken(action.Version, nameof(action.Version));
+            ValidateVersionToken(action.Version, nameof(action.Version));
             ValidateConsent(action.Selected, action.ConsentGranted, action.ActionId);
 
             if (!packageIds.Add(action.PackageId))
@@ -107,7 +108,7 @@ public sealed class InstallerPlanBuilder
     private static void ValidatePackage(LocalAiPackageAction package)
     {
         ValidateActionId(package.ActionId);
-        ValidateRequiredToken(package.Version, nameof(package.Version));
+        ValidateVersionToken(package.Version, nameof(package.Version));
         ValidateAbsolutePath(package.PackagePath, nameof(package.PackagePath));
         ValidateConsent(
             package.Selected,
@@ -123,7 +124,7 @@ public sealed class InstallerPlanBuilder
         {
             ArgumentNullException.ThrowIfNull(action);
             ValidateActionId(action.ActionId);
-            ValidateRequiredToken(action.Model, nameof(action.Model));
+            ValidateModelReference(action.Model, nameof(action.Model));
             if (action.ContextSize <= 0)
             {
                 throw new ArgumentOutOfRangeException(
@@ -253,6 +254,8 @@ public sealed class InstallerPlanBuilder
                 action.Selected,
                 action.ConsentGranted)))
             .ToDictionary(action => action.ActionId, StringComparer.OrdinalIgnoreCase);
+        var semanticEffects = new HashSet<EffectSemanticKey>(
+            EffectSemanticKeyComparer.Instance);
 
         foreach (var effect in effects)
         {
@@ -275,7 +278,41 @@ public sealed class InstallerPlanBuilder
                 throw new InvalidOperationException(
                     $"Effect '{effect.ActionId}' must refer to a selected and consented external action.");
             }
+
+            var semanticKey = new EffectSemanticKey(
+                effect.RelatedActionId,
+                NormalizeWhitespace(effect.Description));
+            if (!semanticEffects.Add(semanticKey))
+            {
+                throw new ArgumentException(
+                    $"Effect '{effect.ActionId}' duplicates an existing effect for action '{effect.RelatedActionId}'.",
+                    nameof(effects));
+            }
         }
+    }
+
+    private static string NormalizeWhitespace(string value)
+    {
+        var normalized = new StringBuilder(value.Length);
+        var needsSeparator = false;
+        foreach (var character in value)
+        {
+            if (char.IsWhiteSpace(character))
+            {
+                needsSeparator = normalized.Length > 0;
+                continue;
+            }
+
+            if (needsSeparator)
+            {
+                normalized.Append(' ');
+                needsSeparator = false;
+            }
+
+            normalized.Append(character);
+        }
+
+        return normalized.ToString();
     }
 
     private static void ValidateActionId(string actionId)
@@ -311,6 +348,66 @@ public sealed class InstallerPlanBuilder
                 $"{parameterName} cannot contain whitespace or control characters.",
                 parameterName);
         }
+    }
+
+    private static void ValidateVersionToken(
+        string value,
+        string parameterName)
+    {
+        ValidateRequiredText(value, parameterName);
+        if (!IsVersionToken(value))
+        {
+            throw new ArgumentException(
+                $"{parameterName} must be a 1-128 character immutable version token.",
+                parameterName);
+        }
+    }
+
+    private static void ValidateModelReference(
+        string value,
+        string parameterName)
+    {
+        ValidateRequiredText(value, parameterName);
+        if (value.Length > 128)
+        {
+            throw new ArgumentException(
+                $"{parameterName} must be at most 128 characters.",
+                parameterName);
+        }
+
+        var separator = value.IndexOf(':');
+        if (separator < 0)
+        {
+            ValidateVersionToken(value, parameterName);
+            return;
+        }
+
+        if (separator != value.LastIndexOf(':') ||
+            !IsVersionToken(value[..separator]) ||
+            !IsVersionToken(value[(separator + 1)..]))
+        {
+            throw new ArgumentException(
+                $"{parameterName} must be an immutable model token with at most one tag separator.",
+                parameterName);
+        }
+    }
+
+    // Grammar: 1-128 ASCII characters; an alphanumeric first and last
+    // character; inner alphanumerics, '.', '-', '_', or '+'; never '..'.
+    private static bool IsVersionToken(string value)
+    {
+        if (value.Length is < 1 or > 128 ||
+            !char.IsAsciiLetterOrDigit(value[0]) ||
+            !char.IsAsciiLetterOrDigit(value[^1]) ||
+            value.Contains("..", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return value.All(
+            character =>
+                char.IsAsciiLetterOrDigit(character) ||
+                character is '.' or '-' or '_' or '+');
     }
 
     private static void ValidateRequiredText(string value, string parameterName)
@@ -399,4 +496,28 @@ public sealed class InstallerPlanBuilder
         string ActionId,
         bool Selected,
         bool ConsentGranted);
+
+    private readonly record struct EffectSemanticKey(
+        string RelatedActionId,
+        string Description);
+
+    private sealed class EffectSemanticKeyComparer :
+        IEqualityComparer<EffectSemanticKey>
+    {
+        public static EffectSemanticKeyComparer Instance { get; } = new();
+
+        public bool Equals(EffectSemanticKey x, EffectSemanticKey y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(
+                x.RelatedActionId,
+                y.RelatedActionId) &&
+            StringComparer.OrdinalIgnoreCase.Equals(
+                x.Description,
+                y.Description);
+
+        public int GetHashCode(EffectSemanticKey obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(
+                    obj.RelatedActionId),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Description));
+    }
 }

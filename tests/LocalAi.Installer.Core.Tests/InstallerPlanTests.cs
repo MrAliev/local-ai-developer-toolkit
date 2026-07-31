@@ -410,6 +410,207 @@ public sealed class InstallerPlanTests
         Assert.Equal(2, plan.NonTransactionalEffects.Count);
     }
 
+    [Theory]
+    [InlineData(VersionLikeField.DependencyVersion, "..")]
+    [InlineData(VersionLikeField.DependencyVersion, "1..2")]
+    [InlineData(VersionLikeField.DependencyVersion, "../escape")]
+    [InlineData(VersionLikeField.DependencyVersion, @"1\..\escape")]
+    [InlineData(VersionLikeField.PackageVersion, "..")]
+    [InlineData(VersionLikeField.PackageVersion, "1..2")]
+    [InlineData(VersionLikeField.PackageVersion, "../escape")]
+    [InlineData(VersionLikeField.PackageVersion, @"1\..\escape")]
+    [InlineData(VersionLikeField.ModelReference, "..")]
+    [InlineData(VersionLikeField.ModelReference, "1..2")]
+    [InlineData(VersionLikeField.ModelReference, "../escape")]
+    [InlineData(VersionLikeField.ModelReference, @"1\..\escape")]
+    public void Unsafe_version_like_tokens_are_rejected(
+        VersionLikeField field,
+        string unsafeValue)
+    {
+        var input = ValidInput();
+        input = field switch
+        {
+            VersionLikeField.DependencyVersion => input with
+            {
+                Dependencies =
+                [
+                    new(
+                        "dependency.git",
+                        "Git.Git",
+                        unsafeValue,
+                        false,
+                        false),
+                ],
+            },
+            VersionLikeField.PackageVersion => input with
+            {
+                Package = input.Package with { Version = unsafeValue },
+            },
+            VersionLikeField.ModelReference => input with
+            {
+                Models =
+                [
+                    new(
+                        "model.unsafe",
+                        unsafeValue,
+                        32_768,
+                        false,
+                        false),
+                ],
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+
+        Assert.ThrowsAny<ArgumentException>(() => Build(input));
+    }
+
+    [Fact]
+    public void Conservative_version_like_token_boundaries_are_accepted()
+    {
+        var input = ValidInput() with
+        {
+            Dependencies =
+            [
+                new("dependency.git", "Git.Git", "1", false, false),
+            ],
+            Package = new(
+                "package.localai",
+                "v1.2.3-rc.1+build_5",
+                @"C:\Downloads\localai.zip",
+                false,
+                false),
+            Models =
+            [
+                new(
+                    "model.qwen",
+                    "qwen3:8b-q4_K_M",
+                    32_768,
+                    false,
+                    false),
+            ],
+        };
+
+        var plan = Build(input);
+
+        Assert.Equal("1", plan.Dependencies[0].Version);
+        Assert.Equal("v1.2.3-rc.1+build_5", plan.Package.Version);
+        Assert.Equal("qwen3:8b-q4_K_M", plan.Models[0].Model);
+    }
+
+    [Fact]
+    public void Version_like_tokens_accept_the_128_character_boundary()
+    {
+        var boundaryToken = new string('v', 128);
+        var input = ValidInput() with
+        {
+            Dependencies =
+            [
+                new("dependency.git", "Git.Git", boundaryToken, false, false),
+            ],
+            Package = ValidInput().Package with { Version = boundaryToken },
+            Models =
+            [
+                new(
+                    "model.boundary",
+                    boundaryToken,
+                    32_768,
+                    false,
+                    false),
+            ],
+        };
+
+        var plan = Build(input);
+
+        Assert.Equal(128, plan.Dependencies[0].Version.Length);
+        Assert.Equal(128, plan.Package.Version.Length);
+        Assert.Equal(128, plan.Models[0].Model.Length);
+    }
+
+    [Fact]
+    public void Version_like_tokens_reject_values_over_128_characters()
+    {
+        var overlongToken = new string('v', 129);
+        var dependency = ValidInput() with
+        {
+            Dependencies =
+            [
+                new("dependency.git", "Git.Git", overlongToken, false, false),
+            ],
+        };
+        var package = ValidInput() with
+        {
+            Package = ValidInput().Package with { Version = overlongToken },
+        };
+        var model = ValidInput() with
+        {
+            Models =
+            [
+                new(
+                    "model.overlong",
+                    overlongToken,
+                    32_768,
+                    false,
+                    false),
+            ],
+        };
+
+        Assert.Throws<ArgumentException>(() => Build(dependency));
+        Assert.Throws<ArgumentException>(() => Build(package));
+        Assert.Throws<ArgumentException>(() => Build(model));
+    }
+
+    [Fact]
+    public void Semantically_duplicate_effects_are_rejected()
+    {
+        var input = ValidInput() with
+        {
+            Dependencies =
+            [
+                new("dependency.git", "Git.Git", "2.50.1", true, true),
+            ],
+            Effects =
+            [
+                new(
+                    "effect.git.primary",
+                    "dependency.git",
+                    "Git remains installed"),
+                new(
+                    "effect.git.duplicate",
+                    "DEPENDENCY.GIT",
+                    "  git\tREMAINS   installed  "),
+            ],
+        };
+
+        Assert.Throws<ArgumentException>(() => Build(input));
+    }
+
+    [Fact]
+    public void Different_effect_descriptions_for_one_action_are_accepted()
+    {
+        var input = ValidInput() with
+        {
+            Dependencies =
+            [
+                new("dependency.git", "Git.Git", "2.50.1", true, true),
+            ],
+            Effects =
+            [
+                new(
+                    "effect.git.install",
+                    "dependency.git",
+                    "Git remains installed"),
+                new(
+                    "effect.git.path",
+                    "dependency.git",
+                    "Git may update the machine PATH"),
+            ],
+        };
+
+        var plan = Build(input);
+
+        Assert.Equal(2, plan.NonTransactionalEffects.Count);
+    }
+
     public static TheoryData<PlanInput> InvalidInputs()
     {
         var data = new TheoryData<PlanInput>
@@ -585,6 +786,13 @@ public sealed class InstallerPlanTests
         Package,
         Model,
         Agent,
+    }
+
+    public enum VersionLikeField
+    {
+        DependencyVersion,
+        PackageVersion,
+        ModelReference,
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
