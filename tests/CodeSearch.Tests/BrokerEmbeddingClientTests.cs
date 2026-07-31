@@ -43,6 +43,45 @@ public sealed class BrokerEmbeddingClientTests
                 TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task Translates_broker_startup_timeout_to_embedding_unavailable()
+    {
+        var timeout = new TimeoutException("broker startup timed out");
+        var client = new BrokerEmbeddingClient(
+            "embed-model",
+            new ThrowingBrokerClient(timeout));
+
+        var error = await Assert.ThrowsAsync<EmbeddingUnavailableException>(
+            () => client.EmbedAsync(
+                ["text"],
+                LocalJobPriority.Interactive,
+                "query:tree",
+                TestContext.Current.CancellationToken));
+
+        Assert.Same(timeout, error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("InvalidDataException")]
+    [InlineData("HttpRequestException")]
+    public async Task Does_not_reclassify_broker_job_failures_as_unavailable(
+        string failureCode)
+    {
+        var failure = new BrokerJobFailedException(Guid.NewGuid(), failureCode);
+        var client = new BrokerEmbeddingClient(
+            "embed-model",
+            new ThrowingBrokerClient(failure));
+
+        var error = await Assert.ThrowsAsync<BrokerJobFailedException>(
+            () => client.EmbedAsync(
+                ["text"],
+                LocalJobPriority.Interactive,
+                "query:tree",
+                TestContext.Current.CancellationToken));
+
+        Assert.Same(failure, error);
+    }
+
     private sealed class FakeBrokerClient(
         IReadOnlyList<IReadOnlyList<double>> embeddings) : IBrokerClient
     {
@@ -68,5 +107,13 @@ public sealed class BrokerEmbeddingClientTests
                 null);
             return Task.FromResult(new LocalJobResult<T>(output, receipt));
         }
+    }
+
+    private sealed class ThrowingBrokerClient(Exception exception) : IBrokerClient
+    {
+        public Task<LocalJobResult<T>> ExecuteAsync<T>(
+            LocalJobRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<LocalJobResult<T>>(exception);
     }
 }

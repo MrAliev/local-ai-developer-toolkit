@@ -125,11 +125,24 @@ public sealed class SearchService
         // garbage rankings instead of an error, so there is no option to get this wrong.
         var embedder = CreateEmbeddingClient(baseIndex.Model);
         var prompt = UseQueryInstruction ? QueryPrompt.ForQuery(baseIndex.Model, query) : query;
-        var vectors = await embedder.EmbedAsync(
-            [prompt],
-            LocalJobPriority.Interactive,
-            QueryDeduplicationKey(baseIndex, prompt),
-            ct);
+        float[][] vectors;
+        try
+        {
+            vectors = await embedder.EmbedAsync(
+                [prompt],
+                LocalJobPriority.Interactive,
+                QueryDeduplicationKey(baseIndex, prompt),
+                ct);
+        }
+        catch (EmbeddingUnavailableException)
+        {
+            return SearchEngine.SearchLexically(
+                searchable,
+                query,
+                resolvedOptions,
+                workingRoot);
+        }
+
         var vector = vectors[0];
 
         // The raw query - not the instruction-wrapped prompt - drives lexical scoring, otherwise

@@ -101,6 +101,40 @@ public static class SearchEngine
         return Materialize(index, root, fused, vectorScores, lexicalScores, options);
     }
 
+    /// <summary>
+    /// Searches only the literal signal when the embedding service is explicitly unavailable.
+    /// A lexical-only result has no semantic score and only positive literal matches are eligible.
+    /// </summary>
+    public static IReadOnlyList<SearchHit> SearchLexically(
+        ISearchableIndex index,
+        string queryText,
+        SearchOptions options,
+        string root)
+    {
+        Validate(options);
+        var candidates = Filter(index, options);
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        var lexicalScores = ScoreLexically(index, queryText, candidates);
+        if (lexicalScores.Count == 0)
+        {
+            return [];
+        }
+
+        var vectorScores = new Dictionary<int, float>();
+        var fused = Fuse(vectorScores, lexicalScores);
+        return Materialize(
+            index,
+            root,
+            fused,
+            vectorScores,
+            lexicalScores,
+            options);
+    }
+
     private static void Validate(SearchOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
