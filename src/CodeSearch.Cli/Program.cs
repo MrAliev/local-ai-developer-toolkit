@@ -38,6 +38,7 @@ try
         "index" => await IndexAsync(options),
         "overlay" => await OverlayAsync(options),
         "search" => await SearchAsync(options),
+        "get-chunk" => await GetChunkAsync(options),
         "evaluate" => await EvaluateAsync(options),
         "status" => Status(options),
         "scan" => Scan(options),
@@ -140,9 +141,36 @@ async Task<int> SearchAsync(Dictionary<string, string> opts)
         Console.WriteLine($"{hit.RelPath}:{hit.StartLine}-{hit.EndLine}  [{hit.Kind}]  cos={hit.VectorScore:F3}");
         Console.WriteLine($"  {hit.Symbol}");
         Console.WriteLine($"  {hit.Signature}");
+        Console.WriteLine($"  chunk_id: {hit.ChunkId}");
         Console.WriteLine();
     }
 
+    return 0;
+}
+
+async Task<int> GetChunkAsync(Dictionary<string, string> opts)
+{
+    if (!opts.TryGetValue("id", out var chunkId) ||
+        string.IsNullOrWhiteSpace(chunkId))
+    {
+        return Fail("get-chunk needs --id <chunk_id>");
+    }
+
+    var chunk = await new SearchService().GetChunkAsync(
+        chunkId,
+        opts.GetValueOrDefault("root"));
+    Console.WriteLine(
+        $"{chunk.RelPath}:{chunk.StartLine}-{chunk.EndLine}  [{chunk.Kind}]");
+    Console.WriteLine(chunk.Symbol);
+    if (chunk.Signature.Length > 0 &&
+        chunk.Signature != chunk.Symbol)
+    {
+        Console.WriteLine(chunk.Signature);
+    }
+
+    Console.WriteLine($"chunk_id: {chunk.ChunkId}");
+    Console.WriteLine();
+    Console.WriteLine(chunk.Body);
     return 0;
 }
 
@@ -316,6 +344,7 @@ static int PrintUsage()
           codesearch overlay [--root <dir>] [--index <base>] [--overlay <file>]
           codesearch search   --query "<text>" [--root <dir>] [--top N] [--kind Type|Method|Text|File]
                               [--path <substring>] [--per-file N] [--no-instruct]
+          codesearch get-chunk --id <chunk_id> [--root <dir>]
           codesearch evaluate --cases <json> [--root <dir>] [--profile|--no-floor] [--no-instruct]
           codesearch status  [--root <dir>]
           codesearch scan    [--root <dir>]

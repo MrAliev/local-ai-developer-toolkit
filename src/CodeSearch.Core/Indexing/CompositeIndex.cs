@@ -8,6 +8,10 @@ public interface ISearchableIndex
 {
     int Dim { get; }
     string Model { get; }
+    string RepositoryId { get; }
+    string GenerationId { get; }
+    string GitTree { get; }
+    string? DirtyHash { get; }
     int ChunkCount { get; }
     ChunkMeta ChunkAt(int index);
     string PathOf(int index);
@@ -98,6 +102,14 @@ public sealed class CompositeIndex : ISearchableIndex
     public int Dim => _base.Dim;
 
     public string Model => _base.Model;
+
+    public string RepositoryId => _base.RepositoryId;
+
+    public string GenerationId => _base.GenerationId;
+
+    public string GitTree => _overlay.GitTree;
+
+    public string? DirtyHash => _overlay.DirtyHash;
 
     public int ChunkCount => _overlay.Chunks.Count + _visibleBaseChunks.Length;
 

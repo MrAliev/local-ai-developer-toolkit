@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime;
+using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using LocalAi.Broker.Client;
@@ -53,6 +54,17 @@ public sealed record IndexStatus(
             WorkingRoot.TrimEnd(Path.DirectorySeparatorChar),
             StringComparison.OrdinalIgnoreCase);
 }
+
+public sealed record SearchChunk(
+    string ChunkId,
+    string RelPath,
+    int StartLine,
+    int EndLine,
+    ChunkKind Kind,
+    string Symbol,
+    string Signature,
+    string Namespace,
+    string Body);
 
 /// <summary>
 /// Resolves the repository, loads its base index plus this worktree's overlay, embeds the query
@@ -127,6 +139,89 @@ public sealed class SearchService
             query,
             resolvedOptions,
             workingRoot);
+    }
+
+    public async Task<SearchChunk> GetChunkAsync(
+        string chunkId,
+        string? root,
+        CancellationToken ct = default)
+    {
+        var requested = SearchChunkId.Parse(chunkId);
+        var workingRoot = RepoLocator.ResolveWorkingRoot(root);
+        var identity = RuntimeIndexLayout.Inspect(workingRoot);
+
+        if (!string.Equals(
+                requested.RepositoryId,
+                identity.RepositoryId,
+                StringComparison.Ordinal))
+        {
+            SearchChunkResolver.ValidateSnapshot(
+                requested,
+                requested with { RepositoryId = identity.RepositoryId });
+        }
+
+        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root));
+        var baseIndex = Load(indexPath);
+        var actualSnapshot = new SearchChunkId(
+            identity.RepositoryId,
+            baseIndex.GenerationId,
+            identity.HeadTree,
+            identity.DirtyHash,
+            requested.Ordinal);
+        SearchChunkResolver.ValidateSnapshot(requested, actualSnapshot);
+
+        var searchable = Compose(baseIndex, workingRoot);
+        var composedSnapshot = new SearchChunkId(
+            searchable.RepositoryId,
+            searchable.GenerationId,
+            searchable.GitTree,
+            searchable.DirtyHash,
+            requested.Ordinal);
+        SearchChunkResolver.ValidateSnapshot(requested, composedSnapshot);
+        SearchChunkResolver.ValidateOrdinal(requested, searchable.ChunkCount);
+
+        var meta = searchable.ChunkAt(requested.Ordinal);
+        var relPath = searchable.PathOf(requested.Ordinal);
+        var fullRoot = Path.GetFullPath(workingRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(fullRoot, relPath));
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!fullPath.StartsWith(
+                fullRoot + Path.DirectorySeparatorChar,
+                comparison))
+        {
+            throw new SearchChunkResolutionException(
+                "unsafe_chunk_path",
+                "unsafe_chunk_path: The indexed source path escapes the repository root.");
+        }
+
+        ct.ThrowIfCancellationRequested();
+        var lines = SourceLines.Split(
+            await File.ReadAllTextAsync(fullPath, ct));
+        if (meta.StartLine < 1 ||
+            meta.EndLine < meta.StartLine ||
+            meta.EndLine > lines.Length)
+        {
+            throw new SearchChunkResolutionException(
+                "stale_source_range",
+                "stale_source_range: The indexed line range no longer exists in the source file.");
+        }
+
+        var body = string.Join(
+            "\n",
+            lines[(meta.StartLine - 1)..meta.EndLine]);
+        return new SearchChunk(
+            chunkId,
+            relPath,
+            meta.StartLine,
+            meta.EndLine,
+            meta.Kind,
+            meta.Symbol,
+            meta.Signature,
+            meta.Namespace,
+            body);
     }
 
     private static string QueryDeduplicationKey(CodeIndex index, string prompt)

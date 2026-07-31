@@ -25,6 +25,9 @@ public class SearchEngineTests : IDisposable
             Model = "test-model",
             Root = _root,
             GitCommit = "abc123",
+            RepositoryId = "repository",
+            GenerationId = "generation",
+            GitTree = "tree",
             IndexedAtUtc = DateTime.UtcNow,
             Files =
             [
@@ -98,6 +101,17 @@ public class SearchEngineTests : IDisposable
 
         Assert.Contains("payments line 1", hits[0].Snippet);
         Assert.DoesNotContain("payments line 20", hits[0].Snippet);
+    }
+
+    [Fact]
+    public void Hits_carry_an_opaque_id_for_the_exact_index_snapshot()
+    {
+        var hit = Assert.Single(SearchEngine.Search(
+            _index, Unit(1, 0, 0), "charging", new SearchOptions { TopK = 1 }, _root));
+
+        Assert.Equal(
+            new SearchChunkId("repository", "generation", "tree", null, 0),
+            SearchChunkId.Parse(hit.ChunkId));
     }
 
     [Fact]

@@ -108,10 +108,61 @@ public static class CodeSearchTools
                 report.Append("   ").AppendLine(hit.Signature);
             }
 
+            report.Append("   chunk_id: ").AppendLine(hit.ChunkId);
             report.AppendLine(Indent(hit.Snippet)).AppendLine();
         }
 
         return report.ToString();
+    }
+
+    [McpServerTool(Name = "get_code_chunk")]
+    [Description("""
+        Returns the complete source body and metadata for one exact search result. Pass a
+        chunk_id returned by search_code. The id is bound to the repository, active generation,
+        git tree, and dirty overlay; stale or cross-repository ids are rejected.
+        """)]
+    public static async Task<string> GetCodeChunk(
+        SearchService service,
+        [Description("Opaque chunk_id returned by search_code.")]
+        string chunkId,
+        [Description("Repository root. Must resolve to the same exact snapshot as the chunk id.")]
+        string? root = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var chunk = await service.GetChunkAsync(
+                chunkId,
+                root,
+                cancellationToken);
+            var report = new StringBuilder();
+            report.Append(chunk.RelPath)
+                .Append(':').Append(chunk.StartLine)
+                .Append('-').Append(chunk.EndLine)
+                .Append("  [").Append(chunk.Kind).AppendLine("]");
+            report.AppendLine(chunk.Symbol);
+            if (chunk.Signature.Length > 0 &&
+                chunk.Signature != chunk.Symbol)
+            {
+                report.AppendLine(chunk.Signature);
+            }
+
+            report.Append("chunk_id: ").AppendLine(chunk.ChunkId);
+            report.AppendLine().Append(chunk.Body);
+            return report.ToString();
+        }
+        catch (SearchChunkIdException ex)
+        {
+            return $"{ex.Code}: {ex.Message}";
+        }
+        catch (SearchChunkResolutionException ex)
+        {
+            return ex.Message;
+        }
+        catch (Exception ex)
+        {
+            return $"get_code_chunk failed: {ex.Message}";
+        }
     }
 
     [McpServerTool(Name = "index_status")]

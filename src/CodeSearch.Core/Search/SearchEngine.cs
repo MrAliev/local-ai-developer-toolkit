@@ -40,7 +40,8 @@ public sealed record SearchHit(
     float VectorScore,
     double LexicalScore,
     double Score,
-    string Snippet);
+    string Snippet,
+    string ChunkId = "");
 
 /// <summary>
 /// Hybrid retrieval: dense vectors for meaning, literal symbol matching for names, fused with
@@ -354,7 +355,13 @@ public static class SearchEngine
                 vectorScores.GetValueOrDefault(chunkIndex),
                 lexicalScores.GetValueOrDefault(chunkIndex),
                 rrf[chunkIndex],
-                Snippet(root, relPath, chunk, options.SnippetLines, fileCache)));
+                Snippet(root, relPath, chunk, options.SnippetLines, fileCache),
+                new SearchChunkId(
+                    index.RepositoryId,
+                    index.GenerationId,
+                    index.GitTree,
+                    index.DirtyHash,
+                    chunkIndex).Encode()));
         }
 
         return hits;
