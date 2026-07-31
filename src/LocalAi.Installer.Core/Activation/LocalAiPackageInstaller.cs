@@ -274,11 +274,13 @@ public sealed class LocalAiPackageInstaller
             }
             else
             {
+                using var trustedLauncher = layoutLease.LockLauncher(
+                    FileMetadata(package, LocalAiPackageLayout.StableLauncherFile));
                 try
                 {
-                    VerifyFile(layout.LauncherPath, FileMetadata(package, LocalAiPackageLayout.StableLauncherFile));
+                    trustedLauncher.Revalidate();
                     result = await processRunner.RunAsync(
-                            layout.LauncherPath,
+                            trustedLauncher.CanonicalPath,
                             ["activate", version, "--stop-running"],
                             activationTimeout,
                             cancellationToken)
@@ -288,6 +290,10 @@ public sealed class LocalAiPackageInstaller
                     exception is ProcessTerminationException or OperationCanceledException)
                 {
                     activationException = exception;
+                }
+                finally
+                {
+                    trustedLauncher.Revalidate();
                 }
             }
 

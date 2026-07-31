@@ -281,6 +281,55 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task Verified_launcher_and_ancestors_are_locked_through_process_invocation()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var runner = new RecordingRunner((executable, arguments, _, _) =>
+        {
+            Assert.Equal(layout.LauncherPath, executable);
+            Assert.Equal(Content(LocalAiPackageLayout.StableLauncherFile), File.ReadAllBytes(executable));
+            Assert.ThrowsAny<IOException>(() => File.WriteAllText(executable, "replaced"));
+            Assert.ThrowsAny<IOException>(() => File.Delete(executable));
+            Assert.ThrowsAny<IOException>(() =>
+                Directory.Move(layout.LauncherDirectory, layout.LauncherDirectory + ".moved"));
+            Assert.ThrowsAny<IOException>(() =>
+                Directory.Move(layout.BinRoot, layout.BinRoot + ".moved"));
+            WritePointer(arguments[1]);
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Installed, result.Status);
+    }
+
+    [Fact]
+    public async Task Cancellation_before_process_start_preserves_prior_installation()
+    {
+        var priorLauncher = System.Text.Encoding.UTF8.GetBytes("prior-launcher");
+        CreateExisting("v1", priorLauncher);
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var priorPointer = File.ReadAllBytes(layout.CurrentPointerPath);
+        var runner = new RecordingRunner((_, _, _, _) => throw new InvalidOperationException());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            Installer(runner).InstallAsync(package, layout, cancellation.Token));
+
+        Assert.Empty(runner.Calls);
+        Assert.Equal(priorLauncher, File.ReadAllBytes(layout.LauncherPath));
+        Assert.Equal(priorPointer, File.ReadAllBytes(layout.CurrentPointerPath));
+        Assert.False(Directory.Exists(Path.Combine(layout.VersionsRoot, "v2")));
+    }
+
+    [Fact]
     public async Task Existing_mismatched_target_is_an_immutable_conflict_without_writes()
     {
         CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));

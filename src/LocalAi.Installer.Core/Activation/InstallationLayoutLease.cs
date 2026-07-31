@@ -53,6 +53,32 @@ public sealed class InstallationLayoutLease : IDisposable
         throw Failure();
     }
 
+    public TrustedLauncher LockLauncher(VerifiedPackageFile expected)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        ObjectDisposedException.ThrowIf(disposed, this);
+        Revalidate();
+        FileStream? stream = null;
+        try
+        {
+            stream = new FileStream(
+                Layout.LauncherPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                64 * 1024,
+                FileOptions.RandomAccess);
+            var result = new TrustedLauncher(this, stream, Layout.LauncherPath, expected);
+            stream = null;
+            result.Revalidate();
+            return result;
+        }
+        finally
+        {
+            stream?.Dispose();
+        }
+    }
+
     public static InstallationLayoutLease Acquire(InstallationLayout layout)
     {
         ArgumentNullException.ThrowIfNull(layout);
@@ -501,6 +527,64 @@ public sealed class InstallationLayoutLease : IDisposable
             {
                 owner.Cleanup(this);
                 Handle.Dispose();
+            }
+        }
+    }
+
+    public sealed class TrustedLauncher : IDisposable
+    {
+        private readonly InstallationLayoutLease owner;
+        private readonly FileStream stream;
+        private readonly WindowsStagingRootLease.FileIdentity identity;
+        private readonly VerifiedPackageFile expected;
+        private bool disposed;
+
+        internal TrustedLauncher(
+            InstallationLayoutLease owner,
+            FileStream stream,
+            string canonicalPath,
+            VerifiedPackageFile expected)
+        {
+            this.owner = owner;
+            this.stream = stream;
+            this.expected = expected;
+            CanonicalPath = Path.GetFullPath(canonicalPath);
+            identity = WindowsStagingRootLease.GetIdentity(stream.SafeFileHandle);
+        }
+
+        public string CanonicalPath { get; }
+
+        public void Revalidate()
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            owner.Revalidate();
+            var actualIdentity = WindowsStagingRootLease.GetIdentity(stream.SafeFileHandle);
+            if (actualIdentity != identity ||
+                actualIdentity.Attributes.HasFlag(FileAttributes.Directory) ||
+                actualIdentity.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                !string.Equals(
+                    WindowsStagingRootLease.GetFinalPath(stream.SafeFileHandle),
+                    CanonicalPath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                stream.Length != expected.Length)
+            {
+                throw Failure();
+            }
+
+            stream.Position = 0;
+            var hash = Convert.ToHexString(SHA256.HashData(stream));
+            if (!string.Equals(hash, expected.Sha256, StringComparison.Ordinal))
+            {
+                throw Failure();
+            }
+        }
+
+        public void Dispose()
+        {
+            if (!disposed)
+            {
+                disposed = true;
+                stream.Dispose();
             }
         }
     }
