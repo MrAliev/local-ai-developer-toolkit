@@ -95,6 +95,8 @@ public sealed class LauncherProgramTests
     [InlineData("malformed")]
     [InlineData("oversized")]
     [InlineData("invalid-utf8")]
+    [InlineData("schema-overflow")]
+    [InlineData("schema-exponent")]
     public async Task Activate_sanitizes_invalid_pointer_without_raw_content_or_path(
         string failure)
     {
@@ -106,6 +108,10 @@ public sealed class LauncherProgramTests
                 (byte)'X',
                 CurrentPointerSnapshot.MaximumBytes + 1).ToArray(),
             "invalid-utf8" => new byte[] { 0xC3, 0x28 },
+            "schema-overflow" => System.Text.Encoding.UTF8.GetBytes(
+                "{\"schemaVersion\":2147483648,\"version\":\"v1\"}"),
+            "schema-exponent" => System.Text.Encoding.UTF8.GetBytes(
+                "{\"schemaVersion\":1e1000,\"version\":\"v1\"}"),
             _ => throw new InvalidOperationException(),
         };
         File.WriteAllBytes(install.CurrentPath, bytes);

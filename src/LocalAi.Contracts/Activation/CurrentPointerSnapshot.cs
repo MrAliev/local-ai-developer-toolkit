@@ -95,7 +95,8 @@ public sealed class CurrentPointerSnapshot
             !properties.Any(property => property.NameEquals("schemaVersion")) ||
             !properties.Any(property => property.NameEquals("version")) ||
             root.GetProperty("schemaVersion").ValueKind != JsonValueKind.Number ||
-            root.GetProperty("schemaVersion").GetInt32() != 1 ||
+            !root.GetProperty("schemaVersion").TryGetInt32(out var schemaVersion) ||
+            schemaVersion != 1 ||
             root.GetProperty("version").ValueKind != JsonValueKind.String)
         {
             throw Invalid();
