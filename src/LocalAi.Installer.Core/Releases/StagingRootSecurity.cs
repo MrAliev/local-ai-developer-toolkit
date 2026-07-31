@@ -741,7 +741,10 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
                 rule.IdentityReference is not SecurityIdentifier sid ||
                 !approvedSids.Contains(sid.Value) ||
                 (rule.FileSystemRights & FileSystemRights.FullControl) !=
-                    FileSystemRights.FullControl)
+                    FileSystemRights.FullControl ||
+                rule.InheritanceFlags !=
+                    (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit) ||
+                rule.PropagationFlags != PropagationFlags.None)
             {
                 throw Failure();
             }

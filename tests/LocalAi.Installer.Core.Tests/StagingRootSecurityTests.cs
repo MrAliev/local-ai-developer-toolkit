@@ -1,6 +1,9 @@
 using System.IO.Compression;
 using System.Numerics;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
@@ -107,6 +110,41 @@ public sealed class StagingRootSecurityTests : IDisposable
             new WindowsStagingRootFactory().CreateExclusive(staging));
 
         Assert.Equal("owned", File.ReadAllText(Path.Combine(staging, "sentinel.txt")));
+    }
+
+    [Theory]
+    [SupportedOSPlatform("windows")]
+    [InlineData((int)InheritanceFlags.None, (int)PropagationFlags.None)]
+    [InlineData(
+        (int)(InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit),
+        (int)PropagationFlags.NoPropagateInherit)]
+    public void Revalidate_rejects_full_control_ace_with_changed_inheritance_semantics(
+        int inheritanceValue,
+        int propagationValue)
+    {
+        Directory.CreateDirectory(root);
+        var staging = Path.Combine(root, "acl-semantics");
+        using var lease = new WindowsStagingRootFactory().CreateExclusive(staging);
+        var directory = new DirectoryInfo(staging);
+        var security = directory.GetAccessControl(
+            AccessControlSections.Access | AccessControlSections.Owner);
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = identity.User!;
+        security.RemoveAccessRuleAll(new FileSystemAccessRule(
+            user,
+            FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            user,
+            FileSystemRights.FullControl,
+            (InheritanceFlags)inheritanceValue,
+            (PropagationFlags)propagationValue,
+            AccessControlType.Allow));
+        directory.SetAccessControl(security);
+
+        Assert.Throws<ReleaseVerificationException>(lease.Revalidate);
     }
 
     [Fact]
