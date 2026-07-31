@@ -48,7 +48,7 @@ public sealed record NonTransactionalEffect(
 
 public sealed record InstallerPlan
 {
-    public InstallerPlan(
+    internal InstallerPlan(
         Guid planId,
         DateTimeOffset createdAtUtc,
         EnvironmentDiagnosis diagnosis,

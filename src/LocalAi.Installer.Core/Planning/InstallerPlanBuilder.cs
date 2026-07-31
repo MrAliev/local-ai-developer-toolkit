@@ -44,13 +44,14 @@ public sealed class InstallerPlanBuilder
         var agentSnapshot = agents.ToArray();
         var effectSnapshot = nonTransactionalEffects.ToArray();
 
+        ValidateEffectElements(effectSnapshot);
         ValidateDependencies(dependencySnapshot);
-        ValidatePackage(package);
+        var packageSnapshot = ValidatePackage(package);
         ValidateModels(modelSnapshot);
         ValidateAgents(agentSnapshot);
         ValidateUniqueActionIds(
             dependencySnapshot,
-            package,
+            packageSnapshot,
             modelSnapshot,
             agentSnapshot,
             effectSnapshot);
@@ -78,7 +79,7 @@ public sealed class InstallerPlanBuilder
             createdAtUtc,
             SnapshotDiagnosis(diagnosis),
             dependencySnapshot,
-            package with { },
+            packageSnapshot,
             modelSnapshot,
             agentSnapshot,
             effectSnapshot);
@@ -105,21 +106,27 @@ public sealed class InstallerPlanBuilder
         }
     }
 
-    private static void ValidatePackage(LocalAiPackageAction package)
+    private static LocalAiPackageAction ValidatePackage(
+        LocalAiPackageAction package)
     {
         ValidateActionId(package.ActionId);
         ValidateVersionToken(package.Version, nameof(package.Version));
-        ValidateAbsolutePath(package.PackagePath, nameof(package.PackagePath));
         ValidateConsent(
             package.Selected,
             package.ConsentGranted,
             package.ActionId);
+        return package with
+        {
+            PackagePath = CanonicalizePackagePath(
+                package.PackagePath,
+                nameof(package.PackagePath)),
+        };
     }
 
     private static void ValidateModels(
         IReadOnlyList<ModelInstallAction> models)
     {
-        var selections = new HashSet<ModelSelection>(ModelSelectionComparer.Instance);
+        var modelsByIdentity = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var action in models)
         {
             ArgumentNullException.ThrowIfNull(action);
@@ -134,11 +141,25 @@ public sealed class InstallerPlanBuilder
             }
 
             ValidateConsent(action.Selected, action.ConsentGranted, action.ActionId);
-            if (!selections.Add(new ModelSelection(action.Model, action.ContextSize)))
+            if (!modelsByIdentity.Add(action.Model))
             {
                 throw new ArgumentException(
-                    $"Model '{action.Model}' with context {action.ContextSize} is selected more than once.",
+                    $"Model '{action.Model}' is selected more than once.",
                     nameof(models));
+            }
+        }
+    }
+
+    private static void ValidateEffectElements(
+        IReadOnlyList<NonTransactionalEffect> effects)
+    {
+        for (var index = 0; index < effects.Count; index++)
+        {
+            if (effects[index] is null)
+            {
+                throw new ArgumentException(
+                    $"Effects cannot contain a null element at index {index}.",
+                    nameof(effects));
             }
         }
     }
@@ -432,6 +453,54 @@ public sealed class InstallerPlanBuilder
         }
     }
 
+    private static string CanonicalizePackagePath(
+        string? path,
+        string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(path) ||
+            path.Length < 4 ||
+            !char.IsAsciiLetter(path[0]) ||
+            path[1] != ':' ||
+            path[2] != '\\' ||
+            path.Contains('/'))
+        {
+            throw new ArgumentException(
+                $"{parameterName} must be an absolute drive-qualified Windows path.",
+                parameterName);
+        }
+
+        var segments = path[3..].Split('\\');
+        foreach (var segment in segments)
+        {
+            if (segment.Length == 0 ||
+                segment is "." or ".." ||
+                segment.EndsWith('.') ||
+                segment.EndsWith(' ') ||
+                segment.Any(IsInvalidWindowsFileNameCharacter))
+            {
+                throw new ArgumentException(
+                    $"{parameterName} contains an invalid or ambiguous Windows path segment.",
+                    parameterName);
+            }
+        }
+
+        var canonicalPath =
+            $"{char.ToUpperInvariant(path[0])}:\\{string.Join('\\', segments)}";
+        var fullPath = Path.GetFullPath(canonicalPath);
+        if (!StringComparer.Ordinal.Equals(canonicalPath, fullPath))
+        {
+            throw new ArgumentException(
+                $"{parameterName} contains path normalization ambiguity.",
+                parameterName);
+        }
+
+        return fullPath;
+    }
+
+    private static bool IsInvalidWindowsFileNameCharacter(char character) =>
+        char.IsControl(character) ||
+        character is '<' or '>' or ':' or '"' or '|' or '?' or '*';
+
     private static void RequireAbsent(string? value, string parameterName)
     {
         if (value is not null)
@@ -447,10 +516,12 @@ public sealed class InstallerPlanBuilder
         bool consentGranted,
         string actionId)
     {
-        if (selected && !consentGranted)
+        if (selected != consentGranted)
         {
             throw new InvalidOperationException(
-                $"Selected action '{actionId}' requires explicit consent.");
+                selected
+                    ? $"Selected action '{actionId}' requires explicit consent."
+                    : $"Unselected action '{actionId}' cannot retain consent.");
         }
     }
 
@@ -475,22 +546,6 @@ public sealed class InstallerPlanBuilder
                     agent.Config with { },
                     agent.Instructions with { })),
             diagnosis.UnsupportedReasons.ToArray());
-
-    private readonly record struct ModelSelection(string Model, int ContextSize);
-
-    private sealed class ModelSelectionComparer : IEqualityComparer<ModelSelection>
-    {
-        public static ModelSelectionComparer Instance { get; } = new();
-
-        public bool Equals(ModelSelection x, ModelSelection y) =>
-            StringComparer.OrdinalIgnoreCase.Equals(x.Model, y.Model) &&
-            x.ContextSize == y.ContextSize;
-
-        public int GetHashCode(ModelSelection obj) =>
-            HashCode.Combine(
-                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Model),
-                obj.ContextSize);
-    }
 
     private sealed record ExternalAction(
         string ActionId,

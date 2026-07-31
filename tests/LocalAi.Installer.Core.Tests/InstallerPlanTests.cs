@@ -99,6 +99,58 @@ public sealed class InstallerPlanTests
         Assert.Equal(AgentIntegrationChoice.NoChange, plan.Agents[0].Choice);
     }
 
+    [Theory]
+    [InlineData(MutationKind.Dependency)]
+    [InlineData(MutationKind.Package)]
+    [InlineData(MutationKind.Model)]
+    [InlineData(MutationKind.Agent)]
+    public void Unselected_mutation_with_consent_is_rejected(MutationKind kind)
+    {
+        var input = ValidInput();
+        input = kind switch
+        {
+            MutationKind.Dependency => input with
+            {
+                Dependencies =
+                [
+                    new("dependency.git", "Git.Git", "2.50.1", false, true),
+                ],
+            },
+            MutationKind.Package => input with
+            {
+                Package = input.Package with
+                {
+                    Selected = false,
+                    ConsentGranted = true,
+                },
+            },
+            MutationKind.Model => input with
+            {
+                Models =
+                [
+                    new("model.qwen", "qwen3:8b", 32_768, false, true),
+                ],
+            },
+            MutationKind.Agent => input with
+            {
+                Agents =
+                [
+                    new(
+                        "agent.codex",
+                        AgentKind.Codex,
+                        AgentIntegrationChoice.NoChange,
+                        null,
+                        null,
+                        false,
+                        true),
+                ],
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+
+        Assert.Throws<InvalidOperationException>(() => Build(input));
+    }
+
     [Fact]
     public void Build_defensively_snapshots_actions_and_nested_diagnosis_collections()
     {
@@ -316,6 +368,21 @@ public sealed class InstallerPlanTests
     }
 
     [Fact]
+    public void Duplicate_model_identity_with_different_context_is_rejected()
+    {
+        var input = ValidInput() with
+        {
+            Models =
+            [
+                new("model.qwen.small", "qwen3:8b", 16_384, false, false),
+                new("model.qwen.large", "QWEN3:8B", 65_536, false, false),
+            ],
+        };
+
+        Assert.Throws<ArgumentException>(() => Build(input));
+    }
+
+    [Fact]
     public void Effects_must_reference_known_consented_external_actions()
     {
         var unknown = ValidInput() with
@@ -408,6 +475,20 @@ public sealed class InstallerPlanTests
         var plan = Build(input);
 
         Assert.Equal(2, plan.NonTransactionalEffects.Count);
+    }
+
+    [Fact]
+    public void Null_effect_element_is_rejected_without_null_reference_failure()
+    {
+        var input = ValidInput() with
+        {
+            Effects = new NonTransactionalEffect[] { null! },
+        };
+
+        var exception = Assert.Throws<ArgumentException>(() => Build(input));
+
+        Assert.IsNotType<NullReferenceException>(exception);
+        Assert.Contains("null", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -562,6 +643,43 @@ public sealed class InstallerPlanTests
         Assert.Throws<ArgumentException>(() => Build(model));
     }
 
+    [Theory]
+    [InlineData(@"C:\bad|name.zip")]
+    [InlineData(@"C:\folder\..\secret.zip")]
+    [InlineData(@"C:\folder\.\package.zip")]
+    [InlineData(@"C:\folder.\package.zip")]
+    [InlineData(@"C:\folder \package.zip")]
+    [InlineData(@"C:\folder\package.zip.")]
+    [InlineData(@"C:\folder\package.zip ")]
+    [InlineData(@"C:/folder/package.zip")]
+    [InlineData(@"C:\folder\\package.zip")]
+    public void Ambiguous_or_invalid_windows_package_paths_are_rejected(
+        string packagePath)
+    {
+        var input = ValidInput() with
+        {
+            Package = ValidInput().Package with { PackagePath = packagePath },
+        };
+
+        Assert.Throws<ArgumentException>(() => Build(input));
+    }
+
+    [Fact]
+    public void Package_path_is_canonicalized_once_into_the_plan()
+    {
+        var input = ValidInput() with
+        {
+            Package = ValidInput().Package with
+            {
+                PackagePath = @"c:\Packages\LocalAi.zip",
+            },
+        };
+
+        var plan = Build(input);
+
+        Assert.Equal(@"C:\Packages\LocalAi.zip", plan.Package.PackagePath);
+    }
+
     [Fact]
     public void Semantically_duplicate_effects_are_rejected()
     {
@@ -612,6 +730,12 @@ public sealed class InstallerPlanTests
         var plan = Build(input);
 
         Assert.Equal(2, plan.NonTransactionalEffects.Count);
+    }
+
+    [Fact]
+    public void Installer_plan_has_no_public_constructor()
+    {
+        Assert.Empty(typeof(InstallerPlan).GetConstructors());
     }
 
     public static TheoryData<PlanInput> InvalidInputs()
