@@ -6,6 +6,13 @@ public sealed class BrokerBootstrapException(string code, string message)
     public string Code { get; } = code;
 }
 
+public interface IBrokerStartAttempt : IDisposable
+{
+    int ProcessId { get; }
+
+    bool TryGetExitCode(out int exitCode);
+}
+
 internal enum BrokerObservationStatus
 {
     CompatibleHealthy,

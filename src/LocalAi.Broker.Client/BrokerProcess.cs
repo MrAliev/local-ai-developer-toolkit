@@ -21,7 +21,7 @@ public sealed class BrokerProcess : IBrokerProcess
     private readonly string _runtimeRoot;
     private readonly Func<string, BrokerProcessState?> _readState;
     private readonly Func<BrokerProcessState, bool> _isRunning;
-    private readonly Func<string, string, int> _start;
+    private readonly Func<string, string, IBrokerStartAttempt> _start;
     private readonly TimeProvider _timeProvider;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly TimeSpan _startupTimeout;
@@ -39,7 +39,7 @@ public sealed class BrokerProcess : IBrokerProcess
             runtimeRoot,
             ReadState,
             IsRunning,
-            Start,
+            StartAttempt,
             timeProvider ?? TimeProvider.System,
             Task.Delay,
             startupTimeout,
@@ -57,7 +57,7 @@ public sealed class BrokerProcess : IBrokerProcess
             runtimeRoot,
             ReadState,
             IsRunning,
-            Start,
+            StartAttempt,
             TimeProvider.System,
             Task.Delay,
             arguments: arguments);
@@ -69,6 +69,63 @@ public sealed class BrokerProcess : IBrokerProcess
         Func<string, BrokerProcessState?> readState,
         Func<BrokerProcessState, bool> isRunning,
         Func<string, string, int> start,
+        TimeProvider timeProvider,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        TimeSpan? startupTimeout = null,
+        string? arguments = null,
+        string? brokerAssemblyPath = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
+        _executablePath = executablePath;
+        _runtimeRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(runtimeRoot));
+        _readState = readState ?? throw new ArgumentNullException(nameof(readState));
+        _isRunning = isRunning ?? throw new ArgumentNullException(nameof(isRunning));
+        ArgumentNullException.ThrowIfNull(start);
+        _start = (executablePath, startArguments) =>
+            new LegacyStartAttempt(start(executablePath, startArguments));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _delay = delay ?? throw new ArgumentNullException(nameof(delay));
+        _startupTimeout = startupTimeout ?? TimeSpan.FromSeconds(15);
+        if (_startupTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(startupTimeout));
+        }
+
+        _arguments = arguments ?? BuildArguments(_runtimeRoot, null);
+        _startupSemaphoreName = CreateSemaphoreName(_runtimeRoot);
+        _ = brokerAssemblyPath;
+    }
+
+    internal static BrokerProcess CreateForTesting(
+        string executablePath,
+        string runtimeRoot,
+        Func<string, BrokerProcessState?> readState,
+        Func<BrokerProcessState, bool> isRunning,
+        Func<string, string, IBrokerStartAttempt> start,
+        TimeProvider timeProvider,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        TimeSpan? startupTimeout = null,
+        string? arguments = null,
+        string? brokerAssemblyPath = null) =>
+        new(
+            executablePath,
+            runtimeRoot,
+            readState,
+            isRunning,
+            start,
+            timeProvider,
+            delay,
+            startupTimeout,
+            arguments,
+            brokerAssemblyPath);
+
+    private BrokerProcess(
+        string executablePath,
+        string runtimeRoot,
+        Func<string, BrokerProcessState?> readState,
+        Func<BrokerProcessState, bool> isRunning,
+        Func<string, string, IBrokerStartAttempt> start,
         TimeProvider timeProvider,
         Func<TimeSpan, CancellationToken, Task> delay,
         TimeSpan? startupTimeout = null,
@@ -113,7 +170,7 @@ public sealed class BrokerProcess : IBrokerProcess
                 "Broker startup requires an absent or stale host state.");
         }
 
-        _start(_executablePath, _arguments);
+        using var startAttempt = _start(_executablePath, _arguments);
         var deadline = _timeProvider.GetUtcNow() + _startupTimeout;
         while (true)
         {
@@ -125,6 +182,30 @@ public sealed class BrokerProcess : IBrokerProcess
             }
 
             ThrowIfIncompatible(observation);
+
+            if (startAttempt.TryGetExitCode(out var exitCode))
+            {
+                if (exitCode != 0)
+                {
+                    throw new BrokerBootstrapException(
+                        "broker_start_failed",
+                        "LocalAi broker process " + startAttempt.ProcessId +
+                        " exited with code " + exitCode +
+                        "; last observation: " + observation.Detail);
+                }
+
+                observation = new BrokerObservation(
+                    BrokerObservationStatus.StartingOrLockOwned,
+                    "broker process " + startAttempt.ProcessId +
+                    " exited successfully; last observation: " + observation.Detail);
+            }
+            else
+            {
+                observation = new BrokerObservation(
+                    BrokerObservationStatus.StartingOrLockOwned,
+                    "broker process " + startAttempt.ProcessId +
+                    " is starting; last observation: " + observation.Detail);
+            }
 
             if (_timeProvider.GetUtcNow() >= deadline)
             {
@@ -303,11 +384,11 @@ public sealed class BrokerProcess : IBrokerProcess
         }
     }
 
-    private static int Start(string executablePath, string arguments)
+    private static IBrokerStartAttempt StartAttempt(string executablePath, string arguments)
     {
-        using var process = Process.Start(CreateStartInfo(executablePath, arguments))
+        var process = Process.Start(CreateStartInfo(executablePath, arguments))
             ?? throw new InvalidOperationException("Could not start the LocalAi broker.");
-        return process.Id;
+        return new ProcessStartAttempt(process);
     }
 
     internal static ProcessStartInfo CreateStartInfo(
@@ -373,4 +454,60 @@ public sealed class BrokerProcess : IBrokerProcess
             semaphore.Dispose();
         }
     }
+
+    private sealed class LegacyStartAttempt(int processId) : IBrokerStartAttempt
+    {
+        public int ProcessId { get; } = processId;
+
+        public bool TryGetExitCode(out int exitCode)
+        {
+            exitCode = default;
+            return false;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+}
+
+internal sealed class ProcessStartAttempt : IBrokerStartAttempt
+{
+    private readonly Process _process;
+
+    public ProcessStartAttempt(Process process)
+    {
+        _process = process ?? throw new ArgumentNullException(nameof(process));
+        ProcessId = process.Id;
+    }
+
+    public int ProcessId { get; }
+
+    public bool TryGetExitCode(out int exitCode)
+    {
+        try
+        {
+            if (!_process.HasExited)
+            {
+                exitCode = default;
+                return false;
+            }
+
+            exitCode = _process.ExitCode;
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            exitCode = default;
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            exitCode = default;
+            return false;
+        }
+    }
+
+    public void Dispose() => _process.Dispose();
 }

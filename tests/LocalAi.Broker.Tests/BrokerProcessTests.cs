@@ -563,6 +563,91 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
+    public async Task Child_exiting_zero_reuses_compatible_lock_owner()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reads = 0;
+        var starts = 0;
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => ++reads == 1
+                ? null
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
+            state => state.ProcessId == 99,
+            (_, _) =>
+            {
+                starts++;
+                return FakeStartAttempt.Exited(42, 0);
+            },
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
+    public async Task Child_exiting_zero_rejects_incompatible_lock_owner()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reads = 0;
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => ++reads == 1
+                ? null
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    new BrokerCompatibility(2, "other")),
+            state => state.ProcessId == 99,
+            static (_, _) => FakeStartAttempt.Exited(42, 0),
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
+            () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("broker_incompatible", exception.Code);
+    }
+
+    [Fact]
+    public async Task Child_nonzero_exit_fails_without_waiting_for_timeout()
+    {
+        var delays = 0;
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => null,
+            _ => false,
+            static (_, _) => FakeStartAttempt.Exited(42, 17),
+            TimeProvider.System,
+            (_, _) =>
+            {
+                delays++;
+                return Task.CompletedTask;
+            });
+
+        var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
+            () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("broker_start_failed", exception.Code);
+        Assert.Contains("17", exception.Message);
+        Assert.Equal(0, delays);
+    }
+
+    [Fact]
     public async Task Concurrent_clients_start_only_one_process()
     {
         var runtimeRoot = Path.Combine(
@@ -634,5 +719,26 @@ public sealed class BrokerProcessTests
             expectedActualDetail,
             exception.Message);
         Assert.Equal(0, starts);
+    }
+
+    private sealed class FakeStartAttempt(int processId, int? exitCode) : IBrokerStartAttempt
+    {
+        private readonly int? _exitCode = exitCode;
+
+        public int ProcessId { get; } = processId;
+
+        public static FakeStartAttempt Running(int processId) => new(processId, null);
+
+        public static FakeStartAttempt Exited(int processId, int exitCode) => new(processId, exitCode);
+
+        public bool TryGetExitCode(out int exitCode)
+        {
+            exitCode = _exitCode.GetValueOrDefault();
+            return _exitCode.HasValue;
+        }
+
+        public void Dispose()
+        {
+        }
     }
 }
