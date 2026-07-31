@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime;
+using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using LocalAi.Broker.Client;
@@ -54,6 +55,17 @@ public sealed record IndexStatus(
             StringComparison.OrdinalIgnoreCase);
 }
 
+public sealed record SearchChunk(
+    string ChunkId,
+    string RelPath,
+    int StartLine,
+    int EndLine,
+    ChunkKind Kind,
+    string Symbol,
+    string Signature,
+    string Namespace,
+    string Body);
+
 /// <summary>
 /// Resolves the repository, loads its base index plus this worktree's overlay, embeds the query
 /// with the index's own model, and searches.
@@ -62,13 +74,17 @@ public sealed class SearchService
 {
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<string, IEmbeddingClient> _embeddingClientFactory;
+    private readonly Func<string, CancellationToken, Task<string>> _sourceTextReader;
 
-    public SearchService(Func<string, IEmbeddingClient>? embeddingClientFactory = null)
+    public SearchService(
+        Func<string, IEmbeddingClient>? embeddingClientFactory = null,
+        Func<string, CancellationToken, Task<string>>? sourceTextReader = null)
     {
         _embeddingClientFactory = embeddingClientFactory ??
             (model => new BrokerEmbeddingClient(
                 model,
                 BrokerClientFactory.CreateDefault()));
+        _sourceTextReader = sourceTextReader ?? File.ReadAllTextAsync;
     }
 
     public IEmbeddingClient CreateEmbeddingClient(string model) =>
@@ -103,25 +119,172 @@ public sealed class SearchService
         var workingRoot = RepoLocator.ResolveWorkingRoot(root);
         var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root));
         var baseIndex = Load(indexPath);
+        RequireSnapshotIdentity(baseIndex);
 
         var searchable = Compose(baseIndex, workingRoot);
+        var resolvedOptions = SearchQualityProfile.Resolve(baseIndex.Model, options);
 
         // The model is read out of the index header rather than configured at the call site.
         // Embedding a query with a different model than the index was built with silently returns
         // garbage rankings instead of an error, so there is no option to get this wrong.
         var embedder = CreateEmbeddingClient(baseIndex.Model);
         var prompt = UseQueryInstruction ? QueryPrompt.ForQuery(baseIndex.Model, query) : query;
-        var vectors = await embedder.EmbedAsync(
-            [prompt],
-            LocalJobPriority.Interactive,
-            QueryDeduplicationKey(baseIndex, prompt),
-            ct);
+        float[][] vectors;
+        try
+        {
+            vectors = await embedder.EmbedAsync(
+                [prompt],
+                LocalJobPriority.Interactive,
+                QueryDeduplicationKey(baseIndex, prompt),
+                ct);
+        }
+        catch (EmbeddingUnavailableException)
+            when (resolvedOptions.AllowLexicalFallbackWhenEmbeddingsUnavailable)
+        {
+            return SearchEngine.SearchLexically(
+                searchable,
+                query,
+                resolvedOptions,
+                workingRoot);
+        }
+
         var vector = vectors[0];
 
         // The raw query - not the instruction-wrapped prompt - drives lexical scoring, otherwise
         // words from the instruction itself would match chunk names.
-        return SearchEngine.Search(searchable, vector, query, options, workingRoot);
+        return SearchEngine.Search(
+            searchable,
+            vector,
+            query,
+            resolvedOptions,
+            workingRoot);
     }
+
+    public async Task<SearchChunk> GetChunkAsync(
+        string chunkId,
+        string? root,
+        CancellationToken ct = default)
+    {
+        var requested = SearchChunkId.Parse(chunkId);
+        var workingRoot = RepoLocator.ResolveWorkingRoot(root);
+        var identity = RuntimeIndexLayout.Inspect(workingRoot);
+
+        if (!string.Equals(
+                requested.RepositoryId,
+                identity.RepositoryId,
+                StringComparison.Ordinal))
+        {
+            SearchChunkResolver.ValidateSnapshot(
+                requested,
+                requested with { RepositoryId = identity.RepositoryId });
+        }
+
+        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root));
+        var baseIndex = Load(indexPath);
+        var actualSnapshot = new SearchChunkId(
+            identity.RepositoryId,
+            baseIndex.GenerationId,
+            identity.HeadTree,
+            identity.DirtyHash,
+            requested.Ordinal);
+        SearchChunkResolver.ValidateSnapshot(requested, actualSnapshot);
+
+        var searchable = Compose(baseIndex, workingRoot);
+        var composedSnapshot = new SearchChunkId(
+            searchable.RepositoryId,
+            searchable.GenerationId,
+            searchable.GitTree,
+            searchable.DirtyHash,
+            requested.Ordinal);
+        SearchChunkResolver.ValidateSnapshot(requested, composedSnapshot);
+        SearchChunkResolver.ValidateOrdinal(requested, searchable.ChunkCount);
+
+        var meta = searchable.ChunkAt(requested.Ordinal);
+        var relPath = searchable.PathOf(requested.Ordinal);
+        if (!SafeSourcePath.TryResolveFile(
+                workingRoot,
+                relPath,
+                out var fullPath,
+                out var pathFailure))
+        {
+            throw SourcePathError(pathFailure);
+        }
+
+        ct.ThrowIfCancellationRequested();
+        var sourceText = await _sourceTextReader(fullPath, ct);
+        if (!CanonicalIndexText.Hash(sourceText).AsSpan().SequenceEqual(
+                searchable.FileHashAt(requested.Ordinal)))
+        {
+            throw new SearchChunkResolutionException(
+                "stale_source_content",
+                "stale_source_content: The source file no longer matches the indexed content.");
+        }
+
+        var currentIdentity = RuntimeIndexLayout.Inspect(workingRoot);
+        SearchChunkResolver.ValidateSnapshot(
+            requested,
+            new SearchChunkId(
+                currentIdentity.RepositoryId,
+                baseIndex.GenerationId,
+                currentIdentity.HeadTree,
+                currentIdentity.DirtyHash,
+                requested.Ordinal));
+
+        var lines = SourceLines.Split(sourceText);
+        if (meta.StartLine < 1 ||
+            meta.EndLine < meta.StartLine ||
+            meta.EndLine > lines.Length)
+        {
+            throw new SearchChunkResolutionException(
+                "stale_source_range",
+                "stale_source_range: The indexed line range no longer exists in the source file.");
+        }
+
+        var body = string.Join(
+            "\n",
+            lines[(meta.StartLine - 1)..meta.EndLine]);
+        return new SearchChunk(
+            chunkId,
+            relPath,
+            meta.StartLine,
+            meta.EndLine,
+            meta.Kind,
+            meta.Symbol,
+            meta.Signature,
+            meta.Namespace,
+            body);
+    }
+
+    private static void RequireSnapshotIdentity(CodeIndex index)
+    {
+        if (string.IsNullOrWhiteSpace(index.RepositoryId) ||
+            string.IsNullOrWhiteSpace(index.GenerationId) ||
+            string.IsNullOrWhiteSpace(index.GitTree))
+        {
+            throw new SearchNotReadyException(
+                "The CodeSearch index predates snapshot-bound chunk retrieval. " +
+                "Rebuild or migrate the index before searching.");
+        }
+    }
+
+    private static SearchChunkResolutionException SourcePathError(
+        SourcePathFailure failure) =>
+        failure switch
+        {
+            SourcePathFailure.OutsideRoot => new(
+                "unsafe_chunk_path",
+                "unsafe_chunk_path: The indexed source path escapes the repository root."),
+            SourcePathFailure.ReparsePoint => new(
+                "unsafe_chunk_reparse_point",
+                "unsafe_chunk_reparse_point: The indexed source path contains a " +
+                "symbolic link or reparse point."),
+            SourcePathFailure.Missing => new(
+                "chunk_source_missing",
+                "chunk_source_missing: The indexed source file no longer exists."),
+            _ => new(
+                "chunk_source_unavailable",
+                "chunk_source_unavailable: The indexed source file is unavailable.")
+        };
 
     private static string QueryDeduplicationKey(CodeIndex index, string prompt)
     {

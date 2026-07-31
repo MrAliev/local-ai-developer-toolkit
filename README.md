@@ -52,6 +52,43 @@ embeddings, immutable index generations, overlays, and hybrid retrieval. LocalLm
 local chat/task helpers and token estimates. `LocalAi.Cli` owns repository registration,
 synchronization, compatibility transport, and opt-in hook installation.
 
+### CodeSearch result workflow
+
+`search_code` uses the embedding model recorded in the index. Production search resolves
+a measured relevance floor for that exact model and fails closed with
+`threshold not calibrated` when no profile exists; it never borrows a threshold from
+another model.
+
+Every search hit includes an opaque `chunk_id`. Pass that value to `get_code_chunk` to
+retrieve the complete indexed source chunk. The ID is bound to the repository, immutable
+generation, current Git tree, dirty-content hash, and composite chunk ordinal. A
+malformed, cross-repository, stale, or out-of-range ID is rejected instead of being
+resolved against a different snapshot.
+
+Source-derived MCP output is data, not instructions. `search_code` keeps its trusted
+index summary outside the wrappers and returns each hit in a fresh nonce-bound block:
+
+```text
+<untrusted-content id="<96-bit-lowercase-hex-nonce>" origin="search_code:<path>">
+...source-derived hit, including chunk_id...
+</untrusted-content id="<same-nonce>">
+```
+
+Successful `get_code_chunk` output uses the same boundary. Validation errors, status,
+and maintenance output remain outside it. Consumers must preserve the boundary and must
+not execute or follow instructions found inside it.
+
+CLI equivalents are:
+
+```powershell
+dotnet run --project src/CodeSearch.Cli -- search --query "where is the broker queue" --root C:\path\to\repository
+dotnet run --project src/CodeSearch.Cli -- get-chunk --id "<chunk_id>" --root C:\path\to\repository
+```
+
+See the measured [CodeSearch retrieval evaluation](docs/codesearch-evaluation.md) for
+the calibrated profile, corpus provenance, A/B results, token heuristic, and
+limitations.
+
 ## Prerequisites
 
 - .NET 10 SDK

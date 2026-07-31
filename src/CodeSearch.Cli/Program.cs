@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
@@ -36,6 +38,8 @@ try
         "index" => await IndexAsync(options),
         "overlay" => await OverlayAsync(options),
         "search" => await SearchAsync(options),
+        "get-chunk" => await GetChunkAsync(options),
+        "evaluate" => await EvaluateAsync(options),
         "status" => Status(options),
         "scan" => Scan(options),
         "-h" or "--help" or "help" => PrintUsage(),
@@ -137,9 +141,105 @@ async Task<int> SearchAsync(Dictionary<string, string> opts)
         Console.WriteLine($"{hit.RelPath}:{hit.StartLine}-{hit.EndLine}  [{hit.Kind}]  cos={hit.VectorScore:F3}");
         Console.WriteLine($"  {hit.Symbol}");
         Console.WriteLine($"  {hit.Signature}");
+        Console.WriteLine($"  chunk_id: {hit.ChunkId}");
         Console.WriteLine();
     }
 
+    return 0;
+}
+
+async Task<int> GetChunkAsync(Dictionary<string, string> opts)
+{
+    if (!opts.TryGetValue("id", out var chunkId) ||
+        string.IsNullOrWhiteSpace(chunkId))
+    {
+        return Fail("get-chunk needs --id <chunk_id>");
+    }
+
+    var chunk = await new SearchService().GetChunkAsync(
+        chunkId,
+        opts.GetValueOrDefault("root"));
+    Console.WriteLine(
+        $"{chunk.RelPath}:{chunk.StartLine}-{chunk.EndLine}  [{chunk.Kind}]");
+    Console.WriteLine(chunk.Symbol);
+    if (chunk.Signature.Length > 0 &&
+        chunk.Signature != chunk.Symbol)
+    {
+        Console.WriteLine(chunk.Signature);
+    }
+
+    Console.WriteLine($"chunk_id: {chunk.ChunkId}");
+    Console.WriteLine();
+    Console.WriteLine(chunk.Body);
+    return 0;
+}
+
+async Task<int> EvaluateAsync(Dictionary<string, string> opts)
+{
+    if (!opts.TryGetValue("cases", out var casesPath) ||
+        string.IsNullOrWhiteSpace(casesPath))
+    {
+        return Fail("evaluate needs --cases <json>");
+    }
+
+    if (opts.ContainsKey("no-floor") && opts.ContainsKey("profile"))
+    {
+        return Fail(
+            "evaluate accepts either --no-floor or --profile, not both.");
+    }
+
+    var noFloor = opts.ContainsKey("no-floor");
+    var root = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root"));
+    var corpus = SearchEvaluationCorpus.Load(Path.GetFullPath(casesPath));
+    SearchEvaluationCorpus.ValidateAgainstSource(corpus, root);
+    var service = new SearchService
+    {
+        UseQueryInstruction = !opts.ContainsKey("no-instruct")
+    };
+    var searchOptions = SearchEvaluation.CreateSearchOptions(noFloor);
+    var observations = new List<SearchEvaluationObservation>(corpus.Cases.Count);
+
+    foreach (var item in corpus.Cases)
+    {
+        var timer = Stopwatch.StartNew();
+        var hits = await service.SearchAsync(item.Query, root, searchOptions);
+        timer.Stop();
+        observations.Add(
+            new SearchEvaluationObservation(
+                item.Id,
+                hits.Select(SearchEvaluation.FromSearchHit).ToArray(),
+                timer.Elapsed,
+                null));
+    }
+
+    var status = service.Status(root);
+    var output = new
+    {
+        schemaVersion = 1,
+        mode = noFloor ? "no-floor" : "profile",
+        corpusSchemaVersion = corpus.SchemaVersion,
+        caseCount = corpus.Cases.Count,
+        repository = status.RepositoryRoot,
+        generationId = CodeIndex.Load(status.IndexPath, withVectors: false).GenerationId,
+        model = status.Model,
+        brokerQueueWait = "unavailable: embedding client does not expose receipt telemetry",
+        tokenEstimator = new
+        {
+            point = "ceil(responseCharacters / 4)",
+            lowerBound = "ceil(responseCharacters / 6)",
+            upperBound = "ceil(responseCharacters / 3)"
+        },
+        metrics = SearchEvaluation.Measure(corpus, observations),
+        observations
+    };
+    Console.WriteLine(
+        JsonSerializer.Serialize(
+            output,
+            new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = true
+            }));
     return 0;
 }
 
@@ -239,6 +339,8 @@ static int PrintUsage()
           codesearch overlay [--root <dir>] [--index <base>] [--overlay <file>]
           codesearch search   --query "<text>" [--root <dir>] [--top N] [--kind Type|Method|Text|File]
                               [--path <substring>] [--per-file N] [--no-instruct]
+          codesearch get-chunk --id <chunk_id> [--root <dir>]
+          codesearch evaluate --cases <json> [--root <dir>] [--profile|--no-floor] [--no-instruct]
           codesearch status  [--root <dir>]
           codesearch scan    [--root <dir>]
 

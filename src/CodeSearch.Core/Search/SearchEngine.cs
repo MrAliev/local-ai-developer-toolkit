@@ -18,6 +18,22 @@ public sealed record SearchOptions
     public int MaxPerFile { get; init; } = 3;
 
     public int SnippetLines { get; init; } = 12;
+
+    /// <summary>
+    /// Vector candidates below this cosine score never receive an RRF rank. Null is reserved for
+    /// the explicit historical no-floor evaluation mode.
+    /// </summary>
+    public float? MinVectorScore { get; init; }
+
+    /// <summary>Only the deterministic evaluator may bypass a calibrated model profile.</summary>
+    public bool AllowUncalibratedModelForEvaluation { get; init; }
+
+    /// <summary>
+    /// Allows interactive search to retain exact literal matches when query embeddings are
+    /// explicitly unavailable. Measurements disable this so degraded retrieval cannot be
+    /// recorded as a valid evaluation run.
+    /// </summary>
+    public bool AllowLexicalFallbackWhenEmbeddingsUnavailable { get; init; } = true;
 }
 
 public sealed record SearchHit(
@@ -31,7 +47,8 @@ public sealed record SearchHit(
     float VectorScore,
     double LexicalScore,
     double Score,
-    string Snippet);
+    string Snippet,
+    string ChunkId = "");
 
 /// <summary>
 /// Hybrid retrieval: dense vectors for meaning, literal symbol matching for names, fused with
@@ -65,6 +82,7 @@ public static class SearchEngine
     public static IReadOnlyList<SearchHit> Search(
         ISearchableIndex index, float[] queryVector, string queryText, SearchOptions options, string root)
     {
+        Validate(options);
         if (queryVector.Length != index.Dim)
         {
             throw new InvalidOperationException(
@@ -80,9 +98,65 @@ public static class SearchEngine
 
         var vectorScores = ScoreVectors(index, queryVector, candidates);
         var lexicalScores = ScoreLexically(index, queryText, candidates);
-        var fused = Fuse(candidates, vectorScores, lexicalScores);
+        var eligibleVectorScores = options.MinVectorScore is { } floor
+            ? vectorScores
+                .Where(pair => pair.Value >= floor)
+                .ToDictionary(pair => pair.Key, pair => pair.Value)
+            : vectorScores;
+        var fused = Fuse(eligibleVectorScores, lexicalScores);
 
         return Materialize(index, root, fused, vectorScores, lexicalScores, options);
+    }
+
+    /// <summary>
+    /// Searches only the literal signal when the embedding service is explicitly unavailable.
+    /// A lexical-only result has no semantic score and only positive literal matches are eligible.
+    /// </summary>
+    public static IReadOnlyList<SearchHit> SearchLexically(
+        ISearchableIndex index,
+        string queryText,
+        SearchOptions options,
+        string root)
+    {
+        Validate(options);
+        var candidates = Filter(index, options);
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        var lexicalScores = ScoreLexically(index, queryText, candidates);
+        if (lexicalScores.Count == 0)
+        {
+            return [];
+        }
+
+        var vectorScores = new Dictionary<int, float>();
+        var fused = Fuse(vectorScores, lexicalScores);
+        return Materialize(
+            index,
+            root,
+            fused,
+            vectorScores,
+            lexicalScores,
+            options);
+    }
+
+    private static void Validate(SearchOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.MinVectorScore is not { } floor)
+        {
+            return;
+        }
+
+        if (!float.IsFinite(floor) || floor is < -1 or > 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                floor,
+                "MinVectorScore must be finite and within [-1, 1].");
+        }
     }
 
     private static List<int> Filter(ISearchableIndex index, SearchOptions options)
@@ -246,12 +320,14 @@ public static class SearchEngine
     }
 
     private static List<int> Fuse(
-        List<int> candidates, Dictionary<int, float> vectorScores, Dictionary<int, double> lexicalScores)
+        Dictionary<int, float> vectorScores,
+        Dictionary<int, double> lexicalScores)
     {
         var fused = new Dictionary<int, double>();
 
-        var byVector = candidates
-            .OrderByDescending(i => vectorScores[i])
+        var byVector = vectorScores
+            .OrderByDescending(pair => pair.Value)
+            .Select(pair => pair.Key)
             .Take(CandidatesPerSignal);
 
         var rank = 0;
@@ -320,7 +396,13 @@ public static class SearchEngine
                 vectorScores.GetValueOrDefault(chunkIndex),
                 lexicalScores.GetValueOrDefault(chunkIndex),
                 rrf[chunkIndex],
-                Snippet(root, relPath, chunk, options.SnippetLines, fileCache)));
+                Snippet(root, relPath, chunk, options.SnippetLines, fileCache),
+                new SearchChunkId(
+                    index.RepositoryId,
+                    index.GenerationId,
+                    index.GitTree,
+                    index.DirtyHash,
+                    chunkIndex).Encode()));
         }
 
         return hits;
@@ -336,13 +418,25 @@ public static class SearchEngine
     {
         if (!cache.TryGetValue(relPath, out var lines))
         {
-            try
-            {
-                lines = SourceLines.Split(File.ReadAllText(Path.Combine(root, relPath)));
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            if (!SafeSourcePath.TryResolveFile(
+                    root,
+                    relPath,
+                    out var fullPath,
+                    out _))
             {
                 lines = [];
+            }
+            else
+            {
+                try
+                {
+                    lines = SourceLines.Split(File.ReadAllText(fullPath));
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException)
+                {
+                    lines = [];
+                }
             }
 
             cache[relPath] = lines;

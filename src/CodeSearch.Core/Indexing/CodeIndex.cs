@@ -105,6 +105,9 @@ public sealed class CodeIndex : ISearchableIndex
 
     string ISearchableIndex.PathOf(int index) => Files[Chunks[index].FileIndex].RelPath;
 
+    ReadOnlySpan<byte> ISearchableIndex.FileHashAt(int index) =>
+        Files[Chunks[index].FileIndex].Hash;
+
     public static CodeIndex Load(string path, bool withVectors = true)
     {
         using var stream = File.OpenRead(path);

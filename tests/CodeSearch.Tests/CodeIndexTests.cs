@@ -61,6 +61,9 @@ public class CodeIndexTests
             // silently orphan those files from every future incremental run.
             Assert.Equal(@"Src\Б.cs", loaded.Files[1].RelPath);
             Assert.Equal(original.Files[1].Hash, loaded.Files[1].Hash);
+            Assert.Equal(
+                original.Files[1].Hash,
+                ((ISearchableIndex)loaded).FileHashAt(2).ToArray());
 
             Assert.Equal(original.Chunks.Count, loaded.Chunks.Count);
             Assert.Equal("A.Go", loaded.Chunks[1].Symbol);

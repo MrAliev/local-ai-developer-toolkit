@@ -92,11 +92,73 @@ public class FileScannerTests : IDisposable
         Assert.DoesNotContain(files, f => f.Contains("worktrees", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Skips_source_files_beneath_a_reparse_point()
+    {
+        var outsideRoot = Path.Combine(
+            Path.GetTempPath(),
+            "codesearch-scan-outside-" + Guid.NewGuid().ToString("N"));
+        var linkPath = Path.Combine(_root, "Linked");
+        Directory.CreateDirectory(outsideRoot);
+        File.WriteAllText(
+            Path.Combine(outsideRoot, "External.cs"),
+            "class External {}\n");
+        try
+        {
+            CreateDirectoryLink(linkPath, outsideRoot);
+
+            var files = FileScanner.Enumerate(_root);
+
+            Assert.DoesNotContain(
+                files,
+                path => path.Contains("External.cs", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(linkPath))
+            {
+                Directory.Delete(linkPath);
+            }
+
+            if (Directory.Exists(outsideRoot))
+            {
+                Directory.Delete(outsideRoot, recursive: true);
+            }
+        }
+    }
+
     private void Write(string relPath)
     {
         var full = Path.Combine(_root, relPath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         File.WriteAllText(full, "// content\n");
+    }
+
+    private static void CreateDirectoryLink(string linkPath, string targetPath)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return;
+        }
+
+        var start = new ProcessStartInfo(
+            Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("/d");
+        start.ArgumentList.Add("/c");
+        start.ArgumentList.Add("mklink");
+        start.ArgumentList.Add("/J");
+        start.ArgumentList.Add(linkPath);
+        start.ArgumentList.Add(targetPath);
+        using var process = Process.Start(start)!;
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
     }
 
     public void Dispose()

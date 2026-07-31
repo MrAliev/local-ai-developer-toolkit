@@ -29,9 +29,20 @@ public sealed class BrokerEmbeddingClient(
             priority,
             Model,
             inputs);
-        var result = await broker.ExecuteAsync<EmbedJobOutput>(
-            request,
-            cancellationToken);
+        LocalJobResult<EmbedJobOutput> result;
+        try
+        {
+            result = await broker.ExecuteAsync<EmbedJobOutput>(
+                request,
+                cancellationToken);
+        }
+        catch (TimeoutException exception)
+        {
+            throw new EmbeddingUnavailableException(
+                "The LocalAi broker did not become available for embedding.",
+                exception);
+        }
+
         if (result.Value.Embeddings.Count != inputs.Count)
         {
             throw new InvalidOperationException(
@@ -49,6 +60,10 @@ public sealed class BrokerEmbeddingClient(
             .ToArray();
     }
 }
+
+public sealed class EmbeddingUnavailableException(
+    string message,
+    Exception innerException) : Exception(message, innerException);
 
 public static class EmbeddingVector
 {
