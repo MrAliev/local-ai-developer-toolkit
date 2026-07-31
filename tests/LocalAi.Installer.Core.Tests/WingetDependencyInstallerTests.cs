@@ -1,3 +1,4 @@
+using System.Reflection;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Diagnosis;
@@ -8,6 +9,10 @@ namespace LocalAi.Installer.Core.Tests;
 public sealed class WingetDependencyInstallerTests
 {
     private static readonly TimeSpan ExpectedTimeout = TimeSpan.FromMinutes(15);
+    private const string SnapshotWingetPath =
+        @"C:\Users\test\AppData\Local\Microsoft\WindowsApps\winget.exe";
+    private const string CanonicalWingetPath =
+        @"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.29.279.0_x64__8wekyb3d8bbwe\winget.exe";
 
     [Fact]
     public void Catalog_is_an_immutable_exact_allowlist_with_official_https_fallbacks()
@@ -43,6 +48,25 @@ public sealed class WingetDependencyInstallerTests
                 .Add(DependencyCatalog.Git));
     }
 
+    [Fact]
+    public void Failed_catalog_lookup_has_an_honest_nullable_out_contract()
+    {
+        var method = typeof(DependencyCatalog).GetMethod(
+            nameof(DependencyCatalog.TryGetByPackageId))!;
+        var resultParameter = method.GetParameters()[1];
+
+        Assert.Equal(
+            NullabilityState.Nullable,
+            new NullabilityInfoContext()
+                .Create(resultParameter)
+                .WriteState);
+        Assert.False(
+            DependencyCatalog.TryGetByPackageId(
+                "Other.Package",
+                out var definition));
+        Assert.Null(definition);
+    }
+
     [Theory]
     [InlineData(
         "dependency.git",
@@ -66,7 +90,8 @@ public sealed class WingetDependencyInstallerTests
         var runner = new RecordingProcessRunner(SucceededProcess());
         var detector = new RecordingDependencyRedetector(
             Detected(dependencyName, detectedPath, version));
-        var installer = new WingetDependencyInstaller(runner, detector);
+        var trust = TrustedWinget();
+        var installer = new WingetDependencyInstaller(runner, detector, trust);
 
         var result = await installer.InstallAsync(
             new DependencyAction(
@@ -75,13 +100,13 @@ public sealed class WingetDependencyInstallerTests
                 version,
                 Selected: true,
                 ConsentGranted: true),
-            Detected("WinGet", @"C:\Windows\System32\winget.exe", "1.10"),
+            Detected("WinGet", SnapshotWingetPath, "1.10"),
             Missing(dependencyName),
             TestContext.Current.CancellationToken);
 
         Assert.Equal(DependencyInstallOutcome.VerifiedSuccess, result.Outcome);
         var call = Assert.Single(runner.Calls);
-        Assert.Equal(@"C:\Windows\System32\winget.exe", call.Executable);
+        Assert.Equal(CanonicalWingetPath, call.Executable);
         Assert.Equal(ExpectedTimeout, call.Timeout);
         Assert.Equal(
             [
@@ -109,6 +134,65 @@ public sealed class WingetDependencyInstallerTests
             "does not automatically uninstall or roll back",
             result.NonTransactionalEffect.Description,
             StringComparison.Ordinal);
+        Assert.Equal(
+            [SnapshotWingetPath],
+            trust.ResolvePaths);
+        Assert.Equal(
+            [CanonicalWingetPath],
+            trust.RevalidatedPaths);
+    }
+
+    [Fact]
+    public void Production_trust_resolver_rejects_a_PATH_only_winget_name()
+    {
+        var trust = new WindowsWingetExecutableTrust();
+
+        var result = trust.Resolve("winget.exe");
+
+        Assert.Equal(ExecutableTrustStatus.InvalidPath, result.Status);
+        Assert.Null(result.Executable);
+    }
+
+    [Fact]
+    public async Task Untrusted_winget_signature_is_rejected_before_execution()
+    {
+        var trust = new RecordingWingetExecutableTrust(
+            new ExecutableTrustResult(
+                ExecutableTrustStatus.UntrustedPublisher,
+                null));
+        var context = NewContext(trust: trust);
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(
+            DependencyInstallOutcome.WingetExecutableUntrusted,
+            result.Outcome);
+        AssertNoExternalEffect(context, result);
+        Assert.Single(trust.ResolvePaths);
+        Assert.Empty(trust.RevalidatedPaths);
+    }
+
+    [Fact]
+    public async Task Changed_winget_target_is_rejected_immediately_before_launch()
+    {
+        var trusted = TrustedExecutable();
+        var trust = new RecordingWingetExecutableTrust(
+            new ExecutableTrustResult(
+                ExecutableTrustStatus.Trusted,
+                trusted),
+            new ExecutableTrustResult(
+                ExecutableTrustStatus.Changed,
+                null));
+        var context = NewContext(trust: trust);
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(
+            DependencyInstallOutcome.WingetExecutableChanged,
+            result.Outcome);
+        AssertNoExternalEffect(context, result);
+        Assert.Single(trust.ResolvePaths);
+        Assert.Single(trust.RevalidatedPaths);
     }
 
     [Fact]
@@ -168,7 +252,11 @@ public sealed class WingetDependencyInstallerTests
     [Fact]
     public async Task Rejects_invalid_inputs_and_non_winget_executable_before_execution()
     {
-        var context = NewContext();
+        var context = NewContext(
+            trust: new RecordingWingetExecutableTrust(
+                new ExecutableTrustResult(
+                    ExecutableTrustStatus.InvalidPath,
+                    null)));
 
         var nullAction = await context.Installer.InstallAsync(
             null!,
@@ -182,8 +270,10 @@ public sealed class WingetDependencyInstallerTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal(DependencyInstallOutcome.InvalidInput, nullAction.Outcome);
-        Assert.Equal(DependencyInstallOutcome.InvalidInput, mismatchedSnapshot.Outcome);
-        Assert.Empty(context.Runner.Calls);
+        Assert.Equal(
+            DependencyInstallOutcome.WingetExecutableUntrusted,
+            mismatchedSnapshot.Outcome);
+        Assert.Empty(context.ProcessCalls);
         Assert.Empty(context.Detector.PackageIds);
     }
 
@@ -231,38 +321,44 @@ public sealed class WingetDependencyInstallerTests
     }
 
     [Fact]
-    public async Task Runner_reported_caller_cancellation_is_distinct_and_does_not_redetect()
+    public async Task Runner_reported_cancellation_marks_external_state_indeterminate()
     {
         var context = NewContext(
             new ProcessResult(null, "", "", TimedOut: false, Cancelled: true));
 
         var result = await InstallGitAsync(context);
 
-        Assert.Equal(DependencyInstallOutcome.CallerCancelled, result.Outcome);
-        Assert.Single(context.Runner.Calls);
+        Assert.Equal(
+            DependencyInstallOutcome.ExternalStateIndeterminate,
+            result.Outcome);
+        Assert.Equal(Missing("Git"), result.Before);
+        Assert.Single(context.ProcessCalls);
         Assert.Empty(context.Detector.PackageIds);
         Assert.Null(result.NonTransactionalEffect);
     }
 
     [Fact]
-    public async Task Cancellation_observed_as_the_process_completes_prevents_redetection()
+    public async Task Successful_exit_is_redetected_even_when_caller_cancels_as_process_completes()
     {
         using var cancellation = new CancellationTokenSource();
         var runner = new CancellingProcessRunner(cancellation);
         var detector = new RecordingDependencyRedetector(
             Detected("Git", "git.exe", "2.50.1"));
-        var installer = new WingetDependencyInstaller(runner, detector);
+        var installer = new WingetDependencyInstaller(
+            runner,
+            detector,
+            TrustedWinget());
 
         var result = await installer.InstallAsync(
             GitAction(),
-            Detected("WinGet", "winget.exe", "1.10"),
+            Detected("WinGet", SnapshotWingetPath, "1.10"),
             Missing("Git"),
             cancellation.Token);
 
-        Assert.Equal(DependencyInstallOutcome.CallerCancelled, result.Outcome);
+        Assert.Equal(DependencyInstallOutcome.VerifiedSuccess, result.Outcome);
         Assert.Equal(1, runner.CallCount);
-        Assert.Empty(detector.PackageIds);
-        Assert.Null(result.NonTransactionalEffect);
+        Assert.Single(detector.PackageIds);
+        Assert.NotNull(result.NonTransactionalEffect);
     }
 
     [Theory]
@@ -270,7 +366,9 @@ public sealed class WingetDependencyInstallerTests
     [InlineData(unchecked((int)0x800704C7))]
     [InlineData(1602)]
     [InlineData(unchecked((int)0x80070642))]
-    public async Task Process_reported_cancellation_or_uac_refusal_is_distinct(
+    [InlineData(unchecked((int)0x8A150005))]
+    [InlineData(unchecked((int)0x8A15010C))]
+    public async Task Official_or_wrapped_process_cancellation_is_distinct(
         int exitCode)
     {
         var context = NewContext(FailedProcess(exitCode));
@@ -278,7 +376,7 @@ public sealed class WingetDependencyInstallerTests
         var result = await InstallGitAsync(context);
 
         Assert.Equal(
-            DependencyInstallOutcome.ProcessCancelledOrUacRefused,
+            DependencyInstallOutcome.ProcessCancelled,
             result.Outcome);
         AssertFailedWithoutRedetection(context, result);
     }
@@ -286,8 +384,7 @@ public sealed class WingetDependencyInstallerTests
     [Theory]
     [InlineData(740, DependencyInstallOutcome.ElevationRequired)]
     [InlineData(unchecked((int)0x800702E4), DependencyInstallOutcome.ElevationRequired)]
-    [InlineData(5, DependencyInstallOutcome.ElevationDenied)]
-    [InlineData(unchecked((int)0x80070005), DependencyInstallOutcome.ElevationDenied)]
+    [InlineData(unchecked((int)0x8A150019), DependencyInstallOutcome.ElevationRequired)]
     public async Task Elevation_outcomes_are_classified_only_for_known_codes(
         int exitCode,
         DependencyInstallOutcome expected)
@@ -297,6 +394,20 @@ public sealed class WingetDependencyInstallerTests
         var result = await InstallGitAsync(context);
 
         Assert.Equal(expected, result.Outcome);
+        AssertFailedWithoutRedetection(context, result);
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(unchecked((int)0x80070005))]
+    public async Task Generic_access_denied_is_not_claimed_to_be_a_UAC_refusal(
+        int exitCode)
+    {
+        var context = NewContext(FailedProcess(exitCode));
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(DependencyInstallOutcome.InstallFailed, result.Outcome);
         AssertFailedWithoutRedetection(context, result);
     }
 
@@ -313,7 +424,7 @@ public sealed class WingetDependencyInstallerTests
     }
 
     [Fact]
-    public async Task Unverified_process_termination_is_distinct()
+    public async Task Unverified_process_termination_marks_external_state_indeterminate()
     {
         var runner = new RecordingProcessRunner(
             new ProcessTerminationException(
@@ -324,8 +435,32 @@ public sealed class WingetDependencyInstallerTests
 
         var result = await InstallGitAsync(context);
 
-        Assert.Equal(DependencyInstallOutcome.TerminationFailed, result.Outcome);
+        Assert.Equal(
+            DependencyInstallOutcome.ExternalStateIndeterminate,
+            result.Outcome);
+        Assert.Equal(Missing("Git"), result.Before);
         AssertFailedWithoutRedetection(context, result);
+    }
+
+    [Fact]
+    public async Task Cancellation_exception_after_launch_marks_external_state_indeterminate()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var runner = new CancellingExceptionProcessRunner(cancellation);
+        var context = NewContext(runner: runner);
+
+        var result = await context.Installer.InstallAsync(
+            GitAction(),
+            Detected("WinGet", SnapshotWingetPath, "1.10"),
+            Missing("Git"),
+            cancellation.Token);
+
+        Assert.Equal(
+            DependencyInstallOutcome.ExternalStateIndeterminate,
+            result.Outcome);
+        Assert.Single(context.ProcessCalls);
+        Assert.Equal(Missing("Git"), result.Before);
+        Assert.Null(result.NonTransactionalEffect);
     }
 
     [Fact]
@@ -338,6 +473,47 @@ public sealed class WingetDependencyInstallerTests
         Assert.Equal(DependencyInstallOutcome.InstallFailed, result.Outcome);
         Assert.Equal(42, result.ExitCode);
         AssertFailedWithoutRedetection(context, result);
+    }
+
+    [Fact]
+    public async Task Process_output_is_never_exposed_in_public_failure_reason()
+    {
+        const string secret = "token=super-secret";
+        var process = new ProcessResult(
+            42,
+            "sensitive stdout\r\n",
+            $"{secret}\r\n\u0001",
+            TimedOut: false,
+            Cancelled: false,
+            StandardOutputTruncated: true,
+            StandardErrorTruncated: true);
+        var context = NewContext(process);
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal("WinGet installation failed.", result.Reason);
+        Assert.DoesNotContain(secret, result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            result.Reason!,
+            character => char.IsControl(character));
+        Assert.True(result.StandardOutputTruncated);
+        Assert.True(result.StandardErrorTruncated);
+    }
+
+    [Fact]
+    public async Task Process_start_exception_text_is_not_exposed()
+    {
+        const string secret = "C:\\secret\\private-token";
+        var context = NewContext(
+            runner: new RecordingProcessRunner(
+                new IOException(secret)));
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(DependencyInstallOutcome.InstallFailed, result.Outcome);
+        Assert.Equal("Trusted WinGet execution failed.", result.Reason);
+        Assert.DoesNotContain(secret, result.Reason, StringComparison.Ordinal);
+        Assert.Single(context.ProcessCalls);
     }
 
     [Theory]
@@ -362,7 +538,7 @@ public sealed class WingetDependencyInstallerTests
             DependencyInstallOutcome.RedetectionMissing,
             result.Outcome);
         Assert.Equal(after, result.After);
-        Assert.Single(context.Runner.Calls);
+        Assert.Single(context.ProcessCalls);
         Assert.Single(context.Detector.PackageIds);
         Assert.Null(result.NonTransactionalEffect);
     }
@@ -420,26 +596,71 @@ public sealed class WingetDependencyInstallerTests
     }
 
     [Fact]
-    public async Task Cancellation_during_redetection_is_safe_and_runs_no_second_process()
+    public async Task Version_matching_is_exact_ordinal()
     {
-        using var cancellation = new CancellationTokenSource();
+        const string requestedVersion = "2.50.1-RC1";
+        var context = NewContext(
+            SucceededProcess(),
+            new RecordingDependencyRedetector(
+                Detected("Git", "git.exe", "2.50.1-rc1")));
+
+        var result = await context.Installer.InstallAsync(
+            new DependencyAction(
+                "dependency.git",
+                "Git.Git",
+                requestedVersion,
+                true,
+                true),
+            Detected("WinGet", SnapshotWingetPath, "1.10"),
+            Missing("Git"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            DependencyInstallOutcome.RedetectionMissing,
+            result.Outcome);
+        Assert.Null(result.NonTransactionalEffect);
+    }
+
+    [Fact]
+    public async Task Cancelled_post_success_redetection_uses_bounded_recovery()
+    {
+        var call = 0;
         var detector = new RecordingDependencyRedetector(
             _ =>
             {
-                cancellation.Cancel();
-                throw new OperationCanceledException(cancellation.Token);
+                call++;
+                if (call == 1)
+                {
+                    throw new OperationCanceledException();
+                }
+
+                return Detected("Git", "git.exe", "2.50.1");
             });
         var context = NewContext(SucceededProcess(), detector);
 
-        var result = await context.Installer.InstallAsync(
-            GitAction(),
-            Detected("WinGet", "winget.exe", "1.10"),
-            Missing("Git"),
-            cancellation.Token);
+        var result = await InstallGitAsync(context);
 
-        Assert.Equal(DependencyInstallOutcome.CallerCancelled, result.Outcome);
-        Assert.Single(context.Runner.Calls);
-        Assert.Single(context.Detector.PackageIds);
+        Assert.Equal(DependencyInstallOutcome.VerifiedSuccess, result.Outcome);
+        Assert.Single(context.ProcessCalls);
+        Assert.Equal(2, context.Detector.PackageIds.Count);
+        Assert.NotNull(result.NonTransactionalEffect);
+    }
+
+    [Fact]
+    public async Task Failed_post_success_redetection_marks_external_state_indeterminate()
+    {
+        var detector = new RecordingDependencyRedetector(
+            _ => throw new OperationCanceledException());
+        var context = NewContext(SucceededProcess(), detector);
+
+        var result = await InstallGitAsync(context);
+
+        Assert.Equal(
+            DependencyInstallOutcome.ExternalStateIndeterminate,
+            result.Outcome);
+        Assert.Single(context.ProcessCalls);
+        Assert.Equal(2, context.Detector.PackageIds.Count);
+        Assert.Equal(Missing("Git"), result.Before);
         Assert.Null(result.NonTransactionalEffect);
     }
 
@@ -447,25 +668,49 @@ public sealed class WingetDependencyInstallerTests
         TestContextData context) =>
         await context.Installer.InstallAsync(
             GitAction(),
-            Detected("WinGet", "winget.exe", "1.10"),
+            Detected("WinGet", SnapshotWingetPath, "1.10"),
             Missing("Git"),
             TestContext.Current.CancellationToken);
 
     private static TestContextData NewContext(
         ProcessResult? result = null,
         RecordingDependencyRedetector? detector = null,
-        RecordingProcessRunner? runner = null)
+        IRecordingProcessRunner? runner = null,
+        RecordingWingetExecutableTrust? trust = null)
     {
         var actualRunner =
             runner ?? new RecordingProcessRunner(result ?? SucceededProcess());
         var actualDetector =
             detector ?? new RecordingDependencyRedetector(
                 Detected("Git", "git.exe", "2.50.1"));
+        var actualTrust = trust ?? TrustedWinget();
         return new TestContextData(
-            new WingetDependencyInstaller(actualRunner, actualDetector),
+            new WingetDependencyInstaller(
+                actualRunner,
+                actualDetector,
+                actualTrust),
             actualRunner,
-            actualDetector);
+            actualDetector,
+            actualTrust);
     }
+
+    private static RecordingWingetExecutableTrust TrustedWinget()
+    {
+        var trusted = TrustedExecutable();
+        return new RecordingWingetExecutableTrust(
+            new ExecutableTrustResult(
+                ExecutableTrustStatus.Trusted,
+                trusted),
+            new ExecutableTrustResult(
+                ExecutableTrustStatus.Trusted,
+                trusted));
+    }
+
+    private static TrustedExecutable TrustedExecutable() =>
+        new(
+            CanonicalWingetPath,
+            "SHA256:0123456789ABCDEF",
+            "Microsoft Corporation");
 
     private static DependencyAction GitAction(
         bool selected = true,
@@ -496,7 +741,7 @@ public sealed class WingetDependencyInstallerTests
         TestContextData context,
         DependencyInstallResult result)
     {
-        Assert.Empty(context.Runner.Calls);
+        Assert.Empty(context.ProcessCalls);
         Assert.Empty(context.Detector.PackageIds);
         Assert.Null(result.NonTransactionalEffect);
     }
@@ -505,17 +750,26 @@ public sealed class WingetDependencyInstallerTests
         TestContextData context,
         DependencyInstallResult result)
     {
-        Assert.Single(context.Runner.Calls);
+        Assert.Single(context.ProcessCalls);
         Assert.Empty(context.Detector.PackageIds);
         Assert.Null(result.NonTransactionalEffect);
     }
 
     private sealed record TestContextData(
         WingetDependencyInstaller Installer,
-        RecordingProcessRunner Runner,
-        RecordingDependencyRedetector Detector);
+        IRecordingProcessRunner Runner,
+        RecordingDependencyRedetector Detector,
+        RecordingWingetExecutableTrust Trust)
+    {
+        public IReadOnlyList<ProcessCall> ProcessCalls => Runner.Calls;
+    }
 
-    private sealed class RecordingProcessRunner : IProcessRunner
+    private interface IRecordingProcessRunner : IProcessRunner
+    {
+        List<ProcessCall> Calls { get; }
+    }
+
+    private sealed class RecordingProcessRunner : IRecordingProcessRunner
     {
         private readonly ProcessResult? _result;
         private readonly Exception? _exception;
@@ -575,9 +829,30 @@ public sealed class WingetDependencyInstallerTests
         }
     }
 
-    private sealed class CancellingProcessRunner(
-        CancellationTokenSource cancellation) : IProcessRunner
+    private sealed class RecordingWingetExecutableTrust(
+        ExecutableTrustResult resolved,
+        ExecutableTrustResult? revalidated = null) : IWinGetExecutableTrust
     {
+        public List<string> ResolvePaths { get; } = [];
+        public List<string> RevalidatedPaths { get; } = [];
+
+        public ExecutableTrustResult Resolve(string snapshotPath)
+        {
+            ResolvePaths.Add(snapshotPath);
+            return resolved;
+        }
+
+        public ExecutableTrustResult Revalidate(TrustedExecutable executable)
+        {
+            RevalidatedPaths.Add(executable.CanonicalPath);
+            return revalidated ?? resolved;
+        }
+    }
+
+    private sealed class CancellingProcessRunner(
+        CancellationTokenSource cancellation) : IRecordingProcessRunner
+    {
+        public List<ProcessCall> Calls { get; } = [];
         public int CallCount { get; private set; }
 
         public Task<ProcessResult> RunAsync(
@@ -587,8 +862,27 @@ public sealed class WingetDependencyInstallerTests
             CancellationToken cancellationToken)
         {
             CallCount++;
+            Calls.Add(new ProcessCall(executable, arguments.ToArray(), timeout));
             cancellation.Cancel();
             return Task.FromResult(SucceededProcess());
+        }
+    }
+
+    private sealed class CancellingExceptionProcessRunner(
+        CancellationTokenSource cancellation) : IRecordingProcessRunner
+    {
+        public List<ProcessCall> Calls { get; } = [];
+
+        public Task<ProcessResult> RunAsync(
+            string executable,
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add(new ProcessCall(executable, arguments.ToArray(), timeout));
+            cancellation.Cancel();
+            return Task.FromException<ProcessResult>(
+                new OperationCanceledException(cancellation.Token));
         }
     }
 

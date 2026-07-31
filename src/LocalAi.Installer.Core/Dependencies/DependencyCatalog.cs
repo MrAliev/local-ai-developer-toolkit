@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 
 namespace LocalAi.Installer.Core.Dependencies;
 
@@ -36,7 +37,8 @@ public static class DependencyCatalog
 
     public static bool TryGetByPackageId(
         string? packageId,
-        out DependencyDefinition definition)
+        [NotNullWhen(true)]
+        out DependencyDefinition? definition)
     {
         definition = Supported.FirstOrDefault(
             candidate => string.Equals(
@@ -48,7 +50,8 @@ public static class DependencyCatalog
 
     internal static bool TryGetByActionId(
         string? actionId,
-        out DependencyDefinition definition)
+        [NotNullWhen(true)]
+        out DependencyDefinition? definition)
     {
         definition = Supported.FirstOrDefault(
             candidate => string.Equals(

@@ -21,12 +21,14 @@ public enum DependencyInstallOutcome
     ConsentDeclined,
     OfficialInstallerOffered,
     WingetUnavailable,
+    WingetExecutableUntrusted,
+    WingetExecutableChanged,
     CallerCancelled,
-    ProcessCancelledOrUacRefused,
+    ProcessCancelled,
     ElevationRequired,
     ElevationDenied,
     TimedOut,
-    TerminationFailed,
+    ExternalStateIndeterminate,
     InstallFailed,
     RedetectionMissing,
     VerifiedSuccess,
@@ -46,23 +48,31 @@ public sealed record DependencyInstallResult(
     OfficialInstallerOffer? OfficialInstallerOffer,
     NonTransactionalEffect? NonTransactionalEffect,
     int? ExitCode,
-    string? Reason);
+    string? Reason,
+    bool StandardOutputTruncated,
+    bool StandardErrorTruncated);
 
 public sealed class WingetDependencyInstaller
 {
     private static readonly TimeSpan InstallTimeout = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan RedetectionTimeout =
+        TimeSpan.FromSeconds(10);
 
     private readonly IProcessRunner _processRunner;
     private readonly IDependencyRedetector _redetector;
+    private readonly IWinGetExecutableTrust _executableTrust;
 
     public WingetDependencyInstaller(
         IProcessRunner processRunner,
-        IDependencyRedetector redetector)
+        IDependencyRedetector redetector,
+        IWinGetExecutableTrust executableTrust)
     {
         _processRunner =
             processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _redetector =
             redetector ?? throw new ArgumentNullException(nameof(redetector));
+        _executableTrust =
+            executableTrust ?? throw new ArgumentNullException(nameof(executableTrust));
     }
 
     public async Task<DependencyInstallResult> InstallAsync(
@@ -160,17 +170,7 @@ public sealed class WingetDependencyInstaller
                 dependency,
                 before,
                 offer: CreateOffer(dependency),
-                reason: winGet.Reason ?? "WinGet detection failed.");
-        }
-
-        if (!IsWingetExecutable(winGet.ExecutablePath))
-        {
-            return Result(
-                DependencyInstallOutcome.InvalidInput,
-                action,
-                dependency,
-                before,
-                reason: "The detected WinGet executable must be winget.exe.");
+                reason: "WinGet detection failed.");
         }
 
         if (cancellationToken.IsCancellationRequested)
@@ -183,34 +183,87 @@ public sealed class WingetDependencyInstaller
                 reason: "The caller cancelled before process execution.");
         }
 
-        ProcessResult processResult;
-        try
-        {
-            processResult = await _processRunner.RunAsync(
-                    winGet.ExecutablePath!,
-                    BuildArguments(dependency, action.Version),
-                    InstallTimeout,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (ProcessTerminationException exception)
+        if (string.IsNullOrWhiteSpace(winGet.ExecutablePath))
         {
             return Result(
-                DependencyInstallOutcome.TerminationFailed,
+                DependencyInstallOutcome.InvalidInput,
                 action,
                 dependency,
                 before,
-                reason: exception.Message);
+                reason: "The WinGet snapshot has no executable path.");
         }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
+
+        var resolved = _executableTrust.Resolve(winGet.ExecutablePath);
+        if (resolved.Status != ExecutableTrustStatus.Trusted ||
+            resolved.Executable is null)
+        {
+            return Result(
+                DependencyInstallOutcome.WingetExecutableUntrusted,
+                action,
+                dependency,
+                before,
+                reason: "WinGet executable trust validation failed.");
+        }
+
+        if (cancellationToken.IsCancellationRequested)
         {
             return Result(
                 DependencyInstallOutcome.CallerCancelled,
                 action,
                 dependency,
                 before,
-                reason: "The caller cancelled process execution.");
+                reason: "The caller cancelled before process execution.");
+        }
+
+        var revalidated = _executableTrust.Revalidate(resolved.Executable);
+        if (revalidated.Status == ExecutableTrustStatus.Changed)
+        {
+            return Result(
+                DependencyInstallOutcome.WingetExecutableChanged,
+                action,
+                dependency,
+                before,
+                reason: "WinGet changed after initial trust validation.");
+        }
+
+        if (revalidated.Status != ExecutableTrustStatus.Trusted ||
+            revalidated.Executable is null)
+        {
+            return Result(
+                DependencyInstallOutcome.WingetExecutableUntrusted,
+                action,
+                dependency,
+                before,
+                reason: "Final WinGet trust validation failed.");
+        }
+
+        ProcessResult processResult;
+        try
+        {
+            processResult = await _processRunner.RunAsync(
+                    revalidated.Executable.CanonicalPath,
+                    BuildArguments(dependency, action.Version),
+                    InstallTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (ProcessTerminationException)
+        {
+            return Result(
+                DependencyInstallOutcome.ExternalStateIndeterminate,
+                action,
+                dependency,
+                before,
+                reason: "WinGet process termination could not be verified.");
+        }
+        catch (OperationCanceledException)
+        {
+            return Result(
+                DependencyInstallOutcome.ExternalStateIndeterminate,
+                action,
+                dependency,
+                before,
+                reason: "WinGet execution was cancelled after launch.");
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
@@ -221,18 +274,7 @@ public sealed class WingetDependencyInstaller
                 action,
                 dependency,
                 before,
-                reason: exception.Message);
-        }
-
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return Result(
-                DependencyInstallOutcome.CallerCancelled,
-                action,
-                dependency,
-                before,
-                exitCode: processResult.ExitCode,
-                reason: "The caller cancelled process execution.");
+                reason: "Trusted WinGet execution failed.");
         }
 
         if (processResult.TimedOut)
@@ -242,17 +284,19 @@ public sealed class WingetDependencyInstaller
                 action,
                 dependency,
                 before,
+                processResult: processResult,
                 reason: "The WinGet installation timed out.");
         }
 
         if (processResult.Cancelled)
         {
             return Result(
-                DependencyInstallOutcome.CallerCancelled,
+                DependencyInstallOutcome.ExternalStateIndeterminate,
                 action,
                 dependency,
                 before,
-                reason: "The caller cancelled process execution.");
+                processResult: processResult,
+                reason: "WinGet execution ended with indeterminate external state.");
         }
 
         var failure = ClassifyExitCode(processResult.ExitCode);
@@ -264,40 +308,25 @@ public sealed class WingetDependencyInstaller
                 dependency,
                 before,
                 exitCode: processResult.ExitCode,
-                reason: FailureReason(processResult));
+                processResult: processResult,
+                reason: FailureReason(failure.Value));
         }
 
-        DependencySnapshot? after;
-        try
-        {
-            after = await _redetector
-                .DetectAsync(dependency, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
+        var redetection = await RedetectAfterSuccessAsync(dependency)
+            .ConfigureAwait(false);
+        if (!redetection.Completed)
         {
             return Result(
-                DependencyInstallOutcome.CallerCancelled,
+                DependencyInstallOutcome.ExternalStateIndeterminate,
                 action,
                 dependency,
                 before,
                 exitCode: processResult.ExitCode,
-                reason: "The caller cancelled dependency re-detection.");
-        }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or
-            System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            return Result(
-                DependencyInstallOutcome.RedetectionMissing,
-                action,
-                dependency,
-                before,
-                exitCode: processResult.ExitCode,
-                reason: exception.Message);
+                processResult: processResult,
+                reason: "Post-install dependency state could not be determined.");
         }
 
+        var after = redetection.Snapshot;
         if (!IsRecognized(after, dependency, action.Version))
         {
             return Result(
@@ -307,6 +336,7 @@ public sealed class WingetDependencyInstaller
                 before,
                 after,
                 exitCode: processResult.ExitCode,
+                processResult: processResult,
                 reason: "The dependency was not recognized after WinGet completed.");
         }
 
@@ -322,7 +352,40 @@ public sealed class WingetDependencyInstaller
             before,
             after,
             effect: effect,
-            exitCode: processResult.ExitCode);
+            exitCode: processResult.ExitCode,
+            processResult: processResult);
+    }
+
+    private async Task<RedetectionAttempt> RedetectAfterSuccessAsync(
+        DependencyDefinition dependency)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var timeout = new CancellationTokenSource(
+                RedetectionTimeout);
+            try
+            {
+                var detection = _redetector.DetectAsync(
+                    dependency,
+                    timeout.Token);
+                var snapshot = await detection
+                    .WaitAsync(RedetectionTimeout)
+                    .ConfigureAwait(false);
+                return new RedetectionAttempt(true, snapshot);
+            }
+            catch (Exception exception) when (
+                exception is OperationCanceledException or TimeoutException or
+                IOException or UnauthorizedAccessException or
+                System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                if (attempt == 1 || exception is TimeoutException)
+                {
+                    return new RedetectionAttempt(false, null);
+                }
+            }
+        }
+
+        return new RedetectionAttempt(false, null);
     }
 
     private static IReadOnlyList<string> BuildArguments(
@@ -343,13 +406,6 @@ public sealed class WingetDependencyInstaller
             "--accept-package-agreements",
             "--accept-source-agreements",
         ];
-
-    private static bool IsWingetExecutable(string? executablePath) =>
-        !string.IsNullOrWhiteSpace(executablePath) &&
-        string.Equals(
-            Path.GetFileName(executablePath),
-            "winget.exe",
-            StringComparison.OrdinalIgnoreCase);
 
     private static bool IsDependencySnapshot(
         DependencySnapshot? snapshot,
@@ -387,7 +443,7 @@ public sealed class WingetDependencyInstaller
         if (string.Equals(
                 detectedVersion,
                 requestedVersion,
-                StringComparison.OrdinalIgnoreCase))
+                StringComparison.Ordinal))
         {
             return true;
         }
@@ -400,13 +456,13 @@ public sealed class WingetDependencyInstaller
         const string gitVersionPrefix = "git version ";
         var normalized = detectedVersion.StartsWith(
             gitVersionPrefix,
-            StringComparison.OrdinalIgnoreCase)
+            StringComparison.Ordinal)
             ? detectedVersion[gitVersionPrefix.Length..]
             : detectedVersion;
         if (string.Equals(
                 normalized,
                 requestedVersion,
-                StringComparison.OrdinalIgnoreCase))
+                StringComparison.Ordinal))
         {
             return true;
         }
@@ -414,7 +470,7 @@ public sealed class WingetDependencyInstaller
         var windowsBuildPrefix = $"{requestedVersion}.windows.";
         if (!normalized.StartsWith(
                 windowsBuildPrefix,
-                StringComparison.OrdinalIgnoreCase))
+                StringComparison.Ordinal))
         {
             return false;
         }
@@ -451,23 +507,29 @@ public sealed class WingetDependencyInstaller
         return exitCode switch
         {
             1223 or unchecked((int)0x800704C7) or
-            1602 or unchecked((int)0x80070642) =>
-                DependencyInstallOutcome.ProcessCancelledOrUacRefused,
-            740 or unchecked((int)0x800702E4) =>
+            1602 or unchecked((int)0x80070642) or
+            unchecked((int)0x8A150005) or
+            unchecked((int)0x8A15010C) =>
+                DependencyInstallOutcome.ProcessCancelled,
+            740 or unchecked((int)0x800702E4) or
+            unchecked((int)0x8A150019) =>
                 DependencyInstallOutcome.ElevationRequired,
-            5 or unchecked((int)0x80070005) =>
-                DependencyInstallOutcome.ElevationDenied,
             _ => DependencyInstallOutcome.InstallFailed,
         };
     }
 
-    private static string FailureReason(ProcessResult processResult)
-    {
-        var standardError = processResult.StandardError.Trim();
-        return string.IsNullOrEmpty(standardError)
-            ? $"WinGet exited with code {processResult.ExitCode?.ToString() ?? "unknown"}."
-            : standardError;
-    }
+    private static string FailureReason(
+        DependencyInstallOutcome outcome) =>
+        outcome switch
+        {
+            DependencyInstallOutcome.ProcessCancelled =>
+                "WinGet reported that installation was cancelled.",
+            DependencyInstallOutcome.ElevationRequired =>
+                "WinGet reported that administrator privileges are required.",
+            DependencyInstallOutcome.ElevationDenied =>
+                "WinGet reported that elevation was denied.",
+            _ => "WinGet installation failed.",
+        };
 
     private static OfficialInstallerOffer CreateOffer(
         DependencyDefinition dependency) =>
@@ -485,6 +547,7 @@ public sealed class WingetDependencyInstaller
         OfficialInstallerOffer? offer = null,
         NonTransactionalEffect? effect = null,
         int? exitCode = null,
+        ProcessResult? processResult = null,
         string? reason = null) =>
         new(
             outcome,
@@ -495,5 +558,11 @@ public sealed class WingetDependencyInstaller
             offer,
             effect,
             exitCode,
-            reason);
+            reason,
+            processResult?.StandardOutputTruncated ?? false,
+            processResult?.StandardErrorTruncated ?? false);
+
+    private sealed record RedetectionAttempt(
+        bool Completed,
+        DependencySnapshot? Snapshot);
 }
