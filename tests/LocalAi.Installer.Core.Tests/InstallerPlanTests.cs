@@ -415,14 +415,17 @@ public sealed class InstallerPlanTests
     [InlineData(VersionLikeField.DependencyVersion, "1..2")]
     [InlineData(VersionLikeField.DependencyVersion, "../escape")]
     [InlineData(VersionLikeField.DependencyVersion, @"1\..\escape")]
+    [InlineData(VersionLikeField.DependencyVersion, "1.2.3+build.5")]
     [InlineData(VersionLikeField.PackageVersion, "..")]
     [InlineData(VersionLikeField.PackageVersion, "1..2")]
     [InlineData(VersionLikeField.PackageVersion, "../escape")]
     [InlineData(VersionLikeField.PackageVersion, @"1\..\escape")]
+    [InlineData(VersionLikeField.PackageVersion, "1.2.3+build.5")]
     [InlineData(VersionLikeField.ModelReference, "..")]
     [InlineData(VersionLikeField.ModelReference, "1..2")]
     [InlineData(VersionLikeField.ModelReference, "../escape")]
     [InlineData(VersionLikeField.ModelReference, @"1\..\escape")]
+    [InlineData(VersionLikeField.ModelReference, "qwen3:8b+build")]
     public void Unsafe_version_like_tokens_are_rejected(
         VersionLikeField field,
         string unsafeValue)
@@ -475,7 +478,7 @@ public sealed class InstallerPlanTests
             ],
             Package = new(
                 "package.localai",
-                "v1.2.3-rc.1+build_5",
+                "v1.2.3-rc.1_build_5",
                 @"C:\Downloads\localai.zip",
                 false,
                 false),
@@ -493,7 +496,7 @@ public sealed class InstallerPlanTests
         var plan = Build(input);
 
         Assert.Equal("1", plan.Dependencies[0].Version);
-        Assert.Equal("v1.2.3-rc.1+build_5", plan.Package.Version);
+        Assert.Equal("v1.2.3-rc.1_build_5", plan.Package.Version);
         Assert.Equal("qwen3:8b-q4_K_M", plan.Models[0].Model);
     }
 

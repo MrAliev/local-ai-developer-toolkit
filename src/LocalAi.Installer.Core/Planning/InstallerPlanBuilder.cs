@@ -393,7 +393,7 @@ public sealed class InstallerPlanBuilder
     }
 
     // Grammar: 1-128 ASCII characters; an alphanumeric first and last
-    // character; inner alphanumerics, '.', '-', '_', or '+'; never '..'.
+    // character; inner alphanumerics, '.', '-', or '_'; never '..'.
     private static bool IsVersionToken(string value)
     {
         if (value.Length is < 1 or > 128 ||
@@ -407,7 +407,7 @@ public sealed class InstallerPlanBuilder
         return value.All(
             character =>
                 char.IsAsciiLetterOrDigit(character) ||
-                character is '.' or '-' or '_' or '+');
+                character is '.' or '-' or '_');
     }
 
     private static void ValidateRequiredText(string value, string parameterName)
