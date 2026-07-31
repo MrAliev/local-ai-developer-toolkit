@@ -58,13 +58,18 @@ anything:
 - `AbsentOrStale`: missing, malformed, stale, or no-longer-owned state. Enter
   synchronized startup.
 - `StartingOrLockOwned`: another process is starting, or the attempted child
-  lost `broker.lock` while a live owner is publishing state. Continue bounded
-  observation without starting another broker.
-- `FailedStart`: the attempted child exits before a compatible state appears,
-  or publishes invalid startup state. Report the child exit code and last
-  observed host-state classification.
+  exits zero after likely losing `broker.lock` while a live owner is publishing
+  state. Continue bounded observation without starting another broker.
+- `FailedStart`: the attempted child exits with a nonzero code before a
+  compatible state appears. Report the child exit code and last observed
+  host-state classification.
 - `TimedOut`: the bounded deadline expires. Report the last classification and
   startup observation rather than a generic readiness timeout.
+
+Malformed, invalid, or unreadable startup state remains an absent/unreadable
+observation and may eventually produce typed `broker_start_timeout`; it does not
+become `FailedStart` by itself. A nonzero child exit produces
+`broker_start_failed`, while a zero exit is observed as a likely lock owner.
 
 A live legacy schema-2 broker is classified as incompatible, not absent. This
 prevents a client from launching a doomed second process behind an owned lock.
@@ -74,6 +79,12 @@ prevents a client from launching a doomed second process behind an owned lock.
 The existing runtime-root-derived named semaphore remains the client-side
 single-start guard. The existing exclusive `broker.lock` remains the
 machine-wide broker ownership primitive.
+
+One monotonic startup budget begins before semaphore acquisition. The client
+checks it after the initial state observation immediately before process
+creation, immediately after the synchronous OS `Process.Start` call returns,
+and before every polling delay. `Process.Start` itself cannot be interrupted;
+cancellation and the remaining budget are checked immediately on return.
 
 The startup abstraction returns an observable attempt rather than only a PID.
 It must allow the client to determine whether the child is still running and,

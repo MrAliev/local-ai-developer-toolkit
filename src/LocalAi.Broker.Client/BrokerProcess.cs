@@ -47,7 +47,10 @@ public sealed class BrokerProcess : IBrokerProcess
             IsRunning,
             StartAttempt,
             timeProvider ?? TimeProvider.System,
-            Task.Delay,
+            (delay, cancellationToken) => DelayAsync(
+                delay,
+                timeProvider ?? TimeProvider.System,
+                cancellationToken),
             startupTimeout,
             BuildArguments(runtimeRoot, ollamaUrl))
     {
@@ -65,7 +68,10 @@ public sealed class BrokerProcess : IBrokerProcess
             IsRunning,
             StartAttempt,
             TimeProvider.System,
-            Task.Delay,
+            static (delay, cancellationToken) => DelayAsync(
+                delay,
+                TimeProvider.System,
+                cancellationToken),
             arguments: arguments);
     }
 
@@ -179,6 +185,11 @@ public sealed class BrokerProcess : IBrokerProcess
                 "Broker startup requires an absent or stale host state.");
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfStartupTimedOut(
+            startupTimestamp,
+            "initial state observation",
+            observation.Detail);
         using var startAttempt = _start(_executablePath, _arguments);
         cancellationToken.ThrowIfCancellationRequested();
         observation = ObserveStartAttempt(
@@ -186,7 +197,10 @@ public sealed class BrokerProcess : IBrokerProcess
             observation,
             cancellationToken);
         var lastObservation = observation.Detail;
-        ThrowIfStartupTimedOut(startupTimestamp, lastObservation);
+        ThrowIfStartupTimedOut(
+            startupTimestamp,
+            "process creation",
+            lastObservation);
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -207,7 +221,10 @@ public sealed class BrokerProcess : IBrokerProcess
             lastObservation = observation.Detail;
 
             cancellationToken.ThrowIfCancellationRequested();
-            ThrowIfStartupTimedOut(startupTimestamp, lastObservation);
+            ThrowIfStartupTimedOut(
+                startupTimestamp,
+                "startup observation",
+                lastObservation);
             var remaining = RemainingStartupBudget(startupTimestamp);
             await _delay(
                 remaining < StartupPollInterval ? remaining : StartupPollInterval,
@@ -432,6 +449,15 @@ public sealed class BrokerProcess : IBrokerProcess
             WindowStyle = ProcessWindowStyle.Hidden
         };
 
+    internal static Task DelayAsync(
+        TimeSpan delay,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        return Task.Delay(delay, timeProvider, cancellationToken);
+    }
+
     private static string BuildArguments(string runtimeRoot, string? ollamaUrl)
     {
         var builder = new StringBuilder();
@@ -493,7 +519,10 @@ public sealed class BrokerProcess : IBrokerProcess
         return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
 
-    private void ThrowIfStartupTimedOut(long startupTimestamp, string lastObservation)
+    private void ThrowIfStartupTimedOut(
+        long startupTimestamp,
+        string phase,
+        string lastObservation)
     {
         if (RemainingStartupBudget(startupTimestamp) > TimeSpan.Zero)
         {
@@ -503,6 +532,7 @@ public sealed class BrokerProcess : IBrokerProcess
         throw new BrokerBootstrapException(
             "broker_start_timeout",
             $"LocalAi broker did not become ready within {_startupTimeout}; " +
+            $"phase: {phase}; " +
             $"last observation: {lastObservation}.");
     }
 

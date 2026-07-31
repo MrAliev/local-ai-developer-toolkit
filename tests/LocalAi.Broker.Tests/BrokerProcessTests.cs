@@ -33,6 +33,19 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
+    public async Task Default_poll_delay_uses_injected_time_provider()
+    {
+        var timeProvider = new RecordingTimerTimeProvider();
+
+        await BrokerProcess.DelayAsync(
+            TimeSpan.FromMilliseconds(1),
+            timeProvider,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, timeProvider.CreateTimerCallCount);
+    }
+
+    [Fact]
     public async Task Healthy_matching_process_is_reused()
     {
         var now = DateTimeOffset.UtcNow;
@@ -627,12 +640,17 @@ public sealed class BrokerProcessTests
     public async Task Startup_timeout_is_bounded()
     {
         var startAttempt = FakeStartAttempt.Running(99);
+        var starts = 0;
         var process = BrokerProcess.CreateForTesting(
             BrokerAssemblyPath,
             "runtime",
             _ => null,
             _ => false,
-            (_, _) => startAttempt,
+            (_, _) =>
+            {
+                starts++;
+                return startAttempt;
+            },
             TimeProvider.System,
             static (_, _) => Task.CompletedTask,
             startupTimeout: TimeSpan.Zero);
@@ -643,7 +661,40 @@ public sealed class BrokerProcessTests
         Assert.Equal("broker_start_timeout", exception.Code);
         Assert.Contains("last observation:", exception.Message);
         Assert.Contains("host state is absent or unreadable", exception.Message);
-        Assert.True(startAttempt.IsDisposed);
+        Assert.Equal(0, starts);
+        Assert.False(startAttempt.IsDisposed);
+    }
+
+    [Fact]
+    public async Task Startup_budget_expiring_during_initial_state_read_does_not_start()
+    {
+        var clock = new RollingBackTimeProvider(DateTimeOffset.UtcNow);
+        var starts = 0;
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ =>
+            {
+                clock.Advance(TimeSpan.FromMilliseconds(101), TimeSpan.Zero);
+                return null;
+            },
+            _ => false,
+            (_, _) =>
+            {
+                starts++;
+                return FakeStartAttempt.Running(99);
+            },
+            clock,
+            static (_, _) => Task.CompletedTask,
+            startupTimeout: TimeSpan.FromMilliseconds(100));
+
+        var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
+            () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("broker_start_timeout", exception.Code);
+        Assert.Contains("phase: initial state observation", exception.Message);
+        Assert.Contains("host state is absent or unreadable", exception.Message);
+        Assert.Equal(0, starts);
     }
 
     [Fact]
@@ -723,6 +774,102 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
+    public async Task Startup_semaphore_wait_cancellation_is_prompt_and_semaphore_remains_reusable()
+    {
+        var runtimeRoot = Path.Combine(
+            Path.GetTempPath(),
+            "localai-process-" + Guid.NewGuid().ToString("N"));
+        var now = DateTimeOffset.UtcNow;
+        using var startEntered = new ManualResetEventSlim();
+        using var releaseStart = new ManualResetEventSlim();
+        var ready = false;
+        var blockedStarts = 0;
+        var reuseStarts = 0;
+        BrokerProcessState? ReadState(string _) =>
+            ready
+                ? new BrokerProcessState(
+                    42,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current)
+                : null;
+        var first = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            runtimeRoot,
+            ReadState,
+            state => state.ProcessId == 42,
+            (_, _) =>
+            {
+                startEntered.Set();
+                releaseStart.Wait(TestContext.Current.CancellationToken);
+                ready = true;
+                return FakeStartAttempt.Running(42);
+            },
+            TimeProvider.System,
+            static (_, token) => Task.Delay(5, token),
+            startupTimeout: TimeSpan.FromSeconds(5));
+        var blocked = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            runtimeRoot,
+            ReadState,
+            state => state.ProcessId == 42,
+            (_, _) =>
+            {
+                blockedStarts++;
+                return FakeStartAttempt.Running(99);
+            },
+            TimeProvider.System,
+            static (_, token) => Task.Delay(5, token),
+            startupTimeout: TimeSpan.FromSeconds(5));
+
+        var firstTask = first.EnsureRunningAsync(TestContext.Current.CancellationToken);
+        Assert.True(
+            startEntered.Wait(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken));
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        var blockedTask = blocked.EnsureRunningAsync(cancellation.Token);
+        await Task.Delay(
+            TimeSpan.FromMilliseconds(50),
+            TestContext.Current.CancellationToken);
+        var stopwatch = Stopwatch.StartNew();
+        cancellation.Cancel();
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => blockedTask);
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1));
+            Assert.Equal(0, blockedStarts);
+        }
+        finally
+        {
+            releaseStart.Set();
+            await firstTask;
+        }
+
+        var reuse = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            runtimeRoot,
+            ReadState,
+            state => state.ProcessId == 42,
+            (_, _) =>
+            {
+                reuseStarts++;
+                return FakeStartAttempt.Running(100);
+            },
+            TimeProvider.System,
+            static (_, token) => Task.Delay(5, token),
+            startupTimeout: TimeSpan.FromSeconds(1));
+
+        await reuse.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, reuseStarts);
+    }
+
+    [Fact]
     public async Task Startup_timeout_uses_monotonic_time_when_utc_clock_rolls_back()
     {
         var clock = new RollingBackTimeProvider(DateTimeOffset.UtcNow);
@@ -763,15 +910,20 @@ public sealed class BrokerProcessTests
     public async Task Child_exiting_zero_lock_owner_did_not_publish_times_out_with_diagnostics()
     {
         var startAttempt = FakeStartAttempt.Exited(42, 0);
+        var clock = new RollingBackTimeProvider(DateTimeOffset.UtcNow);
         var process = BrokerProcess.CreateForTesting(
             BrokerAssemblyPath,
             "runtime",
             _ => null,
             _ => false,
-            (_, _) => startAttempt,
-            new ManualTimeProvider(DateTimeOffset.UtcNow),
+            (_, _) =>
+            {
+                clock.Advance(TimeSpan.FromSeconds(2), TimeSpan.Zero);
+                return startAttempt;
+            },
+            clock,
             static (_, _) => Task.CompletedTask,
-            startupTimeout: TimeSpan.Zero);
+            startupTimeout: TimeSpan.FromSeconds(1));
 
         var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
             () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
@@ -1026,6 +1178,25 @@ public sealed class BrokerProcessTests
         {
             _timestamp += elapsed.Ticks;
             _utcNow += utcChange;
+        }
+    }
+
+    private sealed class RecordingTimerTimeProvider : TimeProvider
+    {
+        public int CreateTimerCallCount { get; private set; }
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            CreateTimerCallCount++;
+            return TimeProvider.System.CreateTimer(
+                callback,
+                state,
+                dueTime,
+                period);
         }
     }
 }
