@@ -101,6 +101,32 @@ public sealed class VersionActivatorTests
     }
 
     [Fact]
+    public void Stop_running_stops_each_owned_process_exactly_once()
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        var before = File.ReadAllBytes(install.CurrentPath);
+        var process = new ProcessSnapshot(
+            42,
+            DateTimeOffset.UtcNow,
+            Path.Combine(install.VersionDirectory("v1"), "localai.exe"),
+            null);
+        var stopCount = 0;
+        var activator = new VersionActivator(
+            install.BinRoot,
+            new LocalAiProcessController(
+                () => [process],
+                (_, _) => stopCount++),
+            TimeSpan.Zero,
+            TimeSpan.Zero);
+
+        activator.Activate("v2", stopRunning: true, ExpectCurrent(before));
+
+        Assert.Equal(1, stopCount);
+        Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
+    }
+
+    [Fact]
     public void Missing_expectation_activates_only_when_pointer_is_still_missing()
     {
         using var install = TestInstall.CreateComplete("v1");

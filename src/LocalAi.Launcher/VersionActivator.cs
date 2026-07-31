@@ -66,13 +66,6 @@ public sealed class VersionActivator
             var currentDirectory = File.Exists(_currentPath)
                 ? _resolver.Resolve("localai").VersionDirectory
                 : null;
-            if (stopRunning && currentDirectory is not null)
-            {
-                _processController.StopOwnedByVersion(
-                    currentDirectory,
-                    _stopTimeout);
-            }
-
             if (currentDirectory is not null)
             {
                 if (stopRunning)
