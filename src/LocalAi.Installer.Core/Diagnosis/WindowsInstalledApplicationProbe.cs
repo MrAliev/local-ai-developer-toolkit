@@ -1,133 +1,150 @@
-using System.Diagnostics;
-using System.Runtime.Versioning;
 using LocalAi.Installer.Core.Abstractions;
-using Microsoft.Win32;
 
 namespace LocalAi.Installer.Core.Diagnosis;
 
 public sealed class WindowsInstalledApplicationProbe : IInstalledApplicationProbe
 {
-    private const string UninstallKey =
-        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+    private readonly IUninstallEntrySource _entrySource;
+    private readonly IExecutableIdentityProbe _executableIdentity;
+
+    public WindowsInstalledApplicationProbe()
+        : this(
+            new WindowsRegistryUninstallEntrySource(),
+            new SystemExecutableIdentityProbe())
+    {
+    }
+
+    public WindowsInstalledApplicationProbe(
+        IUninstallEntrySource entrySource,
+        IExecutableIdentityProbe executableIdentity)
+    {
+        _entrySource = entrySource
+            ?? throw new ArgumentNullException(nameof(entrySource));
+        _executableIdentity = executableIdentity
+            ?? throw new ArgumentNullException(nameof(executableIdentity));
+    }
 
     public Task<InstalledApplicationMetadata?> FindOllamaAsync(
         CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsWindows())
+        foreach (var entry in _entrySource.ReadEntries(cancellationToken))
         {
-            return Task.FromResult<InstalledApplicationMetadata?>(null);
-        }
-
-        foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
-        {
-            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!string.Equals(
+                    entry.DisplayName,
+                    "Ollama",
+                    StringComparison.OrdinalIgnoreCase))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var match = FindInRegistry(hive, view, cancellationToken);
-                if (match is not null)
+                continue;
+            }
+
+            foreach (var candidate in ResolveExecutableCandidates(entry))
+            {
+                var identity = _executableIdentity.Inspect(candidate);
+                if (!IsApprovedOllamaIdentity(identity))
                 {
-                    return Task.FromResult<InstalledApplicationMetadata?>(match);
+                    continue;
                 }
+
+                return Task.FromResult<InstalledApplicationMetadata?>(
+                    new InstalledApplicationMetadata(
+                        entry.DisplayName!,
+                        entry.DisplayVersion,
+                        entry.InstallLocation,
+                        identity.Path,
+                        identity.FileVersion));
             }
         }
 
         return Task.FromResult<InstalledApplicationMetadata?>(null);
     }
 
-    [SupportedOSPlatform("windows")]
-    private static InstalledApplicationMetadata? FindInRegistry(
-        RegistryHive hive,
-        RegistryView view,
-        CancellationToken cancellationToken)
+    private static IEnumerable<string> ResolveExecutableCandidates(
+        UninstallEntrySnapshot entry)
     {
-        try
+        var candidates = new List<string>();
+        AddCandidate(candidates, ParseDisplayIcon(entry.DisplayIcon));
+        if (!string.IsNullOrWhiteSpace(entry.InstallLocation))
         {
-            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
-            using var uninstall = baseKey.OpenSubKey(UninstallKey);
-            if (uninstall is null)
-            {
-                return null;
-            }
-
-            foreach (var subKeyName in uninstall.GetSubKeyNames())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                using var application = uninstall.OpenSubKey(subKeyName);
-                var displayName = application?.GetValue("DisplayName") as string;
-                if (displayName is null ||
-                    !displayName.Contains("Ollama", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var installLocation = application!.GetValue("InstallLocation") as string;
-                var executablePath = ResolveExecutablePath(
-                    application.GetValue("DisplayIcon") as string,
-                    installLocation);
-                return new InstalledApplicationMetadata(
-                    displayName,
-                    application.GetValue("DisplayVersion") as string,
-                    installLocation,
-                    executablePath,
-                    ReadFileVersion(executablePath));
-            }
-        }
-        catch (Exception exception) when (
-            exception is UnauthorizedAccessException or
-            System.Security.SecurityException or IOException)
-        {
+            AddCandidate(
+                candidates,
+                Path.Combine(entry.InstallLocation, "ollama.exe"));
         }
 
-        return null;
+        AddCandidate(
+            candidates,
+            ParseExecutableFromCommand(entry.UninstallString));
+        return candidates;
     }
 
-    private static string? ReadFileVersion(string? executablePath)
+    private static void AddCandidate(List<string> candidates, string? candidate)
     {
-        if (executablePath is null)
+        if (string.IsNullOrWhiteSpace(candidate) ||
+            !string.Equals(
+                Path.GetFileName(candidate),
+                "ollama.exe",
+                StringComparison.OrdinalIgnoreCase) ||
+            candidates.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        candidates.Add(candidate);
+    }
+
+    private static bool IsApprovedOllamaIdentity(
+        ExecutableIdentitySnapshot identity) =>
+        identity.Exists &&
+        string.Equals(
+            Path.GetFileName(identity.Path),
+            "ollama.exe",
+            StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(identity.FileVersion) &&
+        (string.Equals(
+             identity.ProductName,
+             "Ollama",
+             StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(
+             identity.OriginalFileName,
+             "ollama.exe",
+             StringComparison.OrdinalIgnoreCase));
+
+    private static string? ParseDisplayIcon(string? displayIcon)
+    {
+        if (string.IsNullOrWhiteSpace(displayIcon))
         {
             return null;
         }
 
-        try
+        var path = displayIcon.Trim().Trim('"');
+        var comma = path.LastIndexOf(',');
+        if (comma > 0 && int.TryParse(path[(comma + 1)..], out _))
         {
-            return FileVersionInfo.GetVersionInfo(executablePath).FileVersion;
+            path = path[..comma].Trim().Trim('"');
         }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or
-            System.ComponentModel.Win32Exception)
+
+        return path;
+    }
+
+    private static string? ParseExecutableFromCommand(string? command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
         {
             return null;
         }
-    }
 
-    private static string? ResolveExecutablePath(
-        string? displayIcon,
-        string? installLocation)
-    {
-        if (!string.IsNullOrWhiteSpace(displayIcon))
+        var trimmed = command.Trim();
+        if (trimmed[0] == '"')
         {
-            var iconPath = displayIcon.Trim().Trim('"');
-            var comma = iconPath.LastIndexOf(',');
-            if (comma > 0 && int.TryParse(iconPath[(comma + 1)..], out _))
-            {
-                iconPath = iconPath[..comma].Trim().Trim('"');
-            }
-
-            if (File.Exists(iconPath))
-            {
-                return Path.GetFullPath(iconPath);
-            }
+            var closingQuote = trimmed.IndexOf('"', 1);
+            return closingQuote > 1
+                ? trimmed[1..closingQuote]
+                : null;
         }
 
-        if (!string.IsNullOrWhiteSpace(installLocation))
-        {
-            var candidate = Path.Combine(installLocation, "ollama.exe");
-            if (File.Exists(candidate))
-            {
-                return Path.GetFullPath(candidate);
-            }
-        }
-
-        return null;
+        var firstSpace = trimmed.IndexOf(' ');
+        return firstSpace < 0
+            ? trimmed
+            : trimmed[..firstSpace];
     }
 }

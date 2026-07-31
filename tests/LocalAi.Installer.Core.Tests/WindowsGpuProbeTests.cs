@@ -51,6 +51,33 @@ public sealed class WindowsGpuProbeTests
         Assert.NotNull(snapshot.Reason);
     }
 
+    [Fact]
+    public void Production_DXGI_enumeration_is_safe_and_repeatable_without_GPU_assumptions()
+    {
+        var enumerator = new DxgiNativeGpuAdapterEnumerator();
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var result = enumerator.Enumerate();
+
+            Assert.Contains(
+                result.State,
+                new[]
+                {
+                    ObservationState.Available,
+                    ObservationState.Failed,
+                    ObservationState.Unsupported,
+                });
+            Assert.All(
+                result.Adapters,
+                adapter =>
+                {
+                    Assert.False(string.IsNullOrWhiteSpace(adapter.StableId));
+                    Assert.False(string.IsNullOrWhiteSpace(adapter.Name));
+                });
+        }
+    }
+
     private sealed class FakeNativeGpuAdapterEnumerator(
         IReadOnlyList<NativeGpuAdapterDescriptor> adapters,
         ObservationState state = ObservationState.Available,

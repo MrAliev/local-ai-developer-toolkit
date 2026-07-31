@@ -61,9 +61,12 @@ public sealed partial class ExistingLocalAiInspector(IFileSystemProbe fileSystem
                     detectedVersionPath);
             }
 
+            var physicalBinRoot = fileSystem.ResolvePhysicalPath(binRoot);
             var physicalVersionsRoot = fileSystem.ResolvePhysicalPath(versionsRoot);
+            EnsureBelow(physicalVersionsRoot, physicalBinRoot);
             var physicalVersionPath = fileSystem.ResolvePhysicalPath(versionPath);
             EnsureBelow(physicalVersionPath, physicalVersionsRoot);
+            var physicalRequiredFiles = new List<(string Logical, string Physical)>();
             foreach (var requiredFile in RequiredFiles)
             {
                 var requiredPath = Path.Combine(versionPath, requiredFile);
@@ -75,9 +78,39 @@ public sealed partial class ExistingLocalAiInspector(IFileSystemProbe fileSystem
                         detectedVersionPath);
                 }
 
+                var physicalRequiredPath =
+                    fileSystem.ResolvePhysicalPath(requiredPath);
                 EnsureBelow(
-                    fileSystem.ResolvePhysicalPath(requiredPath),
+                    physicalRequiredPath,
                     physicalVersionPath);
+                physicalRequiredFiles.Add((requiredPath, physicalRequiredPath));
+            }
+
+            var revalidatedBinRoot = fileSystem.ResolvePhysicalPath(binRoot);
+            var revalidatedVersionsRoot =
+                fileSystem.ResolvePhysicalPath(versionsRoot);
+            var revalidatedVersionPath =
+                fileSystem.ResolvePhysicalPath(versionPath);
+            EnsureUnchanged(physicalBinRoot, revalidatedBinRoot, binRoot);
+            EnsureUnchanged(
+                physicalVersionsRoot,
+                revalidatedVersionsRoot,
+                versionsRoot);
+            EnsureUnchanged(
+                physicalVersionPath,
+                revalidatedVersionPath,
+                versionPath);
+            EnsureBelow(revalidatedVersionsRoot, revalidatedBinRoot);
+            EnsureBelow(revalidatedVersionPath, revalidatedVersionsRoot);
+            foreach (var requiredFile in physicalRequiredFiles)
+            {
+                var revalidatedRequired =
+                    fileSystem.ResolvePhysicalPath(requiredFile.Logical);
+                EnsureUnchanged(
+                    requiredFile.Physical,
+                    revalidatedRequired,
+                    requiredFile.Logical);
+                EnsureBelow(revalidatedRequired, revalidatedVersionPath);
             }
 
             return new ExistingLocalAiSnapshot(
@@ -88,7 +121,8 @@ public sealed partial class ExistingLocalAiInspector(IFileSystemProbe fileSystem
         }
         catch (Exception exception) when (
             exception is JsonException or IOException or
-            UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            UnauthorizedAccessException or ArgumentException or
+            NotSupportedException or System.ComponentModel.Win32Exception)
         {
             return Unrecognized(
                 exception.Message,
@@ -108,6 +142,24 @@ public sealed partial class ExistingLocalAiInspector(IFileSystemProbe fileSystem
         {
             throw new IOException(
                 $"Resolved path '{path}' is outside the LocalAi versions directory.");
+        }
+    }
+
+    private static void EnsureUnchanged(
+        string before,
+        string after,
+        string logicalPath)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!string.Equals(
+                Path.GetFullPath(before),
+                Path.GetFullPath(after),
+                comparison))
+        {
+            throw new IOException(
+                $"Physical path for '{logicalPath}' changed during inspection.");
         }
     }
 

@@ -152,7 +152,14 @@ public sealed class WindowsEnvironmentDetector(
         var installed = await installedApplications
             .FindOllamaAsync(cancellationToken)
             .ConfigureAwait(false);
-        return installed is null
+        var usable = installed is not null &&
+                     !string.IsNullOrWhiteSpace(installed.ExecutablePath) &&
+                     string.Equals(
+                         Path.GetFileName(installed.ExecutablePath),
+                         "ollama.exe",
+                         StringComparison.OrdinalIgnoreCase) &&
+                     !string.IsNullOrWhiteSpace(installed.ExecutableVersion);
+        return !usable
             ? new DependencySnapshot(
                 "Ollama",
                 DependencyState.NotFound,
@@ -162,8 +169,8 @@ public sealed class WindowsEnvironmentDetector(
             : new DependencySnapshot(
                 "Ollama",
                 DependencyState.Detected,
-                installed.ExecutablePath,
-                installed.ExecutableVersion ?? installed.DisplayVersion,
+                installed!.ExecutablePath,
+                installed.ExecutableVersion,
                 null);
     }
 

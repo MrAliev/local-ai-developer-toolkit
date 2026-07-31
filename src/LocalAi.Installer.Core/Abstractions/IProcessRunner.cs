@@ -14,4 +14,29 @@ public sealed record ProcessResult(
     string StandardOutput,
     string StandardError,
     bool TimedOut,
-    bool Cancelled);
+    bool Cancelled,
+    bool StandardOutputTruncated = false,
+    bool StandardErrorTruncated = false);
+
+public enum ProcessTerminationCause
+{
+    Timeout,
+    Cancellation,
+}
+
+public sealed class ProcessTerminationException : Exception
+{
+    public ProcessTerminationException(
+        int processId,
+        ProcessTerminationCause cause,
+        string message,
+        Exception? innerException = null)
+        : base(message, innerException)
+    {
+        ProcessId = processId;
+        Cause = cause;
+    }
+
+    public int ProcessId { get; }
+    public ProcessTerminationCause Cause { get; }
+}

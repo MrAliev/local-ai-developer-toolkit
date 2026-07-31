@@ -114,6 +114,25 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
     }
 
     [Fact]
+    public async Task Does_not_detect_Ollama_when_probe_metadata_has_no_usable_executable()
+    {
+        var fixture = CreateFixture();
+        fixture.Installed.Ollama = new InstalledApplicationMetadata(
+            "Ollama",
+            "0.11.4",
+            @"C:\Stale",
+            null,
+            null);
+
+        var diagnosis = await fixture.Detector.DetectAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.NotFound, diagnosis.Ollama.State);
+        Assert.Null(diagnosis.Ollama.ExecutablePath);
+        Assert.Null(diagnosis.Ollama.Version);
+    }
+
+    [Fact]
     public async Task Detects_agent_paths_and_metadata_without_reading_config_contents()
     {
         Directory.CreateDirectory(_root);
