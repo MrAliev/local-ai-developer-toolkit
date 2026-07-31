@@ -1121,6 +1121,50 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task Native_publish_failure_removes_fresh_scaffold_and_retry_retains_published_version()
+    {
+        using var package = Package("v1");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var runner = new RecordingRunner((_, arguments, _, _) =>
+        {
+            WritePointer(arguments[1]);
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+        var acquisition = 0;
+        var installer = new LocalAiPackageInstaller(
+            runner,
+            new ExistingLocalAiInspector(new SystemFileSystemProbe()),
+            TimeSpan.FromSeconds(5),
+            (candidate, requireFresh) => ++acquisition == 1
+                ? InstallationLayoutLease.Acquire(
+                    candidate,
+                    requireFresh,
+                    static (_, _, _) => throw new Win32Exception(5))
+                : InstallationLayoutLease.Acquire(candidate, requireFresh));
+
+        await Assert.ThrowsAsync<LocalAiPackageInstallationException>(() =>
+            installer.InstallAsync(package, layout, TestContext.Current.CancellationToken));
+
+        Assert.False(Directory.Exists(layout.Root));
+        Assert.Empty(runner.Calls);
+
+        var retry = await installer.InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Installed, retry.Status);
+        Assert.Single(runner.Calls);
+        Assert.True(Directory.Exists(Path.Combine(layout.VersionsRoot, "v1")));
+        foreach (var file in LocalAiPackageLayout.VersionRequiredFiles)
+        {
+            Assert.Equal(
+                Content(file),
+                File.ReadAllBytes(Path.Combine(layout.VersionsRoot, "v1", file)));
+        }
+    }
+
+    [Fact]
     public async Task Missing_stable_launcher_in_verified_allowlist_is_rejected_before_mutation()
     {
         using var package = Package("v1", omitFile: LocalAiPackageLayout.StableLauncherFile);

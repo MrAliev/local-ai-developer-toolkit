@@ -53,11 +53,28 @@ public sealed class LocalAiPackageInstaller
     private readonly IProcessRunner processRunner;
     private readonly IExistingLocalAiInspector inspector;
     private readonly TimeSpan activationTimeout;
+    private readonly Func<InstallationLayout, bool, InstallationLayoutLease> layoutLeaseFactory;
 
     public LocalAiPackageInstaller(
         IProcessRunner processRunner,
         IExistingLocalAiInspector inspector,
-        TimeSpan activationTimeout)
+        TimeSpan activationTimeout) :
+        this(
+            processRunner,
+            inspector,
+            activationTimeout,
+            static (layout, requireFresh) => OperatingSystem.IsWindows()
+                ? InstallationLayoutLease.Acquire(layout, requireFresh)
+                : throw new PlatformNotSupportedException(
+                    "Protected LocalAi installation layout is available only on Windows."))
+    {
+    }
+
+    internal LocalAiPackageInstaller(
+        IProcessRunner processRunner,
+        IExistingLocalAiInspector inspector,
+        TimeSpan activationTimeout,
+        Func<InstallationLayout, bool, InstallationLayoutLease> layoutLeaseFactory)
     {
         this.processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         this.inspector = inspector ?? throw new ArgumentNullException(nameof(inspector));
@@ -67,6 +84,8 @@ public sealed class LocalAiPackageInstaller
         }
 
         this.activationTimeout = activationTimeout;
+        this.layoutLeaseFactory = layoutLeaseFactory
+            ?? throw new ArgumentNullException(nameof(layoutLeaseFactory));
     }
 
     public async Task<LocalAiPackageInstallResult> InstallAsync(
@@ -166,9 +185,9 @@ public sealed class LocalAiPackageInstaller
         InstallationLayoutLease layoutLease;
         try
         {
-            layoutLease = InstallationLayoutLease.Acquire(
+            layoutLease = layoutLeaseFactory(
                 layout,
-                requireFreshInstallerTree: existing.State == ExistingLocalAiState.Absent);
+                existing.State == ExistingLocalAiState.Absent);
         }
         catch (LocalAiPackageInstallationException)
         {
@@ -296,7 +315,6 @@ public sealed class LocalAiPackageInstaller
                     temporaryVersion.CanonicalPath,
                     LocalAiPackageLayout.VersionRequiredFiles);
                 package.Revalidate();
-                layoutLease.CommitScaffold();
                 try
                 {
                     temporaryVersion.PublishAbsent(version);
@@ -319,12 +337,18 @@ public sealed class LocalAiPackageInstaller
                     layoutLease.RegisterPublishedVersion(version);
                 }
 
+                if (publishedVersion)
+                {
+                    layoutLease.CommitScaffold();
+                }
+
                 if (!ValidateExactVersion(package, versionPath))
                 {
                     throw new LocalAiPackageInstallationException("The immutable version failed read-back verification.");
                 }
             }
-            else
+
+            if (targetExisted)
             {
                 layoutLease.CommitScaffold();
             }

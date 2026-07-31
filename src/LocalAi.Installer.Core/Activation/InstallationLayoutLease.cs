@@ -16,15 +16,18 @@ public sealed class InstallationLayoutLease : IDisposable
 {
     private readonly List<DirectoryEvidence> directories;
     private readonly List<VersionTemporary> versionTemporaries = [];
+    private readonly VersionDirectoryPublisher publishVersionDirectory;
     private bool scaffoldCommitted;
     private bool disposed;
 
     private InstallationLayoutLease(
         InstallationLayout layout,
-        List<DirectoryEvidence> directories)
+        List<DirectoryEvidence> directories,
+        VersionDirectoryPublisher publishVersionDirectory)
     {
         Layout = layout;
         this.directories = directories;
+        this.publishVersionDirectory = publishVersionDirectory;
     }
 
     public InstallationLayout Layout { get; }
@@ -304,9 +307,16 @@ public sealed class InstallationLayoutLease : IDisposable
 
     public static InstallationLayoutLease Acquire(
         InstallationLayout layout,
-        bool requireFreshInstallerTree = false)
+        bool requireFreshInstallerTree = false) =>
+        Acquire(layout, requireFreshInstallerTree, NativeDirectory.Rename);
+
+    internal static InstallationLayoutLease Acquire(
+        InstallationLayout layout,
+        bool requireFreshInstallerTree,
+        VersionDirectoryPublisher publishVersionDirectory)
     {
         ArgumentNullException.ThrowIfNull(layout);
+        ArgumentNullException.ThrowIfNull(publishVersionDirectory);
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException(
@@ -402,7 +412,10 @@ public sealed class InstallationLayoutLease : IDisposable
                 directories.Add(Evidence(versionHandle, entry));
             }
 
-            var result = new InstallationLayoutLease(layout, directories);
+            var result = new InstallationLayoutLease(
+                layout,
+                directories,
+                publishVersionDirectory);
             result.Revalidate();
             directories = null!;
             return result;
@@ -545,7 +558,7 @@ public sealed class InstallationLayoutLease : IDisposable
             temporary.CanonicalPath,
             LocalAiPackageLayout.VersionRequiredFiles);
         var targetPath = Path.Combine(Layout.VersionsRoot, version);
-        NativeDirectory.Rename(
+        publishVersionDirectory(
             temporary.Handle,
             EvidenceFor(Layout.VersionsRoot).Handle,
             version);
@@ -1582,3 +1595,8 @@ public sealed class InstallationLayoutLease : IDisposable
         internal sealed record OpenedDirectory(SafeFileHandle Handle, bool Created);
     }
 }
+
+internal delegate void VersionDirectoryPublisher(
+    SafeFileHandle source,
+    SafeFileHandle targetParent,
+    string targetName);
