@@ -175,6 +175,44 @@ public sealed class BrokerProcessTests
     }
 
     [Fact]
+    public async Task Incompatible_live_host_diagnostic_does_not_split_an_astral_rune_at_the_limit()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        await AssertLiveIncompatibleStateIsRejected(
+            new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now,
+                BrokerCompatibilityContract.HostStateSchemaVersion,
+                BrokerAssemblyPath,
+                new BrokerCompatibility(
+                    BrokerCompatibilityContract.ProtocolVersion,
+                    new string('b', 511) + "\U0001F600")),
+            "actual schema=3 protocol=1 build=" + new string('b', 511) +
+            "; broker path=" + BrokerAssemblyPath);
+    }
+
+    [Fact]
+    public async Task Incompatible_live_host_diagnostic_replaces_unpaired_surrogates()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        await AssertLiveIncompatibleStateIsRejected(
+            new BrokerProcessState(
+                42,
+                now.AddMinutes(-1),
+                now,
+                BrokerCompatibilityContract.HostStateSchemaVersion,
+                BrokerAssemblyPath,
+                new BrokerCompatibility(
+                    BrokerCompatibilityContract.ProtocolVersion,
+                    "high\uD800low\uDC00")),
+            "actual schema=3 protocol=1 build=high\uFFFDlow\uFFFD; broker path=" +
+            BrokerAssemblyPath);
+    }
+
+    [Fact]
     public async Task Non_owner_process_is_replaced()
     {
         var now = DateTimeOffset.UtcNow;

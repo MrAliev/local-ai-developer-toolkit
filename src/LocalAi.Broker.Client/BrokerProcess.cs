@@ -231,14 +231,16 @@ public sealed class BrokerProcess : IBrokerProcess
         }
 
         var builder = new StringBuilder(Math.Min(value.Length, MaximumDiagnosticValueLength));
-        foreach (var character in value)
+        foreach (var rune in value.EnumerateRunes())
         {
-            if (builder.Length == MaximumDiagnosticValueLength)
+            var normalizedRune = Rune.IsControl(rune) ? new Rune('?') : rune;
+            if (builder.Length + normalizedRune.Utf16SequenceLength >
+                MaximumDiagnosticValueLength)
             {
-                return builder.ToString();
+                break;
             }
 
-            builder.Append(char.IsControl(character) ? '?' : character);
+            builder.Append(normalizedRune.ToString());
         }
 
         return builder.ToString();
