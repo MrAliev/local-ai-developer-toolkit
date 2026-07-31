@@ -568,10 +568,12 @@ public sealed class BrokerProcessTests
         var now = DateTimeOffset.UtcNow;
         var reads = 0;
         var starts = 0;
+        var delays = 0;
+        var startAttempt = FakeStartAttempt.Exited(42, 0);
         var process = BrokerProcess.CreateForTesting(
             BrokerAssemblyPath,
             "runtime",
-            _ => ++reads == 1
+            _ => ++reads < 3
                 ? null
                 : new BrokerProcessState(
                     99,
@@ -584,14 +586,21 @@ public sealed class BrokerProcessTests
             (_, _) =>
             {
                 starts++;
-                return FakeStartAttempt.Exited(42, 0);
+                return startAttempt;
             },
             TimeProvider.System,
-            static (_, _) => Task.CompletedTask);
+            (_, _) =>
+            {
+                delays++;
+                return Task.CompletedTask;
+            });
 
         await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, starts);
+        Assert.True(startAttempt.TryGetExitCodeCallCount > 0);
+        Assert.True(startAttempt.IsDisposed);
+        Assert.Equal(1, delays);
     }
 
     [Fact]
@@ -599,10 +608,12 @@ public sealed class BrokerProcessTests
     {
         var now = DateTimeOffset.UtcNow;
         var reads = 0;
+        var delays = 0;
+        var startAttempt = FakeStartAttempt.Exited(42, 0);
         var process = BrokerProcess.CreateForTesting(
             BrokerAssemblyPath,
             "runtime",
-            _ => ++reads == 1
+            _ => ++reads < 3
                 ? null
                 : new BrokerProcessState(
                     99,
@@ -612,26 +623,34 @@ public sealed class BrokerProcessTests
                     BrokerAssemblyPath,
                     new BrokerCompatibility(2, "other")),
             state => state.ProcessId == 99,
-            static (_, _) => FakeStartAttempt.Exited(42, 0),
+            (_, _) => startAttempt,
             TimeProvider.System,
-            static (_, _) => Task.CompletedTask);
+            (_, _) =>
+            {
+                delays++;
+                return Task.CompletedTask;
+            });
 
         var exception = await Assert.ThrowsAsync<BrokerBootstrapException>(
             () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
 
         Assert.Equal("broker_incompatible", exception.Code);
+        Assert.True(startAttempt.TryGetExitCodeCallCount > 0);
+        Assert.True(startAttempt.IsDisposed);
+        Assert.Equal(1, delays);
     }
 
     [Fact]
     public async Task Child_nonzero_exit_fails_without_waiting_for_timeout()
     {
         var delays = 0;
+        var startAttempt = FakeStartAttempt.Exited(42, 17);
         var process = BrokerProcess.CreateForTesting(
             BrokerAssemblyPath,
             "runtime",
             _ => null,
             _ => false,
-            static (_, _) => FakeStartAttempt.Exited(42, 17),
+            (_, _) => startAttempt,
             TimeProvider.System,
             (_, _) =>
             {
@@ -645,6 +664,8 @@ public sealed class BrokerProcessTests
         Assert.Equal("broker_start_failed", exception.Code);
         Assert.Contains("17", exception.Message);
         Assert.Equal(0, delays);
+        Assert.True(startAttempt.TryGetExitCodeCallCount > 0);
+        Assert.True(startAttempt.IsDisposed);
     }
 
     [Fact]
@@ -727,18 +748,21 @@ public sealed class BrokerProcessTests
 
         public int ProcessId { get; } = processId;
 
+        public int TryGetExitCodeCallCount { get; private set; }
+
+        public bool IsDisposed { get; private set; }
+
         public static FakeStartAttempt Running(int processId) => new(processId, null);
 
         public static FakeStartAttempt Exited(int processId, int exitCode) => new(processId, exitCode);
 
         public bool TryGetExitCode(out int exitCode)
         {
+            TryGetExitCodeCallCount++;
             exitCode = _exitCode.GetValueOrDefault();
             return _exitCode.HasValue;
         }
 
-        public void Dispose()
-        {
-        }
+        public void Dispose() => IsDisposed = true;
     }
 }
