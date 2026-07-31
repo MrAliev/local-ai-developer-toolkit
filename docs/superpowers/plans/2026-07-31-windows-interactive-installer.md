@@ -71,6 +71,7 @@
 **Files:**
 - Create: `src/LocalAi.Installer.Core/LocalAi.Installer.Core.csproj`
 - Create: `src/LocalAi.Installer/LocalAi.Installer.csproj`
+- Create: `src/LocalAi.Installer/Program.cs`
 - Create: `tests/LocalAi.Installer.Core.Tests/LocalAi.Installer.Core.Tests.csproj`
 - Create: `tests/LocalAi.Installer.Tests/LocalAi.Installer.Tests.csproj`
 - Create: `tests/LocalAi.Installer.IntegrationTests/LocalAi.Installer.IntegrationTests.csproj`
@@ -115,6 +116,8 @@ WPF properties:
 ```
 
 Use the repository's existing xUnit v3 versions in both test projects.
+Add a minimal `[STAThread] static void Main()` in `Program.cs` so the `WinExe`
+scaffold builds before Task 11 replaces it with the WPF composition root.
 
 - [ ] **Step 4: Run GREEN and solution build**
 
@@ -674,4 +677,3 @@ Check issue #9 acceptance criteria, singleton/FIFO/ACL/activation/full-VRAM/zero
 - [ ] **Step 4: Prepare one PR**
 
 Push `codex/windows-installer` and open a single PR closing #9 only after all release gates pass. Do not publish a signed installer release until signing credentials and protected-tag workflow succeed.
-

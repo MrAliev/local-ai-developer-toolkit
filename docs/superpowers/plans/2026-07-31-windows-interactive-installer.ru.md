@@ -26,7 +26,11 @@
 
 ### 1. Добавить проекты
 
-Создать `LocalAi.Installer.Core`, WPF-проект `LocalAi.Installer`, unit-тесты Core/UI и integration-тесты; добавить их в `LocalAi.slnx`. Сначала тест проверяет отсутствие solution entries (RED), затем добавляются минимальные проекты (GREEN).
+Создать `LocalAi.Installer.Core`, WPF-проект `LocalAi.Installer`, минимальный
+`Program.cs` с `[STAThread] static void Main()`, unit-тесты Core/UI и
+integration-тесты; добавить их в `LocalAi.slnx`. Сначала тест проверяет
+отсутствие solution entries (RED), затем добавляются минимальные проекты
+(GREEN). В Task 11 временная точка входа заменяется WPF composition root.
 
 Коммит:
 
