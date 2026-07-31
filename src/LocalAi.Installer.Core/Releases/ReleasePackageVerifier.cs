@@ -9,6 +9,11 @@ using LocalAi.Installer.Core.Abstractions;
 
 namespace LocalAi.Installer.Core.Releases;
 
+internal interface IReleaseVerificationObserver
+{
+    void OnPackageHashed(string archivePath);
+}
+
 public sealed class ReleasePackageVerifier
 {
     public const string PackageMetadataFileName = "localai-package.json";
@@ -34,6 +39,7 @@ public sealed class ReleasePackageVerifier
     private readonly IAuthenticodeVerifier authenticodeVerifier;
     private readonly AuthenticodePublisherPolicy publisherPolicy;
     private readonly IStagingRootFactory stagingRootFactory;
+    private readonly IReleaseVerificationObserver? verificationObserver;
 
     public ReleasePackageVerifier(
         ReleaseManifestVerifier manifestVerifier,
@@ -54,7 +60,8 @@ public sealed class ReleasePackageVerifier
         IReleaseClient releaseClient,
         IAuthenticodeVerifier authenticodeVerifier,
         AuthenticodePublisherPolicy publisherPolicy,
-        IStagingRootFactory stagingRootFactory)
+        IStagingRootFactory stagingRootFactory,
+        IReleaseVerificationObserver? verificationObserver = null)
     {
         this.manifestVerifier = manifestVerifier ??
             throw new ArgumentNullException(nameof(manifestVerifier));
@@ -66,6 +73,7 @@ public sealed class ReleasePackageVerifier
             throw new ArgumentNullException(nameof(publisherPolicy));
         this.stagingRootFactory = stagingRootFactory ??
             throw new ArgumentNullException(nameof(stagingRootFactory));
+        this.verificationObserver = verificationObserver;
     }
 
     public async Task<VerifiedPackage> VerifyAsync(
@@ -77,24 +85,28 @@ public sealed class ReleasePackageVerifier
         var manifest = manifestVerifier.Verify(manifestJson.Span, signature.Span);
         IStagingRootLease? stagingLease = null;
         List<IRetainedStagingFile>? retainedFiles = null;
+        FileStream? archiveStream = null;
         try
         {
             stagingLease = stagingRootFactory.CreateExclusive(stagingRoot);
             var canonicalRoot = stagingLease.CanonicalPath;
             stagingLease.Revalidate();
             var archivePath = Path.Combine(canonicalRoot, ".package.zip");
-            await DownloadAndHashAsync(
+            archiveStream = await DownloadAndHashAsync(
                 manifest,
                 archivePath,
                 cancellationToken).ConfigureAwait(false);
+            verificationObserver?.OnPackageHashed(archivePath);
             stagingLease.Revalidate();
 
-            var entries = InspectArchive(archivePath);
+            var entries = InspectArchive(archiveStream);
             var extracted = await ExtractAsync(
-                archivePath,
+                archiveStream,
                 stagingLease,
                 entries,
                 cancellationToken).ConfigureAwait(false);
+            archiveStream.Dispose();
+            archiveStream = null;
             File.Delete(archivePath);
             stagingLease.Revalidate();
             retainedFiles = [];
@@ -125,11 +137,13 @@ public sealed class ReleasePackageVerifier
         }
         catch (OperationCanceledException)
         {
+            TryDisposeArchive(archiveStream);
             CleanupOwned(stagingLease, retainedFiles);
             throw;
         }
         catch (ReleaseVerificationException)
         {
+            TryDisposeArchive(archiveStream);
             CleanupOwned(stagingLease, retainedFiles);
             throw;
         }
@@ -138,12 +152,13 @@ public sealed class ReleasePackageVerifier
             InvalidDataException or ArgumentException or NotSupportedException or
             CryptographicException or JsonException or DecoderFallbackException)
         {
+            TryDisposeArchive(archiveStream);
             CleanupOwned(stagingLease, retainedFiles);
             throw Failure();
         }
     }
 
-    private async Task DownloadAndHashAsync(
+    private async Task<FileStream> DownloadAndHashAsync(
         ReleaseManifest manifest,
         string archivePath,
         CancellationToken cancellationToken)
@@ -152,56 +167,59 @@ public sealed class ReleasePackageVerifier
             manifest.PackageUri,
             manifest.PackageSize,
             cancellationToken).ConfigureAwait(false);
-        await using var destination = new FileStream(
+        var destination = new FileStream(
             archivePath,
             FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
+            FileAccess.ReadWrite,
+            FileShare.Read,
             64 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = new byte[64 * 1024];
-        long total = 0;
-        while (true)
+            FileOptions.Asynchronous | FileOptions.RandomAccess);
+        try
         {
-            var read = await source.ReadAsync(buffer, cancellationToken)
-                .ConfigureAwait(false);
-            if (read == 0)
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[64 * 1024];
+            long total = 0;
+            while (true)
             {
-                break;
+                var read = await source.ReadAsync(buffer, cancellationToken)
+                    .ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                total = checked(total + read);
+                if (total > manifest.PackageSize)
+                {
+                    throw Failure();
+                }
+
+                hash.AppendData(buffer.AsSpan(0, read));
+                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+                    .ConfigureAwait(false);
             }
 
-            total = checked(total + read);
-            if (total > manifest.PackageSize)
+            await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+            var expectedHash = Convert.FromHexString(manifest.PackageSha256);
+            var actualHash = hash.GetHashAndReset();
+            if (total != manifest.PackageSize ||
+                !CryptographicOperations.FixedTimeEquals(expectedHash, actualHash))
             {
                 throw Failure();
             }
 
-            hash.AppendData(buffer.AsSpan(0, read));
-            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
-                .ConfigureAwait(false);
+            return destination;
         }
-
-        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-        var expectedHash = Convert.FromHexString(manifest.PackageSha256);
-        var actualHash = hash.GetHashAndReset();
-        if (total != manifest.PackageSize ||
-            !CryptographicOperations.FixedTimeEquals(expectedHash, actualHash))
+        catch
         {
-            throw Failure();
+            TryDisposeArchive(destination);
+            throw;
         }
     }
 
     private static IReadOnlyDictionary<string, CentralEntry> InspectArchive(
-        string archivePath)
+        FileStream stream)
     {
-        using var stream = new FileStream(
-            archivePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            4096,
-            FileOptions.RandomAccess);
         var eocd = FindEndOfCentralDirectory(stream);
         if (eocd.EntryCount > MaximumEntryCount)
         {
@@ -394,14 +412,18 @@ public sealed class ReleasePackageVerifier
     }
 
     private static async Task<IReadOnlyDictionary<string, ExtractedFileEvidence>> ExtractAsync(
-        string archivePath,
+        FileStream archiveStream,
         IStagingRootLease stagingLease,
         IReadOnlyDictionary<string, CentralEntry> inspected,
         CancellationToken cancellationToken)
     {
         var stagingRoot = stagingLease.CanonicalPath;
         var extracted = new Dictionary<string, ExtractedFileEvidence>(StringComparer.Ordinal);
-        using var archive = ZipFile.OpenRead(archivePath);
+        archiveStream.Position = 0;
+        using var archive = new ZipArchive(
+            archiveStream,
+            ZipArchiveMode.Read,
+            leaveOpen: true);
         if (archive.Entries.Count != inspected.Count)
         {
             throw Failure();
@@ -688,6 +710,23 @@ public sealed class ReleasePackageVerifier
             }
 
             total += read;
+        }
+    }
+
+    private static void TryDisposeArchive(FileStream? archiveStream)
+    {
+        if (archiveStream is null)
+        {
+            return;
+        }
+
+        try
+        {
+            archiveStream.Dispose();
+        }
+        catch (Exception exception) when (
+            IsExpectedCleanupFailure(exception))
+        {
         }
     }
 

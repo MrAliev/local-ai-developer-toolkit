@@ -118,6 +118,33 @@ public sealed class ReleasePackageVerifierTests : IDisposable
     }
 
     [Fact]
+    public async Task Manifest_bound_archive_stays_write_locked_through_extraction()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var observer = new ArchiveLockProbe();
+        var verifier = new ReleasePackageVerifier(
+            new ReleaseManifestVerifier(key.ExportSubjectPublicKeyInfo()),
+            new MemoryReleaseClient(package),
+            new RecordingAuthenticodeVerifier(true),
+            new AuthenticodePublisherPolicy(
+                "CN=Approved Publisher, O=LocalAi, C=US",
+                new string('A', 64)),
+            new WindowsStagingRootFactory(),
+            observer);
+
+        using var verified = await verifier.VerifyAsync(
+            json,
+            Sign(key, json),
+            StagingPath(),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(observer.WriteWasBlocked);
+    }
+
+    [Fact]
     public async Task Approved_content_is_read_from_retained_handle_and_excludes_added_files()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -843,6 +870,24 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             AssertBlocked(() => File.Delete(path));
             VerifiedCount++;
             return true;
+        }
+    }
+
+    private sealed class ArchiveLockProbe : IReleaseVerificationObserver
+    {
+        public bool WriteWasBlocked { get; private set; }
+
+        public void OnPackageHashed(string archivePath)
+        {
+            var exception = Record.Exception(() =>
+            {
+                using var ignored = new FileStream(
+                    archivePath,
+                    FileMode.Open,
+                    FileAccess.Write,
+                    FileShare.Read);
+            });
+            WriteWasBlocked = exception is IOException or UnauthorizedAccessException;
         }
     }
 }
