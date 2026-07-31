@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
 
@@ -10,6 +11,11 @@ namespace LocalAi.Installer.Core.Releases;
 internal interface IStagingRootFactory
 {
     IStagingRootLease CreateExclusive(string requestedPath);
+}
+
+internal interface IStagingCreationObserver
+{
+    void AfterExclusiveCreate(string path);
 }
 
 internal interface IStagingRootLease : IDisposable
@@ -32,6 +38,18 @@ internal interface IStagingRootLease : IDisposable
 /// </summary>
 internal sealed class WindowsStagingRootFactory : IStagingRootFactory
 {
+    private readonly IStagingCreationObserver? creationObserver;
+
+    public WindowsStagingRootFactory()
+    {
+    }
+
+    internal WindowsStagingRootFactory(IStagingCreationObserver creationObserver)
+    {
+        this.creationObserver = creationObserver ??
+            throw new ArgumentNullException(nameof(creationObserver));
+    }
+
     public IStagingRootLease CreateExclusive(string requestedPath)
     {
         if (!OperatingSystem.IsWindows())
@@ -44,11 +62,13 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
     }
 
     [SupportedOSPlatform("windows")]
-    private static IStagingRootLease CreateExclusiveWindows(string requestedPath)
+    private IStagingRootLease CreateExclusiveWindows(string requestedPath)
     {
         var canonicalPath = ValidateRequestedPath(requestedPath);
         ValidateAncestors(canonicalPath);
         var security = BuildSecurity();
+        var expectedSecurity = security.GetSecurityDescriptorSddlForm(
+            AccessControlSections.Owner | AccessControlSections.Access);
         var descriptor = security.GetSecurityDescriptorBinaryForm();
         var descriptorPointer = Marshal.AllocHGlobal(descriptor.Length);
         try
@@ -73,10 +93,29 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
             Marshal.FreeHGlobal(descriptorPointer);
         }
 
+        var ownershipNonce = RandomNumberGenerator.GetBytes(32);
+        var ownershipMarker = Path.Combine(
+            canonicalPath,
+            ".localai-staging-owner-" + Guid.NewGuid().ToString("N"));
+        var markerCreated = false;
         SafeFileHandle? handle = null;
         WindowsStagingRootLease? lease = null;
         try
         {
+            using (var marker = new FileStream(
+                       ownershipMarker,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       4096,
+                       FileOptions.WriteThrough))
+            {
+                marker.Write(ownershipNonce);
+                marker.Flush(flushToDisk: true);
+            }
+
+            markerCreated = true;
+            creationObserver?.AfterExclusiveCreate(canonicalPath);
             handle = CreateFileW(
                 canonicalPath,
                 0x00010000 | 0x00020000 | 0x00100000,
@@ -96,6 +135,9 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
                 security);
             handle = null;
             lease.Revalidate();
+            File.Delete(ownershipMarker);
+            markerCreated = false;
+            lease.Revalidate();
             return lease;
         }
         catch
@@ -113,6 +155,15 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
                 {
                     lease.Dispose();
                 }
+            }
+
+            if (markerCreated)
+            {
+                TryRemoveMarkerBoundOwnedLeaf(
+                    canonicalPath,
+                    ownershipMarker,
+                    ownershipNonce,
+                    expectedSecurity);
             }
 
             throw;
@@ -189,6 +240,57 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None,
             AccessControlType.Allow));
+
+    [SupportedOSPlatform("windows")]
+    private static void TryRemoveMarkerBoundOwnedLeaf(
+        string path,
+        string markerPath,
+        ReadOnlySpan<byte> ownershipNonce,
+        string expectedSecurity)
+    {
+        try
+        {
+            if (!Directory.Exists(path) ||
+                File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+            {
+                return;
+            }
+
+            var actualSecurity = new DirectoryInfo(path).GetAccessControl(
+                AccessControlSections.Owner | AccessControlSections.Access);
+            if (!actualSecurity.AreAccessRulesProtected ||
+                !string.Equals(
+                    actualSecurity.GetSecurityDescriptorSddlForm(
+                        AccessControlSections.Owner | AccessControlSections.Access),
+                    expectedSecurity,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var entries = Directory.EnumerateFileSystemEntries(path).ToArray();
+            if (entries.Length != 1 ||
+                !string.Equals(entries[0], markerPath, StringComparison.OrdinalIgnoreCase) ||
+                File.GetAttributes(markerPath).HasFlag(FileAttributes.ReparsePoint))
+            {
+                return;
+            }
+
+            var actualNonce = File.ReadAllBytes(markerPath);
+            if (!CryptographicOperations.FixedTimeEquals(actualNonce, ownershipNonce))
+            {
+                return;
+            }
+
+            File.Delete(markerPath);
+            Directory.Delete(path, recursive: false);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+            System.Security.SecurityException or ArgumentException)
+        {
+        }
+    }
 
     private static ReleaseVerificationException Failure() =>
         new("Secure staging root creation failed.");

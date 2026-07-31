@@ -238,7 +238,15 @@ public sealed class ReleasePackageVerifier
             }
 
             var unixType = (externalAttributes >> 16) & 0xF000;
-            if ((externalAttributes & (uint)FileAttributes.ReparsePoint) != 0 ||
+            const FileAttributes allowedWindowsAttributes =
+                FileAttributes.ReadOnly |
+                FileAttributes.Archive |
+                FileAttributes.Normal;
+            var windowsAttributes =
+                (FileAttributes)(externalAttributes & 0xFFFF);
+            if ((windowsAttributes & ~allowedWindowsAttributes) != 0 ||
+                (windowsAttributes.HasFlag(FileAttributes.Normal) &&
+                 windowsAttributes != FileAttributes.Normal) ||
                 unixType is not (0 or 0x8000))
             {
                 throw Failure();

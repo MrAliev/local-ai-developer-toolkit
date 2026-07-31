@@ -213,6 +213,48 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             externalAttributes: externalAttributes));
     }
 
+    [Theory]
+    [InlineData((int)FileAttributes.Directory)]
+    [InlineData((int)FileAttributes.Device)]
+    [InlineData((int)FileAttributes.Encrypted)]
+    [InlineData((int)FileAttributes.SparseFile)]
+    [InlineData((int)FileAttributes.ReparsePoint)]
+    [InlineData((int)FileAttributes.Offline)]
+    [InlineData((int)FileAttributes.System)]
+    [InlineData((int)FileAttributes.Hidden)]
+    [InlineData((int)FileAttributes.Temporary)]
+    public async Task VerifyAsync_rejects_windows_special_attributes_on_required_file(
+        int attributes)
+    {
+        await AssertPackageRejected(CreatePackage(
+            requiredFileExternalAttributes: attributes));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData((int)FileAttributes.Archive)]
+    [InlineData((int)FileAttributes.Normal)]
+    [InlineData((int)FileAttributes.ReadOnly)]
+    [InlineData((int)(FileAttributes.Archive | FileAttributes.ReadOnly))]
+    public async Task VerifyAsync_accepts_only_regular_windows_file_attributes(
+        int attributes)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage(requiredFileExternalAttributes: attributes);
+        var manifest = CreateManifest(package);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+
+        using var verified = await CreateVerifier(key, package).VerifyAsync(
+            json,
+            Sign(key, json),
+            StagingPath(),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(File.Exists(Path.Combine(
+            verified.StagingRoot,
+            LocalAiPackageLayout.RequiredFiles[0])));
+    }
+
     [Fact]
     public async Task VerifyAsync_rejects_duplicate_central_directory_names()
     {
@@ -449,19 +491,28 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         int? externalAttributes = null,
         bool duplicateRequiredFile = false,
         (string Property, string Value)? metadataOverride = null,
-        IReadOnlyList<string>? extraEntries = null)
+        IReadOnlyList<string>? extraEntries = null,
+        int? requiredFileExternalAttributes = null)
     {
         using var stream = new MemoryStream();
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            foreach (var file in LocalAiPackageLayout.RequiredFiles)
+            for (var index = 0; index < LocalAiPackageLayout.RequiredFiles.Count; index++)
             {
+                var file = LocalAiPackageLayout.RequiredFiles[index];
                 if (string.Equals(file, missingFile, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
-                WriteEntry(archive, file, Encoding.UTF8.GetBytes("test " + file));
+                var entry = WriteEntry(
+                    archive,
+                    file,
+                    Encoding.UTF8.GetBytes("test " + file));
+                if (index == 0 && requiredFileExternalAttributes is { } attributes)
+                {
+                    entry.ExternalAttributes = attributes;
+                }
             }
 
             if (duplicateRequiredFile)
@@ -510,11 +561,15 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         return stream.ToArray();
     }
 
-    private static void WriteEntry(ZipArchive archive, string name, byte[] content)
+    private static ZipArchiveEntry WriteEntry(
+        ZipArchive archive,
+        string name,
+        byte[] content)
     {
         var entry = archive.CreateEntry(name, CompressionLevel.NoCompression);
         using var output = entry.Open();
         output.Write(content);
+        return entry;
     }
 
     private static byte[] MutateFirstEntry(

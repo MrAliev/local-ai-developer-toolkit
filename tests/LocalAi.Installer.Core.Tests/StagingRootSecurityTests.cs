@@ -30,6 +30,36 @@ public sealed class StagingRootSecurityTests : IDisposable
     }
 
     [Fact]
+    public void Post_create_pre_lease_failure_removes_only_marker_bound_owned_leaf()
+    {
+        Directory.CreateDirectory(root);
+        var staging = Path.Combine(root, "owned-failure");
+        var factory = new WindowsStagingRootFactory(
+            new ThrowAfterExclusiveCreate());
+
+        Assert.Throws<ReleaseVerificationException>(() =>
+            factory.CreateExclusive(staging));
+
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Fact]
+    public void Post_create_replacement_is_never_deleted_as_owned()
+    {
+        Directory.CreateDirectory(root);
+        var staging = Path.Combine(root, "replacement");
+        var factory = new WindowsStagingRootFactory(
+            new ReplaceThenThrowAfterExclusiveCreate());
+
+        Assert.Throws<ReleaseVerificationException>(() =>
+            factory.CreateExclusive(staging));
+
+        Assert.Equal(
+            "foreign",
+            File.ReadAllText(Path.Combine(staging, "foreign.txt")));
+    }
+
+    [Fact]
     public async Task Verifier_does_not_cleanup_when_concurrent_creator_wins_before_lease()
     {
         Directory.CreateDirectory(root);
@@ -177,6 +207,23 @@ public sealed class StagingRootSecurityTests : IDisposable
             Directory.CreateDirectory(requestedPath);
             File.WriteAllText(Path.Combine(requestedPath, "winner.txt"), "winner");
             throw new ReleaseVerificationException("Staging root is unavailable.");
+        }
+    }
+
+    private sealed class ThrowAfterExclusiveCreate : IStagingCreationObserver
+    {
+        public void AfterExclusiveCreate(string path) =>
+            throw new ReleaseVerificationException("Injected pre-lease failure.");
+    }
+
+    private sealed class ReplaceThenThrowAfterExclusiveCreate : IStagingCreationObserver
+    {
+        public void AfterExclusiveCreate(string path)
+        {
+            Directory.Delete(path, recursive: true);
+            Directory.CreateDirectory(path);
+            File.WriteAllText(Path.Combine(path, "foreign.txt"), "foreign");
+            throw new ReleaseVerificationException("Injected replacement race.");
         }
     }
 
