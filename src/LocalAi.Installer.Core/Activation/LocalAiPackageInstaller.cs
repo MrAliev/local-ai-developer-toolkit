@@ -204,8 +204,8 @@ public sealed class LocalAiPackageInstaller
                 priorPointer = ReadPointerLocked(layout);
             }
             catch (Exception exception) when (
-                exception is CurrentPointerException or ActivationCoordinationException or
-                IOException or UnauthorizedAccessException)
+                exception is CurrentPointerException or ActivationCoordinationException ||
+                IsNativeHandoffFailure(exception))
             {
                 return new(
                     LocalAiPackageInstallStatus.Refused,
@@ -371,7 +371,8 @@ public sealed class LocalAiPackageInstaller
                         .ConfigureAwait(false);
                 }
                 catch (Exception exception) when (
-                    exception is ProcessTerminationException or OperationCanceledException)
+                    exception is ProcessTerminationException or OperationCanceledException ||
+                    IsNativeHandoffFailure(exception))
                 {
                     activationException = exception;
                 }
@@ -547,7 +548,7 @@ public sealed class LocalAiPackageInstaller
         }
         catch (Exception exception) when (
             exception is ProcessTerminationException or OperationCanceledException or
-            LocalAiPackageInstallationException)
+            LocalAiPackageInstallationException || IsNativeHandoffFailure(exception))
         {
         }
 
@@ -609,8 +610,8 @@ public sealed class LocalAiPackageInstaller
                 publishedVersion && !targetExisted);
         }
         catch (Exception exception) when (
-            exception is CurrentPointerException or ActivationCoordinationException or
-            IOException or UnauthorizedAccessException)
+            exception is CurrentPointerException or ActivationCoordinationException ||
+            IsNativeHandoffFailure(exception))
         {
             return Manual();
         }
@@ -666,8 +667,8 @@ public sealed class LocalAiPackageInstaller
                 reason);
         }
         catch (Exception exception) when (
-            exception is CurrentPointerException or ActivationCoordinationException or
-            IOException or UnauthorizedAccessException)
+            exception is CurrentPointerException or ActivationCoordinationException ||
+            IsNativeHandoffFailure(exception))
         {
             return new(
                 LocalAiPackageInstallStatus.Indeterminate,
@@ -704,8 +705,7 @@ public sealed class LocalAiPackageInstaller
                 publishedVersion && !targetExisted);
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or
-            LocalAiPackageInstallationException)
+            exception is LocalAiPackageInstallationException || IsNativeHandoffFailure(exception))
         {
             return new(
                 LocalAiPackageInstallStatus.RollbackFailed,
@@ -1061,11 +1061,15 @@ public sealed class LocalAiPackageInstaller
         }
         catch (Exception exception) when (
             exception is CurrentPointerException or CurrentPointerChangedException or
-            ActivationCoordinationException or IOException or UnauthorizedAccessException)
+            ActivationCoordinationException || IsNativeHandoffFailure(exception))
         {
             return null;
         }
     }
+
+    private static bool IsNativeHandoffFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or
+            System.ComponentModel.Win32Exception or System.Security.SecurityException;
 
     private static IReadOnlyList<string> ActivationArguments(
         string version,

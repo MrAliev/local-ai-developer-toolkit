@@ -3,7 +3,9 @@ using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Releases;
+using System.ComponentModel;
 using System.Runtime.Versioning;
+using System.Security;
 
 namespace LocalAi.Installer.Core.Tests;
 
@@ -742,6 +744,47 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.Equal(LocalAiPackageInstallStatus.RolledBack, result.Status);
         Assert.Equal("v1", ReadPointerVersion(layout.CurrentPointerPath));
         Assert.Equal(2, runner.Calls.Count);
+    }
+
+    [Theory]
+    [InlineData("io")]
+    [InlineData("win32")]
+    [InlineData("unauthorized")]
+    [InlineData("security")]
+    public async Task Native_process_failures_are_classified_when_activation_and_rollback_fail(
+        string failure)
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var runner = new RecordingRunner((_, arguments, _, _) =>
+        {
+            if (arguments[1] == "v2")
+            {
+                WritePointer("v2");
+            }
+
+            throw failure switch
+            {
+                "io" => new IOException("native I/O failed"),
+                "win32" => new Win32Exception(5, "native startup failed"),
+                "unauthorized" => new UnauthorizedAccessException("native access failed"),
+                "security" => new SecurityException("native policy failed"),
+                _ => new InvalidOperationException(),
+            };
+        });
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.RollbackFailed, result.Status);
+        Assert.Equal("v2", ReadPointerVersion(layout.CurrentPointerPath));
+        Assert.Equal(2, runner.Calls.Count);
+        Assert.Equal(
+            "Activation and rollback both failed; manual recovery is required.",
+            result.Reason);
     }
 
     [Fact]
