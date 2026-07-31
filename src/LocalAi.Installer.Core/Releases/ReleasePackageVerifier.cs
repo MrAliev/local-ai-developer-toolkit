@@ -76,6 +76,7 @@ public sealed class ReleasePackageVerifier
     {
         var manifest = manifestVerifier.Verify(manifestJson.Span, signature.Span);
         IStagingRootLease? stagingLease = null;
+        List<IRetainedStagingFile>? retainedFiles = null;
         try
         {
             stagingLease = stagingRootFactory.CreateExclusive(stagingRoot);
@@ -89,29 +90,47 @@ public sealed class ReleasePackageVerifier
             stagingLease.Revalidate();
 
             var entries = InspectArchive(archivePath);
-            await ExtractAsync(
+            var extracted = await ExtractAsync(
                 archivePath,
                 stagingLease,
                 entries,
                 cancellationToken).ConfigureAwait(false);
             File.Delete(archivePath);
             stagingLease.Revalidate();
-            ValidateMetadata(manifest, canonicalRoot);
-            ValidateFinalLayout(canonicalRoot);
-            ValidateAuthenticode(manifest, canonicalRoot);
-            stagingLease.Revalidate();
-            var verified = new VerifiedPackage(manifest, stagingLease);
+            retainedFiles = [];
+            RetainApprovedFiles(stagingLease, extracted, retainedFiles);
+            stagingLease.ValidateExactLayout(
+                retainedFiles.Select(file => file.Metadata.RelativePath));
+            var retainedByPath = retainedFiles.ToDictionary(
+                file => file.Metadata.RelativePath,
+                StringComparer.Ordinal);
+            ValidateMetadata(
+                manifest,
+                retainedByPath[PackageMetadataFileName]);
+            ValidateAuthenticode(manifest, canonicalRoot, retainedByPath);
+            foreach (var file in retainedFiles)
+            {
+                file.Revalidate();
+            }
+
+            stagingLease.ValidateExactLayout(
+                retainedFiles.Select(file => file.Metadata.RelativePath));
+            var verified = new VerifiedPackage(
+                manifest,
+                stagingLease,
+                retainedFiles);
             stagingLease = null;
+            retainedFiles = null;
             return verified;
         }
         catch (OperationCanceledException)
         {
-            CleanupOwned(stagingLease);
+            CleanupOwned(stagingLease, retainedFiles);
             throw;
         }
         catch (ReleaseVerificationException)
         {
-            CleanupOwned(stagingLease);
+            CleanupOwned(stagingLease, retainedFiles);
             throw;
         }
         catch (Exception exception) when (
@@ -119,7 +138,7 @@ public sealed class ReleasePackageVerifier
             InvalidDataException or ArgumentException or NotSupportedException or
             CryptographicException or JsonException or DecoderFallbackException)
         {
-            CleanupOwned(stagingLease);
+            CleanupOwned(stagingLease, retainedFiles);
             throw Failure();
         }
     }
@@ -374,13 +393,14 @@ public sealed class ReleasePackageVerifier
         }
     }
 
-    private static async Task ExtractAsync(
+    private static async Task<IReadOnlyDictionary<string, ExtractedFileEvidence>> ExtractAsync(
         string archivePath,
         IStagingRootLease stagingLease,
         IReadOnlyDictionary<string, CentralEntry> inspected,
         CancellationToken cancellationToken)
     {
         var stagingRoot = stagingLease.CanonicalPath;
+        var extracted = new Dictionary<string, ExtractedFileEvidence>(StringComparer.Ordinal);
         using var archive = ZipFile.OpenRead(archivePath);
         if (archive.Entries.Count != inspected.Count)
         {
@@ -410,6 +430,7 @@ public sealed class ReleasePackageVerifier
                 64 * 1024,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
             var buffer = new byte[64 * 1024];
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             long written = 0;
             while (true)
             {
@@ -426,6 +447,7 @@ public sealed class ReleasePackageVerifier
                     throw Failure();
                 }
 
+                hash.AppendData(buffer.AsSpan(0, read));
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -437,20 +459,21 @@ public sealed class ReleasePackageVerifier
             }
 
             stagingLease.ValidateCreatedFile(output.SafeFileHandle, destinationPath);
+            extracted.Add(
+                entry.FullName,
+                new ExtractedFileEvidence(
+                    written,
+                    Convert.ToHexString(hash.GetHashAndReset())));
         }
+
+        return extracted;
     }
 
     private static void ValidateMetadata(
         ReleaseManifest manifest,
-        string stagingRoot)
+        IRetainedStagingFile metadataFile)
     {
-        var path = Path.Combine(stagingRoot, PackageMetadataFileName);
-        if (new FileInfo(path).Length > MaximumMetadataSize)
-        {
-            throw Failure();
-        }
-
-        var bytes = File.ReadAllBytes(path);
+        var bytes = metadataFile.ReadAllBytes(MaximumMetadataSize);
         if (bytes.Length >= 3 &&
             bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
         {
@@ -508,28 +531,36 @@ public sealed class ReleasePackageVerifier
         }
     }
 
-    private static void ValidateFinalLayout(string stagingRoot)
+    private static void RetainApprovedFiles(
+        IStagingRootLease stagingLease,
+        IReadOnlyDictionary<string, ExtractedFileEvidence> extracted,
+        ICollection<IRetainedStagingFile> retainedFiles)
     {
-        if (Directory.EnumerateDirectories(stagingRoot).Any())
+        foreach (var relativePath in LocalAiPackageLayout.RequiredFiles.Append(
+                     PackageMetadataFileName))
         {
-            throw Failure();
-        }
+            if (!extracted.TryGetValue(relativePath, out var evidence))
+            {
+                throw Failure();
+            }
 
-        var expected = new HashSet<string>(
-            LocalAiPackageLayout.RequiredFiles.Append(PackageMetadataFileName),
-            StringComparer.Ordinal);
-        var actual = Directory.EnumerateFiles(stagingRoot)
-            .Select(path => Path.GetFileName(path)!)
-            .ToArray();
-        if (!expected.SetEquals(actual))
-        {
-            throw Failure();
+            var retained = stagingLease.RetainFile(relativePath);
+            retainedFiles.Add(retained);
+            if (retained.Metadata.Length != evidence.Length ||
+                !string.Equals(
+                    retained.Metadata.Sha256,
+                    evidence.Sha256,
+                    StringComparison.Ordinal))
+            {
+                throw Failure();
+            }
         }
     }
 
     private void ValidateAuthenticode(
         ReleaseManifest manifest,
-        string stagingRoot)
+        string stagingRoot,
+        IReadOnlyDictionary<string, IRetainedStagingFile> retainedByPath)
     {
         if (!manifest.RequiresAuthenticode)
         {
@@ -540,9 +571,13 @@ public sealed class ReleasePackageVerifier
                      file => file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
                              file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)))
         {
-            if (!authenticodeVerifier.IsTrusted(
-                    Path.Combine(stagingRoot, file),
-                    publisherPolicy))
+            var retained = retainedByPath[file];
+            retained.Revalidate();
+            var trusted = authenticodeVerifier.IsTrusted(
+                Path.Combine(stagingRoot, file),
+                publisherPolicy);
+            retained.Revalidate();
+            if (!trusted)
             {
                 throw Failure();
             }
@@ -656,8 +691,25 @@ public sealed class ReleasePackageVerifier
         }
     }
 
-    private static void CleanupOwned(IStagingRootLease? lease)
+    private static void CleanupOwned(
+        IStagingRootLease? lease,
+        IEnumerable<IRetainedStagingFile>? retainedFiles)
     {
+        if (retainedFiles is not null)
+        {
+            foreach (var file in retainedFiles)
+            {
+                try
+                {
+                    file.Dispose();
+                }
+                catch (Exception exception) when (
+                    IsExpectedCleanupFailure(exception))
+                {
+                }
+            }
+        }
+
         if (lease is null)
         {
             return;
@@ -700,6 +752,8 @@ public sealed class ReleasePackageVerifier
         long UncompressedSize,
         uint ExternalAttributes,
         long LocalHeaderOffset);
+
+    private sealed record ExtractedFileEvidence(long Length, string Sha256);
 
     private readonly record struct EndOfCentralDirectory(
         int EntryCount,

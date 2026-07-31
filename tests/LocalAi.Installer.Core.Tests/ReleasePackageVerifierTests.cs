@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Numerics;
+using System.Runtime.Versioning;
+using Microsoft.Win32.SafeHandles;
 using System.Security.Cryptography;
 using System.Text;
 using LocalAi.Contracts;
@@ -39,11 +41,133 @@ public sealed class ReleasePackageVerifierTests : IDisposable
 
         Assert.Equal(manifest.ReleaseVersion, verified.Manifest.ReleaseVersion);
         Assert.Equal(manifest.VersionDirectory, verified.Manifest.VersionDirectory);
-        Assert.True(Path.IsPathFullyQualified(verified.StagingRoot));
+        Assert.True(Path.IsPathFullyQualified(verified.DiagnosticStagingRoot));
         Assert.Equal(LocalAiPackageLayout.RequiredFiles.Count, auth.Paths.Count);
-        Assert.All(LocalAiPackageLayout.RequiredFiles, file =>
-            Assert.True(File.Exists(Path.Combine(verified.StagingRoot, file))));
-        Assert.False(File.Exists(Path.Combine(verified.StagingRoot, ".package.zip")));
+        Assert.Equal(
+            LocalAiPackageLayout.RequiredFiles.Append(
+                ReleasePackageVerifier.PackageMetadataFileName),
+            verified.Files.Select(file => file.RelativePath));
+        Assert.All(verified.Files, file =>
+        {
+            Assert.True(file.Length > 0);
+            Assert.Matches("^[0-9A-F]{64}$", file.Sha256);
+        });
+        Assert.Throws<NotSupportedException>(() =>
+            ((IList<VerifiedPackageFile>)verified.Files).Clear());
+        Assert.False(File.Exists(Path.Combine(
+            verified.DiagnosticStagingRoot,
+            ".package.zip")));
+    }
+
+    [Fact]
+    public async Task Verified_package_locks_every_approved_file_until_disposed()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var verified = await CreateVerifier(key, package).VerifyAsync(
+            json,
+            Sign(key, json),
+            StagingPath(),
+            TestContext.Current.CancellationToken);
+        var relative = LocalAiPackageLayout.RequiredFiles[0];
+        var path = Path.Combine(verified.DiagnosticStagingRoot, relative);
+        var replacement = Path.Combine(tempRoot, "replacement.bin");
+        File.WriteAllText(replacement, "replacement");
+
+        foreach (var file in verified.Files)
+        {
+            var approvedPath = Path.Combine(
+                verified.DiagnosticStagingRoot,
+                file.RelativePath);
+            AssertBlocked(() => File.WriteAllText(approvedPath, "changed"));
+            AssertBlocked(() => File.Delete(approvedPath));
+        }
+
+        AssertBlocked(() => File.Move(replacement, path, overwrite: true));
+
+        verified.Dispose();
+        foreach (var file in LocalAiPackageLayout.RequiredFiles.Append(
+                     ReleasePackageVerifier.PackageMetadataFileName))
+        {
+            var releasedPath = Path.Combine(verified.DiagnosticStagingRoot, file);
+            File.WriteAllText(releasedPath, "released");
+            Assert.Equal("released", File.ReadAllText(releasedPath));
+        }
+
+        Assert.Throws<ObjectDisposedException>(() => verified.OpenRead(relative));
+    }
+
+    [Fact]
+    public async Task Authenticode_runs_while_each_path_is_locked_to_its_retained_identity()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package, requiresAuthenticode: true);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var authenticode = new LockProbingAuthenticodeVerifier();
+
+        using var verified = await CreateVerifier(key, package, authenticode).VerifyAsync(
+            json,
+            Sign(key, json),
+            StagingPath(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageLayout.RequiredFiles.Count, authenticode.VerifiedCount);
+    }
+
+    [Fact]
+    public async Task Approved_content_is_read_from_retained_handle_and_excludes_added_files()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        using var verified = await CreateVerifier(key, package).VerifyAsync(
+            json,
+            Sign(key, json),
+            StagingPath(),
+            TestContext.Current.CancellationToken);
+        var relative = LocalAiPackageLayout.RequiredFiles[0];
+
+        await using (var content = verified.OpenRead(relative))
+        using (var reader = new StreamReader(content, Encoding.UTF8))
+        {
+            Assert.Equal("test " + relative, await reader.ReadToEndAsync(
+                TestContext.Current.CancellationToken));
+        }
+
+        File.WriteAllText(
+            Path.Combine(verified.DiagnosticStagingRoot, "added.dll"),
+            "unapproved");
+        Assert.DoesNotContain(
+            verified.Files,
+            file => string.Equals(file.RelativePath, "added.dll", StringComparison.Ordinal));
+        Assert.Throws<ReleaseVerificationException>(() => verified.OpenRead("added.dll"));
+        Assert.Throws<ReleaseVerificationException>(verified.Revalidate);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Retained_file_rejects_a_handle_bound_to_another_identity()
+    {
+        Directory.CreateDirectory(tempRoot);
+        var expected = Path.Combine(tempRoot, "expected.bin");
+        var other = Path.Combine(tempRoot, "other.bin");
+        File.WriteAllText(expected, "expected");
+        File.WriteAllText(other, "other");
+        using SafeFileHandle wrongHandle = File.OpenHandle(
+            other,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+
+        Assert.Throws<ReleaseVerificationException>(() =>
+            new WindowsRetainedStagingFile(
+                "expected.bin",
+                expected,
+                wrongHandle));
     }
 
     [Theory]
@@ -281,7 +405,7 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             TestContext.Current.CancellationToken);
 
         Assert.True(File.Exists(Path.Combine(
-            verified.StagingRoot,
+            verified.DiagnosticStagingRoot,
             LocalAiPackageLayout.RequiredFiles[0])));
     }
 
@@ -479,6 +603,15 @@ public sealed class ReleasePackageVerifierTests : IDisposable
                 Sign(key, json),
                 staging ?? StagingPath(),
                 TestContext.Current.CancellationToken));
+    }
+
+    private static void AssertBlocked(Action action)
+    {
+        var exception = Record.Exception(action);
+        Assert.NotNull(exception);
+        Assert.True(
+            exception is IOException or UnauthorizedAccessException,
+            $"Expected a sharing violation, got {exception.GetType().Name}.");
     }
 
     private static ReleasePackageVerifier CreateVerifier(
@@ -695,6 +828,21 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         {
             Paths.Add(path);
             return failAfter is { } count ? Paths.Count <= count : result;
+        }
+    }
+
+    private sealed class LockProbingAuthenticodeVerifier : IAuthenticodeVerifier
+    {
+        public int VerifiedCount { get; private set; }
+
+        public bool IsTrusted(
+            string path,
+            AuthenticodePublisherPolicy publisherPolicy)
+        {
+            AssertBlocked(() => File.WriteAllText(path, "tampered"));
+            AssertBlocked(() => File.Delete(path));
+            VerifiedCount++;
+            return true;
         }
     }
 }

@@ -44,6 +44,10 @@ internal interface IStagingRootLease : IDisposable
 
     void ValidateCreatedFile(SafeFileHandle fileHandle, string expectedPath);
 
+    IRetainedStagingFile RetainFile(string relativePath);
+
+    void ValidateExactLayout(IEnumerable<string> approvedRelativePaths);
+
     void Cleanup();
 }
 
@@ -642,6 +646,66 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
         Revalidate();
     }
 
+    public IRetainedStagingFile RetainFile(string relativePath)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (string.IsNullOrWhiteSpace(relativePath) ||
+            !string.Equals(
+                Path.GetFileName(relativePath),
+                relativePath,
+                StringComparison.Ordinal) ||
+            relativePath.IndexOfAny(['\\', '/', ':']) >= 0)
+        {
+            throw Failure();
+        }
+
+        Revalidate();
+        var expectedPath = Path.Combine(CanonicalPath, relativePath);
+        SafeFileHandle? handle = null;
+        try
+        {
+            handle = File.OpenHandle(
+                expectedPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                FileOptions.RandomAccess);
+            ValidateCreatedFile(handle, expectedPath);
+            var retained = new WindowsRetainedStagingFile(
+                relativePath,
+                expectedPath,
+                handle);
+            handle = null;
+            return retained;
+        }
+        finally
+        {
+            handle?.Dispose();
+        }
+    }
+
+    public void ValidateExactLayout(IEnumerable<string> approvedRelativePaths)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(approvedRelativePaths);
+        Revalidate();
+        if (Directory.EnumerateDirectories(CanonicalPath).Any())
+        {
+            throw Failure();
+        }
+
+        var expected = approvedRelativePaths.ToHashSet(StringComparer.Ordinal);
+        var actual = Directory.EnumerateFiles(CanonicalPath)
+            .Select(path => Path.GetFileName(path)!)
+            .ToArray();
+        if (!expected.SetEquals(actual))
+        {
+            throw Failure();
+        }
+
+        Revalidate();
+    }
+
     public void Cleanup()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -798,7 +862,7 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
         }
     }
 
-    private static FileIdentity GetIdentity(SafeFileHandle handle)
+    internal static FileIdentity GetIdentity(SafeFileHandle handle)
     {
         if (!GetFileInformationByHandle(handle, out var information))
         {
@@ -812,7 +876,7 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
             (FileAttributes)information.FileAttributes);
     }
 
-    private static string GetFinalPath(SafeFileHandle handle)
+    internal static string GetFinalPath(SafeFileHandle handle)
     {
         var required = GetFinalPathNameByHandleW(handle, null, 0, 0);
         if (required == 0)
@@ -849,7 +913,7 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
     private static ReleaseVerificationException Failure() =>
         new("Staging root identity verification failed.");
 
-    private readonly record struct FileIdentity(
+    internal readonly record struct FileIdentity(
         uint VolumeSerialNumber,
         uint FileIndexHigh,
         uint FileIndexLow,

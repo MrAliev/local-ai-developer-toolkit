@@ -473,6 +473,11 @@ public sealed class StagingRootSecurityTests : IDisposable
             Microsoft.Win32.SafeHandles.SafeFileHandle fileHandle,
             string expectedPath) => throw primary;
 
+        public IRetainedStagingFile RetainFile(string relativePath) => throw primary;
+
+        public void ValidateExactLayout(IEnumerable<string> approvedRelativePaths) =>
+            throw primary;
+
         public void Cleanup()
         {
             CleanupCalled = true;
@@ -506,6 +511,12 @@ public sealed class StagingRootSecurityTests : IDisposable
         public void ValidateCreatedFile(
             Microsoft.Win32.SafeHandles.SafeFileHandle fileHandle,
             string expectedPath) => Revalidate();
+
+        public IRetainedStagingFile RetainFile(string relativePath) =>
+            throw new ReleaseVerificationException("Simulated retained identity change.");
+
+        public void ValidateExactLayout(IEnumerable<string> approvedRelativePaths) =>
+            Revalidate();
 
         public void Cleanup()
         {
