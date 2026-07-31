@@ -30,6 +30,22 @@ public sealed class SolutionShapeTests
         }
     }
 
+    [Theory]
+    [InlineData("src/LocalAi.Installer/LocalAi.Installer.csproj")]
+    [InlineData("tests/LocalAi.Installer.Tests/LocalAi.Installer.Tests.csproj")]
+    [InlineData("tests/LocalAi.Installer.IntegrationTests/LocalAi.Installer.IntegrationTests.csproj")]
+    public void Localized_runtime_projects_disable_invariant_globalization(string projectPath)
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var project = XDocument.Load(Path.Combine(repositoryRoot, projectPath));
+        var invariantGlobalization = project
+            .Descendants("InvariantGlobalization")
+            .SingleOrDefault()
+            ?.Value;
+
+        Assert.Equal("false", invariantGlobalization);
+    }
+
     private static string FindRepositoryRoot()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
