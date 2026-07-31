@@ -10,12 +10,7 @@ public sealed class BrokerRuntimeStateStoreTests
     public void Publish_replaces_state_with_strict_readable_document()
     {
         using var fixture = new RuntimeStateFixture();
-        var state = new BrokerProcessState(
-            42,
-            DateTimeOffset.UtcNow.AddMinutes(-1),
-            DateTimeOffset.UtcNow,
-            2,
-            Path.GetFullPath("LocalAi.Broker.dll"));
+        var state = CurrentState();
 
         fixture.Store.Publish(state);
 
@@ -27,15 +22,27 @@ public sealed class BrokerRuntimeStateStoreTests
     }
 
     [Fact]
+    public void Publish_includes_current_protocol_and_build_compatibility()
+    {
+        using var fixture = new RuntimeStateFixture();
+
+        fixture.Store.Publish(CurrentState());
+
+        var actual = JsonSerializer.Deserialize<BrokerProcessState>(
+            File.ReadAllText(fixture.StatePath),
+            LocalAiJson.Strict);
+        Assert.Equal(BrokerCompatibilityContract.Current, actual!.Compatibility);
+        Assert.Equal(3, actual.SchemaVersion);
+    }
+
+    [Fact]
     public async Task Publish_retries_when_existing_state_is_temporarily_locked()
     {
         using var fixture = new RuntimeStateFixture();
-        var initial = new BrokerProcessState(
-            42,
-            DateTimeOffset.UtcNow.AddMinutes(-1),
-            DateTimeOffset.UtcNow.AddSeconds(-1),
-            2,
-            Path.GetFullPath("LocalAi.Broker.dll"));
+        var initial = CurrentState() with
+        {
+            HeartbeatAtUtc = DateTimeOffset.UtcNow.AddSeconds(-1)
+        };
         var heartbeat = initial with { HeartbeatAtUtc = DateTimeOffset.UtcNow };
         fixture.Store.Publish(initial);
         var locked = new FileStream(
@@ -74,12 +81,7 @@ public sealed class BrokerRuntimeStateStoreTests
     public void Delete_owned_state_preserves_replacement_host()
     {
         using var fixture = new RuntimeStateFixture();
-        var owner = new BrokerProcessState(
-            42,
-            DateTimeOffset.UtcNow.AddMinutes(-1),
-            DateTimeOffset.UtcNow,
-            2,
-            Path.GetFullPath("LocalAi.Broker.dll"));
+        var owner = CurrentState();
         var replacement = owner with { ProcessId = 99 };
         fixture.Store.Publish(replacement);
 
@@ -92,18 +94,22 @@ public sealed class BrokerRuntimeStateStoreTests
     public void Delete_owned_state_removes_matching_host()
     {
         using var fixture = new RuntimeStateFixture();
-        var owner = new BrokerProcessState(
-            42,
-            DateTimeOffset.UtcNow.AddMinutes(-1),
-            DateTimeOffset.UtcNow,
-            2,
-            Path.GetFullPath("LocalAi.Broker.dll"));
+        var owner = CurrentState();
         fixture.Store.Publish(owner);
 
         fixture.Store.DeleteIfOwnedBy(owner);
 
         Assert.False(File.Exists(fixture.StatePath));
     }
+
+    private static BrokerProcessState CurrentState(int processId = 42) =>
+        new(
+            processId,
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            DateTimeOffset.UtcNow,
+            BrokerCompatibilityContract.HostStateSchemaVersion,
+            Path.GetFullPath("LocalAi.Broker.dll"),
+            BrokerCompatibilityContract.Current);
 
     private sealed class RuntimeStateFixture : IDisposable
     {

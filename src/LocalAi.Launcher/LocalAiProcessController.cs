@@ -1,8 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 
 namespace LocalAi.Launcher;
 
@@ -14,7 +11,6 @@ public sealed record ProcessSnapshot(
 
 public sealed class LocalAiProcessController
 {
-    private static readonly JsonSerializerOptions StrictJson = CreateJsonOptions();
     private readonly Func<IReadOnlyList<ProcessSnapshot>> _snapshot;
     private readonly Action<ProcessSnapshot, TimeSpan> _stop;
     private readonly StringComparison _pathComparison;
@@ -91,7 +87,7 @@ public sealed class LocalAiProcessController
 
     private static IReadOnlyList<ProcessSnapshot> CaptureSnapshots(string runtimeRoot)
     {
-        var broker = ReadFreshBrokerState(runtimeRoot);
+        var broker = new BrokerHostStateReader().ReadFreshOwnership(runtimeRoot);
         var snapshots = new List<ProcessSnapshot>();
         foreach (var process in Process.GetProcesses())
         {
@@ -151,35 +147,6 @@ public sealed class LocalAiProcessController
         return snapshots;
     }
 
-    private static BrokerHostState? ReadFreshBrokerState(string runtimeRoot)
-    {
-        var path = Path.Combine(runtimeRoot, "host.json");
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-
-        try
-        {
-            var state = JsonSerializer.Deserialize<BrokerHostState>(
-                File.ReadAllText(path),
-                StrictJson);
-            return state is
-            {
-                SchemaVersion: 2,
-                BrokerAssemblyPath.Length: > 0
-            } &&
-                DateTimeOffset.UtcNow - state.HeartbeatAtUtc <= TimeSpan.FromSeconds(5)
-                    ? state
-                    : null;
-        }
-        catch (Exception exception) when (
-            exception is JsonException or IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
-
     private static void StopProcess(ProcessSnapshot snapshot, TimeSpan timeout)
     {
         try
@@ -236,27 +203,9 @@ public sealed class LocalAiProcessController
             : fullPath;
     }
 
-    private static JsonSerializerOptions CreateJsonOptions()
-    {
-        var options = new JsonSerializerOptions
-        {
-            AllowDuplicateProperties = false,
-            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
-            UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
-        };
-        options.MakeReadOnly();
-        return options;
-    }
-
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-    private sealed record BrokerHostState(
-        int ProcessId,
-        DateTimeOffset StartedAtUtc,
-        DateTimeOffset HeartbeatAtUtc,
-        int SchemaVersion,
-        string BrokerAssemblyPath);
 }

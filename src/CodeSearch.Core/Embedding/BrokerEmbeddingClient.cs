@@ -36,6 +36,12 @@ public sealed class BrokerEmbeddingClient(
                 request,
                 cancellationToken);
         }
+        catch (BrokerBootstrapException exception) when (exception.Code == "broker_start_timeout")
+        {
+            throw new EmbeddingUnavailableException(
+                "The LocalAi broker did not become available for embedding.",
+                exception);
+        }
         catch (TimeoutException exception)
         {
             throw new EmbeddingUnavailableException(

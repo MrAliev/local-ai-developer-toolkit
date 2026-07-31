@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,18 +15,24 @@ public interface IBrokerProcess
 
 public sealed class BrokerProcess : IBrokerProcess
 {
+    private const int MaximumDiagnosticValueLength = 512;
+    private static readonly TimeSpan MaximumSemaphoreWaitSlice =
+        TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan StartupPollInterval =
+        TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan MaximumHeartbeatSkew =
+        TimeSpan.FromSeconds(5);
+
     private readonly string _executablePath;
     private readonly string _runtimeRoot;
     private readonly Func<string, BrokerProcessState?> _readState;
     private readonly Func<BrokerProcessState, bool> _isRunning;
-    private readonly Func<string, string, int> _start;
+    private readonly Func<string, string, IBrokerStartAttempt> _start;
     private readonly TimeProvider _timeProvider;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly TimeSpan _startupTimeout;
     private readonly string _arguments;
     private readonly string _startupSemaphoreName;
-    private readonly string _brokerAssemblyPath;
-    private readonly StringComparison _pathComparison;
 
     public BrokerProcess(
         string executablePath,
@@ -38,12 +45,14 @@ public sealed class BrokerProcess : IBrokerProcess
             runtimeRoot,
             ReadState,
             IsRunning,
-            Start,
+            StartAttempt,
             timeProvider ?? TimeProvider.System,
-            Task.Delay,
+            (delay, cancellationToken) => DelayAsync(
+                delay,
+                timeProvider ?? TimeProvider.System,
+                cancellationToken),
             startupTimeout,
-            BuildArguments(runtimeRoot, ollamaUrl),
-            executablePath)
+            BuildArguments(runtimeRoot, ollamaUrl))
     {
     }
 
@@ -57,11 +66,13 @@ public sealed class BrokerProcess : IBrokerProcess
             runtimeRoot,
             ReadState,
             IsRunning,
-            Start,
+            StartAttempt,
             TimeProvider.System,
-            Task.Delay,
-            arguments: arguments,
-            brokerAssemblyPath: brokerAssembly);
+            static (delay, cancellationToken) => DelayAsync(
+                delay,
+                TimeProvider.System,
+                cancellationToken),
+            arguments: arguments);
     }
 
     public BrokerProcess(
@@ -70,6 +81,63 @@ public sealed class BrokerProcess : IBrokerProcess
         Func<string, BrokerProcessState?> readState,
         Func<BrokerProcessState, bool> isRunning,
         Func<string, string, int> start,
+        TimeProvider timeProvider,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        TimeSpan? startupTimeout = null,
+        string? arguments = null,
+        string? brokerAssemblyPath = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
+        _executablePath = executablePath;
+        _runtimeRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(runtimeRoot));
+        _readState = readState ?? throw new ArgumentNullException(nameof(readState));
+        _isRunning = isRunning ?? throw new ArgumentNullException(nameof(isRunning));
+        ArgumentNullException.ThrowIfNull(start);
+        _start = (executablePath, startArguments) =>
+            new LegacyStartAttempt(start(executablePath, startArguments));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _delay = delay ?? throw new ArgumentNullException(nameof(delay));
+        _startupTimeout = startupTimeout ?? TimeSpan.FromSeconds(15);
+        if (_startupTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(startupTimeout));
+        }
+
+        _arguments = arguments ?? BuildArguments(_runtimeRoot, null);
+        _startupSemaphoreName = CreateSemaphoreName(_runtimeRoot);
+        _ = brokerAssemblyPath;
+    }
+
+    internal static BrokerProcess CreateForTesting(
+        string executablePath,
+        string runtimeRoot,
+        Func<string, BrokerProcessState?> readState,
+        Func<BrokerProcessState, bool> isRunning,
+        Func<string, string, IBrokerStartAttempt> start,
+        TimeProvider timeProvider,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        TimeSpan? startupTimeout = null,
+        string? arguments = null,
+        string? brokerAssemblyPath = null) =>
+        new(
+            executablePath,
+            runtimeRoot,
+            readState,
+            isRunning,
+            start,
+            timeProvider,
+            delay,
+            startupTimeout,
+            arguments,
+            brokerAssemblyPath);
+
+    private BrokerProcess(
+        string executablePath,
+        string runtimeRoot,
+        Func<string, BrokerProcessState?> readState,
+        Func<BrokerProcessState, bool> isRunning,
+        Func<string, string, IBrokerStartAttempt> start,
         TimeProvider timeProvider,
         Func<TimeSpan, CancellationToken, Task> delay,
         TimeSpan? startupTimeout = null,
@@ -93,66 +161,106 @@ public sealed class BrokerProcess : IBrokerProcess
 
         _arguments = arguments ?? BuildArguments(_runtimeRoot, null);
         _startupSemaphoreName = CreateSemaphoreName(_runtimeRoot);
-        _brokerAssemblyPath = CanonicalizePath(
-            brokerAssemblyPath ?? executablePath);
-        _pathComparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+        _ = brokerAssemblyPath;
     }
 
     public async Task EnsureRunningAsync(CancellationToken cancellationToken = default)
     {
+        var startupTimestamp = _timeProvider.GetTimestamp();
         using var startupLock = await Task.Run(
-            () => EnterSemaphore(cancellationToken),
+            () => EnterSemaphore(startupTimestamp, cancellationToken),
             cancellationToken);
-        if (IsHealthy(_readState(_runtimeRoot)))
+        cancellationToken.ThrowIfCancellationRequested();
+        var observation = ReadObservation();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
         {
             return;
         }
 
-        _start(_executablePath, _arguments);
-        var deadline = _timeProvider.GetUtcNow() + _startupTimeout;
+        ThrowIfIncompatible(observation);
+        if (observation.Status != BrokerObservationStatus.AbsentOrStale)
+        {
+            throw new InvalidOperationException(
+                "Broker startup requires an absent or stale host state.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfStartupTimedOut(
+            startupTimestamp,
+            "initial state observation",
+            observation.Detail);
+        using var startAttempt = _start(_executablePath, _arguments);
+        cancellationToken.ThrowIfCancellationRequested();
+        observation = ObserveStartAttempt(
+            startAttempt,
+            observation,
+            cancellationToken);
+        var lastObservation = observation.Detail;
+        ThrowIfStartupTimedOut(
+            startupTimestamp,
+            "process creation",
+            lastObservation);
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (IsHealthy(_readState(_runtimeRoot)))
+            observation = ReadObservation();
+            cancellationToken.ThrowIfCancellationRequested();
+            lastObservation = observation.Detail;
+            if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
             {
                 return;
             }
 
-            if (_timeProvider.GetUtcNow() >= deadline)
-            {
-                throw new TimeoutException(
-                    $"LocalAi broker did not become ready within {_startupTimeout}.");
-            }
+            ThrowIfIncompatible(observation);
 
-            await _delay(TimeSpan.FromMilliseconds(50), cancellationToken);
+            observation = ObserveStartAttempt(
+                startAttempt,
+                observation,
+                cancellationToken);
+            lastObservation = observation.Detail;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfStartupTimedOut(
+                startupTimestamp,
+                "startup observation",
+                lastObservation);
+            var remaining = RemainingStartupBudget(startupTimestamp);
+            await _delay(
+                remaining < StartupPollInterval ? remaining : StartupPollInterval,
+                cancellationToken);
         }
     }
 
     public static string StatePath(string runtimeRoot) =>
         Path.Combine(Path.GetFullPath(runtimeRoot), "host.json");
 
-    private bool IsHealthy(BrokerProcessState? state)
+    private BrokerObservation Observe(BrokerProcessState? state)
     {
-        if (state is not { SchemaVersion: 2 } ||
-            string.IsNullOrWhiteSpace(state.BrokerAssemblyPath) ||
-            _timeProvider.GetUtcNow() - state.HeartbeatAtUtc > TimeSpan.FromSeconds(5))
+        if (state is null)
         {
-            return false;
+            return new(
+                BrokerObservationStatus.AbsentOrStale,
+                "host state is absent or unreadable");
+        }
+
+        var heartbeatAge = _timeProvider.GetUtcNow() - state.HeartbeatAtUtc;
+        if (heartbeatAge < -MaximumHeartbeatSkew ||
+            heartbeatAge > MaximumHeartbeatSkew)
+        {
+            return new(
+                BrokerObservationStatus.AbsentOrStale,
+                "host heartbeat is stale");
         }
 
         try
         {
-            if (!string.Equals(
-                    CanonicalizePath(state.BrokerAssemblyPath),
-                    _brokerAssemblyPath,
-                    _pathComparison))
+            if (!_isRunning(state))
             {
-                return false;
+                return new(
+                    BrokerObservationStatus.AbsentOrStale,
+                    "host process is not the recorded owner");
             }
-
-            return _isRunning(state);
         }
         catch (Exception exception) when (
             exception is Win32Exception or
@@ -161,11 +269,128 @@ public sealed class BrokerProcess : IBrokerProcess
             NotSupportedException or
             UnauthorizedAccessException)
         {
-            return false;
+            return new(
+                BrokerObservationStatus.AbsentOrStale,
+                "host process is not the recorded owner");
+        }
+
+        if (state.SchemaVersion != BrokerCompatibilityContract.HostStateSchemaVersion ||
+            !BrokerCompatibilityContract.IsCurrent(state.Compatibility))
+        {
+            return new(
+                BrokerObservationStatus.IncompatibleHealthy,
+                CompatibilityDetail(state));
+        }
+
+        if (string.IsNullOrWhiteSpace(state.BrokerAssemblyPath))
+        {
+            return new(
+                BrokerObservationStatus.IncompatibleHealthy,
+                "host assembly path is missing");
+        }
+
+        return new(
+            BrokerObservationStatus.CompatibleHealthy,
+            "host broker assembly path: " + state.BrokerAssemblyPath);
+    }
+
+    private BrokerObservation ReadObservation()
+    {
+        try
+        {
+            return Observe(_readState(_runtimeRoot));
+        }
+        catch (Exception exception) when (
+            exception is JsonException or
+            IOException or
+            UnauthorizedAccessException)
+        {
+            return new(
+                BrokerObservationStatus.AbsentOrStale,
+                "host state is absent or unreadable");
         }
     }
 
-    private static BrokerProcessState? ReadState(string runtimeRoot)
+    private static string CompatibilityDetail(BrokerProcessState state) =>
+        "expected schema=" + BrokerCompatibilityContract.HostStateSchemaVersion +
+        " protocol=" + BrokerCompatibilityContract.ProtocolVersion +
+        " build=" + BrokerCompatibilityContract.BuildCompatibilityId +
+        "; actual schema=" + state.SchemaVersion.ToString(CultureInfo.InvariantCulture) +
+        " protocol=" +
+        (state.Compatibility?.ProtocolVersion.ToString(CultureInfo.InvariantCulture) ?? "missing") +
+        " build=" + DiagnosticValue(state.Compatibility?.BuildCompatibilityId) +
+        "; broker path=" + DiagnosticValue(state.BrokerAssemblyPath);
+
+    private static string DiagnosticValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "missing";
+        }
+
+        var builder = new StringBuilder(Math.Min(value.Length, MaximumDiagnosticValueLength));
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            var normalizedRune = category is
+                UnicodeCategory.Control or
+                UnicodeCategory.Format or
+                UnicodeCategory.LineSeparator or
+                UnicodeCategory.ParagraphSeparator
+                ? new Rune('?')
+                : rune;
+            if (builder.Length + normalizedRune.Utf16SequenceLength >
+                MaximumDiagnosticValueLength)
+            {
+                break;
+            }
+
+            builder.Append(normalizedRune.ToString());
+        }
+
+        return builder.ToString();
+    }
+
+    private static void ThrowIfIncompatible(BrokerObservation observation)
+    {
+        if (observation.Status == BrokerObservationStatus.IncompatibleHealthy)
+        {
+            throw new BrokerBootstrapException("broker_incompatible", observation.Detail);
+        }
+    }
+
+    private static BrokerObservation ObserveStartAttempt(
+        IBrokerStartAttempt startAttempt,
+        BrokerObservation lastStateObservation,
+        CancellationToken cancellationToken)
+    {
+        var hasExited = startAttempt.TryGetExitCode(out var exitCode);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!hasExited)
+        {
+            return new(
+                BrokerObservationStatus.StartingOrLockOwned,
+                "broker process " + startAttempt.ProcessId +
+                " is starting; last observation: " + lastStateObservation.Detail);
+        }
+
+        if (exitCode != 0)
+        {
+            throw new BrokerBootstrapException(
+                "broker_start_failed",
+                "LocalAi broker process " + startAttempt.ProcessId +
+                " exited with code " + exitCode +
+                "; last observation: " + lastStateObservation.Detail);
+        }
+
+        return new(
+            BrokerObservationStatus.StartingOrLockOwned,
+            "startup process " + startAttempt.ProcessId +
+            " exited successfully; lock owner did not publish compatible state; " +
+            "last observation: " + lastStateObservation.Detail);
+    }
+
+    internal static BrokerProcessState? ReadState(string runtimeRoot)
     {
         var path = StatePath(runtimeRoot);
         if (!File.Exists(path))
@@ -179,7 +404,10 @@ public sealed class BrokerProcess : IBrokerProcess
                 File.ReadAllText(path),
                 LocalAiJson.Strict);
         }
-        catch (JsonException)
+        catch (Exception exception) when (
+            exception is JsonException or
+            IOException or
+            UnauthorizedAccessException)
         {
             return null;
         }
@@ -204,11 +432,11 @@ public sealed class BrokerProcess : IBrokerProcess
         }
     }
 
-    private static int Start(string executablePath, string arguments)
+    private static IBrokerStartAttempt StartAttempt(string executablePath, string arguments)
     {
-        using var process = Process.Start(CreateStartInfo(executablePath, arguments))
+        var process = Process.Start(CreateStartInfo(executablePath, arguments))
             ?? throw new InvalidOperationException("Could not start the LocalAi broker.");
-        return process.Id;
+        return new ProcessStartAttempt(process);
     }
 
     internal static ProcessStartInfo CreateStartInfo(
@@ -220,6 +448,15 @@ public sealed class BrokerProcess : IBrokerProcess
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden
         };
+
+    internal static Task DelayAsync(
+        TimeSpan delay,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        return Task.Delay(delay, timeProvider, cancellationToken);
+    }
 
     private static string BuildArguments(string runtimeRoot, string? ollamaUrl)
     {
@@ -235,21 +472,9 @@ public sealed class BrokerProcess : IBrokerProcess
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 
-    private static string CanonicalizePath(string path)
-    {
-        var fullPath = Path.GetFullPath(path);
-        if (!File.Exists(fullPath))
-        {
-            return fullPath;
-        }
-
-        FileSystemInfo info = new FileInfo(fullPath);
-        return (info.Attributes & FileAttributes.ReparsePoint) != 0
-            ? info.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fullPath
-            : fullPath;
-    }
-
-    private SemaphoreLease EnterSemaphore(CancellationToken cancellationToken)
+    private SemaphoreLease EnterSemaphore(
+        long startupTimestamp,
+        CancellationToken cancellationToken)
     {
         var semaphore = new Semaphore(1, 1, _startupSemaphoreName);
         try
@@ -257,9 +482,26 @@ public sealed class BrokerProcess : IBrokerProcess
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (semaphore.WaitOne(TimeSpan.FromMilliseconds(100)))
+                var remaining = RemainingStartupBudget(startupTimestamp);
+                var waitSlice = remaining <= TimeSpan.Zero
+                    ? TimeSpan.Zero
+                    : remaining < MaximumSemaphoreWaitSlice
+                        ? remaining
+                        : MaximumSemaphoreWaitSlice;
+                if (semaphore.WaitOne(waitSlice))
                 {
                     return new SemaphoreLease(semaphore);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (remaining <= TimeSpan.Zero ||
+                    RemainingStartupBudget(startupTimestamp) <= TimeSpan.Zero)
+                {
+                    throw new BrokerBootstrapException(
+                        "broker_start_timeout",
+                        $"LocalAi broker did not acquire the startup semaphore within " +
+                        $"{_startupTimeout}; phase: startup semaphore; " +
+                        "last observation: startup semaphore contention.");
                 }
             }
         }
@@ -268,6 +510,30 @@ public sealed class BrokerProcess : IBrokerProcess
             semaphore.Dispose();
             throw;
         }
+    }
+
+    private TimeSpan RemainingStartupBudget(long startupTimestamp)
+    {
+        var remaining =
+            _startupTimeout - _timeProvider.GetElapsedTime(startupTimestamp);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+    }
+
+    private void ThrowIfStartupTimedOut(
+        long startupTimestamp,
+        string phase,
+        string lastObservation)
+    {
+        if (RemainingStartupBudget(startupTimestamp) > TimeSpan.Zero)
+        {
+            return;
+        }
+
+        throw new BrokerBootstrapException(
+            "broker_start_timeout",
+            $"LocalAi broker did not become ready within {_startupTimeout}; " +
+            $"phase: {phase}; " +
+            $"last observation: {lastObservation}.");
     }
 
     private static string CreateSemaphoreName(string runtimeRoot)
@@ -288,4 +554,60 @@ public sealed class BrokerProcess : IBrokerProcess
             semaphore.Dispose();
         }
     }
+
+    private sealed class LegacyStartAttempt(int processId) : IBrokerStartAttempt
+    {
+        public int ProcessId { get; } = processId;
+
+        public bool TryGetExitCode(out int exitCode)
+        {
+            exitCode = default;
+            return false;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+}
+
+internal sealed class ProcessStartAttempt : IBrokerStartAttempt
+{
+    private readonly Process _process;
+
+    public ProcessStartAttempt(Process process)
+    {
+        _process = process ?? throw new ArgumentNullException(nameof(process));
+        ProcessId = process.Id;
+    }
+
+    public int ProcessId { get; }
+
+    public bool TryGetExitCode(out int exitCode)
+    {
+        try
+        {
+            if (!_process.HasExited)
+            {
+                exitCode = default;
+                return false;
+            }
+
+            exitCode = _process.ExitCode;
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            exitCode = default;
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            exitCode = default;
+            return false;
+        }
+    }
+
+    public void Dispose() => _process.Dispose();
 }

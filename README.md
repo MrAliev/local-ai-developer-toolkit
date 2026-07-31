@@ -206,6 +206,25 @@ previous version, then switches the pointer. It does not stop Ollama or unrelate
 All model requests, including compatibility commands, continue to use the shared FIFO
 broker; direct Ollama access is unsupported.
 
+### Broker compatibility and startup
+
+The broker `host.json` schema 3 publishes an explicit protocol version and stable build
+compatibility family. Its assembly path remains a diagnostic and launcher
+version-ownership record; client health does not depend on DLL-path affinity. Therefore,
+compatible installed and development clients share the one machine-wide broker even when
+their DLL paths differ.
+
+A fresh live incompatible or legacy host remains running, but the observing client fails
+immediately as `broker_incompatible` and does not attempt to start a second broker. During
+startup, an early nonzero child exit is
+`broker_start_failed`, while a bounded wait that never observes compatible health is
+`broker_start_timeout` and includes the last observation. A zero-exit child likely lost
+`broker.lock` to another process, so the client observes that lock owner's host state only
+within that same bound. CodeSearch retains its lexical fallback for `broker_start_timeout`.
+
+These rules do not change the singleton FIFO, runtime ACL, immutable-version activation,
+full-VRAM/zero-offload, or direct-Ollama prohibition.
+
 ## Model-aware routing
 
 The embedded `model-routing.json` catalog maps each local task profile to one or more

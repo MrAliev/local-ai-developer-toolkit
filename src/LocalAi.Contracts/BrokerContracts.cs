@@ -33,12 +33,36 @@ public enum LocalJobState
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record BrokerCompatibility(
+    [property: JsonRequired] int ProtocolVersion,
+    [property: JsonRequired] string BuildCompatibilityId);
+
+public static class BrokerCompatibilityContract
+{
+    public const int HostStateSchemaVersion = 3;
+    public const int ProtocolVersion = 1;
+    public const string BuildCompatibilityId = "localai-broker-v1";
+
+    public static BrokerCompatibility Current { get; } =
+        new(ProtocolVersion, BuildCompatibilityId);
+
+    public static bool IsCurrent(BrokerCompatibility? value) =>
+        value is not null &&
+        value.ProtocolVersion == ProtocolVersion &&
+        string.Equals(
+            value.BuildCompatibilityId,
+            BuildCompatibilityId,
+            StringComparison.Ordinal);
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record BrokerProcessState(
-    int ProcessId,
-    DateTimeOffset StartedAtUtc,
-    DateTimeOffset HeartbeatAtUtc,
-    int SchemaVersion,
-    string BrokerAssemblyPath);
+    [property: JsonRequired] int ProcessId,
+    [property: JsonRequired] DateTimeOffset StartedAtUtc,
+    [property: JsonRequired] DateTimeOffset HeartbeatAtUtc,
+    [property: JsonRequired] int SchemaVersion,
+    [property: JsonRequired] string BrokerAssemblyPath,
+    BrokerCompatibility? Compatibility = null);
 
 [JsonPolymorphic(
     TypeDiscriminatorPropertyName = "$type",
