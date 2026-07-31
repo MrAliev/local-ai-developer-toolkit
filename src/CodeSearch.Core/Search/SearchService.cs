@@ -115,6 +115,7 @@ public sealed class SearchService
         var workingRoot = RepoLocator.ResolveWorkingRoot(root);
         var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root));
         var baseIndex = Load(indexPath);
+        RequireSnapshotIdentity(baseIndex);
 
         var searchable = Compose(baseIndex, workingRoot);
         var resolvedOptions = SearchQualityProfile.Resolve(baseIndex.Model, options);
@@ -197,6 +198,7 @@ public sealed class SearchService
                 "unsafe_chunk_path: The indexed source path escapes the repository root.");
         }
 
+        RejectReparsePoints(fullRoot, fullPath);
         ct.ThrowIfCancellationRequested();
         var lines = SourceLines.Split(
             await File.ReadAllTextAsync(fullPath, ct));
@@ -222,6 +224,37 @@ public sealed class SearchService
             meta.Signature,
             meta.Namespace,
             body);
+    }
+
+    private static void RequireSnapshotIdentity(CodeIndex index)
+    {
+        if (string.IsNullOrWhiteSpace(index.RepositoryId) ||
+            string.IsNullOrWhiteSpace(index.GenerationId) ||
+            string.IsNullOrWhiteSpace(index.GitTree))
+        {
+            throw new SearchNotReadyException(
+                "The CodeSearch index predates snapshot-bound chunk retrieval. " +
+                "Rebuild or migrate the index before searching.");
+        }
+    }
+
+    private static void RejectReparsePoints(string fullRoot, string fullPath)
+    {
+        var relativePath = Path.GetRelativePath(fullRoot, fullPath);
+        var currentPath = fullRoot;
+        foreach (var component in relativePath.Split(
+                     [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            currentPath = Path.Combine(currentPath, component);
+            if ((File.GetAttributes(currentPath) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new SearchChunkResolutionException(
+                    "unsafe_chunk_reparse_point",
+                    "unsafe_chunk_reparse_point: The indexed source path contains a " +
+                    "symbolic link or reparse point.");
+            }
+        }
     }
 
     private static string QueryDeduplicationKey(CodeIndex index, string prompt)

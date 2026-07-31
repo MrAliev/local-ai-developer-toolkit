@@ -17,6 +17,10 @@ public sealed record SearchChunkId(
 {
     private const int MaxFieldLength = 256;
     private const int MaxPayloadLength = 2048;
+    private const int MaxPayloadSegmentLength = 2731;
+    private const int DigestSegmentLength = 43;
+    private const int MaxEncodedLength = 2779;
+    private const int PrefixLength = 4;
 
     public string Encode()
     {
@@ -39,19 +43,40 @@ public sealed record SearchChunkId(
         }
 
         var payload = stream.ToArray();
+        if (payload.Length > MaxPayloadLength)
+        {
+            throw new ArgumentException(
+                $"The serialized chunk id payload cannot exceed {MaxPayloadLength} bytes.");
+        }
+
         var digest = SHA256.HashData(payload);
         return $"cs1.{Base64Url(payload)}.{Base64Url(digest)}";
     }
 
     public static SearchChunkId Parse(string value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        if (value is null ||
+            value.Length is 0 or > MaxEncodedLength ||
+            string.IsNullOrWhiteSpace(value))
         {
             throw Malformed();
         }
 
-        var parts = value.Split('.');
-        if (parts.Length != 3 || parts[0] != "cs1")
+        if (!value.StartsWith("cs1.", StringComparison.Ordinal))
+        {
+            throw Malformed();
+        }
+
+        var separator = value.IndexOf('.', PrefixLength);
+        if (separator < 0 || value.IndexOf('.', separator + 1) >= 0)
+        {
+            throw Malformed();
+        }
+
+        var payloadLength = separator - PrefixLength;
+        var digestLength = value.Length - separator - 1;
+        if (payloadLength is 0 or > MaxPayloadSegmentLength ||
+            digestLength != DigestSegmentLength)
         {
             throw Malformed();
         }
@@ -60,8 +85,9 @@ public sealed record SearchChunkId(
         byte[] suppliedDigest;
         try
         {
-            payload = FromBase64Url(parts[1]);
-            suppliedDigest = FromBase64Url(parts[2]);
+            payload = FromBase64Url(
+                value.Substring(PrefixLength, payloadLength));
+            suppliedDigest = FromBase64Url(value[(separator + 1)..]);
         }
         catch (FormatException)
         {
