@@ -79,6 +79,137 @@ public sealed class InstallationLayoutLease : IDisposable
         }
     }
 
+    public RetainedLauncherBackup CreateLauncherBackup()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        Revalidate();
+        using var source = new FileStream(
+            Layout.LauncherPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.RandomAccess);
+        ValidateFileHandle(source, Layout.LauncherPath);
+
+        var backups = EvidenceFor(Layout.InstallerBackupsRoot);
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            var name = "launcher-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+            var directoryPath = Path.Combine(Layout.InstallerBackupsRoot, name);
+            try
+            {
+                var handle = NativeDirectory.CreateExclusive(backups.Handle, name, directoryPath);
+                var evidence = Evidence(handle, directoryPath);
+                directories.Add(evidence);
+                var backupPath = Path.Combine(directoryPath, LocalAiPackageLayout.StableLauncherFile);
+                try
+                {
+                    byte[] sourceHash;
+                    long sourceLength;
+                    using (var destination = new FileStream(
+                               backupPath,
+                               FileMode.CreateNew,
+                               FileAccess.Write,
+                               FileShare.None,
+                               64 * 1024,
+                               FileOptions.WriteThrough))
+                    {
+                        source.Position = 0;
+                        source.CopyTo(destination);
+                        destination.Flush(flushToDisk: true);
+                    }
+
+                    sourceLength = source.Length;
+                    source.Position = 0;
+                    sourceHash = SHA256.HashData(source);
+                    ValidateFileHandle(source, Layout.LauncherPath);
+                    var metadata = new LauncherBackupMetadata(
+                        backupPath,
+                        sourceLength,
+                        Convert.ToHexString(sourceHash));
+                    var retained = RetainLauncherBackup(backupPath, metadata);
+                    Revalidate();
+                    return retained;
+                }
+                catch
+                {
+                    try
+                    {
+                        if (File.Exists(backupPath))
+                        {
+                            File.Delete(backupPath);
+                        }
+
+                        NativeDirectory.DeleteEmpty(evidence.Handle);
+                    }
+                    catch (Exception cleanupException) when (
+                        cleanupException is IOException or UnauthorizedAccessException or Win32Exception)
+                    {
+                    }
+
+                    directories.Remove(evidence);
+                    evidence.Handle.Dispose();
+                    throw;
+                }
+            }
+            catch (LocalAiPackageInstallationException) when (
+                Directory.Exists(directoryPath) || File.Exists(directoryPath))
+            {
+            }
+        }
+
+        throw Failure();
+    }
+
+    internal RetainedLauncherBackup RetainLauncherBackup(
+        string path,
+        LauncherBackupMetadata expected)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(expected);
+        var canonicalPath = Path.GetFullPath(path);
+        if (!string.Equals(canonicalPath, Path.GetFullPath(expected.Path), StringComparison.OrdinalIgnoreCase) ||
+            !IsBelow(canonicalPath, Layout.InstallerBackupsRoot) ||
+            !string.Equals(Path.GetFileName(canonicalPath), LocalAiPackageLayout.StableLauncherFile, StringComparison.Ordinal) ||
+            !directories.Any(directory => string.Equals(
+                directory.CanonicalPath,
+                Path.GetDirectoryName(canonicalPath),
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            throw Failure();
+        }
+
+        FileStream? stream = null;
+        try
+        {
+            stream = new FileStream(
+                canonicalPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                64 * 1024,
+                FileOptions.RandomAccess);
+            var retained = new RetainedLauncherBackup(this, stream, canonicalPath, expected);
+            try
+            {
+                retained.Revalidate();
+                stream = null;
+                return retained;
+            }
+            catch
+            {
+                retained.Dispose();
+                stream = null;
+                throw;
+            }
+        }
+        finally
+        {
+            stream?.Dispose();
+        }
+    }
+
     public static InstallationLayoutLease Acquire(
         InstallationLayout layout,
         bool requireFreshInstallerTree = false)
@@ -141,6 +272,22 @@ public sealed class InstallationLayoutLease : IDisposable
                 "backups",
                 layout.InstallerBackupsRoot);
             directories.Add(Evidence(backups.Handle, layout.InstallerBackupsRoot));
+
+            foreach (var entry in Directory.EnumerateFileSystemEntries(layout.InstallerBackupsRoot))
+            {
+                var name = Path.GetFileName(entry);
+                if (!Directory.Exists(entry) ||
+                    !name.StartsWith("launcher-", StringComparison.Ordinal) ||
+                    name.Length == "launcher-".Length)
+                {
+                    throw Failure();
+                }
+
+                ValidateExactNames(entry, [LocalAiPackageLayout.StableLauncherFile]);
+                ValidateRequiredFile(Path.Combine(entry, LocalAiPackageLayout.StableLauncherFile));
+                var backupHandle = NativeDirectory.OpenExisting(backups.Handle, name, entry);
+                directories.Add(Evidence(backupHandle, entry));
+            }
 
             ValidateBinShape(layout);
             ValidateInstallerShape(layout);
@@ -225,12 +372,34 @@ public sealed class InstallationLayoutLease : IDisposable
             throw Failure();
         }
 
+        var expectedBackups = directories
+            .Where(directory => IsBelow(directory.CanonicalPath, Layout.InstallerBackupsRoot))
+            .Select(directory => Path.GetFileName(directory.CanonicalPath))
+            .ToHashSet(StringComparer.Ordinal);
+        var actualBackups = Directory.EnumerateFileSystemEntries(Layout.InstallerBackupsRoot)
+            .Select(path => Path.GetFileName(path)!)
+            .ToArray();
+        if (!expectedBackups.SetEquals(actualBackups))
+        {
+            throw Failure();
+        }
+
         foreach (var directory in directories.Where(directory =>
                      IsBelow(directory.CanonicalPath, Layout.VersionsRoot)))
         {
             ValidateExactVersionDirectory(
                 directory.CanonicalPath,
                 LocalAiPackageLayout.VersionRequiredFiles);
+        }
+
+
+        foreach (var directory in directories.Where(directory =>
+                     IsBelow(directory.CanonicalPath, Layout.InstallerBackupsRoot)))
+        {
+            ValidateExactNames(directory.CanonicalPath, [LocalAiPackageLayout.StableLauncherFile]);
+            ValidateRequiredFile(Path.Combine(
+                directory.CanonicalPath,
+                LocalAiPackageLayout.StableLauncherFile));
         }
     }
 
@@ -467,6 +636,30 @@ public sealed class InstallationLayoutLease : IDisposable
         }
     }
 
+    private static void ValidateRequiredFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            throw Failure();
+        }
+
+        ValidateOptionalFile(path);
+    }
+
+    private static void ValidateFileHandle(FileStream stream, string expectedPath)
+    {
+        var identity = WindowsStagingRootLease.GetIdentity(stream.SafeFileHandle);
+        if (identity.Attributes.HasFlag(FileAttributes.Directory) ||
+            identity.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+            !string.Equals(
+                WindowsStagingRootLease.GetFinalPath(stream.SafeFileHandle),
+                Path.GetFullPath(expectedPath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw Failure();
+        }
+    }
+
     private static bool IsBelow(string path, string root)
     {
         var prefix = Path.TrimEndingDirectorySeparator(root) +
@@ -605,6 +798,94 @@ public sealed class InstallationLayoutLease : IDisposable
                 stream.Dispose();
             }
         }
+    }
+
+    public sealed class RetainedLauncherBackup : IDisposable
+    {
+        private const uint DuplicateSameAccess = 0x00000002;
+        private readonly InstallationLayoutLease owner;
+        private readonly FileStream stream;
+        private readonly WindowsStagingRootLease.FileIdentity identity;
+        private bool disposed;
+
+        internal RetainedLauncherBackup(
+            InstallationLayoutLease owner,
+            FileStream stream,
+            string canonicalPath,
+            LauncherBackupMetadata metadata)
+        {
+            this.owner = owner;
+            this.stream = stream;
+            CanonicalPath = Path.GetFullPath(canonicalPath);
+            Metadata = metadata;
+            identity = WindowsStagingRootLease.GetIdentity(stream.SafeFileHandle);
+        }
+
+        public string CanonicalPath { get; }
+        public LauncherBackupMetadata Metadata { get; }
+
+        public void Revalidate()
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            owner.Revalidate();
+            ValidateFileHandle(stream, CanonicalPath);
+            var actualIdentity = WindowsStagingRootLease.GetIdentity(stream.SafeFileHandle);
+            if (actualIdentity != identity ||
+                !string.Equals(CanonicalPath, Path.GetFullPath(Metadata.Path), StringComparison.OrdinalIgnoreCase) ||
+                stream.Length != Metadata.Length)
+            {
+                throw Failure();
+            }
+
+            stream.Position = 0;
+            var hash = Convert.ToHexString(SHA256.HashData(stream));
+            stream.Position = 0;
+            if (!string.Equals(hash, Metadata.Sha256, StringComparison.Ordinal))
+            {
+                throw Failure();
+            }
+        }
+
+        public FileStream OpenReadDuplicate()
+        {
+            Revalidate();
+            if (!DuplicateHandle(
+                    GetCurrentProcess(),
+                    stream.SafeFileHandle,
+                    GetCurrentProcess(),
+                    out var duplicate,
+                    0,
+                    false,
+                    DuplicateSameAccess))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            return new FileStream(duplicate, FileAccess.Read, 64 * 1024, isAsync: false);
+        }
+
+        public void Dispose()
+        {
+            if (!disposed)
+            {
+                disposed = true;
+                stream.Dispose();
+            }
+        }
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DuplicateHandle(
+            IntPtr sourceProcessHandle,
+            SafeFileHandle sourceHandle,
+            IntPtr targetProcessHandle,
+            out SafeFileHandle targetHandle,
+            uint desiredAccess,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+            uint options);
     }
 
     private static class NativeDirectory

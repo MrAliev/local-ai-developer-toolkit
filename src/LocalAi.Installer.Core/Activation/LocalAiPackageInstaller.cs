@@ -268,7 +268,7 @@ public sealed class LocalAiPackageInstaller
         string? launcherTemporary = null;
         var publishedVersion = false;
         var launcherReplaced = false;
-        LauncherBackupMetadata? launcherBackup = null;
+        InstallationLayoutLease.RetainedLauncherBackup? launcherBackup = null;
         try
         {
             if (!targetExisted)
@@ -318,7 +318,7 @@ public sealed class LocalAiPackageInstaller
 
             if (File.Exists(layout.LauncherPath))
             {
-                launcherBackup = BackupLauncher(layout);
+                launcherBackup = layoutLease.CreateLauncherBackup();
             }
             else
             {
@@ -396,7 +396,7 @@ public sealed class LocalAiPackageInstaller
                 version,
                 priorVersion,
                 versionPath,
-                launcherBackup,
+                launcherBackup?.Metadata,
                 null);
         }
         catch
@@ -423,6 +423,10 @@ public sealed class LocalAiPackageInstaller
 
             throw;
         }
+        finally
+        {
+            launcherBackup?.Dispose();
+        }
     }
 
     public Task<LocalAiPackageInstallResult> InstallAsync(
@@ -444,7 +448,7 @@ public sealed class LocalAiPackageInstaller
         string version,
         CurrentPointerSnapshot priorPointer,
         string versionPath,
-        LauncherBackupMetadata? launcherBackup,
+        InstallationLayoutLease.RetainedLauncherBackup? launcherBackup,
         bool publishedVersion,
         bool targetExisted)
     {
@@ -497,7 +501,7 @@ public sealed class LocalAiPackageInstaller
                 version,
                 priorVersion,
                 versionPath,
-                launcherBackup,
+                launcherBackup.Metadata,
                 "The current-version pointer changed to an unrelated state; no recovery mutation was attempted.",
                 publishedVersion && !targetExisted);
         }
@@ -546,15 +550,16 @@ public sealed class LocalAiPackageInstaller
             version,
             priorVersion,
             versionPath,
-            launcherBackup,
+            launcherBackup.Metadata,
             "Activation and rollback both failed; manual recovery is required.");
     }
 
+    [SupportedOSPlatform("windows")]
     private LocalAiPackageInstallResult RecoverFreshFailureUnderPointerLock(
         InstallationLayout layout,
         string version,
         string versionPath,
-        LauncherBackupMetadata? launcherBackup,
+        InstallationLayoutLease.RetainedLauncherBackup? launcherBackup,
         bool publishedVersion,
         bool targetExisted)
     {
@@ -579,7 +584,7 @@ public sealed class LocalAiPackageInstaller
                 version,
                 null,
                 versionPath,
-                launcherBackup,
+                launcherBackup?.Metadata,
                 "Activation failed before a current version was selected.",
                 publishedVersion && !targetExisted);
         }
@@ -595,18 +600,19 @@ public sealed class LocalAiPackageInstaller
             version,
             null,
             versionPath,
-            launcherBackup,
+            launcherBackup?.Metadata,
             "Activation may have changed the current version; manual recovery is required.",
             publishedVersion && !targetExisted);
     }
 
+    [SupportedOSPlatform("windows")]
     private LocalAiPackageInstallResult RestorePriorLauncherUnderPointerLock(
         InstallationLayout layout,
         string version,
         string priorVersion,
         CurrentPointerSnapshot expectedPointer,
         string versionPath,
-        LauncherBackupMetadata launcherBackup,
+        InstallationLayoutLease.RetainedLauncherBackup launcherBackup,
         bool publishedVersion,
         bool targetExisted,
         string reason)
@@ -624,7 +630,7 @@ public sealed class LocalAiPackageInstaller
                     version,
                     priorVersion,
                     versionPath,
-                    launcherBackup,
+                    launcherBackup.Metadata,
                     "The current-version pointer changed before launcher recovery; no launcher mutation was attempted.",
                     publishedVersion && !targetExisted);
             }
@@ -648,31 +654,32 @@ public sealed class LocalAiPackageInstaller
                 version,
                 priorVersion,
                 versionPath,
-                launcherBackup,
+                launcherBackup.Metadata,
                 "The current-version pointer could not be locked for launcher recovery; no launcher mutation was attempted.",
                 publishedVersion && !targetExisted);
         }
     }
 
+    [SupportedOSPlatform("windows")]
     private static LocalAiPackageInstallResult RestorePriorLauncher(
         InstallationLayout layout,
         string version,
         string priorVersion,
         string versionPath,
-        LauncherBackupMetadata launcherBackup,
+        InstallationLayoutLease.RetainedLauncherBackup launcherBackup,
         bool publishedVersion,
         bool targetExisted,
         string reason)
     {
         try
         {
-            RestoreLauncher(layout.LauncherPath, launcherBackup.Path);
+            RestoreLauncher(layout.LauncherPath, launcherBackup);
             return new(
                 LocalAiPackageInstallStatus.RolledBack,
                 version,
                 priorVersion,
                 versionPath,
-                launcherBackup,
+                launcherBackup.Metadata,
                 reason,
                 publishedVersion && !targetExisted);
         }
@@ -685,25 +692,40 @@ public sealed class LocalAiPackageInstaller
                 version,
                 priorVersion,
                 versionPath,
-                launcherBackup,
+                launcherBackup.Metadata,
                 "The prior stable launcher could not be restored.");
         }
     }
 
-    private static void RestoreLauncher(string launcherPath, string backupPath)
+    [SupportedOSPlatform("windows")]
+    private static void RestoreLauncher(
+        string launcherPath,
+        InstallationLayoutLease.RetainedLauncherBackup backup)
     {
-        ValidateFile(backupPath);
+        backup.Revalidate();
         var temporary = Path.Combine(
             Path.GetDirectoryName(launcherPath)!,
             ".restore-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
-            CopyExistingExact(backupPath, temporary);
-            File.Move(temporary, launcherPath, overwrite: true);
-            if (!FilesEqual(backupPath, launcherPath))
+            using (var source = backup.OpenReadDuplicate())
+            using (var destination = new FileStream(
+                       temporary,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       64 * 1024,
+                       FileOptions.WriteThrough))
             {
-                throw new LocalAiPackageInstallationException("The prior stable launcher failed read-back verification.");
+                source.Position = 0;
+                source.CopyTo(destination);
+                destination.Flush(flushToDisk: true);
             }
+
+            backup.Revalidate();
+            File.Move(temporary, launcherPath, overwrite: true);
+            VerifyBackupCopy(launcherPath, backup.Metadata);
+            backup.Revalidate();
         }
         finally
         {
@@ -714,12 +736,19 @@ public sealed class LocalAiPackageInstaller
         }
     }
 
-    private static bool FilesEqual(string leftPath, string rightPath)
+    private static void VerifyBackupCopy(string path, LauncherBackupMetadata expected)
     {
-        using var left = new FileStream(leftPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var right = new FileStream(rightPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return left.Length == right.Length &&
-               CryptographicOperations.FixedTimeEquals(SHA256.HashData(left), SHA256.HashData(right));
+        ValidateFile(path);
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length != expected.Length ||
+            !string.Equals(
+                Convert.ToHexString(SHA256.HashData(stream)),
+                expected.Sha256,
+                StringComparison.Ordinal))
+        {
+            throw new LocalAiPackageInstallationException(
+                "The prior stable launcher failed read-back verification.");
+        }
     }
 
     private static bool ValidateExactVersion(VerifiedPackage package, string versionPath)
@@ -738,52 +767,6 @@ public sealed class LocalAiPackageInstaller
         catch (LocalAiPackageInstallationException)
         {
             return false;
-        }
-    }
-
-    private static LauncherBackupMetadata BackupLauncher(InstallationLayout layout)
-    {
-        ValidateFile(layout.LauncherPath);
-        Directory.CreateDirectory(layout.InstallerBackupsRoot);
-        ValidateDirectory(layout.InstallerBackupsRoot);
-        var backupDirectory = CreateUniqueDirectory(layout.InstallerBackupsRoot, "launcher-");
-        var backupPath = Path.Combine(backupDirectory, LocalAiPackageLayout.StableLauncherFile);
-        CopyExistingExact(layout.LauncherPath, backupPath);
-        using var backup = new FileStream(backupPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return new(
-            backupPath,
-            backup.Length,
-            Convert.ToHexString(SHA256.HashData(backup)));
-    }
-
-    private static void CopyExistingExact(string sourcePath, string destinationPath)
-    {
-        byte[] sourceHash;
-        long sourceLength;
-        using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-        {
-            using (var destination = new FileStream(
-                       destinationPath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       64 * 1024,
-                       FileOptions.WriteThrough))
-            {
-                source.CopyTo(destination);
-                destination.Flush(flushToDisk: true);
-            }
-
-            sourceLength = source.Length;
-            source.Position = 0;
-            sourceHash = SHA256.HashData(source);
-        }
-
-        using var readBack = new FileStream(destinationPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (sourceLength != readBack.Length ||
-            !CryptographicOperations.FixedTimeEquals(sourceHash, SHA256.HashData(readBack)))
-        {
-            throw new LocalAiPackageInstallationException("The stable launcher backup failed verification.");
         }
     }
 

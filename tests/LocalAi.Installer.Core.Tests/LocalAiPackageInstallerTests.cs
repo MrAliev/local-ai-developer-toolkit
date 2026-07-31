@@ -182,17 +182,41 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         var priorLauncher = System.Text.Encoding.UTF8.GetBytes("prior-launcher");
         CreateExisting("v1", priorLauncher);
         using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        Exception? runnerFailure = null;
         var runner = new RecordingRunner((_, arguments, _, _) =>
         {
-            WritePointer(arguments[1]);
-            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+            try
+            {
+                var backupPath = Assert.Single(
+                    Directory.EnumerateFiles(
+                        layout.InstallerBackupsRoot,
+                        LocalAiPackageLayout.StableLauncherFile,
+                        SearchOption.AllDirectories));
+                Assert.True(Record.Exception(() => File.WriteAllText(backupPath, "tampered"))
+                    is IOException or UnauthorizedAccessException);
+                Assert.True(Record.Exception(() => File.Delete(backupPath))
+                    is IOException or UnauthorizedAccessException);
+                var replacement = Path.Combine(Path.GetDirectoryName(backupPath)!, "replacement.exe");
+                File.WriteAllText(replacement, "replacement");
+                Assert.True(Record.Exception(() => File.Move(replacement, backupPath, overwrite: true))
+                    is IOException or UnauthorizedAccessException);
+                File.Delete(replacement);
+                WritePointer(arguments[1]);
+                return Task.FromResult(new ProcessResult(0, "", "", false, false));
+            }
+            catch (Exception exception)
+            {
+                runnerFailure = exception;
+                throw;
+            }
         });
-        var layout = InstallationLayout.FromLocalAppData(localAppData);
         var priorPointer = File.ReadAllBytes(layout.CurrentPointerPath);
         var installer = Installer(runner);
 
         var result = await installer.InstallAsync(package, layout, TestContext.Current.CancellationToken);
 
+        Assert.Null(runnerFailure);
         Assert.Equal(LocalAiPackageInstallStatus.Installed, result.Status);
         Assert.Equal("v1", result.PriorVersion);
         Assert.NotNull(result.LauncherBackupPath);
@@ -377,6 +401,28 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.ThrowsAny<IOException>(() =>
             Directory.Move(versionPath, versionPath + ".moved"));
         lease.Revalidate();
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Retained_launcher_backup_rejects_wrong_handle_and_metadata()
+    {
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        using var lease = InstallationLayoutLease.Acquire(layout);
+        File.WriteAllBytes(layout.LauncherPath, System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+
+        using var backup = lease.CreateLauncherBackup();
+        var wrongPath = Path.Combine(layout.LauncherDirectory, "wrong.exe");
+        File.WriteAllText(wrongPath, "wrong");
+
+        Assert.Throws<LocalAiPackageInstallationException>(() =>
+            lease.RetainLauncherBackup(wrongPath, backup.Metadata));
+        File.Delete(wrongPath);
+        Assert.Throws<LocalAiPackageInstallationException>(() =>
+            lease.RetainLauncherBackup(
+                backup.CanonicalPath,
+                backup.Metadata with { Length = backup.Metadata.Length + 1 }));
+        backup.Revalidate();
     }
 
     [Fact]
