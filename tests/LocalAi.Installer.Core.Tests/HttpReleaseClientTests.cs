@@ -108,6 +108,47 @@ public sealed class HttpReleaseClientTests
     }
 
     [Fact]
+    public async Task Sync_dispose_releases_response_when_inner_dispose_throws()
+    {
+        var primary = new IOException("primary sync dispose failure");
+        var content = new DisposalFaultingContent(primary);
+        content.Headers.ContentLength = 3;
+        var handler = new RecordingHandler((_, _) =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        using var client = new HttpReleaseClient(handler);
+        var stream = await client.OpenPackageAsync(
+            new Uri("https://example.invalid/package.zip"),
+            3,
+            TestContext.Current.CancellationToken);
+
+        var thrown = Assert.Throws<IOException>(stream.Dispose);
+
+        Assert.Same(primary, thrown);
+        Assert.True(content.WasDisposed);
+    }
+
+    [Fact]
+    public async Task Async_dispose_releases_response_when_inner_dispose_throws()
+    {
+        var primary = new IOException("primary async dispose failure");
+        var content = new DisposalFaultingContent(primary);
+        content.Headers.ContentLength = 3;
+        var handler = new RecordingHandler((_, _) =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        using var client = new HttpReleaseClient(handler);
+        var stream = await client.OpenPackageAsync(
+            new Uri("https://example.invalid/package.zip"),
+            3,
+            TestContext.Current.CancellationToken);
+
+        var thrown = await Assert.ThrowsAsync<IOException>(async () =>
+            await stream.DisposeAsync());
+
+        Assert.Same(primary, thrown);
+        Assert.True(content.WasDisposed);
+    }
+
+    [Fact]
     public async Task Propagates_cancellation()
     {
         var handler = new RecordingHandler(async (_, token) =>
@@ -230,6 +271,53 @@ public sealed class HttpReleaseClientTests
 
         protected override Task<Stream> CreateContentReadStreamAsync() =>
             Task.FromResult<Stream>(new FaultingStream());
+    }
+
+    private sealed class DisposalFaultingContent(Exception failure) : HttpContent
+    {
+        private readonly DisposalFaultingStream stream = new(failure);
+
+        public bool WasDisposed { get; private set; }
+
+        protected override Task SerializeToStreamAsync(
+            Stream target,
+            TransportContext? context) =>
+            throw new InvalidOperationException();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync() =>
+            Task.FromResult<Stream>(stream);
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                WasDisposed = true;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class DisposalFaultingStream(Exception failure) : MemoryStream
+    {
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                throw failure;
+            }
+
+            base.Dispose(disposing);
+        }
+
+        public override ValueTask DisposeAsync() =>
+            ValueTask.FromException(failure);
     }
 
     private sealed class FaultingStream : MemoryStream

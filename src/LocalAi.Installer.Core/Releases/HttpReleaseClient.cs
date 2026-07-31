@@ -189,8 +189,26 @@ public sealed class HttpReleaseClient : Abstractions.IReleaseClient, IDisposable
             if (disposing && !disposed)
             {
                 disposed = true;
-                inner.Dispose();
-                response.Dispose();
+                Exception? primary = null;
+                try
+                {
+                    inner.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    primary = exception;
+                    throw;
+                }
+                finally
+                {
+                    try
+                    {
+                        response.Dispose();
+                    }
+                    catch when (primary is not null)
+                    {
+                    }
+                }
             }
 
             base.Dispose(disposing);
@@ -201,8 +219,26 @@ public sealed class HttpReleaseClient : Abstractions.IReleaseClient, IDisposable
             if (!disposed)
             {
                 disposed = true;
-                await inner.DisposeAsync().ConfigureAwait(false);
-                response.Dispose();
+                Exception? primary = null;
+                try
+                {
+                    await inner.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    primary = exception;
+                    throw;
+                }
+                finally
+                {
+                    try
+                    {
+                        response.Dispose();
+                    }
+                    catch when (primary is not null)
+                    {
+                    }
+                }
             }
 
             GC.SuppressFinalize(this);
