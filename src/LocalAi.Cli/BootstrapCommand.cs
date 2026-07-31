@@ -1,3 +1,5 @@
+using LocalAi.Contracts;
+
 namespace LocalAi.Cli;
 
 public sealed record BootstrapPlan(
