@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using LocalAi.Contracts.Activation;
+
 namespace LocalAi.Launcher.Tests;
 
 public sealed class VersionActivatorTests
@@ -11,7 +14,10 @@ public sealed class VersionActivatorTests
         var before = File.ReadAllBytes(install.CurrentPath);
 
         var error = Assert.Throws<LauncherException>(
-            () => CreateActivator(install).Activate("v2", stopRunning: false));
+            () => CreateActivator(install).Activate(
+                "v2",
+                stopRunning: false,
+                ExpectCurrent(before)));
 
         Assert.Equal("version_incomplete", error.Code);
         Assert.Equal(before, File.ReadAllBytes(install.CurrentPath));
@@ -22,17 +28,25 @@ public sealed class VersionActivatorTests
     {
         using var install = TestInstall.CreateComplete("v1", "v2", "v3");
         install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        var expectation = ExpectCurrent(File.ReadAllBytes(install.CurrentPath));
 
-        await Task.WhenAll(
+        var errors = await Task.WhenAll(
             Task.Run(
-                () => CreateActivator(install).Activate("v2", stopRunning: false),
+                () => Record.Exception(() =>
+                    CreateActivator(install, TimeSpan.FromSeconds(1))
+                        .Activate("v2", false, expectation)),
                 TestContext.Current.CancellationToken),
             Task.Run(
-                () => CreateActivator(install).Activate("v3", stopRunning: false),
+                () => Record.Exception(() =>
+                    CreateActivator(install, TimeSpan.FromSeconds(1))
+                        .Activate("v3", false, expectation)),
                 TestContext.Current.CancellationToken));
 
         var resolved = new VersionResolver(install.BinRoot).Resolve("localai");
         Assert.Contains(resolved.Version, new[] { "v2", "v3" });
+        Assert.Single(errors, error => error is null);
+        var rejected = Assert.Single(errors, error => error is not null);
+        Assert.Equal("current_pointer_changed", Assert.IsType<LauncherException>(rejected).Code);
         Assert.Empty(Directory.EnumerateFiles(install.BinRoot, "*.tmp"));
     }
 
@@ -46,7 +60,10 @@ public sealed class VersionActivatorTests
             Path.Combine(install.BinRoot, "current.lock"));
 
         var error = Assert.Throws<LauncherException>(
-            () => CreateActivator(install).Activate("v2", stopRunning: false));
+            () => CreateActivator(install).Activate(
+                "v2",
+                stopRunning: false,
+                ExpectCurrent(before)));
 
         Assert.Equal("version_in_use", error.Code);
         Assert.Equal(before, File.ReadAllBytes(install.CurrentPath));
@@ -74,18 +91,72 @@ public sealed class VersionActivatorTests
             TimeSpan.Zero);
 
         var error = Assert.Throws<LauncherException>(
-            () => activator.Activate("v2", stopRunning: false));
+            () => activator.Activate(
+                "v2",
+                stopRunning: false,
+                ExpectCurrent(before)));
 
         Assert.Equal("version_in_use", error.Code);
         Assert.Equal(before, File.ReadAllBytes(install.CurrentPath));
     }
 
-    private static VersionActivator CreateActivator(TestInstall install) =>
+    [Fact]
+    public void Missing_expectation_activates_only_when_pointer_is_still_missing()
+    {
+        using var install = TestInstall.CreateComplete("v1");
+
+        CreateActivator(install).Activate(
+            "v1",
+            stopRunning: false,
+            CurrentPointerExpectation.Missing);
+
+        Assert.Equal("v1", new VersionResolver(install.BinRoot).ReadCurrent().Version);
+    }
+
+    [Fact]
+    public void Exact_hash_expectation_rejects_same_version_raw_rewrite()
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        var before = File.ReadAllBytes(install.CurrentPath);
+        var expectation = ExpectCurrent(before);
+        install.WriteCurrent("""{ "schemaVersion": 1, "version": "v1" }""");
+        var rewritten = File.ReadAllBytes(install.CurrentPath);
+
+        var error = Assert.Throws<LauncherException>(() =>
+            CreateActivator(install).Activate("v2", false, expectation));
+
+        Assert.Equal("current_pointer_changed", error.Code);
+        Assert.Equal(rewritten, File.ReadAllBytes(install.CurrentPath));
+    }
+
+    [Fact]
+    public void Exact_hash_expectation_rejects_unrelated_third_pointer()
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2", "v3");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        var expectation = ExpectCurrent(File.ReadAllBytes(install.CurrentPath));
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v3"}""");
+        var before = File.ReadAllBytes(install.CurrentPath);
+
+        var error = Assert.Throws<LauncherException>(() =>
+            CreateActivator(install).Activate("v2", true, expectation));
+
+        Assert.Equal("current_pointer_changed", error.Code);
+        Assert.Equal(before, File.ReadAllBytes(install.CurrentPath));
+    }
+
+    private static VersionActivator CreateActivator(
+        TestInstall install,
+        TimeSpan? leaseTimeout = null) =>
         new(
             install.BinRoot,
             new LocalAiProcessController(
                 static () => [],
                 static (_, _) => { }),
-            TimeSpan.Zero,
+            leaseTimeout ?? TimeSpan.Zero,
             TimeSpan.Zero);
+
+    private static CurrentPointerExpectation ExpectCurrent(byte[] bytes) =>
+        CurrentPointerExpectation.ExactSha256(SHA256.HashData(bytes));
 }
