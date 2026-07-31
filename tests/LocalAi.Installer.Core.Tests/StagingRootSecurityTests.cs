@@ -30,7 +30,6 @@ public sealed class StagingRootSecurityTests : IDisposable
     }
 
     [Theory]
-    [InlineData((int)StagingCreationStage.HandleOpen)]
     [InlineData((int)StagingCreationStage.LeaseConstruction)]
     [InlineData((int)StagingCreationStage.NonceGeneration)]
     [InlineData((int)StagingCreationStage.MarkerOpen)]
@@ -44,6 +43,7 @@ public sealed class StagingRootSecurityTests : IDisposable
         Directory.CreateDirectory(root);
         var staging = Path.Combine(root, "owned-failure-" + stage);
         var factory = new WindowsStagingRootFactory(
+            new NativeNtAtomicDirectoryCreator(),
             new ThrowAtCreationStage(stage));
 
         Assert.Throws<ReleaseVerificationException>(() =>
@@ -57,15 +57,50 @@ public sealed class StagingRootSecurityTests : IDisposable
     {
         Directory.CreateDirectory(root);
         var staging = Path.Combine(root, "replacement");
-        var factory = new WindowsStagingRootFactory(
-            new ReplaceThenThrowBeforeHandleOpen());
+        var creator = new MisboundAtomicDirectoryCreator("foreign");
+        var factory = new WindowsStagingRootFactory(creator);
 
         Assert.Throws<ReleaseVerificationException>(() =>
             factory.CreateExclusive(staging));
 
-        Assert.Equal(
-            "foreign",
-            File.ReadAllText(Path.Combine(staging, "foreign.txt")));
+        Assert.False(Directory.Exists(staging));
+        Assert.True(Directory.Exists(Path.Combine(root, "foreign")));
+    }
+
+    [Fact]
+    public void Atomic_native_create_failure_leaves_nothing_and_is_not_retried()
+    {
+        Directory.CreateDirectory(root);
+        var staging = Path.Combine(root, "native-failure");
+        var creator = new FailingAtomicDirectoryCreator();
+        var factory = new WindowsStagingRootFactory(creator);
+
+        Assert.Throws<ReleaseVerificationException>(() =>
+            factory.CreateExclusive(staging));
+
+        Assert.Equal(1, creator.CallCount);
+        Assert.False(Directory.Exists(staging));
+    }
+
+    [Fact]
+    public void Native_atomic_create_returns_bound_handle_and_collision_is_never_owned()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Native atomic staging creation is Windows-specific.");
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        var staging = Path.Combine(root, "native-owned");
+        using var lease = new WindowsStagingRootFactory().CreateExclusive(staging);
+        lease.Revalidate();
+        File.WriteAllText(Path.Combine(staging, "sentinel.txt"), "owned");
+
+        Assert.Throws<ReleaseVerificationException>(() =>
+            new WindowsStagingRootFactory().CreateExclusive(staging));
+
+        Assert.Equal("owned", File.ReadAllText(Path.Combine(staging, "sentinel.txt")));
     }
 
     [Fact]
@@ -166,9 +201,11 @@ public sealed class StagingRootSecurityTests : IDisposable
             return;
         }
 
+        var creator = new FailingAtomicDirectoryCreator();
         Assert.Throws<ReleaseVerificationException>(() =>
-            new WindowsStagingRootFactory().CreateExclusive(
+            new WindowsStagingRootFactory(creator).CreateExclusive(
                 Path.Combine(link, "stage")));
+        Assert.Equal(0, creator.CallCount);
         Assert.False(Directory.Exists(Path.Combine(outside, "stage")));
     }
 
@@ -232,20 +269,31 @@ public sealed class StagingRootSecurityTests : IDisposable
         }
     }
 
-    private sealed class ReplaceThenThrowBeforeHandleOpen : IStagingCreationObserver
+    private sealed class FailingAtomicDirectoryCreator : IAtomicDirectoryCreator
     {
-        public void OnStage(StagingCreationStage stage, string path)
-        {
-            if (stage != StagingCreationStage.HandleOpen)
-            {
-                return;
-            }
+        public int CallCount { get; private set; }
 
-            Directory.Delete(path, recursive: true);
-            Directory.CreateDirectory(path);
-            File.WriteAllText(Path.Combine(path, "foreign.txt"), "foreign");
-            throw new ReleaseVerificationException("Injected replacement race.");
+        public Microsoft.Win32.SafeHandles.SafeFileHandle CreateDirectory(
+            Microsoft.Win32.SafeHandles.SafeFileHandle parentHandle,
+            string leafName,
+            ReadOnlySpan<byte> securityDescriptor)
+        {
+            CallCount++;
+            throw new ReleaseVerificationException("Injected native create failure.");
         }
+    }
+
+    private sealed class MisboundAtomicDirectoryCreator(string foreignLeaf)
+        : IAtomicDirectoryCreator
+    {
+        public Microsoft.Win32.SafeHandles.SafeFileHandle CreateDirectory(
+            Microsoft.Win32.SafeHandles.SafeFileHandle parentHandle,
+            string leafName,
+            ReadOnlySpan<byte> securityDescriptor) =>
+            new NativeNtAtomicDirectoryCreator().CreateDirectory(
+                parentHandle,
+                foreignLeaf,
+                securityDescriptor);
     }
 
     private sealed class IdentityFailureFactory : IStagingRootFactory

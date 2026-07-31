@@ -13,6 +13,14 @@ internal interface IStagingRootFactory
     IStagingRootLease CreateExclusive(string requestedPath);
 }
 
+internal interface IAtomicDirectoryCreator
+{
+    SafeFileHandle CreateDirectory(
+        SafeFileHandle parentHandle,
+        string leafName,
+        ReadOnlySpan<byte> securityDescriptor);
+}
+
 internal interface IStagingCreationObserver
 {
     void OnStage(StagingCreationStage stage, string path);
@@ -20,7 +28,6 @@ internal interface IStagingCreationObserver
 
 internal enum StagingCreationStage
 {
-    HandleOpen,
     LeaseConstruction,
     NonceGeneration,
     MarkerOpen,
@@ -49,16 +56,27 @@ internal interface IStagingRootLease : IDisposable
 /// </summary>
 internal sealed class WindowsStagingRootFactory : IStagingRootFactory
 {
+    private readonly IAtomicDirectoryCreator atomicDirectoryCreator;
     private readonly IStagingCreationObserver? creationObserver;
 
     public WindowsStagingRootFactory()
+        : this(new NativeNtAtomicDirectoryCreator(), null)
     {
     }
 
-    internal WindowsStagingRootFactory(IStagingCreationObserver creationObserver)
+    internal WindowsStagingRootFactory(
+        IAtomicDirectoryCreator atomicDirectoryCreator)
+        : this(atomicDirectoryCreator, null)
     {
-        this.creationObserver = creationObserver ??
-            throw new ArgumentNullException(nameof(creationObserver));
+    }
+
+    internal WindowsStagingRootFactory(
+        IAtomicDirectoryCreator atomicDirectoryCreator,
+        IStagingCreationObserver? creationObserver)
+    {
+        this.atomicDirectoryCreator = atomicDirectoryCreator ??
+            throw new ArgumentNullException(nameof(atomicDirectoryCreator));
+        this.creationObserver = creationObserver;
     }
 
     public IStagingRootLease CreateExclusive(string requestedPath)
@@ -77,53 +95,42 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
     {
         var canonicalPath = ValidateRequestedPath(requestedPath);
         ValidateAncestors(canonicalPath);
+        var canonicalParent = Path.GetDirectoryName(canonicalPath)!;
+        var leafName = Path.GetFileName(canonicalPath);
         var security = BuildSecurity();
         var descriptor = security.GetSecurityDescriptorBinaryForm();
-        var descriptorPointer = Marshal.AllocHGlobal(descriptor.Length);
-        var createdExclusively = false;
         string? ownershipMarker = null;
         var markerCreated = false;
         SafeFileHandle? markerHandle = null;
+        SafeFileHandle? parentHandle = null;
         SafeFileHandle? rootHandle = null;
         WindowsStagingRootLease? lease = null;
+        var rootHandleBoundToRequest = false;
         try
         {
-            try
-            {
-                Marshal.Copy(descriptor, 0, descriptorPointer, descriptor.Length);
-                var attributes = new SecurityAttributes
-                {
-                    Length = Marshal.SizeOf<SecurityAttributes>(),
-                    SecurityDescriptor = descriptorPointer,
-                    InheritHandle = false,
-                };
-                if (!CreateDirectoryW(canonicalPath, ref attributes))
-                {
-                    var error = Marshal.GetLastWin32Error();
-                    throw error == 183
-                        ? Failure()
-                        : new Win32Exception(error);
-                }
-
-                createdExclusively = true;
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(descriptorPointer);
-            }
-
-            creationObserver?.OnStage(
-                StagingCreationStage.HandleOpen,
+            parentHandle = OpenParentHandle(canonicalParent);
+            WindowsStagingRootLease.ValidateDirectoryHandle(
+                parentHandle,
+                canonicalParent);
+            rootHandle = atomicDirectoryCreator.CreateDirectory(
+                parentHandle,
+                leafName,
+                descriptor);
+            WindowsStagingRootLease.ValidateDirectoryHandle(
+                rootHandle,
                 canonicalPath);
-            rootHandle = OpenRootHandle(canonicalPath);
+            rootHandleBoundToRequest = true;
 
             creationObserver?.OnStage(
                 StagingCreationStage.LeaseConstruction,
                 canonicalPath);
             lease = new WindowsStagingRootLease(
                 canonicalPath,
+                canonicalParent,
+                parentHandle,
                 rootHandle,
                 security);
+            parentHandle = null;
             rootHandle = null;
             lease.Revalidate();
 
@@ -175,18 +182,21 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
         catch
         {
             markerHandle?.Dispose();
-            if (createdExclusively)
+            if (rootHandleBoundToRequest)
             {
                 TryCleanupCreationFailure(
                     canonicalPath,
+                    canonicalParent,
                     security,
                     ownershipMarker,
                     markerCreated,
+                    ref parentHandle,
                     ref rootHandle,
                     ref lease);
             }
 
             rootHandle?.Dispose();
+            parentHandle?.Dispose();
             lease?.Dispose();
             throw;
         }
@@ -264,11 +274,11 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
             AccessControlType.Allow));
 
     [SupportedOSPlatform("windows")]
-    private static SafeFileHandle OpenRootHandle(string path)
+    private static SafeFileHandle OpenParentHandle(string path)
     {
         var handle = CreateFileW(
             path,
-            0x00010000 | 0x00020000 | 0x00100000,
+            0x00000001 | 0x00000020 | 0x00000080 | 0x00020000 | 0x00100000,
             FileShare.ReadWrite,
             IntPtr.Zero,
             3,
@@ -287,9 +297,11 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
     [SupportedOSPlatform("windows")]
     private static void TryCleanupCreationFailure(
         string path,
+        string parentPath,
         DirectorySecurity expectedSecurity,
         string? markerPath,
         bool markerCreated,
+        ref SafeFileHandle? parentHandle,
         ref SafeFileHandle? rootHandle,
         ref WindowsStagingRootLease? lease)
     {
@@ -297,11 +309,18 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
         {
             if (lease is null)
             {
-                rootHandle ??= OpenRootHandle(path);
+                if (parentHandle is null || rootHandle is null)
+                {
+                    return;
+                }
+
                 lease = new WindowsStagingRootLease(
                     path,
+                    parentPath,
+                    parentHandle,
                     rootHandle,
                     expectedSecurity);
+                parentHandle = null;
                 rootHandle = null;
             }
 
@@ -318,22 +337,6 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
     private static ReleaseVerificationException Failure() =>
         new("Secure staging root creation failed.");
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SecurityAttributes
-    {
-        public int Length;
-        public IntPtr SecurityDescriptor;
-
-        [MarshalAs(UnmanagedType.Bool)]
-        public bool InheritHandle;
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CreateDirectoryW(
-        string path,
-        ref SecurityAttributes securityAttributes);
-
     [DllImport(
         "kernel32.dll",
         CharSet = CharSet.Unicode,
@@ -349,10 +352,180 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
         IntPtr templateFile);
 }
 
+internal sealed class NativeNtAtomicDirectoryCreator : IAtomicDirectoryCreator
+{
+    private const uint FileListDirectory = 0x00000001;
+    private const uint FileReadAttributes = 0x00000080;
+    private const uint Delete = 0x00010000;
+    private const uint ReadControl = 0x00020000;
+    private const uint Synchronize = 0x00100000;
+    private const uint FileAttributeNormal = 0x00000080;
+    private const uint FileShareRead = 0x00000001;
+    private const uint FileShareWrite = 0x00000002;
+    private const uint FileCreate = 2;
+    private const uint FileDirectoryFile = 0x00000001;
+    private const uint FileSynchronousIoNonalert = 0x00000020;
+    private const uint FileOpenReparsePoint = 0x00200000;
+    private const uint ObjCaseInsensitive = 0x00000040;
+
+    public SafeFileHandle CreateDirectory(
+        SafeFileHandle parentHandle,
+        string leafName,
+        ReadOnlySpan<byte> securityDescriptor)
+    {
+        ArgumentNullException.ThrowIfNull(parentHandle);
+        if (parentHandle.IsInvalid || parentHandle.IsClosed ||
+            string.IsNullOrWhiteSpace(leafName) ||
+            leafName is "." or ".." ||
+            leafName.IndexOfAny(['\\', '/', ':']) >= 0 ||
+            securityDescriptor.IsEmpty)
+        {
+            throw Failure();
+        }
+
+        var nameBuffer = IntPtr.Zero;
+        var namePointer = IntPtr.Zero;
+        var descriptorPointer = IntPtr.Zero;
+        var parentAddedRef = false;
+        IntPtr nativeHandle = IntPtr.Zero;
+        try
+        {
+            nameBuffer = Marshal.StringToHGlobalUni(leafName);
+            var name = new UnicodeString
+            {
+                Length = checked((ushort)(leafName.Length * sizeof(char))),
+                MaximumLength = checked((ushort)((leafName.Length + 1) * sizeof(char))),
+                Buffer = nameBuffer,
+            };
+            namePointer = Marshal.AllocHGlobal(Marshal.SizeOf<UnicodeString>());
+            Marshal.StructureToPtr(name, namePointer, fDeleteOld: false);
+
+            var descriptor = securityDescriptor.ToArray();
+            descriptorPointer = Marshal.AllocHGlobal(descriptor.Length);
+            Marshal.Copy(descriptor, 0, descriptorPointer, descriptor.Length);
+
+            parentHandle.DangerousAddRef(ref parentAddedRef);
+            var attributes = new ObjectAttributes
+            {
+                Length = Marshal.SizeOf<ObjectAttributes>(),
+                RootDirectory = parentHandle.DangerousGetHandle(),
+                ObjectName = namePointer,
+                Attributes = ObjCaseInsensitive,
+                SecurityDescriptor = descriptorPointer,
+            };
+            var status = NtCreateFile(
+                out nativeHandle,
+                FileListDirectory | FileReadAttributes | Delete | ReadControl | Synchronize,
+                ref attributes,
+                out _,
+                IntPtr.Zero,
+                FileAttributeNormal,
+                FileShareRead | FileShareWrite,
+                FileCreate,
+                FileDirectoryFile | FileSynchronousIoNonalert | FileOpenReparsePoint,
+                IntPtr.Zero,
+                0);
+            if (status < 0 || nativeHandle == IntPtr.Zero || nativeHandle == new IntPtr(-1))
+            {
+                if (nativeHandle != IntPtr.Zero && nativeHandle != new IntPtr(-1))
+                {
+                    new SafeFileHandle(nativeHandle, ownsHandle: true).Dispose();
+                    nativeHandle = IntPtr.Zero;
+                }
+
+                throw Failure();
+            }
+
+            var result = new SafeFileHandle(nativeHandle, ownsHandle: true);
+            nativeHandle = IntPtr.Zero;
+            return result;
+        }
+        catch (Exception exception) when (
+            exception is OverflowException or OutOfMemoryException or
+            ArgumentException)
+        {
+            throw Failure();
+        }
+        finally
+        {
+            if (nativeHandle != IntPtr.Zero && nativeHandle != new IntPtr(-1))
+            {
+                new SafeFileHandle(nativeHandle, ownsHandle: true).Dispose();
+            }
+
+            if (parentAddedRef)
+            {
+                parentHandle.DangerousRelease();
+            }
+
+            if (descriptorPointer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(descriptorPointer);
+            }
+
+            if (namePointer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(namePointer);
+            }
+
+            if (nameBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(nameBuffer);
+            }
+        }
+    }
+
+    private static ReleaseVerificationException Failure() =>
+        new("Secure staging root creation failed.");
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct UnicodeString
+    {
+        public ushort Length;
+        public ushort MaximumLength;
+        public IntPtr Buffer;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ObjectAttributes
+    {
+        public int Length;
+        public IntPtr RootDirectory;
+        public IntPtr ObjectName;
+        public uint Attributes;
+        public IntPtr SecurityDescriptor;
+        public IntPtr SecurityQualityOfService;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoStatusBlock
+    {
+        public IntPtr Status;
+        public UIntPtr Information;
+    }
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtCreateFile(
+        out IntPtr fileHandle,
+        uint desiredAccess,
+        ref ObjectAttributes objectAttributes,
+        out IoStatusBlock ioStatusBlock,
+        IntPtr allocationSize,
+        uint fileAttributes,
+        uint shareAccess,
+        uint createDisposition,
+        uint createOptions,
+        IntPtr eaBuffer,
+        uint eaLength);
+}
+
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsStagingRootLease : IStagingRootLease
 {
+    private readonly SafeFileHandle parentHandle;
     private readonly SafeFileHandle rootHandle;
+    private readonly FileIdentity parentIdentity;
+    private readonly string parentPhysicalPath;
     private readonly FileIdentity identity;
     private readonly string physicalPath;
     private readonly HashSet<string> approvedSids;
@@ -361,11 +534,25 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
 
     public WindowsStagingRootLease(
         string canonicalPath,
+        string canonicalParentPath,
+        SafeFileHandle parentHandle,
         SafeFileHandle rootHandle,
         DirectorySecurity expectedSecurity)
     {
         CanonicalPath = canonicalPath;
+        this.parentHandle = parentHandle;
         this.rootHandle = rootHandle;
+        parentIdentity = GetIdentity(parentHandle);
+        parentPhysicalPath = GetFinalPath(parentHandle);
+        if (!string.Equals(
+                parentPhysicalPath,
+                canonicalParentPath,
+                StringComparison.OrdinalIgnoreCase) ||
+            parentIdentity.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw Failure();
+        }
+
         identity = GetIdentity(rootHandle);
         physicalPath = GetFinalPath(rootHandle);
         if (!string.Equals(
@@ -394,7 +581,14 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         var currentIdentity = GetIdentity(rootHandle);
-        if (currentIdentity != identity ||
+        var currentParentIdentity = GetIdentity(parentHandle);
+        if (currentParentIdentity != parentIdentity ||
+            currentParentIdentity.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+            !string.Equals(
+                GetFinalPath(parentHandle),
+                parentPhysicalPath,
+                StringComparison.OrdinalIgnoreCase) ||
+            currentIdentity != identity ||
             currentIdentity.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
             !string.Equals(
                 GetFinalPath(rootHandle),
@@ -498,6 +692,7 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
 
         disposed = true;
         rootHandle.Dispose();
+        parentHandle.Dispose();
     }
 
     public void Dispose()
@@ -506,6 +701,7 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
         {
             disposed = true;
             rootHandle.Dispose();
+            parentHandle.Dispose();
         }
     }
 
@@ -554,6 +750,28 @@ internal sealed class WindowsStagingRootLease : IStagingRootLease
         }
 
         if (!seen.SetEquals(approvedSids))
+        {
+            throw Failure();
+        }
+    }
+
+    internal static void ValidateDirectoryHandle(
+        SafeFileHandle handle,
+        string expectedPath)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        if (handle.IsInvalid || handle.IsClosed)
+        {
+            throw Failure();
+        }
+
+        var identity = GetIdentity(handle);
+        if (identity.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+            !identity.Attributes.HasFlag(FileAttributes.Directory) ||
+            !string.Equals(
+                GetFinalPath(handle),
+                Path.GetFullPath(expectedPath),
+                StringComparison.OrdinalIgnoreCase))
         {
             throw Failure();
         }
