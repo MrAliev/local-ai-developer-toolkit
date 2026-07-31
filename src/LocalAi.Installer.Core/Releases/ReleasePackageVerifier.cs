@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.ComponentModel;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -667,15 +668,24 @@ public sealed class ReleasePackageVerifier
             lease.Cleanup();
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or
-            ReleaseVerificationException or ObjectDisposedException)
+            IsExpectedCleanupFailure(exception))
         {
         }
-        finally
+
+        try
         {
             lease.Dispose();
         }
+        catch (Exception exception) when (
+            IsExpectedCleanupFailure(exception))
+        {
+        }
     }
+
+    private static bool IsExpectedCleanupFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or
+        ReleaseVerificationException or ObjectDisposedException or
+        Win32Exception or System.Security.SecurityException or ArgumentException;
 
     private static ReleaseVerificationException Failure() =>
         new("Release package verification failed.");

@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Numerics;
 using System.Runtime.Versioning;
+using System.ComponentModel;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -89,6 +90,23 @@ public sealed class StagingRootSecurityTests : IDisposable
 
         Assert.Equal(1, creator.CallCount);
         Assert.False(Directory.Exists(staging));
+    }
+
+    [Fact]
+    public void Native_staging_failure_is_sanitized()
+    {
+        Directory.CreateDirectory(root);
+        var staging = Path.Combine(root, "native-secret");
+        var factory = new WindowsStagingRootFactory(
+            new ThrowingAtomicDirectoryCreator(
+                new Win32Exception(5, @"secret C:\private\stage")));
+
+        var exception = Assert.Throws<ReleaseVerificationException>(() =>
+            factory.CreateExclusive(staging));
+
+        Assert.Equal("Secure staging root creation failed.", exception.Message);
+        Assert.DoesNotContain("secret", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(staging, exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -217,6 +235,60 @@ public sealed class StagingRootSecurityTests : IDisposable
 
         Assert.True(failingFactory.Lease?.CleanupCalled);
         Assert.False(Directory.Exists(staging));
+    }
+
+    [Theory]
+    [InlineData("win32", false)]
+    [InlineData("security", false)]
+    [InlineData("argument", false)]
+    [InlineData("win32", true)]
+    [InlineData("security", true)]
+    [InlineData("argument", true)]
+    public async Task Cleanup_failure_never_masks_verification_failure_or_cancellation(
+        string cleanupFailure,
+        bool cancel)
+    {
+        Directory.CreateDirectory(root);
+        var staging = Path.Combine(root, "cleanup-primary-" + Guid.NewGuid().ToString("N"));
+        Exception primary = cancel
+            ? new OperationCanceledException("primary cancellation")
+            : new ReleaseVerificationException("primary verification failure");
+        Exception cleanup = cleanupFailure switch
+        {
+            "win32" => new Win32Exception(5, "secret native cleanup failure"),
+            "security" => new System.Security.SecurityException("secret security cleanup failure"),
+            _ => new ArgumentException("secret argument cleanup failure"),
+        };
+        var factory = new CleanupFailureFactory(staging, primary, cleanup);
+        var package = CreatePackage();
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var manifest = new ReleaseManifest(
+            1, "1.2.3", "1.2.3",
+            BrokerCompatibilityContract.ProtocolVersion,
+            BrokerCompatibilityContract.BuildCompatibilityId,
+            new Uri("https://example.invalid/package.zip"),
+            package.Length,
+            Convert.ToHexString(SHA256.HashData(package)),
+            false,
+            []);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var verifier = new ReleasePackageVerifier(
+            new ReleaseManifestVerifier(key.ExportSubjectPublicKeyInfo()),
+            new MemoryClient(package),
+            new AlwaysTrustedAuthenticode(),
+            new AuthenticodePublisherPolicy("CN=Publisher, O=LocalAi, C=US", new string('A', 64)),
+            factory);
+
+        var thrown = await Assert.ThrowsAnyAsync<Exception>(() =>
+            verifier.VerifyAsync(
+                json,
+                Sign(key, json),
+                staging,
+                TestContext.Current.CancellationToken));
+
+        Assert.Same(primary, thrown);
+        Assert.True(factory.Lease.CleanupCalled);
+        Assert.True(factory.Lease.Disposed);
     }
 
     [Fact]
@@ -358,6 +430,56 @@ public sealed class StagingRootSecurityTests : IDisposable
                 parentHandle,
                 foreignLeaf,
                 securityDescriptor);
+    }
+
+    private sealed class ThrowingAtomicDirectoryCreator(Exception failure)
+        : IAtomicDirectoryCreator
+    {
+        public Microsoft.Win32.SafeHandles.SafeFileHandle CreateDirectory(
+            Microsoft.Win32.SafeHandles.SafeFileHandle parentHandle,
+            string leafName,
+            ReadOnlySpan<byte> securityDescriptor) => throw failure;
+    }
+
+    private sealed class CleanupFailureFactory(
+        string path,
+        Exception primary,
+        Exception cleanupFailure) : IStagingRootFactory
+    {
+        public CleanupFailureLease Lease { get; } =
+            new(path, primary, cleanupFailure);
+
+        public IStagingRootLease CreateExclusive(string requestedPath)
+        {
+            Directory.CreateDirectory(path);
+            return Lease;
+        }
+    }
+
+    private sealed class CleanupFailureLease(
+        string path,
+        Exception primary,
+        Exception cleanupFailure) : IStagingRootLease
+    {
+        public string CanonicalPath => path;
+
+        public bool CleanupCalled { get; private set; }
+
+        public bool Disposed { get; private set; }
+
+        public void Revalidate() => throw primary;
+
+        public void ValidateCreatedFile(
+            Microsoft.Win32.SafeHandles.SafeFileHandle fileHandle,
+            string expectedPath) => throw primary;
+
+        public void Cleanup()
+        {
+            CleanupCalled = true;
+            throw cleanupFailure;
+        }
+
+        public void Dispose() => Disposed = true;
     }
 
     private sealed class IdentityFailureFactory : IStagingRootFactory

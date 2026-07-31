@@ -87,7 +87,25 @@ internal sealed class WindowsStagingRootFactory : IStagingRootFactory
                 "Secure staging is available only on Windows.");
         }
 
-        return CreateExclusiveWindows(requestedPath);
+        try
+        {
+            return CreateExclusiveWindows(requestedPath);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ReleaseVerificationException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+            Win32Exception or System.Security.SecurityException or
+            ArgumentException)
+        {
+            throw Failure();
+        }
     }
 
     [SupportedOSPlatform("windows")]
