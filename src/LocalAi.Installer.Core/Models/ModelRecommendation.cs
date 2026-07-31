@@ -143,10 +143,27 @@ public sealed class ModelRecommendation
 
     public IReadOnlyList<ModelRecommendationChoice> Choices { get; }
 
+    /// <summary>
+    /// The smallest enabled option. Null when no options are enabled. With one
+    /// enabled option, Minimal, Recommended, and Extended reference that option;
+    /// with two, Minimal is the smaller option.
+    /// </summary>
     public ModelRecommendationChoice? Minimal { get; }
 
+    /// <summary>
+    /// The lower-median enabled option. Null when no options are enabled. With
+    /// one enabled option, Minimal, Recommended, and Extended reference that
+    /// option; with two, Recommended references the same smaller option as
+    /// Minimal while Extended references the larger option.
+    /// </summary>
     public ModelRecommendationChoice? Recommended { get; }
 
+    /// <summary>
+    /// The largest enabled option. Null when no options are enabled. With one
+    /// enabled option, Minimal, Recommended, and Extended reference that option;
+    /// with two, Extended is the larger option while Minimal and Recommended
+    /// reference the smaller option.
+    /// </summary>
     public ModelRecommendationChoice? Extended { get; }
 
     public ManualModelSelectionStatus ManualSelectionStatus { get; }

@@ -236,6 +236,24 @@ public sealed class ModelRecommendationEngineTests
     }
 
     [Fact]
+    public void Manual_model_selection_uses_exact_name_and_context_identity()
+    {
+        var result = Recommend(
+            AvailableGpu(Gpu("gpu", 100_000)),
+            [
+                Model("same-model", 2048, 1_000),
+                Model("same-model", 4096, 2_000),
+            ],
+            manualModel: new ModelSelection("same-model", 4096));
+
+        Assert.Equal(ManualModelSelectionStatus.Selected, result.ManualSelectionStatus);
+        Assert.NotNull(result.ManualChoice);
+        Assert.Equal("same-model", result.ManualChoice.Name);
+        Assert.Equal(4096, result.ManualChoice.ContextTokens);
+        Assert.Equal(2_000UL, result.ManualChoice.SignedBaseEstimateBytes);
+    }
+
+    [Fact]
     public void Unknown_manual_model_is_an_explicit_invalid_result()
     {
         var result = Recommend(
