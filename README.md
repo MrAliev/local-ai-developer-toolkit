@@ -164,7 +164,19 @@ dotnet publish src/CodeSearch.Mcp/CodeSearch.Mcp.csproj --configuration Release 
 dotnet publish src/LocalLm.Mcp/LocalLm.Mcp.csproj --configuration Release --output publish/LocalLm.Mcp
 dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --output publish/LocalAi.Cli
 dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --output publish/LocalAi.Launcher
+dotnet publish src/LocalAi.Broker/LocalAi.Broker.csproj --configuration Release --output publish/LocalAi.Broker
 ```
+
+> The queue and the runtime ACL bootstrap live in `LocalAi.Broker.Core`, a library, and
+> `LocalAi.Broker.Client` references that rather than the broker executable. Keep it that
+> way. While the client referenced the `OutputType=Exe` project, every dependent publish
+> also emitted the broker's `apphost.exe`, `deps.json` and `runtimeconfig.json`, and a
+> RID-specific framework-dependent publish then failed with `NETSDK1152` — cleaning
+> `bin`/`obj` did not help, because the conflict was produced during the build.
+>
+> That reference also placed `LocalAi.Broker.exe` next to its dependants by accident, which
+> is how development builds could start a broker at all. The copy is now explicit, in
+> `src/BrokerBinary.props`, and applies to the projects that need it.
 
 For an installer that does not depend on preinstalled .NET runtime:
 
@@ -261,7 +273,23 @@ avoid the SmartScreen prompt on machines other than the build machine.
 ### Immutable versions and atomic activation
 
 Publish the CLI, MCP servers, broker, contracts, and their runtime dependencies into a
-fresh staging directory. Verify the complete output, then copy it once to
+fresh staging directory. Merge every per-project publish output into that one directory
+**including the `runtimes\` subtree** — a framework-dependent publish without an explicit
+RID places Windows-only assemblies such as `System.Diagnostics.EventLog.dll` under
+`runtimes\win\lib\net10.0\`, and `deps.json` resolves them from exactly that path. A flat
+copy of the top-level files alone produces a directory that fails at startup with
+`FileNotFoundException`.
+
+Verify the complete output before activating: the staging directory must contain every
+component executable (`codesearch.exe`, `codesearch-mcp.exe`, `locallm-mcp.exe`,
+`localai.exe`, `localai-launcher.exe`, `LocalAi.Broker.exe`) and every dependency
+(`CodeSearch.Core.dll`, `LocalLm.Core.dll`, `LocalAi.Broker.Client.dll`,
+`LocalAi.Repository.dll`, `ModelContextProtocol.dll`, the `Microsoft.Extensions.*` set).
+A directory holding only a couple of dozen files is a partial publish, not a release —
+launching a tool from it fails with a `System.Runtime` load error that comes from the
+child process, not from the launcher.
+
+Then copy it once to
 `bin\versions\<version>`. A published version directory is immutable: activation never
 updates or deletes it, and historical versions remain available for rollback.
 
@@ -281,17 +309,28 @@ The active version is the atomically replaced `bin\current.json` document:
 {"schemaVersion":1,"version":"<version>"}
 ```
 
-After the candidate directory has been verified, activate it with:
+After the candidate directory has been verified, activate it. Activation always requires
+an explicit expectation about the pointer you are replacing, so a concurrent activation
+cannot be overwritten silently:
 
 ```powershell
-bin\launcher\localai-launcher.exe activate <version>
-bin\launcher\localai-launcher.exe activate <version> --stop-running
+# Replacing a pointer that already exists: state its current SHA-256.
+$expected = (Get-FileHash bin\current.json -Algorithm SHA256).Hash
+bin\launcher\localai-launcher.exe activate <version> --if-current-sha256 $expected
+
+# First ever activation, when bin\current.json does not exist yet.
+bin\launcher\localai-launcher.exe activate <version> --if-current-missing
+
+# Add --stop-running when the previous version is still in use.
+bin\launcher\localai-launcher.exe activate <version> --if-current-sha256 $expected --stop-running
 ```
 
-The first form fails while a launcher-managed version is in use. The second form stops
-only processes whose exact executable or fresh broker assembly identity belongs to the
-previous version, then switches the pointer. It does not stop Ollama or unrelated
-`dotnet` processes. Roll back by activating a previously verified immutable directory.
+Omitting both guards is a usage error and exits with code 2. Activation also fails when
+the observed pointer does not match the stated expectation. Without `--stop-running` it
+fails while a launcher-managed version is in use; with it, only processes whose exact
+executable or fresh broker assembly identity belongs to the previous version are stopped,
+and then the pointer is switched. It does not stop Ollama or unrelated `dotnet`
+processes. Roll back by activating a previously verified immutable directory.
 All model requests, including compatibility commands, continue to use the shared FIFO
 broker; direct Ollama access is unsupported.
 
