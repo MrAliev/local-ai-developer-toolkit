@@ -26,6 +26,7 @@ public sealed class InstallerWizardViewModelTests
         var dependencies = vm.Dependencies;
 
         dependencies.SetConsent("Git", true);
+        dependencies.SetConsent("VisualCpp", false);
         dependencies.MarkInstalled("Ollama");
         Assert.NotEqual(dependencies.Dependencies[0].IsConsented, dependencies.Dependencies[1].IsConsented);
 
@@ -122,5 +123,22 @@ public sealed class InstallerWizardViewModelTests
 
         Assert.True(vm.IsRussian);
         Assert.Equal("ru-RU", InstallerCulture.CurrentCultureCode);
+    }
+
+    [Fact]
+    public void Defaults_allow_fast_navigation_to_run_step()
+    {
+        var vm = new InstallerWizardViewModel();
+        vm.Diagnose.SetResult(true);
+
+        Assert.True(vm.MoveNext()); // Dependencies
+        Assert.True(vm.MoveNext()); // Package
+        Assert.True(vm.MoveNext()); // Models
+        Assert.True(vm.MoveNext()); // Agents
+        Assert.True(vm.MoveNext()); // Review
+        Assert.Equal(InstallerPage.ReviewApply, vm.CurrentPage);
+
+        Assert.True(vm.Review.IsConfirmed);
+        Assert.True(vm.CanRun);
     }
 }

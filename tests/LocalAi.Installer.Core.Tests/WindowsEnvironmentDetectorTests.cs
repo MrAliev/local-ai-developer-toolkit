@@ -115,6 +115,24 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
     }
 
     [Fact]
+    public async Task Detects_Ollama_from_command_when_registry_entry_is_missing()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["ollama.exe"] =
+            @"C:\Users\me\AppData\Local\Programs\Ollama\ollama.exe";
+        fixture.Process.Results[@"C:\Users\me\AppData\Local\Programs\Ollama\ollama.exe"] =
+            new ProcessResult(0, "ollama version is 0.32.5", "", false, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Detected, diagnosis.Ollama.State);
+        Assert.Equal("0.32.5", diagnosis.Ollama.Version);
+        Assert.Equal(
+            @"C:\Users\me\AppData\Local\Programs\Ollama\ollama.exe",
+            diagnosis.Ollama.ExecutablePath);
+    }
+
+    [Fact]
     public async Task Does_not_detect_Ollama_when_probe_metadata_has_no_usable_executable()
     {
         var fixture = CreateFixture();
