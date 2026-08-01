@@ -92,6 +92,9 @@ public sealed class DiagnosePageViewModel : ObservableObject
             diagnosis.Git,
             "Needed to index repositories."));
         Checks.Add(Describe(
+            diagnosis.GitHubCli,
+            "Reads the private release repository through your existing 'gh auth login'."));
+        Checks.Add(Describe(
             diagnosis.Ollama,
             "Runs the local models."));
 

@@ -53,6 +53,11 @@ public sealed class WindowsEnvironmentDetector(
                 "git.exe",
                 cancellationToken)
             .ConfigureAwait(false);
+        var gitHubCli = await DetectCommandDependencyAsync(
+                "GitHubCli",
+                "gh.exe",
+                cancellationToken)
+            .ConfigureAwait(false);
         var ollama = await DetectOllamaAsync(cancellationToken).ConfigureAwait(false);
         var disk = diskProbe.Observe(environment.LocalAppData);
         var network = await networkProbe.ObserveAsync(cancellationToken).ConfigureAwait(false);
@@ -79,6 +84,7 @@ public sealed class WindowsEnvironmentDetector(
             network,
             winGet,
             git,
+            gitHubCli,
             ollama,
             gpu,
             existing,
