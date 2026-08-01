@@ -187,6 +187,23 @@ public sealed class ModelsPageViewModel : ObservableObject
         _ => false,
     };
 
+    /// <summary>
+    /// The page's answer in the form the installation understands.
+    ///
+    /// Deliberately not a list of tags: the sizes shown here come from the routing catalogue
+    /// and the model registry, neither of which is signed, and the broker installer only
+    /// accepts models weighed against the release manifest. So the page states the intent and
+    /// the signed manifest decides the set.
+    /// </summary>
+    public ModelProvisioningSelection BuildProvisioningSelection() => Mode switch
+    {
+        ModelSelectionMode.Skip => ModelProvisioningSelection.None,
+        ModelSelectionMode.ChooseExact when selectedModel is not null && selectedContext > 0 =>
+            new(ModelProvisioningMode.Exact, selectedModel.Tag, selectedContext),
+        ModelSelectionMode.ChooseExact => ModelProvisioningSelection.None,
+        _ => new(ModelProvisioningMode.Automatic),
+    };
+
     public string ReviewText => Mode switch
     {
         ModelSelectionMode.Skip => "Models: skipped, nothing will be downloaded",

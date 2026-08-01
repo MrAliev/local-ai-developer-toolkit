@@ -1,15 +1,31 @@
+using System.Runtime.Versioning;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Diagnosis;
+using LocalAi.Installer.Core.Models;
 
 namespace LocalAi.Installer.Core.Releases;
+
+/// <summary>
+/// What the run did about models. <paramref name="Excluded"/> carries the models that were
+/// never requested and why; <paramref name="Batch"/> is the broker's own answer for the ones
+/// that were. Both are null-free and both are reported: a model silently absent from a
+/// finished installation is the failure mode this record exists to prevent.
+/// </summary>
+public sealed record ReleaseModelInstallReport(
+    IReadOnlyList<string> Excluded,
+    BrokerModelInstallBatchResult? Batch)
+{
+    public static ReleaseModelInstallReport NotRequested { get; } = new([], null);
+}
 
 public sealed record ReleaseInstallResult(
     LocalAiPackageInstallStatus Status,
     string Version,
     string? PriorVersion,
     string VersionPath,
-    string? Reason)
+    string? Reason,
+    ReleaseModelInstallReport? Models = null)
 {
     public bool Installed =>
         Status is LocalAiPackageInstallStatus.Installed
@@ -30,6 +46,12 @@ public sealed class ReleaseInstallService(
 {
     private static readonly TimeSpan ActivationTimeout = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// The broker installer's own ceiling, and the right value here: a pull is a multi-gigabyte
+    /// download, and anything shorter turns a slow connection into a failed installation.
+    /// </summary>
+    private static readonly TimeSpan ModelInstallTimeout = TimeSpan.FromMinutes(30);
+
     private readonly GitHubReleaseFeed feed =
         feed ?? throw new ArgumentNullException(nameof(feed));
 
@@ -44,6 +66,9 @@ public sealed class ReleaseInstallService(
         string workingDirectory,
         string tag,
         IProgress<long>? bytesDownloaded = null,
+        ModelProvisioningSelection? models = null,
+        GpuSnapshot? gpu = null,
+        IProgress<string>? modelProgress = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(release);
@@ -80,12 +105,73 @@ public sealed class ReleaseInstallService(
             .InstallAsync(verified, InstallationLayout.CreateDefault(), cancellationToken)
             .ConfigureAwait(false);
 
+        var modelReport = ReleaseModelInstallReport.NotRequested;
+        var installed = result.Status is LocalAiPackageInstallStatus.Installed
+            or LocalAiPackageInstallStatus.AlreadyInstalled;
+        if (installed &&
+            models is { Mode: not ModelProvisioningMode.None } &&
+            OperatingSystem.IsWindows())
+        {
+            // Only after activation: the model work runs through the launcher this package
+            // just published, and the broker installer checks it against the verified files.
+            modelReport = await ProvisionModelsAsync(
+                    verified,
+                    models,
+                    gpu ?? new GpuSnapshot(ObservationState.Unavailable, [], "No adapter information was collected."),
+                    modelProgress,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         return new ReleaseInstallResult(
             result.Status,
             result.Version,
             result.PriorVersion,
             result.VersionPath,
-            result.Reason);
+            result.Reason,
+            modelReport);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private async Task<ReleaseModelInstallReport> ProvisionModelsAsync(
+        VerifiedPackage package,
+        ModelProvisioningSelection selection,
+        GpuSnapshot gpu,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var plan = ModelProvisioningPlanner.Create(
+            package.Manifest.Models,
+            gpu,
+            selection);
+        foreach (var excluded in plan.Excluded)
+        {
+            progress?.Report(excluded);
+        }
+
+        if (plan.Requests.Count == 0)
+        {
+            return new(plan.Excluded, null);
+        }
+
+        progress?.Report(
+            "Models: " +
+            string.Join(
+                ", ",
+                plan.Requests.Select(request =>
+                    $"{request.Action.Model} at {request.Action.ContextSize} tokens")) +
+            ". Anything already installed is left alone; the rest is downloaded now.");
+
+        using var lease = InstallationLayoutLease.Acquire(InstallationLayout.CreateDefault());
+        using var modelInstaller = new BrokerModelInstaller(
+            processRunner,
+            lease,
+            package,
+            ModelInstallTimeout);
+        var batch = await modelInstaller
+            .InstallAsync(plan.Requests, cancellationToken)
+            .ConfigureAwait(false);
+        return new(plan.Excluded, batch);
     }
 
     /// <summary>
