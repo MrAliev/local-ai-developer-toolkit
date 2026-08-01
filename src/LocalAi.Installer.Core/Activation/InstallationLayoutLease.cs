@@ -737,17 +737,25 @@ public sealed class InstallationLayoutLease : IDisposable
         ValidateOptionalFile(Path.Combine(layout.BinRoot, "current.lock"));
     }
 
+    /// <summary>
+    /// Validates only what the installer owns inside the root.
+    ///
+    /// The root is shared with the runtime: the broker keeps its queue, telemetry and state
+    /// here, including loose files such as host.json, policy.json, sequence.json and
+    /// broker.lock. Demanding that every entry be a directory refused installation on any
+    /// machine where LocalAi had ever run — that is, on every upgrade. Entries the installer
+    /// neither reads nor writes are none of its business, and the paths it does resolve are
+    /// each validated in their own right.
+    /// </summary>
     private static void ValidateRootShape(string root)
     {
-        foreach (var entry in Directory.EnumerateFileSystemEntries(root))
+        foreach (var owned in new[] { "bin", "installer" })
         {
-            var name = Path.GetFileName(entry);
-            if (name is "bin" or "installer")
+            var path = Path.Combine(root, owned);
+            if (Directory.Exists(path) || File.Exists(path))
             {
-                continue;
+                ValidateDirectoryPath(path);
             }
-
-            ValidateDirectoryPath(entry);
         }
     }
 

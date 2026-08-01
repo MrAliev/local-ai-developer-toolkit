@@ -98,7 +98,14 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <ItemsControl ItemsSource="{Binding Diagnose.Checks}">
+                        <StackPanel Margin="0,4,0,0"
+                                    Visibility="{Binding Diagnose.IsChecking, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Checking this computer. Starting winget, git and ollama to see what is installed — this takes a few seconds."
+                                       Style="{StaticResource Muted}" Margin="0,0,0,10" />
+                            <ProgressBar IsIndeterminate="True" Height="4" Width="280" HorizontalAlignment="Left" />
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding Diagnose.Checks}"
+                                      Visibility="{Binding Diagnose.HasResults, Converter={StaticResource BoolToVisibility}}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Grid Margin="0,0,0,8">

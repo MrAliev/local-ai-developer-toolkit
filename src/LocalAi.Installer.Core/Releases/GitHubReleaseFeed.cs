@@ -45,6 +45,54 @@ public sealed class GitHubReleaseFeed(
         string.IsNullOrWhiteSpace(gitHubCliPath) ? "gh" : gitHubCliPath;
 
     /// <summary>
+    /// Turns a user-facing tag into a real one. "latest" is not a tag GitHub knows — asking
+    /// for it by name returns 404 — so the newest published release is looked up instead.
+    /// </summary>
+    public async Task<string> ResolveTagAsync(
+        string requestedTag,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedTag) &&
+            !string.Equals(requestedTag.Trim(), "latest", StringComparison.OrdinalIgnoreCase))
+        {
+            return requestedTag.Trim();
+        }
+
+        ProcessResult result;
+        try
+        {
+            result = await processRunner.RunAsync(
+                    cliPath,
+                    [
+                        "release", "view",
+                        "--repo", repository,
+                        "--json", "tagName",
+                        "--jq", ".tagName",
+                    ],
+                    DocumentTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new ReleaseResolutionException(
+                "The GitHub CLI could not be started. Install it and sign in with " +
+                "'gh auth login' so the installer can read this private repository.",
+                exception);
+        }
+
+        var tag = result.StandardOutput?.Trim();
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(tag))
+        {
+            throw new ReleaseResolutionException(
+                "Could not determine the newest release. Check that this computer is signed " +
+                $"in with 'gh auth login'. {result.StandardError}".Trim());
+        }
+
+        return tag;
+    }
+
+    /// <summary>
     /// Downloads and verifies the manifest for a release tag. A failure here means the
     /// release must not be installed, so it is reported rather than worked around.
     /// </summary>
@@ -93,13 +141,64 @@ public sealed class GitHubReleaseFeed(
     public async Task<string> DownloadPackageAsync(
         string tag,
         string workingDirectory,
+        IProgress<long>? bytesDownloaded = null,
         CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(workingDirectory);
+        var target = Path.Combine(workingDirectory, PackageAsset);
+
+        // The CLI reports progress only on its own console, so bytes are observed from the
+        // growing file instead. Verified against a real download: the file grows steadily
+        // while the transfer runs.
+        using var watcher = bytesDownloaded is null
+            ? null
+            : StartSizeWatcher(target, bytesDownloaded, cancellationToken);
+
         await DownloadAssetAsync(
                 tag, PackageAsset, workingDirectory, PackageTimeout, cancellationToken)
             .ConfigureAwait(false);
-        return Path.Combine(workingDirectory, PackageAsset);
+
+        if (File.Exists(target))
+        {
+            bytesDownloaded?.Report(new FileInfo(target).Length);
+        }
+
+        return target;
+    }
+
+    private static CancellationTokenSource StartSizeWatcher(
+        string path,
+        IProgress<long> progress,
+        CancellationToken cancellationToken)
+    {
+        var watcher = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = watcher.Token;
+        _ = Task.Run(
+            async () =>
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(400), token)
+                            .ConfigureAwait(false);
+                        if (File.Exists(path))
+                        {
+                            progress.Report(new FileInfo(path).Length);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+                    catch (IOException)
+                    {
+                        // The file is being written; the next poll will see it.
+                    }
+                }
+            },
+            token);
+        return watcher;
     }
 
     private async Task DownloadAssetAsync(

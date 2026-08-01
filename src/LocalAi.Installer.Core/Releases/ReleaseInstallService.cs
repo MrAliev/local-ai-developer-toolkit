@@ -42,13 +42,18 @@ public sealed class ReleaseInstallService(
     public async Task<ReleaseInstallResult> InstallAsync(
         ResolvedRelease release,
         string workingDirectory,
+        string tag,
+        IProgress<long>? bytesDownloaded = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(release);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        // The release tag and the version inside the manifest are separate things: assets
+        // live under the tag, so the tag is what the download needs.
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
 
         var packagePath = await feed
-            .DownloadPackageAsync(release.Manifest.ReleaseVersion, workingDirectory, cancellationToken)
+            .DownloadPackageAsync(tag, workingDirectory, bytesDownloaded, cancellationToken)
             .ConfigureAwait(false);
 
         var stagingRoot = Path.Combine(

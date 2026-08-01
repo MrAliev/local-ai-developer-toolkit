@@ -50,6 +50,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private string? rollbackMessage;
     private EnvironmentDiagnosis? environmentDiagnosis;
     private CatalogRecommendation lastRecommendation = CatalogRecommendation.Empty;
+    private string? resolvedTag;
 
     public InstallerWizardViewModel()
     {
@@ -579,6 +580,21 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     private async Task RefreshEnvironmentDiagnosticsAsync(CancellationToken cancellationToken)
     {
+        diagnose.IsChecking = true;
+        RefreshAll();
+        try
+        {
+            await RunEnvironmentDiagnosticsAsync(cancellationToken);
+        }
+        finally
+        {
+            diagnose.IsChecking = false;
+            RefreshAll();
+        }
+    }
+
+    private async Task RunEnvironmentDiagnosticsAsync(CancellationToken cancellationToken)
+    {
         var diagnosis = await environmentDetector.DetectAsync(cancellationToken);
         environmentDiagnosis = diagnosis;
 
@@ -689,11 +705,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
         try
         {
             var feed = new GitHubReleaseFeed(processRunner);
+            // "latest" is not a tag GitHub knows; resolve it to the newest published one so
+            // the field can keep its convenient default.
+            resolvedTag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
             package.SelectResolvedRelease(
-                await feed.ResolveAsync(
-                    package.ReleaseVersion.Trim(),
-                    WorkingDirectory,
-                    cancellationToken));
+                await feed.ResolveAsync(resolvedTag, WorkingDirectory, cancellationToken),
+                resolvedTag);
         }
         catch (ReleaseResolutionException exception)
         {
@@ -717,16 +734,31 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return;
         }
 
-        SetProgress(Math.Max(progress, 40), "Downloading the LocalAi package...");
         AppendLog(
             report,
             $"LocalAi package {resolved.Manifest.ReleaseVersion}: downloading and verifying...");
+
+        // Real byte progress: the expected size comes from the verified manifest, and the
+        // downloaded bytes are observed as the file grows.
+        var total = resolved.Manifest.PackageSize;
+        var downloadProgress = new Progress<long>(bytes =>
+            SetProgress(
+                40 + (int)(50 * Math.Clamp(bytes, 0, total) / Math.Max(total, 1)),
+                $"Downloading the LocalAi package: " +
+                $"{bytes / (1024d * 1024):N0} of {total / (1024d * 1024):N0} MB"));
+        SetProgress(40, "Downloading the LocalAi package...");
 
         var service = new ReleaseInstallService(
             new GitHubReleaseFeed(processRunner),
             processRunner,
             new SystemFileSystemProbe());
-        var result = await service.InstallAsync(resolved, WorkingDirectory, cancellationToken);
+        var result = await service.InstallAsync(
+            resolved,
+            WorkingDirectory,
+            resolvedTag ?? resolved.Manifest.ReleaseVersion,
+            downloadProgress,
+            cancellationToken);
+        SetProgress(90, "Installing the LocalAi package...");
 
         AppendLog(
             report,
