@@ -18,10 +18,12 @@ public sealed class ModelManagementTasks(ILocalModelClient client)
     public async Task<LocalModelPreflightOutput> PreflightAsync(
         string model,
         int contextTokens,
+        string catalogVersion,
         CancellationToken cancellationToken = default) =>
         (await _client.PreflightModelAsync(
             model,
             contextTokens,
+            catalogVersion,
             cancellationToken)).Value;
 
     public async Task<LocalModelSyncResult> SyncRecommendedAsync(

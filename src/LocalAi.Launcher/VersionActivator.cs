@@ -1,4 +1,6 @@
-using System.Security.Cryptography;
+using LocalAi.Contracts.Activation;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
@@ -6,15 +8,12 @@ namespace LocalAi.Launcher;
 
 public sealed class VersionActivator
 {
-    private static readonly TimeSpan ActivationMutexTimeout =
-        TimeSpan.FromSeconds(15);
     private readonly string _binRoot;
     private readonly string _currentPath;
     private readonly VersionResolver _resolver;
     private readonly LocalAiProcessController _processController;
     private readonly TimeSpan _leaseTimeout;
     private readonly TimeSpan _stopTimeout;
-    private readonly string _mutexName;
 
     public VersionActivator(
         string binRoot,
@@ -40,48 +39,46 @@ public sealed class VersionActivator
             ?? throw new ArgumentNullException(nameof(processController));
         _leaseTimeout = leaseTimeout;
         _stopTimeout = stopTimeout;
-        _mutexName = CreateMutexName(_binRoot);
     }
 
-    public void Activate(string version, bool stopRunning)
+    public void Activate(
+        string version,
+        bool stopRunning,
+        CurrentPointerExpectation expectation)
     {
+        ArgumentNullException.ThrowIfNull(expectation);
+        VersionResolver.ValidateVersionName(version);
         var temporaryPath = Path.Combine(
             _binRoot,
             $"current.{Guid.NewGuid():N}.tmp");
-        using var mutex = new Mutex(initiallyOwned: false, _mutexName);
-        var ownsMutex = false;
         try
         {
+            var leaseStarted = Stopwatch.GetTimestamp();
+            using var startupGate = ActivationCoordinator.AcquireStartupGate(
+                _binRoot,
+                _leaseTimeout);
+            // Process inspection and stopping use their own timeout; only the two
+            // lease-acquisition waits consume the shared lease budget.
+            var remainingLeaseTimeout = Remaining(
+                _leaseTimeout,
+                leaseStarted);
+            CurrentPointerSnapshot observed;
             try
             {
-                ownsMutex = mutex.WaitOne(ActivationMutexTimeout);
+                observed = CurrentPointerSnapshot.Read(startupGate);
+                expectation.Validate(observed);
             }
-            catch (AbandonedMutexException)
-            {
-                ownsMutex = true;
-            }
-
-            if (!ownsMutex)
+            catch (CurrentPointerChangedException exception)
             {
                 throw new LauncherException(
-                    "activation_timeout",
-                    "Timed out waiting for another LocalAi activation.");
+                    "current_pointer_changed",
+                    exception.Message);
             }
 
             _resolver.ValidateVersion(version);
-            var currentDirectory = File.Exists(_currentPath)
-                ? _resolver.Resolve("localai").VersionDirectory
+            var currentDirectory = observed.Exists
+                ? _resolver.ValidateVersion(observed.Version!)
                 : null;
-            if (stopRunning && currentDirectory is not null)
-            {
-                _processController.StopOwnedByVersion(
-                    currentDirectory,
-                    _stopTimeout);
-            }
-
-            using var lease = VersionLease.AcquireExclusive(
-                Path.Combine(_binRoot, "current.lock"),
-                _leaseTimeout);
             if (currentDirectory is not null)
             {
                 if (stopRunning)
@@ -98,38 +95,77 @@ public sealed class VersionActivator
                 }
             }
 
+            using var lease = ActivationCoordinator.AcquireExclusive(
+                startupGate,
+                remainingLeaseTimeout);
+            try
+            {
+                expectation.Validate(CurrentPointerSnapshot.Read(lease));
+            }
+            catch (CurrentPointerChangedException exception)
+            {
+                throw new LauncherException(
+                    "current_pointer_changed",
+                    exception.Message);
+            }
+
             _resolver.ValidateVersion(version);
             WritePointer(temporaryPath, version);
             File.Move(temporaryPath, _currentPath, overwrite: true);
-            var committed = _resolver.ReadCurrent();
-            if (!string.Equals(
-                    committed.Version,
-                    version,
-                    StringComparison.Ordinal))
+            var committed = CurrentPointerSnapshot.Read(lease);
+            var expectedBytes = CurrentPointerSnapshot.CreateCanonicalBytes(version);
+            if (!committed.Exists || !committed.IsCanonical ||
+                !string.Equals(committed.Version, version, StringComparison.Ordinal) ||
+                !committed.RawBytes.SequenceEqual(expectedBytes))
             {
                 throw new LauncherException(
                     "current_pointer_invalid",
                     "Committed LocalAi current-version pointer did not read back.");
             }
         }
+        catch (ActivationCoordinationException exception)
+        {
+            throw new LauncherException(exception.Code, exception.Message);
+        }
+        catch (Exception exception) when (
+            exception is CurrentPointerException or JsonException or DecoderFallbackException)
+        {
+            throw new LauncherException(
+                "current_pointer_invalid",
+                "The LocalAi current-version pointer is invalid.");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or Win32Exception)
+        {
+            throw new LauncherException(
+                "activation_failed",
+                "LocalAi activation failed.");
+        }
         finally
         {
-            if (File.Exists(temporaryPath))
+            try
             {
-                File.Delete(temporaryPath);
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
             }
-
-            if (ownsMutex)
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or Win32Exception)
             {
-                mutex.ReleaseMutex();
             }
         }
     }
 
+    private static TimeSpan Remaining(TimeSpan budget, long started)
+    {
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        return elapsed >= budget ? TimeSpan.Zero : budget - elapsed;
+    }
+
     private static void WritePointer(string temporaryPath, string version)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(
-            new VersionPointer(1, version));
+        var bytes = CurrentPointerSnapshot.CreateCanonicalBytes(version);
         using var stream = new FileStream(
             temporaryPath,
             FileMode.CreateNew,
@@ -141,14 +177,4 @@ public sealed class VersionActivator
         stream.Flush(flushToDisk: true);
     }
 
-    private static string CreateMutexName(string binRoot)
-    {
-        var normalized = OperatingSystem.IsWindows()
-            ? binRoot.ToUpperInvariant()
-            : binRoot;
-        var hash = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
-        return (OperatingSystem.IsWindows() ? @"Global\" : string.Empty) +
-               "LocalAi.Launcher.Activation." + hash;
-    }
 }

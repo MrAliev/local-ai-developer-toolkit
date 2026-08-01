@@ -308,6 +308,7 @@ public sealed record LocalModelResidencyStatus(
 public sealed record LocalModelPreflightOutput(
     [property: JsonRequired] string Model,
     [property: JsonRequired] int ContextTokens,
+    [property: JsonRequired] string CatalogVersion,
     [property: JsonRequired] long SizeBytes,
     [property: JsonRequired] long SizeVramBytes,
     [property: JsonRequired] bool FullyResident,

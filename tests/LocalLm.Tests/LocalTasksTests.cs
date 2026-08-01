@@ -407,6 +407,13 @@ public sealed class LocalTasksTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<LocalJobResult<LocalModelPreflightOutput>> PreflightModelAsync(
+            string model,
+            int contextTokens,
+            string catalogVersion,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<LocalJobResult<ModelMaintenanceJobOutput>> PullModelAsync(
             string model,
             string catalogVersion,

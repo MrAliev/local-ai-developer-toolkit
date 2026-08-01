@@ -1,6 +1,33 @@
 using LocalAi.Cli;
 using System.Text.Json;
 
+if (args is ["model", .. var modelArguments])
+{
+    using var processLifetime = new CancellationTokenSource();
+    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+        processLifetime.Token);
+    ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        processLifetime.Cancel();
+    };
+    EventHandler exitHandler = (_, _) => processLifetime.Cancel();
+    Console.CancelKeyPress += cancelHandler;
+    AppDomain.CurrentDomain.ProcessExit += exitHandler;
+    try
+    {
+        return await ModelCommand.ExecuteProductionAsync(
+            modelArguments,
+            Console.Out,
+            cancellation.Token);
+    }
+    finally
+    {
+        Console.CancelKeyPress -= cancelHandler;
+        AppDomain.CurrentDomain.ProcessExit -= exitHandler;
+    }
+}
+
 if (args is ["native", var operation, ..])
 {
     var requestIndex = Array.IndexOf(args, "--request");
@@ -104,8 +131,5 @@ if (args is ["hooks", "install", ..])
     return 0;
 }
 
-Console.Error.WriteLine(
-    "Usage: localai native <operation> [--request file] | " +
-    "localai repo status [git-common-dir] | localai bootstrap --dry-run | " +
-    "localai sync [--root dir] | localai hooks install [--root dir]");
+Console.Error.WriteLine(CliUsage.Text);
 return 2;

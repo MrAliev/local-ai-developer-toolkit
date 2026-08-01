@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+    <!-- Tasks 6/8 must add clean library adapters before Installer.Core consumes these project types. -->
+    <ProjectReference Include="..\LocalAi.Launcher\LocalAi.Launcher.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
+    <ProjectReference Include="..\LocalLm.Core\LocalLm.Core.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
+  </ItemGroup>
+</Project>

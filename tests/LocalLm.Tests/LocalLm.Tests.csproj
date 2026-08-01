@@ -13,6 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\LocalAi.Cli\LocalAi.Cli.csproj" />
     <ProjectReference Include="..\..\src\LocalLm.Core\LocalLm.Core.csproj" />
     <ProjectReference Include="..\..\src\LocalAi.Broker.Client\LocalAi.Broker.Client.csproj" />
     <ProjectReference Include="..\..\src\LocalAi.Contracts\LocalAi.Contracts.csproj" />

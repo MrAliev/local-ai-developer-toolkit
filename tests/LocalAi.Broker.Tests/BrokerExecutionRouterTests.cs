@@ -105,7 +105,8 @@ public sealed class BrokerExecutionRouterTests : IDisposable
             "preflight",
             LocalJobPriority.Interactive,
             "translategemma:12b",
-            2048);
+            2048,
+            fixture.Catalog.CatalogVersion);
 
         var result = await fixture.Router.ExecuteAsync(
             request,
@@ -115,10 +116,30 @@ public sealed class BrokerExecutionRouterTests : IDisposable
             LocalAiJson.Strict)!;
         Assert.Equal("translategemma:12b", output.Model);
         Assert.Equal(2048, output.ContextTokens);
+        Assert.Equal(fixture.Catalog.CatalogVersion, output.CatalogVersion);
         Assert.Equal(output.SizeBytes, output.SizeVramBytes);
         Assert.True(output.FullyResident);
         Assert.Equal("translategemma:12b", fixture.Router.ResidentModel);
         Assert.Empty(fixture.Executed);
+    }
+
+    [Fact]
+    public async Task Model_preflight_rejects_stale_catalog_before_runtime_call()
+    {
+        var fixture = CreateFixture();
+        fixture.Transport.Installed = ["translategemma:12b"];
+        var request = LocalJobRequestFactory.CreateModelPreflight(
+            "preflight-stale",
+            LocalJobPriority.Interactive,
+            "translategemma:12b",
+            2048,
+            "stale");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Router.ExecuteAsync(request, TestContext.Current.CancellationToken));
+
+        Assert.Empty(fixture.Transport.Processes);
+        Assert.Null(fixture.Router.ResidentModel);
     }
 
     [Fact]

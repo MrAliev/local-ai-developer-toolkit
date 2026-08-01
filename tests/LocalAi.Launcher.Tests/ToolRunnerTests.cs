@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using LocalAi.Contracts.Activation;
+
 namespace LocalAi.Launcher.Tests;
 
 public sealed class ToolRunnerTests : IDisposable
@@ -109,6 +112,75 @@ public sealed class ToolRunnerTests : IDisposable
             Path.Combine(install.BinRoot, "current.lock"),
             TimeSpan.Zero);
         Assert.NotNull(exclusive);
+    }
+
+    [Fact]
+    public async Task Activation_stops_existing_once_and_blocks_new_tool_start_until_commit()
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.ReplaceTool("v1", "localai.exe", Environment.GetEnvironmentVariable("ComSpec")!);
+        install.ReplaceTool("v2", "localai.exe", Environment.GetEnvironmentVariable("ComSpec")!);
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        var existingStarted = Path.Combine(install.Root, "existing-started.txt");
+        var releaseExisting = Path.Combine(install.Root, "release-existing.txt");
+        var newVersion = Path.Combine(install.Root, "new-version.txt");
+        var application = new LauncherApplication(
+            install.BinRoot,
+            @"C:\LocalAi\bin\launcher\localai-launcher.exe");
+        var existing = application.RunAsync(
+            "localai",
+            [
+                "/d", "/c",
+                $"echo started>{existingStarted} & ping -n 7 127.0.0.1 > nul",
+            ],
+            TestContext.Current.CancellationToken);
+        await WaitForFileAsync(existingStarted, TestContext.Current.CancellationToken);
+
+        var stopCount = 0;
+        var stopObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var process = new ProcessSnapshot(
+            42,
+            DateTimeOffset.UtcNow,
+            Path.Combine(install.VersionDirectory("v1"), "localai.exe"),
+            null);
+        var activator = new VersionActivator(
+            install.BinRoot,
+            new LocalAiProcessController(
+                () => [process],
+                (_, _) =>
+                {
+                    Interlocked.Increment(ref stopCount);
+                    File.WriteAllText(releaseExisting, "release");
+                    stopObserved.TrySetResult();
+                }),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.Zero);
+        var before = File.ReadAllBytes(install.CurrentPath);
+        var activation = Task.Run(
+            () => activator.Activate(
+                "v2",
+                stopRunning: true,
+                CurrentPointerExpectation.ExactSha256(SHA256.HashData(before))),
+            TestContext.Current.CancellationToken);
+        await stopObserved.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+
+        var newStart = Task.Run(
+            () => application.RunAsync(
+                "localai",
+                ["/d", "/c", $"echo %LOCALAI_ACTIVE_VERSION%>{newVersion}"],
+                TestContext.Current.CancellationToken),
+            TestContext.Current.CancellationToken);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Assert.False(newStart.IsCompleted);
+
+        await activation;
+        Assert.Equal(0, await existing);
+        Assert.Equal(0, await newStart);
+        Assert.Equal(1, stopCount);
+        Assert.Equal("v2", File.ReadAllText(newVersion).Trim());
+        Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
     }
 
     [Fact]

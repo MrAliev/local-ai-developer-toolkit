@@ -64,10 +64,11 @@ public sealed class ModelManagementTasksTests
         var result = await tasks.PreflightAsync(
             "translategemma:12b",
             2048,
+            "signed-7",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            ("translategemma:12b", 2048),
+            ("translategemma:12b", 2048, "signed-7"),
             client.Preflight);
         Assert.True(result.FullyResident);
         Assert.Equal(result.SizeBytes, result.SizeVramBytes);
@@ -91,7 +92,7 @@ public sealed class ModelManagementTasksTests
 
         public (LocalTaskProfile Profile, string Model)? Report { get; private set; }
 
-        public (string Model, int ContextTokens)? Preflight { get; private set; }
+        public (string Model, int ContextTokens, string CatalogVersion)? Preflight { get; private set; }
 
         public Task<LocalJobResult<LocalModelsStatusOutput>> GetModelsStatusAsync(
             CancellationToken cancellationToken = default) =>
@@ -113,13 +114,15 @@ public sealed class ModelManagementTasksTests
         public Task<LocalJobResult<LocalModelPreflightOutput>> PreflightModelAsync(
             string model,
             int contextTokens,
+            string catalogVersion,
             CancellationToken cancellationToken = default)
         {
-            Preflight = (model, contextTokens);
+            Preflight = (model, contextTokens, catalogVersion);
             return Task.FromResult(Result(
                 new LocalModelPreflightOutput(
                     model,
                     contextTokens,
+                    catalogVersion,
                     100,
                     100,
                     true,

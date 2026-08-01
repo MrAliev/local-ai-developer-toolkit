@@ -1,5 +1,7 @@
 namespace LocalAi.Launcher;
 
+using LocalAi.Contracts;
+
 public static class LauncherLayout
 {
     public static IReadOnlyDictionary<string, string> Tools { get; } =
@@ -11,13 +13,6 @@ public static class LauncherLayout
             ["locallm-mcp"] = "locallm-mcp.exe"
         };
 
-    public static IReadOnlyList<string> RequiredFiles { get; } =
-    [
-        "localai.exe",
-        "codesearch.exe",
-        "codesearch-mcp.exe",
-        "locallm-mcp.exe",
-        "LocalAi.Broker.dll",
-        "LocalAi.Contracts.dll"
-    ];
+    public static IReadOnlyList<string> RequiredFiles =>
+        LocalAiPackageLayout.RequiredFiles;
 }

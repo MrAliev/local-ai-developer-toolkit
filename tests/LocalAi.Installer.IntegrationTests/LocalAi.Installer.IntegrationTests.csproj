@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- xUnit v3 Testing Platform tests intentionally reference the self-contained WPF executable. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\LocalAi.Installer\LocalAi.Installer.csproj" />
+    <ProjectReference Include="..\..\src\LocalAi.Installer.Core\LocalAi.Installer.Core.csproj" />
+  </ItemGroup>
+</Project>

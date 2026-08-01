@@ -1,22 +1,19 @@
+using LocalAi.Contracts.Activation;
+
 namespace LocalAi.Launcher;
 
 public sealed class VersionLease : IDisposable
 {
-    private readonly FileStream _stream;
+    private readonly IDisposable _lease;
 
-    private VersionLease(FileStream stream)
+    private VersionLease(IDisposable lease)
     {
-        _stream = stream;
+        _lease = lease;
     }
 
     public static VersionLease AcquireShared(string lockPath)
     {
-        EnsureParent(lockPath);
-        return new VersionLease(new FileStream(
-            lockPath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.ReadWrite));
+        return new VersionLease(ActivationCoordinator.AcquireShared(BinRoot(lockPath)));
     }
 
     public static VersionLease AcquireExclusive(
@@ -28,34 +25,20 @@ public sealed class VersionLease : IDisposable
             throw new ArgumentOutOfRangeException(nameof(timeout));
         }
 
-        EnsureParent(lockPath);
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        while (true)
+        try
         {
-            try
-            {
-                return new VersionLease(new FileStream(
-                    lockPath,
-                    FileMode.OpenOrCreate,
-                    FileAccess.ReadWrite,
-                    FileShare.None));
-            }
-            catch (IOException) when (DateTimeOffset.UtcNow < deadline)
-            {
-                Thread.Sleep(TimeSpan.FromMilliseconds(25));
-            }
-            catch (IOException)
-            {
-                throw new LauncherException(
-                    "version_in_use",
-                    "The active LocalAi version is currently in use.");
-            }
+            return new VersionLease(
+                ActivationCoordinator.AcquireExclusive(BinRoot(lockPath), timeout));
+        }
+        catch (ActivationCoordinationException exception)
+        {
+            throw new LauncherException(exception.Code, exception.Message);
         }
     }
 
-    public void Dispose() => _stream.Dispose();
+    public void Dispose() => _lease.Dispose();
 
-    private static void EnsureParent(string lockPath)
+    private static string BinRoot(string lockPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lockPath);
         var parent = Path.GetDirectoryName(Path.GetFullPath(lockPath))
@@ -63,5 +46,6 @@ public sealed class VersionLease : IDisposable
                 "Version lease path has no parent directory.",
                 nameof(lockPath));
         Directory.CreateDirectory(parent);
+        return parent;
     }
 }

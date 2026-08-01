@@ -90,6 +90,22 @@ public sealed class VersionResolverTests
         Assert.Equal("version_incomplete", error.Code);
     }
 
+    [Theory]
+    [InlineData("v1.")]
+    [InlineData("v1 ")]
+    [InlineData("CON")]
+    [InlineData("../v1")]
+    public void Rejects_unsafe_version_names_using_shared_contract(string version)
+    {
+        using var install = TestInstall.CreateComplete("v1");
+
+        var error = Assert.Throws<LauncherException>(() =>
+            new VersionResolver(install.BinRoot).ValidateVersion(version));
+
+        Assert.Equal("version_path_invalid", error.Code);
+        Assert.Equal("The LocalAi version name is invalid.", error.Message);
+    }
+
     [Fact]
     public void Rejects_version_directory_reparse_escape()
     {
