@@ -673,7 +673,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         // Detection records presence only; it must not grant consent on the user's behalf.
         dependencies.SetInstalled("Git", diagnosis.Git.State == DependencyState.Detected);
         dependencies.SetInstalled("Ollama", diagnosis.Ollama.State == DependencyState.Detected);
-        dependencies.SetInstalled("GitHubCli", await IsGitHubCliPresentAsync(cancellationToken));
+        dependencies.SetInstalled(
+            "GitHubCli",
+            diagnosis.GitHubCli.State == DependencyState.Detected);
 
         OnPropertyChanged(nameof(Diagnose));
         OnPropertyChanged(nameof(Dependencies));
@@ -718,28 +720,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
             lastRecommendation,
             residency.Policy == ModelResidencyPolicy.RequireFullVram);
         RefreshAll();
-    }
-
-    /// <summary>
-    /// The environment detector does not probe the GitHub CLI, so it is checked here. Only
-    /// presence is established: whether this machine is signed in surfaces when a release is
-    /// actually resolved, with the CLI's own message.
-    /// </summary>
-    private async Task<bool> IsGitHubCliPresentAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var result = await processRunner.RunAsync(
-                "gh",
-                ["--version"],
-                TimeSpan.FromSeconds(15),
-                cancellationToken);
-            return result.ExitCode == 0;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return false;
-        }
     }
 
     private static DependencyDefinition? ResolveDependencyDefinition(string dependencyId) =>

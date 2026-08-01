@@ -141,6 +141,7 @@ public sealed record EnvironmentDiagnosis
         NetworkSnapshot network,
         DependencySnapshot winGet,
         DependencySnapshot git,
+        DependencySnapshot gitHubCli,
         DependencySnapshot ollama,
         GpuSnapshot gpu,
         ExistingLocalAiSnapshot existingLocalAi,
@@ -152,6 +153,7 @@ public sealed record EnvironmentDiagnosis
         Network = network;
         WinGet = winGet;
         Git = git;
+        GitHubCli = gitHubCli;
         Ollama = ollama;
         Gpu = new GpuSnapshot(gpu.State, gpu.Adapters, gpu.Reason);
         ExistingLocalAi = existingLocalAi;
@@ -166,6 +168,16 @@ public sealed record EnvironmentDiagnosis
     public NetworkSnapshot Network { get; }
     public DependencySnapshot WinGet { get; }
     public DependencySnapshot Git { get; }
+
+    /// <summary>
+    /// The GitHub CLI is a required dependency, because the release repository is private and
+    /// the installer reads it through an existing `gh auth login` rather than handling a token.
+    /// It used to be probed separately from every other dependency, by a helper that returned a
+    /// bare bool — so when it came back false there was no path, no version and no reason to
+    /// show, and "GitHub CLI not found" was unanswerable on a machine where `gh --version`
+    /// plainly worked. It now travels with the rest of the diagnosis.
+    /// </summary>
+    public DependencySnapshot GitHubCli { get; }
     public DependencySnapshot Ollama { get; }
     public GpuSnapshot Gpu { get; }
     public ExistingLocalAiSnapshot ExistingLocalAi { get; }

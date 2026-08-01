@@ -32,14 +32,46 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
         foreach (var pathEntry in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
                      .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            var candidate = Path.Combine(pathEntry.Trim().Trim('"'), executableName);
-            if (File.Exists(candidate))
+            var directory = pathEntry.Trim().Trim('"');
+            foreach (var name in CandidateNames(executableName))
             {
-                return Path.GetFullPath(candidate);
+                var candidate = Path.Combine(directory, name);
+                if (File.Exists(candidate))
+                {
+                    return Path.GetFullPath(candidate);
+                }
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The bare name first, then each PATHEXT extension. Only the bare name used to be tried,
+    /// so resolving "gh" searched for a file literally called `gh` and found nothing next to
+    /// `gh.exe`. Every current caller happens to pass a full name like `winget.exe`, which is
+    /// why that never showed - the next caller to pass a bare command would have hit it.
+    /// </summary>
+    private static IEnumerable<string> CandidateNames(string executableName)
+    {
+        yield return executableName;
+        if (!OperatingSystem.IsWindows() || Path.HasExtension(executableName))
+        {
+            yield break;
+        }
+
+        var pathExt = Environment.GetEnvironmentVariable("PATHEXT");
+        var extensions = string.IsNullOrWhiteSpace(pathExt)
+            ? [".COM", ".EXE", ".BAT", ".CMD"]
+            : pathExt.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var extension in extensions)
+        {
+            var trimmed = extension.Trim();
+            if (trimmed.StartsWith('.'))
+            {
+                yield return executableName + trimmed;
+            }
+        }
     }
 
     private static string ReadWindowsProductName()

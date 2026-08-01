@@ -567,6 +567,7 @@ public sealed class InstallerPlanBuilder
             diagnosis.Network with { },
             diagnosis.WinGet with { },
             diagnosis.Git with { },
+            diagnosis.GitHubCli with { },
             diagnosis.Ollama with { },
             new GpuSnapshot(
                 diagnosis.Gpu.State,
