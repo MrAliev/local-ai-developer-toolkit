@@ -55,7 +55,19 @@ internal static class BrokerProgram
             var queue = new DurableQueue(runtimeRoot);
             using var transport = new OllamaTransport(ollamaUri);
             var catalog = ModelRoutingCatalog.LoadEmbedded();
-            var runtime = new ModelRuntime(transport, catalog);
+            var policy = new ModelResidencyPolicyStore(runtimeRoot).Read();
+            var runtime = new ModelRuntime(
+                transport,
+                catalog,
+                residencyPolicy: policy.ModelResidency);
+            if (policy.ModelResidency != ModelResidencyPolicy.RequireFullVram)
+            {
+                Console.Error.WriteLine(
+                    "LocalAi broker: model residency policy is relaxed to " +
+                    $"{policy.ModelResidency}. Responses may be substantially slower than a " +
+                    "fully resident load.");
+            }
+
             var experiments = new ExperimentStateStore(runtimeRoot);
             var telemetry = new ModelTelemetryStore(runtimeRoot);
             var coordinator = new ModelExecutionCoordinator(

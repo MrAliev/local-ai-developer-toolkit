@@ -52,6 +52,11 @@ if (args is ["repo", "status", ..])
     return 0;
 }
 
+if (args is ["policy", ..])
+{
+    return PolicyCommand.Execute(args.AsSpan(1).ToArray());
+}
+
 if (args is ["bootstrap", "--dry-run", ..])
 {
     var runtimeRoot = Path.Combine(

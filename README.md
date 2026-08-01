@@ -295,6 +295,40 @@ previous version, then switches the pointer. It does not stop Ollama or unrelate
 All model requests, including compatibility commands, continue to use the shared FIFO
 broker; direct Ollama access is unsupported.
 
+### Model residency policy
+
+By default a model must be **fully resident in video memory**; anything less is refused. This
+is not a performance preference. A model that spills into system memory does not fail — it
+just becomes several times slower, and nothing in the answer says so.
+
+Machines without a usable discrete adapter can relax it:
+
+```powershell
+localai policy show
+localai policy set --residency AllowPartialOffload
+localai policy set --residency AllowCpu
+```
+
+| Setting | Admits | Refuses |
+| --- | --- | --- |
+| `RequireFullVram` (default) | fully resident loads | everything else |
+| `AllowPartialOffload` | part of the model on the adapter | pure CPU loads |
+| `AllowCpu` | anything that actually loaded | a model reporting no size |
+
+The policy lives in `%LOCALAPPDATA%\LocalAi\policy.json` and is read by the broker, the CLI
+and the installer alike. A missing, malformed or unknown-value document falls back to
+`RequireFullVram`: a parse error must never silently relax a safety check. A broker that is
+already running keeps the previous policy until it is restarted.
+
+Degradation stays visible: every load admitted below full residency carries a warning naming
+the share that reached video memory, and `FullyResident` reports the truth rather than a
+constant. Note that the agent instruction block still asks for full-VRAM validation, so
+relaxing this diverges from what those instructions promise.
+
+An NPU does not help here. Everything runs through Ollama, whose backends are CPU, CUDA,
+ROCm, Metal and Vulkan; NPUs are driven by a separate stack (OpenVINO, DirectML, Windows ML),
+and the residency numbers this policy is built on do not map onto NPU memory.
+
 ### Broker compatibility and startup
 
 The broker `host.json` schema 3 publishes an explicit protocol version and stable build

@@ -244,11 +244,12 @@ public sealed class ModelRuntimeTests
         Assert.Empty(transport.Pulled);
     }
 
-    private sealed class FakeRuntimeTransport : IModelRuntimeTransport
+    // Shared with the residency-policy tests so both suites drive the same fake transport.
+    internal sealed class FakeRuntimeTransport : IModelRuntimeTransport
     {
         public IReadOnlyList<string> Installed { get; init; } = [];
 
-        public IReadOnlyList<OllamaProcessInfo> Processes { get; init; } = [];
+        public IReadOnlyList<OllamaProcessInfo> Processes { get; set; } = [];
 
         public Queue<IReadOnlyList<OllamaProcessInfo>> ProcessSnapshots { get; } = [];
 
@@ -310,7 +311,7 @@ public sealed class ModelRuntimeTests
         }
     }
 
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    internal sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
     }

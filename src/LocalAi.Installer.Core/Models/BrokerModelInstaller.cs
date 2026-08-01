@@ -445,9 +445,7 @@ public sealed class BrokerModelInstaller : IDisposable
                     action.Model,
                     action.ContextSize,
                     trust.CatalogVersion);
-                if (proof.SizeBytes <= 0 ||
-                    proof.SizeVramBytes != proof.SizeBytes ||
-                    !proof.FullyResident)
+                if (proof.SizeBytes <= 0 || !IsResidencyAcceptable(proof))
                 {
                     results.Add(Rejected(request, pullAttempted, pullCompleted));
                     continue;
@@ -1014,6 +1012,21 @@ public sealed class BrokerModelInstaller : IDisposable
 
         return actualPath;
     }
+
+    /// <summary>
+    /// Accepts a model according to the configured residency policy instead of demanding
+    /// full residency unconditionally. On a machine deliberately set up for integrated
+    /// graphics, a partially offloaded load is the expected outcome, not a rejection.
+    /// </summary>
+    private static bool IsResidencyAcceptable(ModelPreflightCommandSuccess proof) =>
+        ModelResidencyPolicyStore.ReadDefault().ModelResidency switch
+        {
+            ModelResidencyPolicy.RequireFullVram =>
+                proof.FullyResident && proof.SizeVramBytes == proof.SizeBytes,
+            ModelResidencyPolicy.AllowPartialOffload => proof.SizeVramBytes > 0,
+            ModelResidencyPolicy.AllowCpu => true,
+            _ => false,
+        };
 
     private static BrokerModelInstallResult Rejected(
         BrokerModelInstallRequest request,

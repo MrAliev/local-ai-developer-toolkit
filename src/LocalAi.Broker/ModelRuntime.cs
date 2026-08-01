@@ -1,3 +1,5 @@
+using LocalAi.Contracts;
+
 namespace LocalAi.Broker;
 
 public sealed record OllamaProcessInfo(
@@ -13,7 +15,15 @@ public sealed record ModelResidencyProof(
     long SizeBytes,
     long SizeVramBytes,
     bool FullyResident,
-    DateTimeOffset VerifiedAtUtc);
+    DateTimeOffset VerifiedAtUtc)
+{
+    /// <summary>
+    /// Set when a relaxed policy admitted a load that is not fully resident, and therefore
+    /// slower. Callers must surface it: a degraded answer that looks identical to a healthy
+    /// one is exactly the failure this policy exists to prevent.
+    /// </summary>
+    public string? DegradationWarning { get; init; }
+}
 
 public interface IModelRuntimeTransport
 {
@@ -67,17 +77,21 @@ public sealed class ModelRuntime : IModelRuntime
     private readonly IModelRuntimeTransport _transport;
     private readonly ModelRoutingCatalog _catalog;
     private readonly TimeProvider _timeProvider;
+    private readonly LocalAi.Contracts.ModelResidencyPolicy _residencyPolicy;
     private readonly HashSet<ModelContextKey> _disabled = [];
     private readonly object _sync = new();
 
     public ModelRuntime(
         IModelRuntimeTransport transport,
         ModelRoutingCatalog catalog,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        LocalAi.Contracts.ModelResidencyPolicy residencyPolicy =
+            LocalAi.Contracts.ModelResidencyPolicy.RequireFullVram)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _residencyPolicy = residencyPolicy;
     }
 
     public bool IsDisabled(string model, int contextTokens)
@@ -199,9 +213,31 @@ public sealed class ModelRuntime : IModelRuntime
                     $"expected {contextTokens}.");
             }
 
-            if (process.SizeBytes <= 0 ||
-                process.SizeVramBytes <= 0 ||
-                process.SizeVramBytes != process.SizeBytes)
+            // A model that reports no size at all never really loaded; that is a technical
+            // failure under every policy.
+            if (process.SizeBytes <= 0)
+            {
+                throw new ModelPreflightException(
+                    model,
+                    contextTokens,
+                    LocalAi.Contracts.ModelExecutionOutcome.TechnicalFailure,
+                    $"Model '{model}' reported no loaded size after preflight.");
+            }
+
+            var fullyResident = process.SizeVramBytes == process.SizeBytes;
+            var admitted = _residencyPolicy switch
+            {
+                LocalAi.Contracts.ModelResidencyPolicy.RequireFullVram =>
+                    process.SizeVramBytes > 0 && fullyResident,
+                // Partial offload still requires the adapter to hold something; a pure CPU
+                // load under this policy is a different, explicitly chosen setting.
+                LocalAi.Contracts.ModelResidencyPolicy.AllowPartialOffload =>
+                    process.SizeVramBytes > 0,
+                LocalAi.Contracts.ModelResidencyPolicy.AllowCpu => true,
+                _ => false,
+            };
+
+            if (!admitted)
             {
                 throw new ModelPreflightException(
                     model,
@@ -215,8 +251,13 @@ public sealed class ModelRuntime : IModelRuntime
                 contextTokens,
                 process.SizeBytes,
                 process.SizeVramBytes,
-                FullyResident: true,
-                _timeProvider.GetUtcNow());
+                fullyResident,
+                _timeProvider.GetUtcNow())
+            {
+                DegradationWarning = _residencyPolicy.DescribeDegradation(
+                    process.SizeBytes,
+                    process.SizeVramBytes),
+            };
         }
         catch (Exception exception) when (
             exception is not OperationCanceledException ||
