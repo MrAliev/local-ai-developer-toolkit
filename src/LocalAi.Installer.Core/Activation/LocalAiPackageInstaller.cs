@@ -189,7 +189,7 @@ public sealed class LocalAiPackageInstaller
                 layout,
                 existing.State == ExistingLocalAiState.Absent);
         }
-        catch (LocalAiPackageInstallationException)
+        catch (LocalAiPackageInstallationException exception)
         {
             return new(
                 LocalAiPackageInstallStatus.Refused,
@@ -197,7 +197,9 @@ public sealed class LocalAiPackageInstaller
                 existing.Version,
                 versionPath,
                 null,
-                "The existing LocalAi layout is unrecognized.");
+                // Carry the underlying reason: "unrecognized" on its own gave the user
+                // nothing to act on and hid which check actually refused the layout.
+                $"The existing LocalAi layout was refused. {exception.Message}");
         }
 
         using (layoutLease)
