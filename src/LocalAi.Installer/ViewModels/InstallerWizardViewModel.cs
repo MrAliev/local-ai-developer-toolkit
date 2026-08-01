@@ -5,6 +5,7 @@ using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Diagnosis;
+using LocalAi.Installer.Core.Models;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -47,6 +48,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private string progressText = "Ready";
     private string? rollbackMessage;
     private EnvironmentDiagnosis? environmentDiagnosis;
+    private CatalogRecommendation lastRecommendation = CatalogRecommendation.Empty;
 
     public InstallerWizardViewModel()
     {
@@ -65,6 +67,17 @@ public sealed class InstallerWizardViewModel : ObservableObject
         NextCommand = new RelayCommand(() => MoveNext(), () => CanMoveNext);
         InstallCommand = new AsyncRelayCommand(() => RunAsync(), () => CanRun);
         CancelCommand = new RelayCommand(Cancel, () => CanCancel);
+
+        // Relaxing the residency policy immediately widens what the models page can offer,
+        // so the two pages stay consistent instead of contradicting each other.
+        residency.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ResidencyPageViewModel.Policy))
+            {
+                OnResidencyChanged();
+            }
+        };
+
         RebuildSteps();
     }
 
@@ -567,6 +580,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         diagnose.Load(diagnosis);
         residency.HasUsableAdapter = diagnose.HasUsableAdapter;
         agents.ApplyDetection(diagnosis.Agents);
+        await RefreshRecommendationAsync(diagnosis, cancellationToken);
 
         // Detection records presence only; it must not grant consent on the user's behalf.
         dependencies.SetInstalled("Git", diagnosis.Git.State == DependencyState.Detected);
@@ -574,6 +588,46 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         OnPropertyChanged(nameof(Diagnose));
         OnPropertyChanged(nameof(Dependencies));
+        RefreshAll();
+    }
+
+    /// <summary>
+    /// Recomputes which catalogue models fit this machine. Sizes come from the public model
+    /// registry, so this is a network call: it must never prevent the wizard from running,
+    /// and an offline machine simply gets the catalogue without sizes.
+    /// </summary>
+    private async Task RefreshRecommendationAsync(
+        EnvironmentDiagnosis diagnosis,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var registry = new OllamaRegistryClient();
+            var recommender = new CatalogModelRecommender(registry);
+            lastRecommendation = await recommender.RecommendAsync(
+                diagnosis.Gpu,
+                models.CatalogModels,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            lastRecommendation = CatalogRecommendation.Empty;
+        }
+
+        models.ApplyRecommendation(
+            lastRecommendation,
+            residency.Policy == ModelResidencyPolicy.RequireFullVram);
+    }
+
+    /// <summary>
+    /// Re-applies the last recommendation under the current residency choice, so relaxing
+    /// the policy immediately widens what the models page offers.
+    /// </summary>
+    public void OnResidencyChanged()
+    {
+        models.ApplyRecommendation(
+            lastRecommendation,
+            residency.Policy == ModelResidencyPolicy.RequireFullVram);
         RefreshAll();
     }
 

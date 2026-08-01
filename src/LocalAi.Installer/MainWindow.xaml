@@ -224,8 +224,17 @@
                         </StackPanel.Style>
                         <RadioButton GroupName="ModelMode" Content="Choose automatically for this computer"
                                      IsChecked="{Binding Models.IsAutomatic, Mode=TwoWay}" Margin="0,0,0,4" />
-                        <TextBlock Text="Picks catalogue models that fit the detected adapter and the video memory setting."
-                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,10" />
+                        <StackPanel Margin="20,0,0,10">
+                            <TextBlock Text="{Binding Models.AutomaticSummary}"
+                                       Style="{StaticResource Muted}" FontSize="11" Margin="0,0,0,6" />
+                            <ItemsControl ItemsSource="{Binding Models.AutomaticSelection}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" FontSize="11" Margin="0,0,0,3" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
 
                         <RadioButton GroupName="ModelMode" Content="Choose exactly"
                                      IsChecked="{Binding Models.IsChooseExact, Mode=TwoWay}" Margin="0,0,0,4" />
