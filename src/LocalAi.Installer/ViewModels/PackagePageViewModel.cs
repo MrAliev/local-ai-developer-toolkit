@@ -1,3 +1,5 @@
+using LocalAi.Installer.Core.Releases;
+
 namespace LocalAi.Installer.ViewModels;
 
 public enum PackageSourceState
@@ -72,23 +74,34 @@ public sealed class PackagePageViewModel : ObservableObject
         _ => "LocalAi package: not resolved — it will not be installed",
     };
 
-    public void SelectResolvedRelease(string version)
+    /// <summary>
+    /// The verified release, kept so the install step uses exactly the manifest that was
+    /// checked here instead of fetching and trusting a second copy.
+    /// </summary>
+    public ResolvedRelease? Resolved { get; private set; }
+
+    public void SelectResolvedRelease(ResolvedRelease release)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(version);
-        releaseVersion = version;
+        ArgumentNullException.ThrowIfNull(release);
+        Resolved = release;
+        releaseVersion = release.Manifest.ReleaseVersion;
         OnPropertyChanged(nameof(ReleaseVersion));
-        StatusText = $"Release {version} resolved and verified.";
+        StatusText =
+            $"Release {release.Manifest.ReleaseVersion} verified, " +
+            $"{release.Manifest.PackageSize / (1024d * 1024):N0} MB to download.";
         State = PackageSourceState.Selected;
     }
 
     public void ReportIncompatible(string reason)
     {
+        Resolved = null;
         StatusText = reason;
         State = PackageSourceState.Incompatible;
     }
 
     public void ReportUnavailable(string reason)
     {
+        Resolved = null;
         StatusText = reason;
         State = PackageSourceState.Unavailable;
     }

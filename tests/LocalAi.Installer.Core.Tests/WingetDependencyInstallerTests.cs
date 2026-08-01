@@ -18,7 +18,7 @@ public sealed class WingetDependencyInstallerTests
     public void Catalog_is_an_immutable_exact_allowlist_with_official_https_fallbacks()
     {
         Assert.Equal(
-            ["Git.Git", "Ollama.Ollama"],
+            ["Git.Git", "Ollama.Ollama", "GitHub.cli"],
             DependencyCatalog.Supported.Select(item => item.PackageId));
         Assert.All(
             DependencyCatalog.Supported,
@@ -35,6 +35,9 @@ public sealed class WingetDependencyInstallerTests
         Assert.Equal(
             "https://ollama.com/download/windows",
             DependencyCatalog.Ollama.OfficialInstallerUri.AbsoluteUri);
+        Assert.Equal(
+            "https://cli.github.com/",
+            DependencyCatalog.GitHubCli.OfficialInstallerUri.AbsoluteUri);
         Assert.False(
             DependencyCatalog.TryGetByPackageId(
                 "git.git",
