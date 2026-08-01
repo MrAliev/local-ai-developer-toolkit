@@ -53,7 +53,9 @@ internal static class Program
               localai-release-signer verify --manifest <file> --signature <file>
                                             [--public-key <file>]
 
-            Keys default to %LOCALAPPDATA%\LocalAi\release-signing\.
+            The private key defaults to
+            %LOCALAPPDATA%\LocalAi\release-signing\release-signing-private.pkcs8.der.
+            The public key defaults to the key embedded in the installer build.
             """);
         return 2;
     }
@@ -86,16 +88,19 @@ internal static class Program
         var canonical = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
         var signature = SignLowS(canonical, LoadPrivateKey(args.Optional("private-key")));
 
+        // Verify before writing anything: a rejected signature must not leave a manifest on
+        // disk that someone can publish by mistake.
+        using (var verifier = new ReleaseManifestVerifier(LoadPublicKeyBytes(args.Optional("public-key"))))
+        {
+            verifier.Verify(canonical, signature);
+        }
+
         var outputDirectory = args.Require("out");
         Directory.CreateDirectory(outputDirectory);
         var manifestPath = Path.Combine(outputDirectory, "release-manifest.json");
         var signaturePath = Path.Combine(outputDirectory, "release-manifest.sig");
         File.WriteAllBytes(manifestPath, canonical);
         File.WriteAllBytes(signaturePath, signature);
-
-        // Prove the artifacts verify before anyone publishes them.
-        using var verifier = new ReleaseManifestVerifier(LoadPublicKeyBytes(args.Optional("public-key")));
-        verifier.Verify(canonical, signature);
 
         Console.WriteLine($"manifest  : {manifestPath} ({canonical.Length} bytes)");
         Console.WriteLine($"signature : {signaturePath} ({signature.Length} bytes)");
@@ -160,19 +165,23 @@ internal static class Program
     private static ECDsa LoadPrivateKey(string? path)
     {
         var key = ECDsa.Create();
-        key.ImportPkcs8PrivateKey(File.ReadAllBytes(path ?? DefaultKeyPath("private.pkcs8")), out _);
+        key.ImportPkcs8PrivateKey(File.ReadAllBytes(path ?? DefaultPrivateKeyPath()), out _);
         return key;
     }
 
+    /// <summary>
+    /// Defaults to the key embedded in the installer, so signing fails here if the private
+    /// key does not match what shipped binaries trust — rather than on a user's machine.
+    /// </summary>
     private static byte[] LoadPublicKeyBytes(string? path) =>
-        File.ReadAllBytes(path ?? DefaultKeyPath("public.spki"));
+        path is null ? ReleaseTrustAnchor.PublicKey : File.ReadAllBytes(path);
 
-    private static string DefaultKeyPath(string kind) =>
+    private static string DefaultPrivateKeyPath() =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "LocalAi",
             "release-signing",
-            $"release-signing-{kind}.der");
+            "release-signing-private.pkcs8.der");
 
     private sealed class Args
     {

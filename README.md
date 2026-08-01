@@ -210,6 +210,13 @@ localai-release-signer sign `
     --out publish\release
 ```
 
+Verification uses the public key embedded in `LocalAi.Installer.Core`
+(`ReleaseTrustAnchor`), not a file next to the tool, so signing with a key the shipped
+installer does not trust fails immediately instead of on a user's machine. Nothing is
+written when verification fails. Commit the public half at
+`src/LocalAi.Installer.Core/Releases/release-signing-public.spki.der`; the private half
+must never enter the repository.
+
 Publish `release-manifest.json` and `release-manifest.sig` as release assets alongside the
 package. Field rules worth knowing before a release fails validation: `ReleaseVersion` is
 strict semver with **no leading `v`**, `PackageSha256` is **upper-case** hex, and

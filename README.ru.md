@@ -193,6 +193,13 @@ localai-release-signer sign `
     --out publish\release
 ```
 
+Проверка выполняется публичным ключом, встроенным в `LocalAi.Installer.Core`
+(`ReleaseTrustAnchor`), а не файлом рядом с утилитой. Поэтому подпись ключом, которому
+выпущенный установщик не доверяет, падает сразу, а не на машине пользователя. При провале
+проверки на диск не пишется ничего. Публичную половину держите в репозитории по пути
+`src/LocalAi.Installer.Core/Releases/release-signing-public.spki.der`, приватная не должна
+попадать в репозиторий никогда.
+
 Публикуйте `release-manifest.json` и `release-manifest.sig` ассетами релиза рядом с
 пакетом. Правила полей, о которые проще всего споткнуться: `ReleaseVersion` — строгий
 semver **без префикса `v`**, `PackageSha256` — hex **в верхнем регистре**, `PackageUri` —
