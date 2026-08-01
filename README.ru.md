@@ -162,6 +162,47 @@ dotnet publish src/LocalAi.Installer/LocalAi.Installer.csproj --configuration Re
 
 Каталог `publish/` игнорируется. Публикация не регистрирует исполняемые файлы с клиентом AI или устанавливает Git хуки.
 
+### Подпись манифеста релиза
+
+Установщик отвергает любой релиз, чей манифест не подписан доверенным ключом ECDSA P-256.
+Это самостоятельно сгенерированная пара ключей, а не сертификат: ни центра сертификации,
+ни расходов здесь нет. Создайте её один раз и держите приватный ключ вне репозитория:
+
+```powershell
+$dir = "$env:LOCALAPPDATA\LocalAi\release-signing"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$ec = [System.Security.Cryptography.ECDsa]::Create(
+    [System.Security.Cryptography.ECCurve]::CreateFromFriendlyName("nistP256"))
+[IO.File]::WriteAllBytes("$dir\release-signing-private.pkcs8.der", $ec.ExportPkcs8PrivateKey())
+[IO.File]::WriteAllBytes("$dir\release-signing-public.spki.der", $ec.ExportSubjectPublicKeyInfo())
+$ec.Dispose()
+icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
+```
+
+Подписывайте пакет утилитой `localai-release-signer`. Она собирает манифест тем же
+каноническим сериализатором, которым пользуется проверяющий, приводит подпись к
+канонической форме low-S, обязательной для верификатора, и перепроверяет результат ещё до
+публикации:
+
+```powershell
+localai-release-signer sign `
+    --package publish\localai-package.zip `
+    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.2/localai-package.zip `
+    --release-version 0.1.2 `
+    --version-directory d9c52d2 `
+    --out publish\release
+```
+
+Публикуйте `release-manifest.json` и `release-manifest.sig` ассетами релиза рядом с
+пакетом. Правила полей, о которые проще всего споткнуться: `ReleaseVersion` — строгий
+semver **без префикса `v`**, `PackageSha256` — hex **в верхнем регистре**, `PackageUri` —
+только `https`, без userinfo и фрагмента.
+
+Authenticode — отдельный и необязательный механизм: не указывайте
+`--require-authenticode`, и установщик полностью пропустит проверку доверия к
+исполняемым файлам. Подписанные бинарники нужны лишь для того, чтобы не появлялось
+предупреждение SmartScreen на машинах, отличных от сборочной.
+
 ### Неизменяемые версии и атомарная активация
 
 Опубликуйте CLI, MCP-серверы, брокер, контракты и их зависимости среды выполнения

@@ -180,6 +180,45 @@ dotnet publish src/LocalAi.Installer/LocalAi.Installer.csproj --configuration Re
 The `publish/` directory is ignored. Publishing does not register executables with an
 AI client or install Git hooks.
 
+### Signing a release manifest
+
+The installer refuses any release whose manifest is not signed with the ECDSA P-256 key it
+trusts. This is a self-generated key pair, not a certificate: no certificate authority and
+no cost are involved. Generate it once and keep the private key outside the repository:
+
+```powershell
+$dir = "$env:LOCALAPPDATA\LocalAi\release-signing"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$ec = [System.Security.Cryptography.ECDsa]::Create(
+    [System.Security.Cryptography.ECCurve]::CreateFromFriendlyName("nistP256"))
+[IO.File]::WriteAllBytes("$dir\release-signing-private.pkcs8.der", $ec.ExportPkcs8PrivateKey())
+[IO.File]::WriteAllBytes("$dir\release-signing-public.spki.der", $ec.ExportSubjectPublicKeyInfo())
+$ec.Dispose()
+icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
+```
+
+Sign the package with `localai-release-signer`. It builds the manifest through the same
+canonical serializer the verifier uses, normalises the signature to the canonical low-S
+form the verifier requires, and re-verifies the result before it can be published:
+
+```powershell
+localai-release-signer sign `
+    --package publish\localai-package.zip `
+    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.2/localai-package.zip `
+    --release-version 0.1.2 `
+    --version-directory d9c52d2 `
+    --out publish\release
+```
+
+Publish `release-manifest.json` and `release-manifest.sig` as release assets alongside the
+package. Field rules worth knowing before a release fails validation: `ReleaseVersion` is
+strict semver with **no leading `v`**, `PackageSha256` is **upper-case** hex, and
+`PackageUri` must be `https` without user info or a fragment.
+
+Authenticode is a separate and optional mechanism: leave `--require-authenticode` off and
+the installer skips executable trust checks entirely. Signed binaries are only needed to
+avoid the SmartScreen prompt on machines other than the build machine.
+
 ### Immutable versions and atomic activation
 
 Publish the CLI, MCP servers, broker, contracts, and their runtime dependencies into a

@@ -9,6 +9,7 @@
     <Project Path="src/LocalAi.Installer/LocalAi.Installer.csproj" />
     <Project Path="src/LocalAi.Installer.Core/LocalAi.Installer.Core.csproj" />
     <Project Path="src/LocalAi.Launcher/LocalAi.Launcher.csproj" />
+    <Project Path="src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj" />
     <Project Path="src/LocalAi.Repository/LocalAi.Repository.csproj" />
     <Project Path="src/LocalAi.Cli/LocalAi.Cli.csproj" />
     <Project Path="src/LocalLm.Core/LocalLm.Core.csproj" />
