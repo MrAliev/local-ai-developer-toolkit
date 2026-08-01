@@ -200,7 +200,7 @@ icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 
 Сначала соберите пакет. Верификатор сверяет состав архива с
 `LocalAiPackageLayout.PackageArtifactFiles` через `SetEquals`, поэтому в нём должно быть
-ровно семь артефактов плюс `localai-package.json` — плоско и без единой лишней записи.
+ровно шесть артефактов плюс `localai-package.json` — плоско и без единой лишней записи.
 **Именно поэтому исполняемые файлы обязаны публиковаться self-contained**: в формате нет
 места для соседних сборок-зависимостей, и framework-dependent сборку выложить релизом
 нельзя.
@@ -208,7 +208,7 @@ icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 ```powershell
 localai-release-signer pack `
     --input publish\artifacts `
-    --release-version 0.1.2 `
+    --release-version 0.1.3 `
     --version-directory d9c52d2 `
     --out publish\release\localai-package.zip
 ```
@@ -221,8 +221,8 @@ localai-release-signer pack `
 ```powershell
 localai-release-signer sign `
     --package publish\localai-package.zip `
-    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.2/localai-package.zip `
-    --release-version 0.1.2 `
+    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.3/localai-package.zip `
+    --release-version 0.1.3 `
     --version-directory d9c52d2 `
     --out publish\release
 ```
