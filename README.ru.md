@@ -208,7 +208,7 @@ icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 ```powershell
 localai-release-signer pack `
     --input publish\artifacts `
-    --release-version 0.1.5 `
+    --release-version 0.1.6 `
     --version-directory d9c52d2 `
     --out publish\release\localai-package.zip
 ```
@@ -221,8 +221,8 @@ localai-release-signer pack `
 ```powershell
 localai-release-signer sign `
     --package publish\localai-package.zip `
-    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.5/localai-package.zip `
-    --release-version 0.1.5 `
+    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.6/localai-package.zip `
+    --release-version 0.1.6 `
     --version-directory d9c52d2 `
     --out publish\release
 ```
