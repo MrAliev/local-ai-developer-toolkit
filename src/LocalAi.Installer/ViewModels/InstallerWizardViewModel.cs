@@ -6,6 +6,7 @@ using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Models;
+using LocalAi.Installer.Core.Releases;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -373,6 +374,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 await RefreshEnvironmentDiagnosticsAsync(token);
             }
 
+            // The package goes last: prerequisites must be in place first, and a failure
+            // here must not leave half-installed dependencies unexplained.
+            await InstallPackageAsync(report, token);
+
             SetProgress(95, "Finalising...");
             AppendLog(report, "Finalising.");
             finish.Summary = BuildFinishSummary(
@@ -585,6 +590,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         // Detection records presence only; it must not grant consent on the user's behalf.
         dependencies.SetInstalled("Git", diagnosis.Git.State == DependencyState.Detected);
         dependencies.SetInstalled("Ollama", diagnosis.Ollama.State == DependencyState.Detected);
+        dependencies.SetInstalled("GitHubCli", await IsGitHubCliPresentAsync(cancellationToken));
 
         OnPropertyChanged(nameof(Diagnose));
         OnPropertyChanged(nameof(Dependencies));
@@ -631,13 +637,107 @@ public sealed class InstallerWizardViewModel : ObservableObject
         RefreshAll();
     }
 
+    /// <summary>
+    /// The environment detector does not probe the GitHub CLI, so it is checked here. Only
+    /// presence is established: whether this machine is signed in surfaces when a release is
+    /// actually resolved, with the CLI's own message.
+    /// </summary>
+    private async Task<bool> IsGitHubCliPresentAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await processRunner.RunAsync(
+                "gh",
+                ["--version"],
+                TimeSpan.FromSeconds(15),
+                cancellationToken);
+            return result.ExitCode == 0;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
     private static DependencyDefinition? ResolveDependencyDefinition(string dependencyId) =>
         dependencyId switch
         {
             "Git" => DependencyCatalog.Git,
             "Ollama" => DependencyCatalog.Ollama,
+            "GitHubCli" => DependencyCatalog.GitHubCli,
             _ => null,
         };
+
+    /// <summary>
+    /// Scratch space for downloaded release assets, under the installer's own directory so a
+    /// failed run leaves nothing behind in the installed layout.
+    /// </summary>
+    private static string WorkingDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "LocalAi",
+        "installer",
+        "downloads");
+
+    /// <summary>
+    /// Resolves and verifies the requested release. Failures are shown on the package page
+    /// rather than thrown: an unresolved package does not stop the rest of the installation.
+    /// </summary>
+    public async Task ResolvePackageAsync(CancellationToken cancellationToken = default)
+    {
+        package.ReportUnavailable("Checking the release...");
+        RefreshAll();
+        try
+        {
+            var feed = new GitHubReleaseFeed(processRunner);
+            package.SelectResolvedRelease(
+                await feed.ResolveAsync(
+                    package.ReleaseVersion.Trim(),
+                    WorkingDirectory,
+                    cancellationToken));
+        }
+        catch (ReleaseResolutionException exception)
+        {
+            package.ReportUnavailable(exception.Message);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            package.ReportUnavailable($"The release could not be checked: {exception.Message}");
+        }
+
+        RefreshAll();
+    }
+
+    private async Task InstallPackageAsync(
+        StringBuilder report,
+        CancellationToken cancellationToken)
+    {
+        if (package.Resolved is not { } resolved)
+        {
+            AppendLog(report, "LocalAi package: no verified release selected, skipping.");
+            return;
+        }
+
+        SetProgress(Math.Max(progress, 40), "Downloading the LocalAi package...");
+        AppendLog(
+            report,
+            $"LocalAi package {resolved.Manifest.ReleaseVersion}: downloading and verifying...");
+
+        var service = new ReleaseInstallService(
+            new GitHubReleaseFeed(processRunner),
+            processRunner,
+            new SystemFileSystemProbe());
+        var result = await service.InstallAsync(resolved, WorkingDirectory, cancellationToken);
+
+        AppendLog(
+            report,
+            result.Installed
+                ? $"LocalAi package: {result.Status}, version {result.Version} at {result.VersionPath}."
+                : $"LocalAi package: {result.Status}. {result.Reason}".Trim());
+        if (!result.Installed)
+        {
+            hasRunError = true;
+        }
+    }
 
     private async Task<bool> TryInstallDependencyWithWingetAsync(
         DependencyDefinition dependency,

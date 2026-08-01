@@ -50,6 +50,7 @@ public sealed class InstallerWizardViewModelTests
         Assert.False(wizard.Dependencies.CanContinue);
 
         wizard.Dependencies.SetInstalled("Ollama", true);
+        wizard.Dependencies.SetInstalled("GitHubCli", true);
         Assert.True(wizard.Dependencies.CanContinue);
     }
 
@@ -198,6 +199,7 @@ public sealed class InstallerWizardViewModelTests
         var wizard = SupportedWizard();
         wizard.Dependencies.SetInstalled("Git", true);
         wizard.Dependencies.SetInstalled("Ollama", true);
+        wizard.Dependencies.SetInstalled("GitHubCli", true);
 
         Assert.True(wizard.MoveNext()); // Dependencies
         Assert.True(wizard.MoveNext()); // Package
@@ -218,6 +220,7 @@ public sealed class InstallerWizardViewModelTests
         var wizard = SupportedWizard();
         wizard.Dependencies.SetInstalled("Git", true);
         wizard.Dependencies.SetInstalled("Ollama", true);
+        wizard.Dependencies.SetInstalled("GitHubCli", true);
         for (var step = 0; step < 6; step++)
         {
             wizard.MoveNext();
@@ -264,6 +267,7 @@ public sealed class InstallerWizardViewModelTests
         var wizard = SupportedWizard();
         wizard.Dependencies.SetInstalled("Git", true);
         wizard.Dependencies.SetInstalled("Ollama", true);
+        wizard.Dependencies.SetInstalled("GitHubCli", true);
         for (var step = 0; step < 6; step++)
         {
             wizard.MoveNext();

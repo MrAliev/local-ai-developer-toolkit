@@ -32,8 +32,20 @@ public static class DependencyCatalog
         "Ollama.Ollama",
         "https://ollama.com/download/windows");
 
+    /// <summary>
+    /// Needed to download release assets from a private repository. The installer never
+    /// handles a token itself: it reuses the sign-in the user already established with
+    /// <c>gh auth login</c> on that machine.
+    /// </summary>
+    public static DependencyDefinition GitHubCli { get; } = Create(
+        "dependency.github-cli",
+        "GitHub CLI",
+        "gh.exe",
+        "GitHub.cli",
+        "https://cli.github.com/");
+
     public static IReadOnlyList<DependencyDefinition> Supported { get; } =
-        new ReadOnlyCollection<DependencyDefinition>([Git, Ollama]);
+        new ReadOnlyCollection<DependencyDefinition>([Git, Ollama, GitHubCli]);
 
     public static bool TryGetByPackageId(
         string? packageId,

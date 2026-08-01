@@ -13,6 +13,9 @@ public sealed class DependenciesPageViewModel : ObservableObject
     [
         new("Git", "Git", true),
         new("Ollama", "Ollama", true),
+        // Required because the release repository is private: the installer reads it with
+        // the sign-in already established by 'gh auth login' rather than handling a token.
+        new("GitHubCli", "GitHub CLI", true),
         new("VisualCpp", "MSVC redistributable", false) { IsInstallable = false },
     ];
 

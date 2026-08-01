@@ -33,16 +33,8 @@ public partial class MainWindow : Window
         viewModel.RefreshNavigationState();
     }
 
-    private void OnPackageCheckRelease(object sender, RoutedEventArgs e)
-    {
-        // No release feed is configured yet, and the page must not claim a package it has
-        // not resolved. Reporting the real state is the whole point of this button.
-        viewModel.Package.ReportUnavailable(
-            "No signed release manifest is published for this build yet, so the LocalAi " +
-            "package cannot be installed. Everything else on the following pages still " +
-            "applies.");
-        viewModel.RefreshNavigationState();
-    }
+    private async void OnPackageCheckRelease(object sender, RoutedEventArgs e) =>
+        await viewModel.ResolvePackageAsync();
 
     private void OnAgentChoiceChanged(object sender, SelectionChangedEventArgs e)
     {
