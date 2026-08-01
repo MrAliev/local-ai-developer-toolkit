@@ -29,10 +29,8 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
                 : null;
         }
 
-        foreach (var pathEntry in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var directory in SearchDirectories())
         {
-            var directory = pathEntry.Trim().Trim('"');
             foreach (var name in CandidateNames(executableName))
             {
                 var candidate = Path.Combine(directory, name);
@@ -44,6 +42,71 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Every directory worth searching, in order, without repeats.
+    /// </summary>
+    private static IEnumerable<string> SearchDirectories()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in PathSources())
+        {
+            foreach (var entry in source.Split(
+                         Path.PathSeparator,
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                var directory = entry.Trim().Trim('"');
+                if (directory.Length > 0 && seen.Add(directory))
+                {
+                    yield return directory;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The process PATH first, then the machine and user PATH as the registry holds them now.
+    ///
+    /// Windows hands PATH to a process by inheriting the parent's environment block at creation,
+    /// not by reading the registry. A dependency installed during an open session is therefore
+    /// invisible to everything descended from a shell that started earlier - and Explorer starts
+    /// at logon, so that is nearly everything. Installing the GitHub CLI and immediately running
+    /// this installer produced exactly that: `gh.exe` sat in the machine PATH, `where gh` found
+    /// it from a fresh shell, and the installer reported "Not found" and refused to continue,
+    /// because it had been launched from a browser descended from the pre-install Explorer.
+    ///
+    /// Reading the registry values closes that gap without asking anyone to sign out first.
+    /// </summary>
+    private static IEnumerable<string> PathSources()
+    {
+        yield return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        if (!OperatingSystem.IsWindows())
+        {
+            yield break;
+        }
+
+        foreach (var target in new[]
+                 {
+                     EnvironmentVariableTarget.Machine,
+                     EnvironmentVariableTarget.User,
+                 })
+        {
+            string? value;
+            try
+            {
+                value = Environment.GetEnvironmentVariable("Path", target);
+            }
+            catch (System.Security.SecurityException)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                yield return value;
+            }
+        }
     }
 
     /// <summary>
