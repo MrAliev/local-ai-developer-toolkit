@@ -35,6 +35,24 @@ public sealed class DependenciesPageViewModel : ObservableObject
         OnPropertyChanged(nameof(Dependencies));
     }
 
+    public void SetInstalled(string id, bool installed)
+    {
+        var dependency = Dependencies.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+        if (dependency is null)
+        {
+            throw new InvalidOperationException($"Unknown dependency '{id}'.");
+        }
+
+        dependency.IsInstalled = installed;
+        if (installed)
+        {
+            dependency.IsConsented = true;
+        }
+
+        OnPropertyChanged(nameof(CanContinue));
+        OnPropertyChanged(nameof(Dependencies));
+    }
+
     public void MarkInstalled(string id)
     {
         var dependency = Dependencies.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));

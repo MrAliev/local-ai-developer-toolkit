@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using LocalAi.Installer.Core.Abstractions;
 
 namespace LocalAi.Installer.Core.Diagnosis;
@@ -159,19 +160,58 @@ public sealed class WindowsEnvironmentDetector(
                          "ollama.exe",
                          StringComparison.OrdinalIgnoreCase) &&
                      !string.IsNullOrWhiteSpace(installed.DetectedVersion);
-        return !usable
-            ? new DependencySnapshot(
-                "Ollama",
-                DependencyState.NotFound,
-                null,
-                null,
-                null)
-            : new DependencySnapshot(
+        if (usable)
+        {
+            return new DependencySnapshot(
                 "Ollama",
                 DependencyState.Detected,
                 installed!.ExecutablePath,
                 installed.DetectedVersion,
                 null);
+        }
+
+        var commandDependency = await DetectCommandDependencyAsync(
+            "Ollama",
+            "ollama.exe",
+            cancellationToken).ConfigureAwait(false);
+        return commandDependency.State switch
+        {
+            DependencyState.Detected =>
+                new DependencySnapshot(
+                    "Ollama",
+                    DependencyState.Detected,
+                    commandDependency.ExecutablePath,
+                    NormalizeOllamaVersion(commandDependency.Version),
+                    null),
+            DependencyState.Failed =>
+                new DependencySnapshot(
+                    "Ollama",
+                    DependencyState.Failed,
+                    commandDependency.ExecutablePath,
+                    null,
+                    commandDependency.Reason),
+            _ => new DependencySnapshot(
+                "Ollama",
+                DependencyState.NotFound,
+                null,
+                null,
+                null),
+        };
+    }
+
+    private static string? NormalizeOllamaVersion(string? rawVersion)
+    {
+        if (string.IsNullOrWhiteSpace(rawVersion))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(
+            rawVersion,
+            @"\b([0-9]{1,5}(?:\.[0-9]{1,5}){1,3}(?:[-+][0-9A-Za-z](?:[0-9A-Za-z.-]{0,30}[0-9A-Za-z])?)?)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return match.Success ? match.Value : rawVersion.Trim();
     }
 
     private AgentSnapshot DetectAgent(

@@ -166,6 +166,17 @@ dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --outp
 dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --output publish/LocalAi.Launcher
 ```
 
+For an installer that does not depend on preinstalled .NET runtime:
+
+```powershell
+dotnet publish src/CodeSearch.Cli/CodeSearch.Cli.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/CodeSearch.Cli
+dotnet publish src/CodeSearch.Mcp/CodeSearch.Mcp.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/CodeSearch.Mcp
+dotnet publish src/LocalLm.Mcp/LocalLm.Mcp.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/LocalLm.Mcp
+dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/LocalAi.Cli
+dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/LocalAi.Launcher
+dotnet publish src/LocalAi.Installer/LocalAi.Installer.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/LocalAi.Installer
+```
+
 The `publish/` directory is ignored. Publishing does not register executables with an
 AI client or install Git hooks.
 

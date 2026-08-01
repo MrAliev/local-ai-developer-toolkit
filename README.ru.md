@@ -149,6 +149,17 @@ dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --outp
 dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --output publish/LocalAi.Launcher
 ```
 
+Для автономного установщика (без зависимости от системного .NET runtime):
+
+```powershell
+dotnet publish src/CodeSearch.Cli/CodeSearch.Cli.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/CodeSearch.Cli
+dotnet publish src/CodeSearch.Mcp/CodeSearch.Mcp.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/CodeSearch.Mcp
+dotnet publish src/LocalLm.Mcp/LocalLm.Mcp.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/LocalLm.Mcp
+dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/LocalAi.Cli
+dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/LocalAi.Launcher
+dotnet publish src/LocalAi.Installer/LocalAi.Installer.csproj --configuration Release --runtime win-x64 --self-contained true --property:PublishSingleFile=true --output publish/LocalAi.Installer
+```
+
 Каталог `publish/` игнорируется. Публикация не регистрирует исполняемые файлы с клиентом AI или устанавливает Git хуки.
 
 ### Неизменяемые версии и атомарная активация

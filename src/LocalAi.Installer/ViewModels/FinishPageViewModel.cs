@@ -4,6 +4,7 @@ public sealed class FinishPageViewModel : ObservableObject
 {
     private bool success;
     private bool requiresRestart;
+    private string? summary;
     private string? rollbackNotes;
     private string? progress;
 
@@ -23,6 +24,15 @@ public sealed class FinishPageViewModel : ObservableObject
         {
             SetProperty(ref requiresRestart, value);
             OnPropertyChanged(nameof(RestartNotice));
+        }
+    }
+
+    public string? Summary
+    {
+        get => summary;
+        set
+        {
+            SetProperty(ref summary, value);
         }
     }
 
