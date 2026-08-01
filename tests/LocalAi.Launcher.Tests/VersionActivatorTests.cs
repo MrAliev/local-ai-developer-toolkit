@@ -248,7 +248,11 @@ public sealed class VersionActivatorTests
                     });
                 }),
             TimeSpan.FromMilliseconds(250),
-            TimeSpan.FromSeconds(1));
+            // The lease budget only has to outlast the choreography above (350 ms of stop work
+            // plus a 100 ms release). One second left almost no headroom, so a loaded machine
+            // exhausted it and failed a test that is about the stop timeout being separate from
+            // this budget, not about its absolute size.
+            TimeSpan.FromSeconds(5));
 
         activator.Activate("v2", stopRunning: true, ExpectCurrent(before));
         await release!;
