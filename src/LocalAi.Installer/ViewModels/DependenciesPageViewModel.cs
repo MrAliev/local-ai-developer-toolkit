@@ -5,9 +5,12 @@ namespace LocalAi.Installer.ViewModels;
 public sealed class DependenciesPageViewModel : ObservableObject
 {
     /// <summary>
-    /// Only items the installer can actually act on are offered as choices. The MSVC
-    /// redistributable has no automated recipe, so it is listed as information instead of a
-    /// checkbox that silently does nothing.
+    /// Only what the installer can act on and the product actually needs.
+    ///
+    /// The MSVC redistributable used to be listed here. Nothing in LocalAi referenced it —
+    /// no catalogue entry, no detection, no code requiring it. The components are
+    /// self-contained .NET and Ollama brings its own native dependencies, so it has been
+    /// removed rather than left as a line that informs nobody and installs nothing.
     /// </summary>
     public ObservableCollection<DependencySelection> Dependencies { get; } =
     [
@@ -16,7 +19,6 @@ public sealed class DependenciesPageViewModel : ObservableObject
         // Required because the release repository is private: the installer reads it with
         // the sign-in already established by 'gh auth login' rather than handling a token.
         new("GitHubCli", "GitHub CLI", true),
-        new("VisualCpp", "MSVC redistributable", false) { IsInstallable = false },
     ];
 
     public IReadOnlyList<DependencySelection> SelectedDependencies =>

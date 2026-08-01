@@ -80,14 +80,19 @@ public sealed class PackagePageViewModel : ObservableObject
     /// </summary>
     public ResolvedRelease? Resolved { get; private set; }
 
-    public void SelectResolvedRelease(ResolvedRelease release)
+    /// <summary>
+    /// Reports the tag that was actually resolved, so a field left at "latest" names the
+    /// real release instead of leaving the user to guess which one was chosen.
+    /// </summary>
+    public void SelectResolvedRelease(ResolvedRelease release, string tag)
     {
         ArgumentNullException.ThrowIfNull(release);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
         Resolved = release;
-        releaseVersion = release.Manifest.ReleaseVersion;
+        releaseVersion = tag;
         OnPropertyChanged(nameof(ReleaseVersion));
         StatusText =
-            $"Release {release.Manifest.ReleaseVersion} verified, " +
+            $"Release {tag} verified, " +
             $"{release.Manifest.PackageSize / (1024d * 1024):N0} MB to download.";
         State = PackageSourceState.Selected;
     }

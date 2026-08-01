@@ -13,8 +13,26 @@ public sealed class DiagnosePageViewModel : ObservableObject
     private bool isSupported;
     private string? unsupportedReason;
     private bool hasUsableAdapter;
+    private bool isChecking = true;
 
     public ObservableCollection<EnvironmentCheck> Checks { get; } = [];
+
+    /// <summary>
+    /// True while the environment is being probed. Detection launches winget, git and ollama
+    /// and takes several seconds; without this the first page sat empty and looked frozen.
+    /// </summary>
+    public bool IsChecking
+    {
+        get => isChecking;
+        set
+        {
+            SetProperty(ref isChecking, value);
+            OnPropertyChanged(nameof(HasResults));
+            OnPropertyChanged(nameof(CanContinue));
+        }
+    }
+
+    public bool HasResults => !IsChecking;
 
     public bool IsSupported
     {
@@ -42,7 +60,11 @@ public sealed class DiagnosePageViewModel : ObservableObject
         private set => SetProperty(ref hasUsableAdapter, value);
     }
 
-    public bool CanContinue => IsSupported;
+    /// <summary>
+    /// Blocked while the check runs: continuing on results that are not in yet would show
+    /// the next pages an environment nobody has looked at.
+    /// </summary>
+    public bool CanContinue => IsSupported && !IsChecking;
 
     public void SetResult(bool supported, string? reason = null)
     {

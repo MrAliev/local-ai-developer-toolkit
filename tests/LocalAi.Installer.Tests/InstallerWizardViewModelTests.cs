@@ -1,4 +1,5 @@
 using LocalAi.Contracts;
+using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Planning;
 using LocalAi.Installer.ViewModels;
 
@@ -9,14 +10,34 @@ public sealed class InstallerWizardViewModelTests
     private static InstallerWizardViewModel SupportedWizard()
     {
         var wizard = new InstallerWizardViewModel();
+        // The real wizard clears this when the environment probe finishes.
+        wizard.Diagnose.IsChecking = false;
         wizard.Diagnose.SetResult(true);
         return wizard;
+    }
+
+    [Fact]
+    public void The_first_page_holds_the_user_while_the_check_is_running()
+    {
+        var wizard = new InstallerWizardViewModel();
+
+        // Detection has not finished, so there is nothing to move on from yet.
+        Assert.True(wizard.Diagnose.IsChecking);
+        Assert.False(wizard.Diagnose.HasResults);
+        Assert.False(wizard.CanMoveNext);
+
+        wizard.Diagnose.IsChecking = false;
+        wizard.Diagnose.SetResult(true);
+
+        Assert.True(wizard.Diagnose.HasResults);
+        Assert.True(wizard.CanMoveNext);
     }
 
     [Fact]
     public void Unsupported_environment_blocks_the_first_page()
     {
         var wizard = new InstallerWizardViewModel();
+        wizard.Diagnose.IsChecking = false;
         wizard.Diagnose.SetResult(false, "unsupported cpu");
 
         Assert.False(wizard.CanMoveNext);
@@ -67,15 +88,23 @@ public sealed class InstallerWizardViewModelTests
     }
 
     [Fact]
-    public void A_dependency_without_an_installer_cannot_be_selected()
+    public void Every_listed_prerequisite_is_one_the_installer_can_act_on()
     {
         var wizard = SupportedWizard();
 
-        wizard.Dependencies.SetConsent("VisualCpp", true);
-
-        var msvc = wizard.Dependencies.Dependencies.Single(item => item.Id == "VisualCpp");
-        Assert.False(msvc.IsInstallable);
-        Assert.False(msvc.IsConsented);
+        // The MSVC redistributable used to sit here purely as decoration: nothing detected
+        // it, nothing installed it and nothing needed it. The page must not regain items
+        // that inform nobody.
+        Assert.NotEmpty(wizard.Dependencies.Dependencies);
+        Assert.All(
+            wizard.Dependencies.Dependencies,
+            dependency =>
+            {
+                Assert.True(dependency.IsInstallable);
+                Assert.NotNull(
+                    DependencyCatalog.Supported.SingleOrDefault(
+                        definition => definition.DisplayName == dependency.Title));
+            });
     }
 
     [Fact]

@@ -37,7 +37,8 @@ public sealed class GitHubReleaseFeedTests : IDisposable
     private sealed class FakeCli(
         int exitCode,
         string standardError = "",
-        Action<string, string>? onDownload = null) : IProcessRunner
+        Action<string, string>? onDownload = null,
+        string standardOutput = "") : IProcessRunner
     {
         public List<IReadOnlyList<string>> Invocations { get; } = [];
 
@@ -48,7 +49,7 @@ public sealed class GitHubReleaseFeedTests : IDisposable
             CancellationToken cancellationToken)
         {
             Invocations.Add(arguments);
-            if (exitCode == 0)
+            if (exitCode == 0 && arguments.Contains("download"))
             {
                 onDownload?.Invoke(
                     ValueAfter(arguments, "--dir"),
@@ -56,7 +57,7 @@ public sealed class GitHubReleaseFeedTests : IDisposable
             }
 
             return Task.FromResult(
-                new ProcessResult(exitCode, string.Empty, standardError, false, false));
+                new ProcessResult(exitCode, standardOutput, standardError, false, false));
         }
     }
 
@@ -150,11 +151,51 @@ public sealed class GitHubReleaseFeedTests : IDisposable
         var path = await feed.DownloadPackageAsync(
             "0.1.2",
             root,
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.EndsWith(GitHubReleaseFeed.PackageAsset, path, StringComparison.Ordinal);
         Assert.Equal(
             GitHubReleaseFeed.PackageAsset,
             ValueAfter(cli.Invocations.Single(), "--pattern"));
+    }
+
+    [Fact]
+    public async Task An_explicit_tag_is_used_as_given()
+    {
+        var cli = new FakeCli(0);
+        var feed = new GitHubReleaseFeed(cli);
+
+        Assert.Equal(
+            "0.1.2",
+            await feed.ResolveTagAsync("  0.1.2 ", TestContext.Current.CancellationToken));
+        Assert.Empty(cli.Invocations);
+    }
+
+    [Theory]
+    [InlineData("latest")]
+    [InlineData("LATEST")]
+    [InlineData("")]
+    public async Task Latest_is_resolved_to_the_newest_published_tag(string requested)
+    {
+        // "latest" is not a tag GitHub serves; asking for it by name returns 404, which is
+        // exactly how a default-looking field used to break the whole install.
+        var cli = new FakeCli(0, standardOutput: "0.1.7\n");
+        var feed = new GitHubReleaseFeed(cli);
+
+        Assert.Equal(
+            "0.1.7",
+            await feed.ResolveTagAsync(requested, TestContext.Current.CancellationToken));
+        Assert.Contains("view", cli.Invocations.Single());
+    }
+
+    [Fact]
+    public async Task A_failure_to_determine_the_newest_release_is_reported()
+    {
+        var feed = new GitHubReleaseFeed(new FakeCli(1, "not logged in"));
+
+        var error = await Assert.ThrowsAsync<ReleaseResolutionException>(
+            () => feed.ResolveTagAsync("latest", TestContext.Current.CancellationToken));
+
+        Assert.Contains("gh auth login", error.Message, StringComparison.Ordinal);
     }
 }
