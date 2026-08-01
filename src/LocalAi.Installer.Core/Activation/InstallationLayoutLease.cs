@@ -942,7 +942,16 @@ public sealed class InstallationLayoutLease : IDisposable
             seen.Add(sid.Value);
         }
 
-        if (!seen.SetEquals(allowed))
+        // A subset of the allowed principals, not an exact match.
+        //
+        // Every rule above is already required to name an allowed principal, so nothing
+        // unexpected can hold rights here — that is the property worth protecting. Demanding
+        // all three additionally rejected ACLs that are stricter than required, and the
+        // broker runtime writes exactly such an ACL on the shared root: the user and
+        // Administrators, without SYSTEM. Insisting on equality refused installation on
+        // every machine the runtime had ever touched, for a directory that was in no way
+        // less safe.
+        if (!seen.Contains(user.Value))
         {
             throw Failure();
         }
