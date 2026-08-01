@@ -150,6 +150,12 @@ block into that client's global instructions file — `~/.claude/CLAUDE.md` for 
 `~/.codex/AGENTS.md` for Codex. A detected client defaults to both; a client that was not
 found is left alone, and an explicit choice always wins.
 
+The block is repository-agnostic on purpose. Indexing stays opt-in per repository, so rather
+than assuming the repositories that happened to be set up on the machine it was installed on,
+it states the check (`localai repo status`) and the two commands that connect any repository
+wherever it was cloned. Without that, a client on a fresh machine can use the local models but
+never offers to index the first repository it is pointed at.
+
 The instruction block is delimited by `<!-- BEGIN LOCALAI MANAGED INSTRUCTIONS -->` and its
 matching end marker. Everything between them is replaced wholesale on the next install and
 everything outside them is preserved, so upgrading the rules never costs a user their own
