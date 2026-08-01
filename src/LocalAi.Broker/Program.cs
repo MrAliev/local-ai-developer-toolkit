@@ -34,8 +34,12 @@ internal static class BrokerProgram
         var startedAt = new DateTimeOffset(
             process.StartTime.ToUniversalTime(),
             TimeSpan.Zero);
+        // Environment.ProcessPath rather than Assembly.Location: the broker ships as a
+        // single-file self-contained executable, and Location is empty when bundled.
         var brokerAssemblyPath = Path.GetFullPath(
-            typeof(BrokerHost).Assembly.Location);
+            Environment.ProcessPath
+            ?? throw new InvalidOperationException(
+                "The broker could not determine its own executable path."));
         var owner = new BrokerProcessState(
             process.Id,
             startedAt,

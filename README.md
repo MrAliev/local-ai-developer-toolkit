@@ -182,6 +182,13 @@ AI client or install Git hooks.
 
 ### Signing a release manifest
 
+An installed machine never needs a system-wide .NET runtime. Every component — the broker
+included — ships as a self-contained executable, and the broker is started as
+`LocalAi.Broker.exe` from the directory of whichever component needs it. That path is
+resolved through `AppContext.BaseDirectory`; **`Assembly.Location` must not be used**,
+because it returns an empty string in a single-file publish and the process dies with
+"The path is empty" before the broker is ever reached.
+
 The installer refuses any release whose manifest is not signed with the ECDSA P-256 key it
 trusts. This is a self-generated key pair, not a certificate: no certificate authority and
 no cost are involved. Generate it once and keep the private key outside the repository:

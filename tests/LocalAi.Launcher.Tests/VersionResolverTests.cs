@@ -1,3 +1,5 @@
+using LocalAi.Contracts;
+
 namespace LocalAi.Launcher.Tests;
 
 public sealed class VersionResolverTests
@@ -81,7 +83,7 @@ public sealed class VersionResolverTests
     public void Rejects_incomplete_version()
     {
         using var install = TestInstall.CreateComplete("v1");
-        install.RemoveRequiredFile("v1", "LocalAi.Broker.dll");
+        install.RemoveRequiredFile("v1", LocalAiPackageLayout.BrokerFile);
         install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
 
         var error = Assert.Throws<LauncherException>(
@@ -135,7 +137,7 @@ public sealed class VersionResolverTests
         install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
         var broker = Path.Combine(
             install.VersionDirectory("v1"),
-            "LocalAi.Broker.dll");
+            LocalAiPackageLayout.BrokerFile);
         var outside = Path.Combine(install.Root, "outside.dll");
         File.WriteAllText(outside, "outside");
         string ResolvePhysicalPath(string path) =>
