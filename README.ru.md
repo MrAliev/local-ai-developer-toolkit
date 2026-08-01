@@ -179,7 +179,22 @@ $ec.Dispose()
 icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 ```
 
-Подписывайте пакет утилитой `localai-release-signer`. Она собирает манифест тем же
+Сначала соберите пакет. Верификатор сверяет состав архива с
+`LocalAiPackageLayout.PackageArtifactFiles` через `SetEquals`, поэтому в нём должно быть
+ровно семь артефактов плюс `localai-package.json` — плоско и без единой лишней записи.
+**Именно поэтому исполняемые файлы обязаны публиковаться self-contained**: в формате нет
+места для соседних сборок-зависимостей, и framework-dependent сборку выложить релизом
+нельзя.
+
+```powershell
+localai-release-signer pack `
+    --input publish\artifacts `
+    --release-version 0.1.2 `
+    --version-directory d9c52d2 `
+    --out publish\release\localai-package.zip
+```
+
+Затем подпишите пакет утилитой `localai-release-signer`. Она собирает манифест тем же
 каноническим сериализатором, которым пользуется проверяющий, приводит подпись к
 канонической форме low-S, обязательной для верификатора, и перепроверяет результат ещё до
 публикации:
@@ -191,6 +206,17 @@ localai-release-signer sign `
     --release-version 0.1.2 `
     --version-directory d9c52d2 `
     --out publish\release
+```
+
+Перед публикацией прогоните готовые артефакты через собственный верификатор пакета из
+установщика. Он выполняет тот же разбор архива, распаковку и сверку метаданных, что и
+установка, поэтому структурная ошибка вылезет здесь, а не на чужой машине:
+
+```powershell
+localai-release-signer verify-package `
+    --package publish\release\localai-package.zip `
+    --manifest publish\release\release-manifest.json `
+    --signature publish\release\release-manifest.sig
 ```
 
 Проверка выполняется публичным ключом, встроенным в `LocalAi.Installer.Core`

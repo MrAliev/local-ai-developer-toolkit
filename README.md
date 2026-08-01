@@ -197,7 +197,21 @@ $ec.Dispose()
 icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 ```
 
-Sign the package with `localai-release-signer`. It builds the manifest through the same
+Build the package first. The verifier compares the archive contents against
+`LocalAiPackageLayout.PackageArtifactFiles` with `SetEquals`, so it must hold exactly seven
+artifacts plus `localai-package.json`, flat and with nothing extra. **That is why the
+executables must be published self-contained**: the format has no room for sibling
+dependency assemblies, so a framework-dependent build cannot be shipped as a release.
+
+```powershell
+localai-release-signer pack `
+    --input publish\artifacts `
+    --release-version 0.1.2 `
+    --version-directory d9c52d2 `
+    --out publish\release\localai-package.zip
+```
+
+Then sign it with `localai-release-signer`. It builds the manifest through the same
 canonical serializer the verifier uses, normalises the signature to the canonical low-S
 form the verifier requires, and re-verifies the result before it can be published:
 
@@ -208,6 +222,17 @@ localai-release-signer sign `
     --release-version 0.1.2 `
     --version-directory d9c52d2 `
     --out publish\release
+```
+
+Before publishing, run the finished artifacts through the installer's own package verifier.
+This exercises the archive inspection, extraction and metadata comparison an installer
+performs, so a structural mistake fails here rather than on someone else's machine:
+
+```powershell
+localai-release-signer verify-package `
+    --package publish\release\localai-package.zip `
+    --manifest publish\release\release-manifest.json `
+    --signature publish\release\release-manifest.sig
 ```
 
 Verification uses the public key embedded in `LocalAi.Installer.Core`

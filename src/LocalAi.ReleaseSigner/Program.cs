@@ -1,8 +1,10 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using LocalAi.Contracts;
+using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Releases;
 
 namespace LocalAi.ReleaseSigner;
@@ -27,8 +29,10 @@ internal static class Program
         {
             return args.FirstOrDefault() switch
             {
+                "pack" => Pack(Args.Parse(args.Skip(1))),
                 "sign" => Sign(Args.Parse(args.Skip(1))),
                 "verify" => Verify(Args.Parse(args.Skip(1))),
+                "verify-package" => VerifyPackage(Args.Parse(args.Skip(1))).GetAwaiter().GetResult(),
                 _ => Usage(),
             };
         }
@@ -44,6 +48,10 @@ internal static class Program
         Console.Error.WriteLine(
             """
             Usage:
+              localai-release-signer pack --input <directory> --release-version <1.2.3>
+                                          --version-directory <name>
+                                          [--model-catalog-version <name>] --out <zip>
+
               localai-release-signer sign --package <file> --package-uri <https url>
                                           --release-version <1.2.3> --version-directory <name>
                                           [--model-catalog-version <name>] [--models <file>]
@@ -59,6 +67,78 @@ internal static class Program
             """);
         return 2;
     }
+
+    /// <summary>
+    /// Builds the release package. The verifier compares the archive entry names against
+    /// <see cref="LocalAiPackageLayout.PackageArtifactFiles"/> with SetEquals, so the archive
+    /// must hold exactly those files plus the metadata document — flat, with no directory
+    /// entries and nothing extra. That in turn means the executables have to be published
+    /// self-contained: there is no room in the format for sibling dependency assemblies.
+    /// </summary>
+    private static int Pack(Args args)
+    {
+        var input = args.Require("input");
+        var releaseVersion = args.Require("release-version");
+        var versionDirectory = args.Require("version-directory");
+        var modelCatalogVersion = args.Optional("model-catalog-version") ?? "1";
+
+        var missing = LocalAiPackageLayout.PackageArtifactFiles
+            .Where(file => !File.Exists(Path.Combine(input, file)))
+            .ToArray();
+        if (missing.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"Missing package artifacts in {input}: {string.Join(", ", missing)}");
+        }
+
+        var metadata = BuildPackageMetadata(releaseVersion, versionDirectory, modelCatalogVersion);
+        var output = args.Require("out");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        if (File.Exists(output))
+        {
+            File.Delete(output);
+        }
+
+        using (var archive = new ZipArchive(File.Create(output), ZipArchiveMode.Create))
+        {
+            foreach (var file in LocalAiPackageLayout.PackageArtifactFiles)
+            {
+                var entry = archive.CreateEntry(file, CompressionLevel.Optimal);
+                using var target = entry.Open();
+                using var source = File.OpenRead(Path.Combine(input, file));
+                source.CopyTo(target);
+            }
+
+            var metadataEntry = archive.CreateEntry(
+                ReleasePackageVerifier.PackageMetadataFileName,
+                CompressionLevel.Optimal);
+            using var metadataStream = metadataEntry.Open();
+            metadataStream.Write(metadata);
+        }
+
+        var package = new FileInfo(output);
+        Console.WriteLine($"package : {package.FullName}");
+        Console.WriteLine($"entries : {LocalAiPackageLayout.PackageArtifactFiles.Count + 1}");
+        Console.WriteLine($"size    : {package.Length:N0} bytes");
+        Console.WriteLine($"sha256  : {Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(output)))}");
+        return 0;
+    }
+
+    /// <summary>
+    /// The verifier rebuilds this document itself and compares byte for byte, so the
+    /// property order and the absence of whitespace and BOM are part of the contract.
+    /// </summary>
+    private static byte[] BuildPackageMetadata(
+        string releaseVersion,
+        string versionDirectory,
+        string modelCatalogVersion) =>
+        System.Text.Encoding.UTF8.GetBytes(
+            $"{{\"SchemaVersion\":1," +
+            $"\"ReleaseVersion\":{JsonSerializer.Serialize(releaseVersion)}," +
+            $"\"VersionDirectory\":{JsonSerializer.Serialize(versionDirectory)}," +
+            $"\"ModelCatalogVersion\":{JsonSerializer.Serialize(modelCatalogVersion)}," +
+            $"\"ProtocolVersion\":{BrokerCompatibilityContract.ProtocolVersion.ToString(CultureInfo.InvariantCulture)}," +
+            $"\"BuildCompatibilityId\":{JsonSerializer.Serialize(BrokerCompatibilityContract.BuildCompatibilityId)}}}");
 
     private static int Sign(Args args)
     {
@@ -120,6 +200,42 @@ internal static class Program
         Console.WriteLine($"package   : {verified.PackageUri}");
         Console.WriteLine("verified  : OK");
         return 0;
+    }
+
+    /// <summary>
+    /// Runs the finished artifacts through the real <see cref="ReleasePackageVerifier"/> —
+    /// the same archive inspection, extraction and metadata comparison an installer performs.
+    /// Structural mistakes in the zip surface here instead of on someone else's machine.
+    /// </summary>
+    private static async Task<int> VerifyPackage(Args args)
+    {
+        var packagePath = Path.GetFullPath(args.Require("package"));
+        var manifest = File.ReadAllBytes(args.Require("manifest"));
+        var signature = File.ReadAllBytes(args.Require("signature"));
+        var stagingRoot = args.Optional("staging")
+            ?? Path.Combine(Path.GetTempPath(), $"localai-verify-{Guid.NewGuid():N}");
+
+        var verifier = new ReleasePackageVerifier(
+            new ReleaseManifestVerifier(LoadPublicKeyBytes(args.Optional("public-key"))),
+            new LocalFileReleaseClient(packagePath),
+            new WindowsAuthenticodeVerifier(),
+            // Only consulted when the manifest sets RequiresAuthenticode.
+            new AuthenticodePublisherPolicy("CN=LocalAi", new string('0', 64)));
+
+        var verified = await verifier.VerifyAsync(manifest, signature, stagingRoot);
+        Console.WriteLine($"release  : {verified.Manifest.ReleaseVersion}");
+        Console.WriteLine($"directory: {verified.Manifest.VersionDirectory}");
+        Console.WriteLine("package  : OK");
+        return 0;
+    }
+
+    private sealed class LocalFileReleaseClient(string path) : IReleaseClient
+    {
+        public Task<Stream> OpenPackageAsync(
+            Uri approvedPackageUri,
+            long maximumBytes,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<Stream>(File.OpenRead(path));
     }
 
     private static IReadOnlyList<ManifestModel> ReadModels(string? path)
