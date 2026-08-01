@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -8,11 +8,21 @@ public sealed class ModelsPageViewModel : ObservableObject
     private string? manualModelId;
     private int manualContext;
 
+    /// <summary>
+    /// The models LocalAi actually routes to, matching the shipped routing catalog. This list
+    /// used to name models the product does not use at all, which made the recommended option
+    /// meaningless. When a release manifest carries a model catalogue, it replaces this.
+    /// </summary>
     public ObservableCollection<RecommendedModel> RecommendedModels { get; } =
     [
-        new("llama3.2:8b", "low"),
-        new("qwen2.5:14b", "medium"),
-        new("phi4:14b", "high"),
+        new("qwen3-embedding:8b-q8_0", "Code search embeddings",
+            "Required for repository indexing. Roughly 7.5 GB."),
+        new("qwen3.5:9b", "Text tasks",
+            "Summaries and routine file work. Roughly 6 GB."),
+        new("qwen2.5-coder:14b", "Code tasks",
+            "Code reading and review. Roughly 8.5 GB."),
+        new("qwen3-vl:8b-instruct-q8_0", "Images and OCR",
+            "Screenshots and scanned documents. Roughly 9 GB."),
     ];
 
     public ModelSelectionMode Mode
@@ -21,8 +31,47 @@ public sealed class ModelsPageViewModel : ObservableObject
         set
         {
             SetProperty(ref mode, value);
+            OnPropertyChanged(nameof(IsAutomatic));
+            OnPropertyChanged(nameof(IsManual));
+            OnPropertyChanged(nameof(IsSkip));
             OnPropertyChanged(nameof(CanContinue));
             OnPropertyChanged(nameof(ReviewText));
+        }
+    }
+
+    public bool IsAutomatic
+    {
+        get => Mode == ModelSelectionMode.Automatic;
+        set
+        {
+            if (value)
+            {
+                Mode = ModelSelectionMode.Automatic;
+            }
+        }
+    }
+
+    public bool IsManual
+    {
+        get => Mode == ModelSelectionMode.Manual;
+        set
+        {
+            if (value)
+            {
+                Mode = ModelSelectionMode.Manual;
+            }
+        }
+    }
+
+    public bool IsSkip
+    {
+        get => Mode == ModelSelectionMode.Skip;
+        set
+        {
+            if (value)
+            {
+                Mode = ModelSelectionMode.Skip;
+            }
         }
     }
 
@@ -52,20 +101,18 @@ public sealed class ModelsPageViewModel : ObservableObject
     {
         ModelSelectionMode.Skip => true,
         ModelSelectionMode.Automatic => RecommendedModels.Count > 0,
-        ModelSelectionMode.Manual => !string.IsNullOrWhiteSpace(ManualModelId) && ManualContextWindow > 0,
+        ModelSelectionMode.Manual =>
+            !string.IsNullOrWhiteSpace(ManualModelId) && ManualContextWindow > 0,
         _ => false,
     };
 
-    public string ReviewText
+    public string ReviewText => Mode switch
     {
-        get
-        {
-            return Mode switch
-            {
-                ModelSelectionMode.Skip => "Models: skipped",
-                ModelSelectionMode.Manual => $"Models: manual {ManualModelId} ctx={ManualContextWindow}",
-                _ => $"Models: automatic ({RecommendedModels.Count})",
-            };
-        }
-    }
+        ModelSelectionMode.Skip => "Models: skipped, nothing will be downloaded",
+        ModelSelectionMode.Manual =>
+            $"Models: {ManualModelId} with a {ManualContextWindow} token context",
+        _ => "Models: " + string.Join(
+            ", ",
+            RecommendedModels.Select(model => model.Id)),
+    };
 }

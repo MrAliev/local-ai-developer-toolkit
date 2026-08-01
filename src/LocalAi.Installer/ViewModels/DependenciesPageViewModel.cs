@@ -1,68 +1,87 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 
 namespace LocalAi.Installer.ViewModels;
 
 public sealed class DependenciesPageViewModel : ObservableObject
 {
+    /// <summary>
+    /// Only items the installer can actually act on are offered as choices. The MSVC
+    /// redistributable has no automated recipe, so it is listed as information instead of a
+    /// checkbox that silently does nothing.
+    /// </summary>
     public ObservableCollection<DependencySelection> Dependencies { get; } =
     [
         new("Git", "Git", true),
-        new("VisualCpp", "MSVC redistributable", false),
-        new("Ollama", "Ollama CLI", false),
+        new("Ollama", "Ollama", true),
+        new("VisualCpp", "MSVC redistributable", false) { IsInstallable = false },
     ];
 
     public IReadOnlyList<DependencySelection> SelectedDependencies =>
-        [.. Dependencies];
+        [.. Dependencies.Where(dependency => dependency.IsConsented)];
 
-    public bool CanContinue
+    /// <summary>
+    /// A required dependency blocks the wizard only while it is neither present nor selected
+    /// for installation. Nothing is pre-selected: consent is the user's to give.
+    /// </summary>
+    public bool CanContinue =>
+        !Dependencies.Any(dependency =>
+            dependency.IsRequired &&
+            dependency.IsInstallable &&
+            !dependency.IsInstalled &&
+            !dependency.IsConsented);
+
+    public string ReviewText
     {
         get
         {
-            return !Dependencies.Any(dependency => dependency.IsRequired && !dependency.IsInstalled && !dependency.IsConsented);
+            var selected = Dependencies
+                .Where(dependency => dependency.IsConsented)
+                .Select(dependency =>
+                    $"{dependency.Title} ({(dependency.IsInstalled ? "reinstall" : "install")})")
+                .ToArray();
+            return selected.Length == 0
+                ? "Dependencies: nothing selected"
+                : "Dependencies: " + string.Join(", ", selected);
         }
     }
 
     public void SetConsent(string id, bool consent)
     {
-        var dependency = Dependencies.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
-        if (dependency is null)
+        var dependency = Find(id);
+        if (!dependency.IsInstallable && consent)
         {
-            throw new InvalidOperationException($"Unknown dependency '{id}'.");
+            return;
         }
 
         dependency.IsConsented = consent;
-        OnPropertyChanged(nameof(CanContinue));
-        OnPropertyChanged(nameof(Dependencies));
+        Notify();
     }
 
+    /// <summary>
+    /// Records what the environment probe found. Detection deliberately does not grant
+    /// consent: an already installed dependency must not be reinstalled unless asked.
+    /// </summary>
     public void SetInstalled(string id, bool installed)
     {
-        var dependency = Dependencies.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
-        if (dependency is null)
-        {
-            throw new InvalidOperationException($"Unknown dependency '{id}'.");
-        }
-
-        dependency.IsInstalled = installed;
-        if (installed)
-        {
-            dependency.IsConsented = true;
-        }
-
-        OnPropertyChanged(nameof(CanContinue));
-        OnPropertyChanged(nameof(Dependencies));
+        Find(id).IsInstalled = installed;
+        Notify();
     }
 
     public void MarkInstalled(string id)
     {
-        var dependency = Dependencies.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
-        if (dependency is null)
-        {
-            throw new InvalidOperationException($"Unknown dependency '{id}'.");
-        }
+        Find(id).IsInstalled = true;
+        Notify();
+    }
 
-        dependency.IsInstalled = true;
-        OnPropertyChanged(nameof(CanContinue));
+    private DependencySelection Find(string id) =>
+        Dependencies.FirstOrDefault(item =>
+            string.Equals(item.Id, id, StringComparison.Ordinal))
+        ?? throw new InvalidOperationException($"Unknown dependency '{id}'.");
+
+    private void Notify()
+    {
         OnPropertyChanged(nameof(Dependencies));
+        OnPropertyChanged(nameof(CanContinue));
+        OnPropertyChanged(nameof(ReviewText));
     }
 }

@@ -2,374 +2,403 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:LocalAi.Installer.ViewModels"
-        Title="LocalAi Installer"
-        Width="1020"
-        Height="820"
-        MinWidth="980"
-        MinHeight="760"
+        Title="LocalAi Setup"
+        Width="760"
+        Height="560"
+        MinWidth="720"
+        MinHeight="520"
+        WindowStartupLocation="CenterScreen"
         Loaded="OnLoaded">
-    <Grid Margin="16">
-        <Grid.Resources>
-            <Style TargetType="TextBlock">
-                <Setter Property="TextWrapping" Value="Wrap" />
-                <Setter Property="FontSize" Value="15" />
-            </Style>
-            <Style TargetType="TextBox">
-                <Setter Property="FontSize" Value="14" />
-            </Style>
-            <Style TargetType="Button">
-                <Setter Property="FontSize" Value="14" />
-            </Style>
-            <Style TargetType="CheckBox">
-                <Setter Property="FontSize" Value="14" />
-            </Style>
-            <Style TargetType="RadioButton">
-                <Setter Property="FontSize" Value="14" />
-            </Style>
-            <Style TargetType="ComboBox">
-                <Setter Property="FontSize" Value="14" />
-            </Style>
-            <Style TargetType="ComboBoxItem">
-                <Setter Property="FontSize" Value="14" />
-            </Style>
-        </Grid.Resources>
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+        <Style TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
 
-        <TextBlock Text="LocalAi Interactive Installer"
-                   FontSize="30"
-                   FontWeight="SemiBold" />
+        <Style x:Key="PageTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
 
-        <ScrollViewer Grid.Row="1" Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="0,0,10,0">
-                <TextBlock Text="{Binding StepTitle}"
-                           FontSize="28"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,12" />
-                <TextBlock Text="{Binding StepDescription}" FontSize="16" />
-                <TextBlock Text="{Binding StepStatus}"
-                           FontStyle="Italic"
-                           Margin="0,12,0,8"
-                           FontSize="14" />
+        <Style x:Key="Muted" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#666666" />
+        </Style>
 
-                <StackPanel x:Name="DiagnosePanel">
-                    <StackPanel.Style>
-                        <Style TargetType="StackPanel">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Diagnose}">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </StackPanel.Style>
+        <Style x:Key="WarningText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#8A5300" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
 
-                    <TextBlock Text="{Binding Diagnose.IsSupported, StringFormat='OS supported: {0}'}" />
-                </StackPanel>
+        <Style x:Key="NavButton" TargetType="Button">
+            <Setter Property="Width" Value="96" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+        </Style>
 
-                <StackPanel x:Name="DependenciesPanel">
-                    <StackPanel.Style>
-                        <Style TargetType="StackPanel">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Dependencies}">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </StackPanel.Style>
+        <!-- The orientation pane: shows where the user is without any extra interaction. -->
+        <DataTemplate x:Key="StepTemplate">
+            <TextBlock Text="{Binding Title}" Margin="0,0,0,6">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="#888888" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                <Setter Property="Foreground" Value="#333333" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                <Setter Property="Foreground" Value="#000000" />
+                                <Setter Property="FontWeight" Value="Bold" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </DataTemplate>
+    </Window.Resources>
 
-                    <TextBlock Text="Select optional dependencies for installation (required items are pre-checked)"
-                               Margin="0,0,0,10"
-                               FontSize="16" />
-                    <ItemsControl ItemsSource="{Binding Dependencies.Dependencies}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <DockPanel Margin="0,0,0,8">
-                                    <TextBlock Width="280" Text="{Binding Title}" VerticalAlignment="Center" FontSize="15" />
-                                    <CheckBox Content="Install / enable"
-                                              IsChecked="{Binding IsConsented}"
-                                              Tag="{Binding Id}"
-                                              Checked="OnDependencyConsentChanged"
-                                              Unchecked="OnDependencyConsentChanged"
-                                              Margin="0,0,8,0"
-                                              VerticalAlignment="Center" />
-                                    <TextBlock Text="Required"
-                                               Foreground="DarkRed"
-                                               Margin="0,0,8,0"
-                                               VerticalAlignment="Center">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsRequired}" Value="True">
-                                                        <Setter Property="Visibility" Value="Visible" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                    <CheckBox Content="Installed"
-                                              IsChecked="{Binding IsInstalled}"
-                                              IsEnabled="False"
-                                              VerticalAlignment="Center" />
-                                </DockPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="180" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-                <StackPanel x:Name="PackagePanel">
-                    <StackPanel.Style>
-                        <Style TargetType="StackPanel">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Package}">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </StackPanel.Style>
+        <Border Grid.Column="0" Background="#F3F3F3" BorderBrush="#DDDDDD" BorderThickness="0,0,1,0">
+            <StackPanel Margin="16,20,12,16">
+                <TextBlock Text="LocalAi Setup" FontSize="15" FontWeight="Bold" Margin="0,0,0,16" />
+                <ItemsControl ItemsSource="{Binding StepList}"
+                              ItemTemplate="{StaticResource StepTemplate}" />
+            </StackPanel>
+        </Border>
 
-                    <TextBlock Text="Release tag" FontSize="16" />
-                    <TextBox x:Name="PackageVersionBox"
-                             Text="{Binding Package.ReleaseVersion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                             Width="360"
-                             Height="32" />
-                    <Button Content="Check compatibility and select release"
-                            Click="OnPackageSelectRelease"
-                            Width="360"
-                            Height="34"
-                            Margin="0,6,0,10" />
-                    <TextBlock Text="{Binding Package.HasPackage, StringFormat='Package selected: {0}'}" />
-                    <TextBlock Text="{Binding Package.IsCompatible, StringFormat='Compatible: {0}'}" />
-                </StackPanel>
+        <Grid Grid.Column="1" Margin="20,16,20,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-                <StackPanel x:Name="ModelsPanel">
-                    <StackPanel.Style>
-                        <Style TargetType="StackPanel">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Models}">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </StackPanel.Style>
+            <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                <TextBlock Text="{Binding StepTitle}" Style="{StaticResource PageTitle}" />
+                <TextBlock Text="{Binding StepDescription}" Style="{StaticResource Muted}" Margin="0,4,0,0" />
+                <TextBlock Text="{Binding StepStatus}" Style="{StaticResource Muted}" FontSize="11" Margin="0,6,0,0" />
+            </StackPanel>
 
-                    <RadioButton Content="Automatic (recommended)"
-                                 IsChecked="True"
-                                 Checked="OnModelModeAutomatic"
-                                 Margin="0,0,0,6" />
-                    <RadioButton Content="Skip model setup"
-                                 Checked="OnModelModeSkip"
-                                 Margin="0,0,0,6" />
-                    <RadioButton Content="Manual model"
-                                 Checked="OnModelModeManual"
-                                 Margin="0,0,0,6" />
-                    <StackPanel x:Name="ManualModelPanel" Margin="20,6,0,0">
-                        <TextBlock Text="Model id" />
-                        <TextBox Text="{Binding Models.ManualModelId, UpdateSourceTrigger=PropertyChanged}"
-                                 TextChanged="OnManualModelIdChanged"
-                                 Width="360"
-                                 Height="32" />
-                        <TextBlock Text="Context window" Margin="0,8,0,0" />
-                        <TextBox Text="{Binding Models.ManualContextWindow, UpdateSourceTrigger=PropertyChanged}"
-                                 TextChanged="OnManualContextChanged"
-                                 Width="160"
-                                 Height="32" />
-                    </StackPanel>
-                </StackPanel>
-
-                <StackPanel x:Name="AgentsPanel">
-                    <StackPanel.Style>
-                        <Style TargetType="StackPanel">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Agents}">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </StackPanel.Style>
-
-                    <TextBlock Text="Choose how LocalAi integration should be applied to each client app."
-                               FontSize="16"
-                               Margin="0,0,0,8" />
-                    <TextBlock Text="Choose one option per client: 'Configure existing' changes current startup scripts, 'Install managed block' installs an isolated LocalAi integration layer, 'Skip' does nothing, and 'Run without agent' only installs LocalAi core without touching that client."
-                               Foreground="Gray"
-                               FontSize="14"
-                               TextWrapping="Wrap"
-                               Margin="0,0,0,12" />
-                    <ItemsControl ItemsSource="{Binding Agents.Agents}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <DockPanel Margin="0,0,0,12">
-                                    <TextBlock Width="180"
-                                               Text="{Binding Agent}"
-                                               FontWeight="SemiBold"
-                                               VerticalAlignment="Center" />
-                                    <ComboBox Width="300"
-                                              Height="32"
-                                              Tag="{Binding Agent}"
-                                              SelectedValuePath="Tag"
-                                              SelectedValue="{Binding Choice, Mode=OneWay}"
-                                              SelectionChanged="OnAgentChoiceChanged">
-                                        <ComboBoxItem Tag="{x:Static vm:AgentChoice.None}">
-                                            <StackPanel>
-                                                <TextBlock Text="Not selected" />
-                                                <TextBlock Text="Installer will keep current setup untouched for this client."
-                                                           FontSize="14"
-                                                           Foreground="Gray" />
-                                            </StackPanel>
-                                        </ComboBoxItem>
-                                        <ComboBoxItem Tag="{x:Static vm:AgentChoice.Skip}">
-                                            <StackPanel>
-                                                <TextBlock Text="Skip" />
-                                                <TextBlock Text="Do not configure this agent. Existing configuration may still run."
-                                                           FontSize="14"
-                                                           Foreground="Gray" />
-                                            </StackPanel>
-                                        </ComboBoxItem>
-                                        <ComboBoxItem Tag="{x:Static vm:AgentChoice.ConfigureExisting}">
-                                            <StackPanel>
-                                                <TextBlock Text="Configure existing" />
-                                                <TextBlock Text="Modify current integration files in place to point to LocalAi."
-                                                           FontSize="14"
-                                                           Foreground="Gray" />
-                                            </StackPanel>
-                                        </ComboBoxItem>
-                                        <ComboBoxItem Tag="{x:Static vm:AgentChoice.InstallManagedBlock}">
-                                            <StackPanel>
-                                                <TextBlock Text="Install managed block" />
-                                                <TextBlock Text="Add LocalAi managed integration bundle and start with managed block."
-                                                           FontSize="14"
-                                                           Foreground="Gray" />
-                                            </StackPanel>
-                                        </ComboBoxItem>
-                                        <ComboBoxItem Tag="{x:Static vm:AgentChoice.RunWithoutAgent}">
-                                            <StackPanel>
-                                                <TextBlock Text="Run without agent" />
-                                                <TextBlock Text="Do not configure this client; only install LocalAi core pieces."
-                                                           FontSize="14"
-                                                           Foreground="Gray" />
-                                            </StackPanel>
-                                        </ComboBoxItem>
-                                    </ComboBox>
-                                </DockPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-
-                <Grid x:Name="ReviewPanel">
-                    <Grid.Style>
-                        <Style TargetType="Grid">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.ReviewApply}">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Grid.Style>
-
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <Grid>
+                    <!-- System check -->
                     <StackPanel>
-                        <TextBlock Text="Review" FontSize="16" FontWeight="SemiBold" />
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Diagnose}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <ItemsControl ItemsSource="{Binding Diagnose.Checks}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1" Text="{Binding StatusText}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#1A7F37" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Status}" Value="{x:Static vm:CheckStatus.Warning}">
+                                                            <Setter Property="Foreground" Value="#8A5300" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Status}" Value="{x:Static vm:CheckStatus.Missing}">
+                                                            <Setter Property="Foreground" Value="#8A5300" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Status}" Value="{x:Static vm:CheckStatus.Blocking}">
+                                                            <Setter Property="Foreground" Value="#B42318" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock Grid.Column="2" Text="{Binding Detail}" Style="{StaticResource Muted}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding Diagnose.UnsupportedReason}"
+                                   Style="{StaticResource WarningText}"
+                                   Margin="0,10,0,0" />
+                    </StackPanel>
+
+                    <!-- Prerequisites -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Dependencies}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <ItemsControl ItemsSource="{Binding Dependencies.Dependencies}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox Grid.Column="0"
+                                                  IsChecked="{Binding IsConsented}"
+                                                  IsEnabled="{Binding IsInstallable}"
+                                                  Tag="{Binding Id}"
+                                                  Checked="OnDependencyConsentChanged"
+                                                  Unchecked="OnDependencyConsentChanged"
+                                                  VerticalAlignment="Top"
+                                                  Margin="0,2,8,0" />
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock>
+                                                <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" />
+                                                <Run Text=" — " />
+                                                <Run Text="{Binding StateText, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock Text="No automated installer is available; install it yourself."
+                                                       FontSize="11">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource Muted}">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsInstallable}" Value="False">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- LocalAi package -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Package}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="Release tag" />
+                        <TextBox Text="{Binding Package.ReleaseVersion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="280" Height="24" HorizontalAlignment="Left" Margin="0,4,0,8" />
+                        <Button Content="Check release" Width="140" Height="26" HorizontalAlignment="Left"
+                                Click="OnPackageCheckRelease" />
+                        <TextBlock Text="{Binding Package.StatusText}" Style="{StaticResource Muted}" Margin="0,10,0,0" />
+                    </StackPanel>
+
+                    <!-- Models -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Models}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <RadioButton GroupName="ModelMode" Content="Set up the recommended models"
+                                     IsChecked="{Binding Models.IsAutomatic, Mode=TwoWay}" Margin="0,0,0,6" />
+                        <ItemsControl ItemsSource="{Binding Models.RecommendedModels}" Margin="20,0,0,8">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Margin="0,0,0,4" Style="{StaticResource Muted}" FontSize="11">
+                                        <Run Text="{Binding Id, Mode=OneWay}" FontWeight="SemiBold" />
+                                        <Run Text=" — " />
+                                        <Run Text="{Binding Purpose, Mode=OneWay}" />
+                                        <Run Text=". " />
+                                        <Run Text="{Binding Detail, Mode=OneWay}" />
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <RadioButton GroupName="ModelMode" Content="Choose a model myself"
+                                     IsChecked="{Binding Models.IsManual, Mode=TwoWay}" Margin="0,0,0,6" />
+                        <StackPanel Margin="20,0,0,8"
+                                    Visibility="{Binding Models.IsManual, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Model id" />
+                            <TextBox Text="{Binding Models.ManualModelId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Width="280" Height="24" HorizontalAlignment="Left" Margin="0,4,0,6" />
+                            <TextBlock Text="Context window" />
+                            <TextBox Text="{Binding Models.ManualContextWindow, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Width="120" Height="24" HorizontalAlignment="Left" Margin="0,4,0,0" />
+                        </StackPanel>
+                        <RadioButton GroupName="ModelMode" Content="Skip model setup"
+                                     IsChecked="{Binding Models.IsSkip, Mode=TwoWay}" />
+                    </StackPanel>
+
+                    <!-- Video memory -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Residency}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="{Binding Residency.AdapterHint}"
+                                   Style="{StaticResource WarningText}"
+                                   Margin="0,0,0,12"
+                                   Visibility="{Binding Residency.HasAdapterHint, Converter={StaticResource BoolToVisibility}}" />
+                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsRequireFullVram, Mode=TwoWay}" Margin="0,0,0,4">
+                            <TextBlock Text="Require the whole model in video memory (recommended)" />
+                        </RadioButton>
+                        <TextBlock Text="Refuses to run a model that does not fit. Fastest and predictable."
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,10" />
+                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsAllowPartialOffload, Mode=TwoWay}" Margin="0,0,0,4">
+                            <TextBlock Text="Allow part of the model in system memory" />
+                        </RadioButton>
+                        <TextBlock Text="Needs an adapter that holds at least part of the model. Slower."
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,10" />
+                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsAllowCpu, Mode=TwoWay}" Margin="0,0,0,4">
+                            <TextBlock Text="Allow running on the processor" />
+                        </RadioButton>
+                        <TextBlock Text="Works without a usable adapter. Much slower."
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,10" />
+                        <TextBlock Text="{Binding Residency.Warning}"
+                                   Style="{StaticResource WarningText}"
+                                   Visibility="{Binding Residency.HasWarning, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+
+                    <!-- Client apps -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Agents}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <ItemsControl ItemsSource="{Binding Agents.Agents}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,0,14">
+                                        <TextBlock>
+                                            <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" />
+                                            <Run Text=" (" /><Run Text="{Binding DetectionText, Mode=OneWay}" /><Run Text=")" />
+                                        </TextBlock>
+                                        <ComboBox Width="380" Height="24" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                                  Tag="{Binding Agent}"
+                                                  ItemsSource="{Binding DataContext.Agents.Choices, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  SelectedItem="{Binding Choice, Mode=OneWay}"
+                                                  SelectionChanged="OnAgentChoiceChanged" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- Confirm: a milestone page, summary and consent only. -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Confirm}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
                         <TextBox Text="{Binding ReviewText, Mode=OneWay}"
-                                 TextWrapping="Wrap"
-                                 IsReadOnly="True"
-                                 Height="180" />
-                        <CheckBox Margin="0,12,0,0"
-                                  Content="I confirm these settings"
-                                  IsChecked="{Binding Review.IsConfirmed}"
+                                 IsReadOnly="True" TextWrapping="Wrap" Height="200"
+                                 VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
+                        <CheckBox Content="I have reviewed these settings"
+                                  Margin="0,12,0,0"
+                                  IsChecked="{Binding Review.IsConfirmed, Mode=TwoWay}"
                                   Checked="OnReviewConfirmedChanged"
                                   Unchecked="OnReviewConfirmedChanged" />
-                        <TextBlock Text="Applying actions may take some time; follow the log below."
-                                   Margin="0,0,0,6" />
-                        <TextBlock Text="{Binding ProgressText}" Margin="0,12,0,8" />
-                        <ProgressBar Value="{Binding Progress, Mode=OneWay}"
-                                     IsIndeterminate="{Binding IsRunning}"
-                                     Maximum="100" Minimum="0" Height="16" />
-                        <TextBlock Text="Execution log" Margin="0,12,0,6" FontSize="14" />
-                        <TextBox Text="{Binding Finish.Progress, Mode=OneWay}"
-                                 TextWrapping="Wrap"
-                                 IsReadOnly="True"
-                                 Height="220" />
                     </StackPanel>
-                </Grid>
 
-                <Grid x:Name="FinishPanel">
-                    <Grid.Style>
-                        <Style TargetType="Grid">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Finish}">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Grid.Style>
-
+                    <!-- Progress -->
                     <StackPanel>
-                        <TextBlock Text="Installation complete." FontSize="20" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding Finish.RequiresRestart, StringFormat='Restart required: {0}'}"
-                                   Margin="0,8,0,0" />
-                        <TextBlock Text="Summary" FontWeight="SemiBold" Margin="0,8,0,4" />
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Progress}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="{Binding ProgressText}" Margin="0,0,0,8" />
+                        <ProgressBar Value="{Binding Progress, Mode=OneWay}" Maximum="100" Height="16" />
+                        <TextBlock Text="Log" Margin="0,14,0,4" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding Finish.Progress, Mode=OneWay}"
+                                 IsReadOnly="True" TextWrapping="Wrap" Height="200"
+                                 VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
+                    </StackPanel>
+
+                    <!-- Finish -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Finish}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
                         <TextBox Text="{Binding FinishSummary, Mode=OneWay}"
-                                 TextWrapping="Wrap"
-                                 IsReadOnly="True"
-                                 Height="120" />
-                        <TextBlock Text="Operation log:" Margin="0,8,0,4" />
-                        <TextBox Text="{Binding Finish.Progress}"
-                                 TextWrapping="Wrap"
-                                 IsReadOnly="True"
-                                 Height="180" />
-                        <TextBlock Text="{Binding RollbackResult}"
-                                   TextWrapping="Wrap"
-                                   Margin="0,8,0,0" />
+                                 IsReadOnly="True" TextWrapping="Wrap" Height="110"
+                                 VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
+                        <TextBlock Text="Log" Margin="0,12,0,4" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding Finish.Progress, Mode=OneWay}"
+                                 IsReadOnly="True" TextWrapping="Wrap" Height="180"
+                                 VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
                     </StackPanel>
                 </Grid>
-            </StackPanel>
-        </ScrollViewer>
+            </ScrollViewer>
 
-        <StackPanel Grid.Row="2"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right"
-                    Margin="0,12,0,0">
-            <Button x:Name="PreviousButton"
-                    Content="Back"
-                    Width="140"
-                    Height="36"
-                    Margin="0,0,8,0"
-                    Click="OnPreviousClicked"
-                    IsEnabled="{Binding CanMovePrevious}"
-                    Visibility="{Binding BackButtonVisibility}" />
-            <Button x:Name="NextButton"
-                    Content="Next"
-                    Width="140"
-                    Height="36"
-                    Margin="0,0,8,0"
-                    Click="OnNextClicked"
-                    IsEnabled="{Binding CanMoveNext}"
-                    Visibility="{Binding NextButtonVisibility}" />
-            <Button x:Name="RunButton"
-                    Content="Run"
-                    Width="140"
-                    Height="36"
-                    Click="OnRunClicked"
-                    Visibility="{Binding RunButtonVisibility}"
-                    IsEnabled="{Binding CanRun}" />
-            <Button x:Name="CloseButton"
-                    Content="Close"
-                    Width="140"
-                    Height="36"
-                    Click="OnCloseClicked"
-                    Visibility="{Binding CloseButtonVisibility}" />
-        </StackPanel>
+            <!-- Navigation stays in place for the whole wizard; only availability changes. -->
+            <Border Grid.Row="2" BorderBrush="#DDDDDD" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,10,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Back" Style="{StaticResource NavButton}"
+                            Command="{Binding BackCommand}" />
+                    <Button Content="Next" Style="{StaticResource NavButton}"
+                            Command="{Binding NextCommand}"
+                            Visibility="{Binding IsNextVisible, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Content="Install" Style="{StaticResource NavButton}" IsDefault="True"
+                            Command="{Binding InstallCommand}"
+                            Visibility="{Binding IsInstallVisible, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Content="{Binding CancelButtonText}" Style="{StaticResource NavButton}" IsCancel="True"
+                            Command="{Binding CancelCommand}" />
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

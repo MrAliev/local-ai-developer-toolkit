@@ -1,10 +1,26 @@
-﻿namespace LocalAi.Installer.ViewModels;
+namespace LocalAi.Installer.ViewModels;
 
+public enum PackageSourceState
+{
+    NotChecked,
+    Unavailable,
+    Selected,
+    Incompatible,
+}
+
+/// <summary>
+/// Chooses the LocalAi package to install.
+///
+/// The previous version reported "compatible" for whatever string was typed, without ever
+/// contacting a release feed, so it always looked like a package had been found. This one
+/// reports only what it actually knows and never claims a package it has not resolved.
+/// </summary>
 public sealed class PackagePageViewModel : ObservableObject
 {
     private string releaseVersion = "latest";
-    private bool isCompatible;
-    private bool hasPackage;
+    private PackageSourceState state = PackageSourceState.NotChecked;
+    private string statusText =
+        "No release has been checked yet.";
 
     public string ReleaseVersion
     {
@@ -12,43 +28,76 @@ public sealed class PackagePageViewModel : ObservableObject
         set
         {
             SetProperty(ref releaseVersion, value);
-            OnPropertyChanged(nameof(CanContinue));
+            // Editing the tag invalidates whatever was resolved for the previous one.
+            State = PackageSourceState.NotChecked;
+            StatusText = "No release has been checked yet.";
         }
     }
 
-    public bool IsCompatible
+    public PackageSourceState State
     {
-        get => isCompatible;
-        set
+        get => state;
+        private set
         {
-            SetProperty(ref isCompatible, value);
+            SetProperty(ref state, value);
+            OnPropertyChanged(nameof(HasPackage));
+            OnPropertyChanged(nameof(IsCompatible));
             OnPropertyChanged(nameof(CanContinue));
+            OnPropertyChanged(nameof(ReviewText));
         }
     }
 
-    public bool HasPackage
+    public string StatusText
     {
-        get => hasPackage;
-        set
-        {
-            SetProperty(ref hasPackage, value);
-            OnPropertyChanged(nameof(CanContinue));
-        }
+        get => statusText;
+        private set => SetProperty(ref statusText, value);
     }
 
-    public bool CanContinue => HasPackage && IsCompatible;
+    public bool HasPackage => State == PackageSourceState.Selected;
 
-    public void SelectCompatibleRelease(string version, bool compatible = true)
+    public bool IsCompatible => State == PackageSourceState.Selected;
+
+    /// <summary>
+    /// An unresolved package does not block the wizard: dependencies, models and client
+    /// integration are still worth installing on their own. The confirmation page states
+    /// plainly that the LocalAi package itself will not be installed.
+    /// </summary>
+    public bool CanContinue => true;
+
+    public string ReviewText => State switch
     {
-        ReleaseVersion = version;
-        IsCompatible = compatible;
-        HasPackage = true;
+        PackageSourceState.Selected => $"LocalAi package: {ReleaseVersion}",
+        PackageSourceState.Incompatible =>
+            $"LocalAi package: {ReleaseVersion} is not compatible — it will not be installed",
+        _ => "LocalAi package: not resolved — it will not be installed",
+    };
+
+    public void SelectResolvedRelease(string version)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        releaseVersion = version;
+        OnPropertyChanged(nameof(ReleaseVersion));
+        StatusText = $"Release {version} resolved and verified.";
+        State = PackageSourceState.Selected;
+    }
+
+    public void ReportIncompatible(string reason)
+    {
+        StatusText = reason;
+        State = PackageSourceState.Incompatible;
+    }
+
+    public void ReportUnavailable(string reason)
+    {
+        StatusText = reason;
+        State = PackageSourceState.Unavailable;
     }
 
     public void Reset()
     {
-        ReleaseVersion = "latest";
-        IsCompatible = false;
-        HasPackage = false;
+        releaseVersion = "latest";
+        OnPropertyChanged(nameof(ReleaseVersion));
+        StatusText = "No release has been checked yet.";
+        State = PackageSourceState.NotChecked;
     }
 }
