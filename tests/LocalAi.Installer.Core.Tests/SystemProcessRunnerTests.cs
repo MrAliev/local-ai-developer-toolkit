@@ -63,10 +63,14 @@ public sealed class SystemProcessRunnerTests
             TestContext.Current.CancellationToken);
         try
         {
+            // The script sleeps for 30 seconds, so any budget below that still times out. Two
+            // seconds also had to cover PowerShell's startup before the script recorded its pid;
+            // under a full parallel test run it did not, and the test failed on a missing pid
+            // file instead of on the classification it exists to check.
             var result = await runner.RunAsync(
                 ResolvePowerShell(),
                 PowerShellFileArguments(scriptPath, pidPath),
-                TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(10),
                 TestContext.Current.CancellationToken);
 
             Assert.True(result.TimedOut);
@@ -93,21 +97,29 @@ public sealed class SystemProcessRunnerTests
             scriptPath,
             "Set-Content -LiteralPath $args[0] -Value $PID; Start-Sleep -Seconds 30",
             TestContext.Current.CancellationToken);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cancellation = new CancellationTokenSource();
         try
         {
-            var result = await runner.RunAsync(
+            var run = runner.RunAsync(
                 ResolvePowerShell(),
                 PowerShellFileArguments(scriptPath, pidPath),
                 TimeSpan.FromSeconds(30),
                 cancellation.Token);
 
+            // Cancel once the child has actually recorded its pid, not after a fixed delay. Two
+            // seconds raced PowerShell's startup: on a loaded machine the run was cancelled
+            // before the script wrote anything, and the test then failed on a missing pid file
+            // rather than on the classification it exists to check.
+            var pid = await ReadPidWhenWrittenAsync(
+                pidPath,
+                TestContext.Current.CancellationToken);
+            await cancellation.CancelAsync();
+            var result = await run;
+
             Assert.False(result.TimedOut);
             Assert.True(result.Cancelled);
             Assert.Null(result.ExitCode);
-            AssertProcessExited(int.Parse(await File.ReadAllTextAsync(
-                pidPath,
-                TestContext.Current.CancellationToken)));
+            AssertProcessExited(pid);
         }
         finally
         {
@@ -157,6 +169,42 @@ public sealed class SystemProcessRunnerTests
             scriptPath,
             .. arguments,
         ];
+
+    /// <summary>
+    /// Waits until the child has written a complete pid. Set-Content creates the file before it
+    /// has content, so existence alone is not enough - reading too early yields an empty string
+    /// and a parse failure that looks nothing like the race that caused it.
+    /// </summary>
+    private static async Task<int> ReadPidWhenWrittenAsync(
+        string pidPath,
+        CancellationToken cancellationToken)
+    {
+        var deadline = TimeSpan.FromSeconds(30);
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (File.Exists(pidPath))
+            {
+                try
+                {
+                    var text = await File.ReadAllTextAsync(pidPath, cancellationToken);
+                    if (int.TryParse(text.Trim(), out var pid))
+                    {
+                        return pid;
+                    }
+                }
+                catch (IOException)
+                {
+                    // Still being written; fall through and retry.
+                }
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken);
+        }
+
+        throw new TimeoutException($"The child never recorded a pid in '{pidPath}'.");
+    }
 
     private static string TemporaryPath(string extension) =>
         Path.Combine(

@@ -99,7 +99,15 @@ public sealed class VersionLeaseTests : IDisposable
         stopwatch.Stop();
         await holder;
         Assert.Equal("version_in_use", error.Code);
-        Assert.InRange(stopwatch.Elapsed, TimeSpan.FromMilliseconds(170), TimeSpan.FromMilliseconds(280));
+
+        // The regression guarded against is spending the budget twice - once on the startup gate
+        // and again on the file lease - which would take about 400 ms. The upper bound only has
+        // to stay below that. It used to sit at 280 ms, which measured scheduler jitter rather
+        // than the behaviour: under a full parallel test run the same correct code overshot it.
+        Assert.InRange(
+            stopwatch.Elapsed,
+            TimeSpan.FromMilliseconds(170),
+            TimeSpan.FromMilliseconds(360));
     }
 
     public void Dispose()
