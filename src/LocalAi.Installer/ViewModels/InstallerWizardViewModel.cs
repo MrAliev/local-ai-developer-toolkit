@@ -722,6 +722,22 @@ public sealed class InstallerWizardViewModel : ObservableObject
         RefreshAll();
     }
 
+    /// <summary>
+    /// The GitHub CLI exactly where the environment check found it, or null if it found nothing.
+    ///
+    /// Resolving it once and reusing the answer is the point. The feed defaults to the bare name
+    /// "gh" and leaves the lookup to CreateProcess, which searches only the PATH this process
+    /// inherited at startup — so on a machine where the CLI was installed during the session the
+    /// check reported it present, from the registry, and the very next step still failed with
+    /// "The GitHub CLI could not be started". Two lookups with different rules cannot disagree
+    /// if there is only one.
+    /// </summary>
+    private string? GitHubCliPath =>
+        environmentDiagnosis?.GitHubCli is
+            { State: DependencyState.Detected, ExecutablePath: { } path }
+            ? path
+            : null;
+
     private static DependencyDefinition? ResolveDependencyDefinition(string dependencyId) =>
         dependencyId switch
         {
@@ -754,7 +770,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         RefreshAll();
         try
         {
-            var feed = new GitHubReleaseFeed(processRunner);
+            var feed = new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath);
             // "latest" is not a tag GitHub knows; resolve it to the newest published one so
             // the field can keep its convenient default.
             resolvedTag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
@@ -807,7 +823,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         SetProgress(40, "Downloading the LocalAi package...");
 
         var service = new ReleaseInstallService(
-            new GitHubReleaseFeed(processRunner),
+            new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath),
             processRunner,
             new SystemFileSystemProbe());
         var result = await service.InstallAsync(
