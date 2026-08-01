@@ -13,7 +13,10 @@ public sealed class InstallerExecutorTests : IDisposable
         var snapshot = InstallerJournalSnapshot.Start(
             Guid.Parse("11111111-1111-1111-1111-111111111111"),
             [InstallerJournalStep.Pending("package.activate", transactional: true)],
-            [new JournalNonTransactionalEffect("dependency.git", "Git install cannot be rolled back automatically.")]);
+            [new(
+                "dependency.git",
+                InstallerEffectKind.DependencyInstall,
+                "Git install cannot be rolled back automatically.")]);
 
         await journal.SaveAsync(snapshot, TestContext.Current.CancellationToken);
         var loaded = await journal.LoadAsync(TestContext.Current.CancellationToken);

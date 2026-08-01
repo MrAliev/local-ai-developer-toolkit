@@ -16,7 +16,10 @@ public sealed class RollbackServiceTests
                 InstallerJournalStep.Completed("package.activate", transactional: true, artifactSha256: "P", backupPath: @"C:\backup\launcher.bak"),
                 InstallerJournalStep.Completed("agent.codex", transactional: true, artifactSha256: "A", backupPath: @"C:\backup\codex.bak"),
             ],
-            [new JournalNonTransactionalEffect("dependency.git", "Git install remains installed.")]);
+            [new(
+                "dependency.git",
+                InstallerEffectKind.DependencyInstall,
+                "Git install remains installed.")]);
 
         var result = await service.RollbackAsync(
             snapshot,

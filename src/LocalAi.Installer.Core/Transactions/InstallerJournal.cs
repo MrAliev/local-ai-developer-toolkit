@@ -67,7 +67,10 @@ public sealed record InstallerStepResult(
     }
 }
 
-public sealed record JournalNonTransactionalEffect(string StepId, string Description);
+public sealed record JournalNonTransactionalEffect(
+    string StepId,
+    InstallerEffectKind EffectKind,
+    string Description);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record NonTransactionalJournalEffect(
@@ -94,23 +97,93 @@ public sealed record InstallerJournalStep(
     public string? BackupPath => BackupPaths.Count == 0 ? null : BackupPaths[0];
 
     public static InstallerJournalStep Pending(string stepId, bool transactional) =>
-        Create(stepId, transactional, InstallerStepStatus.Pending, null, null, null);
+        Create(
+            stepId,
+            transactional
+                ? InstallerEffectKind.AgentConfiguration
+                : InstallerEffectKind.DependencyInstall,
+            transactional,
+            InstallerStepStatus.Pending,
+            null,
+            null,
+            null);
+
+    public static InstallerJournalStep Pending(
+        string stepId,
+        InstallerEffectKind effectKind,
+        bool transactional) =>
+        Create(
+            stepId,
+            effectKind,
+            transactional,
+            InstallerStepStatus.Pending,
+            null,
+            null,
+            null);
 
     public static InstallerJournalStep Completed(
         string stepId,
         bool transactional,
         string? artifactSha256,
         string? backupPath = null) =>
-        Create(stepId, transactional, InstallerStepStatus.Completed, artifactSha256, backupPath, null);
+        Create(
+            stepId,
+            transactional
+                ? InstallerEffectKind.AgentConfiguration
+                : InstallerEffectKind.DependencyInstall,
+            transactional,
+            InstallerStepStatus.Completed,
+            artifactSha256,
+            backupPath,
+            null);
+
+    public static InstallerJournalStep Completed(
+        string stepId,
+        InstallerEffectKind effectKind,
+        bool transactional,
+        string? artifactSha256,
+        string? backupPath = null) =>
+        Create(
+            stepId,
+            effectKind,
+            transactional,
+            InstallerStepStatus.Completed,
+            artifactSha256,
+            backupPath,
+            null);
 
     public static InstallerJournalStep Failed(
         string stepId,
         bool transactional,
         string failureMessage) =>
-        Create(stepId, transactional, InstallerStepStatus.Failed, null, null, failureMessage);
+        Create(
+            stepId,
+            transactional
+                ? InstallerEffectKind.AgentConfiguration
+                : InstallerEffectKind.DependencyInstall,
+            transactional,
+            InstallerStepStatus.Failed,
+            null,
+            null,
+            failureMessage);
+
+    public static InstallerJournalStep Failed(
+        string stepId,
+        InstallerEffectKind effectKind,
+        bool transactional,
+        string failureMessage) =>
+        Create(
+            stepId,
+            effectKind,
+            transactional,
+            InstallerStepStatus.Failed,
+            null,
+            null,
+            failureMessage);
 
     private static InstallerJournalStep Create(
         string stepId,
+        InstallerEffectKind effectKind,
         bool transactional,
         InstallerStepStatus status,
         string? artifactSha256,
@@ -118,7 +191,7 @@ public sealed record InstallerJournalStep(
         string? failureMessage) =>
         new(
             stepId,
-            transactional ? InstallerEffectKind.AgentConfiguration : InstallerEffectKind.DependencyInstall,
+            effectKind,
             transactional,
             status,
             status == InstallerStepStatus.Failed ? 1 : 0,
@@ -162,7 +235,7 @@ public sealed record InstallerJournalSnapshot(
             nonTransactionalEffects
                 .Select(effect => new NonTransactionalJournalEffect(
                     effect.StepId,
-                    InstallerEffectKind.DependencyInstall,
+                    effect.EffectKind,
                     effect.Description))
                 .ToArray());
     }

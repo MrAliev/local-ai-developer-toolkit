@@ -25,15 +25,18 @@ public sealed record InstallerExecutionResult(
 public sealed class InstallerExecutionStep : IInstallerStep
 {
     private readonly Func<CancellationToken, Task<InstallerStepResult>> execute;
+    private readonly Func<InstallerJournalStep, CancellationToken, Task> rollback;
 
     private InstallerExecutionStep(
         string id,
         bool isTransactional,
-        Func<CancellationToken, Task<InstallerStepResult>> execute)
+        Func<CancellationToken, Task<InstallerStepResult>> execute,
+        Func<InstallerJournalStep, CancellationToken, Task>? rollback)
     {
         Id = id;
         IsTransactional = isTransactional;
         this.execute = execute;
+        this.rollback = rollback ?? ((_, _) => Task.CompletedTask);
     }
 
     public string Id { get; }
@@ -43,18 +46,24 @@ public sealed class InstallerExecutionStep : IInstallerStep
     public static InstallerExecutionStep Transactional(
         string id,
         Func<CancellationToken, Task<InstallerStepResult>> execute) =>
-        new(id, true, execute);
+        new(id, true, execute, null);
+
+    public static InstallerExecutionStep Transactional(
+        string id,
+        Func<CancellationToken, Task<InstallerStepResult>> execute,
+        Func<InstallerJournalStep, CancellationToken, Task> rollback) =>
+        new(id, true, execute, rollback);
 
     public static InstallerExecutionStep NonTransactional(
         string id,
         Func<CancellationToken, Task<InstallerStepResult>> execute) =>
-        new(id, false, execute);
+        new(id, false, execute, null);
 
     public Task<InstallerStepResult> ExecuteAsync(CancellationToken cancellationToken) =>
         execute(cancellationToken);
 
     public Task RollbackAsync(InstallerJournalStep step, CancellationToken cancellationToken) =>
-        Task.CompletedTask;
+        rollback(step, cancellationToken);
 }
 
 public sealed class InstallerExecutor
