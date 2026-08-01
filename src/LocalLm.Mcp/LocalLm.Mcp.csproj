@@ -16,4 +16,6 @@
     <ProjectReference Include="..\LocalAi.Broker.Client\LocalAi.Broker.Client.csproj" />
   </ItemGroup>
 
+  <Import Project="..\BrokerBinary.props" />
+
 </Project>

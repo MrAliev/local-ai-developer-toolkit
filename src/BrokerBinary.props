@@ -1,0 +1,36 @@
+<Project>
+
+  <!-- Components that may start the broker need LocalAi.Broker.exe next to them, because
+       BrokerProcess resolves it through AppContext.BaseDirectory.
+
+       In an installed layout the version directory contains it. A build output is not an
+       installed layout, so it has to be copied here. This used to happen by accident: the
+       client referenced the broker's Exe project, which dragged its apphost into every
+       dependent output and also caused NETSDK1152 on RID specific publishes. That reference
+       is gone; the copy is declared here on purpose, takes only the executable, and is
+       skipped during publish so the packaged layout stays under the layout contract. -->
+
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)LocalAi.Broker\LocalAi.Broker.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
+  </ItemGroup>
+
+  <Target Name="CopyBrokerExecutableForDevelopment" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildThisFileDirectory)LocalAi.Broker\LocalAi.Broker.csproj"
+             Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="BrokerTargetAssembly" />
+    </MSBuild>
+
+    <ItemGroup>
+      <BrokerExecutable Include="@(BrokerTargetAssembly->'%(RootDir)%(Directory)%(Filename).exe')" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(BrokerExecutable)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(BrokerExecutable.FullPath)')" />
+  </Target>
+
+</Project>

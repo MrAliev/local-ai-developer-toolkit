@@ -3,6 +3,7 @@
     <Project Path="src/CodeSearch.Cli/CodeSearch.Cli.csproj" />
     <Project Path="src/CodeSearch.Core/CodeSearch.Core.csproj" />
     <Project Path="src/CodeSearch.Mcp/CodeSearch.Mcp.csproj" />
+    <Project Path="src/LocalAi.Broker.Core/LocalAi.Broker.Core.csproj" />
     <Project Path="src/LocalAi.Broker/LocalAi.Broker.csproj" />
     <Project Path="src/LocalAi.Broker.Client/LocalAi.Broker.Client.csproj" />
     <Project Path="src/LocalAi.Contracts/LocalAi.Contracts.csproj" />

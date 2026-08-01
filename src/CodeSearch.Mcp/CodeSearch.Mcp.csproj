@@ -15,4 +15,6 @@
     <ProjectReference Include="..\CodeSearch.Core\CodeSearch.Core.csproj" />
   </ItemGroup>
 
+  <Import Project="..\BrokerBinary.props" />
+
 </Project>

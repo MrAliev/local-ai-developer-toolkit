@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Broker.Core\LocalAi.Broker.Core.csproj" />
     <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
   </ItemGroup>
 
