@@ -217,7 +217,7 @@ icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 ```
 
 Build the package first. The verifier compares the archive contents against
-`LocalAiPackageLayout.PackageArtifactFiles` with `SetEquals`, so it must hold exactly seven
+`LocalAiPackageLayout.PackageArtifactFiles` with `SetEquals`, so it must hold exactly six
 artifacts plus `localai-package.json`, flat and with nothing extra. **That is why the
 executables must be published self-contained**: the format has no room for sibling
 dependency assemblies, so a framework-dependent build cannot be shipped as a release.
@@ -225,7 +225,7 @@ dependency assemblies, so a framework-dependent build cannot be shipped as a rel
 ```powershell
 localai-release-signer pack `
     --input publish\artifacts `
-    --release-version 0.1.2 `
+    --release-version 0.1.3 `
     --version-directory d9c52d2 `
     --out publish\release\localai-package.zip
 ```
@@ -237,8 +237,8 @@ form the verifier requires, and re-verifies the result before it can be publishe
 ```powershell
 localai-release-signer sign `
     --package publish\localai-package.zip `
-    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.2/localai-package.zip `
-    --release-version 0.1.2 `
+    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.3/localai-package.zip `
+    --release-version 0.1.3 `
     --version-directory d9c52d2 `
     --out publish\release
 ```

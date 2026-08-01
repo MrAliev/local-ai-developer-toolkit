@@ -1,3 +1,4 @@
+using CodeSearch.Core.Chunking;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
 
@@ -28,7 +29,8 @@ public sealed class BrokerEmbeddingClient(
             deduplicationKey,
             priority,
             Model,
-            inputs);
+            inputs,
+            requestedContextTokens: ChunkLimits.EmbeddingContextTokens);
         LocalJobResult<EmbedJobOutput> result;
         try
         {
@@ -68,6 +70,14 @@ public sealed class BrokerEmbeddingClient(
 }
 
 public sealed class EmbeddingUnavailableException(
+    string message,
+    Exception innerException) : Exception(message, innerException);
+
+/// <summary>
+/// A single chunk the embedding model refused, already isolated from its batch. Carries the file
+/// and chunk so the operator can act on it; the broker's own job id names nothing a human owns.
+/// </summary>
+public sealed class EmbeddingChunkException(
     string message,
     Exception innerException) : Exception(message, innerException);
 

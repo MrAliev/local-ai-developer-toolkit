@@ -418,12 +418,7 @@ public sealed class IndexBuilder(IEmbeddingClient embedder, Action<string>? log 
                 position++;
             }
 
-            var inputs = batch.Select(b => b.Text).ToList();
-            var embeddings = await embedder.EmbedAsync(
-                inputs,
-                LocalJobPriority.Background,
-                EmbeddingDeduplicationKey(inputs),
-                ct);
+            var embeddings = await EmbedBatchAsync(batch, ct);
             for (var i = 0; i < batch.Count; i++)
             {
                 vectors[batch[i].RelPath][batch[i].Slot] = embeddings[i];
@@ -436,6 +431,51 @@ public sealed class IndexBuilder(IEmbeddingClient embedder, Action<string>? log 
         }
 
         return vectors;
+    }
+
+    /// <summary>
+    /// One failing chunk used to end a multi-hour run: the broker exception propagated straight
+    /// out of the build and every embedding computed so far was discarded, because a generation
+    /// is published atomically and nothing is checkpointed. Halving the batch on failure isolates
+    /// the offender - a transient fault clears on the smaller retry, and a deterministic one is
+    /// reported against the exact file and chunk instead of an opaque broker job id.
+    /// </summary>
+    private async Task<float[][]> EmbedBatchAsync(
+        IReadOnlyList<(string RelPath, int Slot, string Text)> batch,
+        CancellationToken ct)
+    {
+        var inputs = batch.Select(b => b.Text).ToList();
+        try
+        {
+            return await embedder.EmbedAsync(
+                inputs,
+                LocalJobPriority.Background,
+                EmbeddingDeduplicationKey(inputs),
+                ct);
+        }
+        catch (Exception exception) when (
+            exception is not OperationCanceledException and
+                not EmbeddingUnavailableException &&
+            batch.Count > 1)
+        {
+            _log($"Embedding {batch.Count} chunks failed ({exception.Message}); " +
+                 "halving the batch to isolate the chunk.");
+            var half = batch.Count / 2;
+            var head = await EmbedBatchAsync([.. batch.Take(half)], ct);
+            var tail = await EmbedBatchAsync([.. batch.Skip(half)], ct);
+            return [.. head, .. tail];
+        }
+        catch (Exception exception) when (
+            exception is not OperationCanceledException and
+                not EmbeddingUnavailableException and
+                not EmbeddingChunkException)
+        {
+            var chunk = batch[0];
+            throw new EmbeddingChunkException(
+                $"Chunk {chunk.Slot} of '{chunk.RelPath}' ({chunk.Text.Length} characters) " +
+                $"could not be embedded: {exception.Message}",
+                exception);
+        }
     }
 
     private string EmbeddingDeduplicationKey(IReadOnlyList<string> inputs)

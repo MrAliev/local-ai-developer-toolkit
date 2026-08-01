@@ -314,7 +314,12 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         EmbedJobPayload payload,
         CancellationToken cancellationToken)
     {
-        var body = JsonSerializer.Serialize(new EmbedRequest(payload.Model, payload.Inputs));
+        var body = JsonSerializer.Serialize(new EmbedRequest(
+            payload.Model,
+            payload.Inputs,
+            Options: payload.RequestedContextTokens is { } contextTokens
+                ? new GenerateOptions(contextTokens)
+                : null));
         using var document = await SendAsync(
             HttpMethod.Post,
             "api/embed",

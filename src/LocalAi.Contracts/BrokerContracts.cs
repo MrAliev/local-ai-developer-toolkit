@@ -153,15 +153,27 @@ public sealed record NativeOllamaJobOutput(
 public sealed record EmbedJobPayload : LocalJobPayload
 {
     [JsonConstructor]
-    public EmbedJobPayload(string? model, IReadOnlyList<string>? inputs)
+    public EmbedJobPayload(
+        string? model,
+        IReadOnlyList<string>? inputs,
+        int? requestedContextTokens = null)
     {
         if (string.IsNullOrWhiteSpace(model))
         {
             throw new ArgumentException("Model cannot be blank.", nameof(model));
         }
 
+        if (requestedContextTokens is { } contextTokens &&
+            !LocalContextTiers.IsSupported(contextTokens))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(requestedContextTokens),
+                "Context must be a supported power-of-two tier from 2K through 256K.");
+        }
+
         Model = model;
         Inputs = Snapshot(inputs, nameof(inputs), requireValues: true);
+        RequestedContextTokens = requestedContextTokens;
     }
 
     [JsonRequired]
@@ -171,6 +183,16 @@ public sealed record EmbedJobPayload : LocalJobPayload
     [JsonRequired]
     [JsonInclude]
     public IReadOnlyList<string> Inputs { get; private init; }
+
+    /// <summary>
+    /// Embedding inputs are sized by the caller's chunk budget, not by a conversation, so the
+    /// tier must travel with the request. Left null the transport sends no options at all and
+    /// Ollama falls back to its VRAM-derived default, which was 4096 on a 16 GB iGPU - a dense
+    /// C# chunk runs about 1.5 characters per token, so a full-size chunk overflowed that
+    /// window and the whole indexing run died on one HTTP 400.
+    /// </summary>
+    [JsonInclude]
+    public int? RequestedContextTokens { get; private init; }
 
     [JsonIgnore]
     public override LocalJobKind Kind => LocalJobKind.Embed;
@@ -711,11 +733,12 @@ public static class LocalJobRequestFactory
         string? model,
         IReadOnlyList<string>? inputs,
         Guid? jobId = null,
-        DateTimeOffset? createdAtUtc = null) =>
+        DateTimeOffset? createdAtUtc = null,
+        int? requestedContextTokens = null) =>
         Create(
             deduplicationKey,
             priority,
-            new EmbedJobPayload(model, inputs),
+            new EmbedJobPayload(model, inputs, requestedContextTokens),
             jobId,
             createdAtUtc);
 
