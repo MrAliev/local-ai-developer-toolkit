@@ -314,10 +314,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         try
         {
-            // Applied first so an interrupted run still leaves the machine with the
-            // residency setting the user actually chose.
-            ApplyResidencyPolicy(report);
-
             if (!EnableDependencyActions)
             {
                 finish.Progress = report.ToString().Trim();
@@ -380,6 +376,22 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // here must not leave half-installed dependencies unexplained.
             await InstallPackageAsync(report, token);
 
+            // Deliberately after the package, never before it.
+            //
+            // Writing the policy creates %LOCALAPPDATA%\LocalAi with a plain CreateDirectory,
+            // so the root inherits whatever the parent grants. The installer then opens that
+            // existing root - its own hardened creation path no longer applies - and refuses
+            // it, because the layout lease rejects an inherited or over-granted ACL and is
+            // required to do so without mutating anything. Applying the policy first therefore
+            // guaranteed "the layout is unsafe (check: ValidateAcl)" on every clean machine:
+            // the wizard defeated itself with its own first write.
+            //
+            // Ordering it after the install means the root is created by the installer with the
+            // ACL the validator demands, and the policy simply lands inside it. The cost is
+            // that a run interrupted mid-install no longer leaves the residency setting behind
+            // - a setting the next run asks for again anyway.
+            ApplyResidencyPolicy(report);
+
             SetProgress(95, "Finalising...");
             AppendLog(report, "Finalising.");
             finish.Summary = BuildFinishSummary(
@@ -432,7 +444,46 @@ public sealed class InstallerWizardViewModel : ObservableObject
         {
             isRunning = false;
             runCancellation = null;
+            PersistReport(report);
             RefreshAll();
+        }
+    }
+
+    /// <summary>
+    /// The run report only ever existed inside this window, so a refused installation explained
+    /// itself exactly once and lost the explanation the moment the wizard was closed - which is
+    /// precisely when someone needs it. Persisting it turns "it did not install" into a reason.
+    ///
+    /// Written outside the LocalAi root deliberately. That tree is validated against an exact
+    /// name list on every install, so a log directory inside it would refuse the next
+    /// installation rather than help diagnose the last one.
+    /// </summary>
+    private void PersistReport(StringBuilder report)
+    {
+        if (report is null || report.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LocalAi-installer-logs");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(
+                directory,
+                $"install-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+            File.WriteAllText(path, report.ToString());
+            finish.Summary = string.IsNullOrWhiteSpace(finish.Summary)
+                ? $"Report saved to {path}."
+                : $"{finish.Summary}{Environment.NewLine}Report saved to {path}.";
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                NotSupportedException or ArgumentException)
+        {
+            // A missing log must never turn a successful install into a failed one.
         }
     }
 
@@ -749,8 +800,15 @@ public sealed class InstallerWizardViewModel : ObservableObject
     {
         if (package.Resolved is not { } resolved)
         {
-            packageOutcome = "skipped, no verified release was selected";
-            AppendLog(report, "LocalAi package: no verified release selected, skipping.");
+            // Not a skip: installing the package is the entire point of this wizard. Returning
+            // quietly here let the run finish as "Installation complete" while nothing had been
+            // installed at all, which is the one outcome worse than a visible failure.
+            packageOutcome = "not installed, no verified release was selected";
+            AppendLog(
+                report,
+                "LocalAi package: no verified release was selected, so nothing was installed. " +
+                "Return to the package step and check the release before continuing.");
+            hasRunError = true;
             return;
         }
 
