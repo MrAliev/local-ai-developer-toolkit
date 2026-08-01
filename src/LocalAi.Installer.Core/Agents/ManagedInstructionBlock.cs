@@ -7,12 +7,20 @@ public static class ManagedInstructionBlock
     public const string BeginMarker = "<!-- BEGIN LOCALAI MANAGED INSTRUCTIONS -->";
     public const string EndMarker = "<!-- END LOCALAI MANAGED INSTRUCTIONS -->";
 
-    public static readonly string Block =
-        BeginMarker + Environment.NewLine +
-        "Use only the shared LocalAi FIFO broker for local-model work." + Environment.NewLine +
-        "Never access Ollama directly." + Environment.NewLine +
-        "Require full-VRAM, zero-offload validation." + Environment.NewLine +
-        EndMarker;
+    /// <summary>
+    /// The operating rules an assistant needs in order to actually use this installation.
+    ///
+    /// Three lines used to live here — broker only, no direct Ollama, full VRAM — which
+    /// describe how the transport must behave but never say when to reach for a local model
+    /// at all. An assistant that reads only that keeps grepping the repository and keeps
+    /// sending screenshots to the cloud, so the installed tools sit unused and the machine
+    /// buys nothing. The rules below are therefore written as routing decisions first and
+    /// transport invariants second.
+    ///
+    /// Everything sits between the markers so the next install replaces it wholesale, and
+    /// anything the user writes outside them survives untouched.
+    /// </summary>
+    public static readonly string Block = BuildBlock();
 
     public static ManagedInstructionBlockResult Upsert(string? content)
     {
@@ -43,6 +51,66 @@ public static class ManagedInstructionBlock
 
         return new(!string.Equals(content, updated, StringComparison.Ordinal), updated);
     }
+
+    private static string BuildBlock() =>
+        (BeginMarker + "\n" + Body + "\n" + EndMarker).ReplaceLineEndings();
+
+    private const string Body =
+        """
+        ## LocalAi local models
+
+        Managed by the LocalAi installer. Anything between these markers is replaced on the
+        next install; keep your own guidance outside them.
+
+        ### Transport
+
+        Use only the shared LocalAi FIFO broker for local-model work. Never access Ollama
+        directly — no `localhost:11434`, no `ollama` binary from a launcher. CodeSearch,
+        LocalLm, delegation wrappers and Git hooks share that single queue, and it is what
+        keeps ordering, deduplication, leases, heartbeat and recovery correct across several
+        clients running at once.
+
+        Require full-VRAM, zero-offload validation. A model that spills into system memory
+        does not fail; it just becomes several times slower and says nothing about it. Relax
+        that on purpose or not at all: `localai policy set --residency AllowPartialOffload`
+        or `AllowCpu`, and expect degraded answers to be labelled as such.
+
+        ### Finding code
+
+        Begin every "where does X live", "what handles Y", "is there already something like
+        Z" with `search_code` from the `codesearch` MCP server rather than a text search. It
+        matches by meaning and by exact symbol name over Roslyn-aware chunks, and costs a
+        fraction of reading the candidate files. `index_status` says whether the index is
+        behind HEAD; `index_refresh` is for repair, not for routine use.
+
+        A literal sweep for one exact token, once the target is already known, is still a job
+        for grep. Reading a file before editing it is never delegated to anything.
+
+        ### Images, logs, routine file work
+
+        | Tool | What it is for |
+        | --- | --- |
+        | `read_image` | any image on disk: screenshot, scanned page, diagram, photographed table |
+        | `triage_log` | any long machine output: build and test logs, dependency dumps, query plans, stack traces |
+        | `ask_local` | mechanical work over known files: list, summarise, extract TODOs, translate, check a convention |
+
+        The saving only exists for data that has not entered the conversation yet: an image
+        pasted straight into chat has already been paid for, and handing it to a local model
+        afterwards buys nothing. Ask for a file path instead.
+
+        Local models are markedly weaker than cloud ones. They are good at "list this" and
+        "summarise that", and unreliable on architecture and subtle bugs. Verify anything a
+        decision depends on.
+
+        ### Reporting
+
+        After every local tool call, say in the reply which tool and model ran, roughly how
+        long it took, and the estimated cloud tokens avoided — as a range, because there is no
+        live token counter and false precision is worse than an honest estimate. LocalLm tools
+        return that line themselves, computed from what they actually processed; carry it
+        through instead of inventing a number. Using a local tool silently and showing only
+        the result defeats the point of having one.
+        """;
 
     private static List<int> AllIndexesOf(string content, string marker)
     {

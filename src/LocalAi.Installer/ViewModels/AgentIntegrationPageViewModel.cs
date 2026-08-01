@@ -4,11 +4,22 @@ using LocalAi.Installer.Core.Diagnosis;
 namespace LocalAi.Installer.ViewModels;
 
 /// <summary>
-/// Per-client integration choice. Defaults to leaving a client untouched, so nothing is
-/// reconfigured without an explicit decision.
+/// Per-client integration choice.
+///
+/// A detected client defaults to full integration: registering the MCP servers and writing
+/// the managed instructions is the entire reason the rest of the installation is worth
+/// anything, and defaulting to "leave unchanged" produced installations where the binaries
+/// were present and no client could reach them. Nothing is applied silently — the review
+/// page lists the choice and the run only starts on explicit confirmation.
+///
+/// A client that was not detected stays untouched, and an explicit choice always wins over
+/// the default, including a deliberate "leave unchanged".
 /// </summary>
 public sealed class AgentIntegrationPageViewModel : ObservableObject
 {
+    private readonly HashSet<string> explicitChoices =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public ObservableCollection<AgentOption> Agents { get; } =
     [
         new("codex", AgentChoice.NoChange),
@@ -43,6 +54,7 @@ public sealed class AgentIntegrationPageViewModel : ObservableObject
                 continue;
             }
 
+            explicitChoices.Add(Agents[index].Agent);
             Agents[index] = Agents[index] with { Choice = choice };
             OnPropertyChanged(nameof(Agents));
             OnPropertyChanged(nameof(ReviewText));
@@ -54,7 +66,12 @@ public sealed class AgentIntegrationPageViewModel : ObservableObject
 
     /// <summary>
     /// Records which clients were actually found, so the page can say so instead of silently
-    /// offering to configure something that is not installed.
+    /// offering to configure something that is not installed, and arms the default: a client
+    /// that exists is set up unless the user says otherwise.
+    ///
+    /// Detection runs more than once during a session, so a client that disappears between
+    /// runs must lose the default it was given; only a choice the user made by hand is kept
+    /// across refreshes.
     /// </summary>
     public void ApplyDetection(IReadOnlyList<AgentSnapshot> agents)
     {
@@ -67,9 +84,15 @@ public sealed class AgentIntegrationPageViewModel : ObservableObject
             var detected = agents.Any(agent =>
                 agent.Kind == kind &&
                 (agent.Executable.Exists || agent.Config.Exists));
-            Agents[index] = Agents[index] with { IsDetected = detected };
+            var choice = explicitChoices.Contains(Agents[index].Agent)
+                ? Agents[index].Choice
+                : detected
+                    ? AgentChoice.McpAndInstructions
+                    : AgentChoice.NoChange;
+            Agents[index] = Agents[index] with { IsDetected = detected, Choice = choice };
         }
 
         OnPropertyChanged(nameof(Agents));
+        OnPropertyChanged(nameof(ReviewText));
     }
 }

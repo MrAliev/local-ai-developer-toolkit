@@ -3,6 +3,8 @@ using System.IO;
 using System.Text;
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
+using LocalAi.Installer.Core.Activation;
+using LocalAi.Installer.Core.Agents;
 using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Models;
@@ -52,6 +54,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private CatalogRecommendation lastRecommendation = CatalogRecommendation.Empty;
     private string? resolvedTag;
     private string? packageOutcome;
+    private bool packageInstalled;
 
     public InstallerWizardViewModel()
     {
@@ -392,6 +395,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // - a setting the next run asks for again anyway.
             ApplyResidencyPolicy(report);
 
+            // After the package, for the same reason the models are: the registration points
+            // at the launcher this run installed, so writing it before the launcher exists
+            // would hand every client a path to nothing.
+            await ApplyAgentConfigurationAsync(report, token);
+
             SetProgress(95, "Finalising...");
             AppendLog(report, "Finalising.");
             finish.Summary = BuildFinishSummary(
@@ -504,6 +512,87 @@ public sealed class InstallerWizardViewModel : ObservableObject
     }
 
     public void RefreshNavigationState() => RefreshAll();
+
+    /// <summary>
+    /// Registers the MCP servers and writes the managed instruction block for every client
+    /// the user chose to configure.
+    ///
+    /// This step existed only as a page for a while: the wizard collected the choice, printed
+    /// it on the review screen, and then never acted on it, so a finished installation left
+    /// Claude and Codex unable to reach anything it had installed. Each client is applied
+    /// independently — a malformed config in one must not cost the other its integration.
+    /// </summary>
+    private async Task ApplyAgentConfigurationAsync(
+        StringBuilder report,
+        CancellationToken cancellationToken)
+    {
+        var requested = agents.Agents
+            .Where(agent => agent.Choice != AgentChoice.NoChange)
+            .ToArray();
+        if (requested.Length == 0)
+        {
+            AppendLog(report, "Client applications: left unchanged.");
+            return;
+        }
+
+        if (packageOutcome is null || !packageInstalled)
+        {
+            AppendLog(
+                report,
+                "Client applications: skipped, because the LocalAi package was not installed " +
+                "and the registration would point at a launcher that is not there.");
+            hasRunError = true;
+            return;
+        }
+
+        SetProgress(94, "Configuring client applications...");
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var binRoot = InstallationLayout.CreateDefault().BinRoot;
+        foreach (var agent in requested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var isClaude = string.Equals(agent.Agent, "claude", StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                var claude = isClaude ? new ClaudeConfigurationAdapter(home, binRoot) : null;
+                var codex = isClaude ? null : new CodexConfigurationAdapter(home, binRoot);
+                var choice = agent.Choice.ToCore();
+                var plan = claude is not null
+                    ? claude.Preview(choice)
+                    : codex!.Preview(choice);
+                if (!plan.HasChanges)
+                {
+                    AppendLog(report, $"{plan.AgentName}: already configured, nothing to change.");
+                    continue;
+                }
+
+                if (claude is not null)
+                {
+                    await claude.ApplyAsync(plan, cancellationToken);
+                }
+                else
+                {
+                    await codex!.ApplyAsync(plan, cancellationToken);
+                }
+
+                AppendLog(
+                    report,
+                    $"{plan.AgentName}: {agent.Choice.Title()} applied to " +
+                    string.Join(", ", plan.Files.Select(file => file.Path)) +
+                    ". Restart the client to pick it up.");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // A hand-edited config that the adapter refuses to rewrite is the common case
+                // here, and it is recoverable by hand, so it must not fail the installation.
+                AppendLog(
+                    report,
+                    $"{agent.DisplayName}: not configured — {exception.Message} " +
+                    "The rest of the installation is unaffected.");
+                hasRunError = true;
+            }
+        }
+    }
 
     private void ApplyResidencyPolicy(StringBuilder report)
     {
@@ -826,14 +915,23 @@ public sealed class InstallerWizardViewModel : ObservableObject
             new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath),
             processRunner,
             new SystemFileSystemProbe());
+        var modelProgress = new Progress<string>(message =>
+        {
+            SetProgress(92, "Setting up local models...");
+            AppendLog(report, message);
+        });
         var result = await service.InstallAsync(
             resolved,
             WorkingDirectory,
             resolvedTag ?? resolved.Manifest.ReleaseVersion,
             downloadProgress,
+            models.BuildProvisioningSelection(),
+            environmentDiagnosis?.Gpu,
+            modelProgress,
             cancellationToken);
         SetProgress(90, "Installing the LocalAi package...");
 
+        packageInstalled = result.Installed;
         packageOutcome = result.Installed
             ? $"{result.Status}, version {result.Version}"
             : $"{result.Status} — {result.Reason}".TrimEnd(' ', '—');
@@ -844,6 +942,59 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 : $"LocalAi package: {result.Status}. {result.Reason}".Trim());
         if (!result.Installed)
         {
+            hasRunError = true;
+        }
+
+        ReportModelOutcome(report, result.Models);
+    }
+
+    /// <summary>
+    /// A model that was asked for and did not arrive has to be visible here. The broker
+    /// answers per model, and a refusal carries the smaller context sizes that would have
+    /// fitted, so both are printed rather than collapsed into "models: failed".
+    /// </summary>
+    private void ReportModelOutcome(StringBuilder report, ReleaseModelInstallReport? models)
+    {
+        if (models?.Batch is not { } batch)
+        {
+            return;
+        }
+
+        foreach (var model in batch.Models)
+        {
+            var pulled = model.PullCompleted
+                ? "downloaded"
+                : model.PullAttempted
+                    ? "download did not finish"
+                    : "already present";
+            if (model.Outcome == BrokerModelInstallOutcome.Accepted)
+            {
+                AppendLog(
+                    report,
+                    $"Model {model.Model} at {model.ContextTokens} tokens: {pulled}, " +
+                    "fully resident.");
+                continue;
+            }
+
+            var suggestion = model.FallbackSuggestions.Count == 0
+                ? string.Empty
+                : " Smaller options that fit: " +
+                    string.Join(
+                        ", ",
+                        model.FallbackSuggestions.Select(fallback =>
+                            $"{fallback.Model} at {fallback.ContextTokens}")) + ".";
+            AppendLog(
+                report,
+                $"Model {model.Model} at {model.ContextTokens} tokens: {model.Outcome} " +
+                $"({model.Code}), {pulled}.{suggestion}");
+            hasRunError = true;
+        }
+
+        if (batch.StopReason != BrokerModelBatchStopReason.None)
+        {
+            AppendLog(
+                report,
+                $"Model setup stopped early: {batch.StopReason} ({batch.Code}).");
             hasRunError = true;
         }
     }

@@ -138,6 +138,43 @@ Install the shared chained Git hooks only after approving that external mutation
 C:\path\to\LocalAi\bin\launcher\localai-launcher.exe run localai hooks install --root C:\path\to\repository
 ```
 
+## What the installer sets up
+
+A finished installation is expected to leave a machine that can actually be used, so the
+wizard applies three things beyond copying binaries. Each is shown on the review page and
+none is applied before the run is confirmed.
+
+**Client integration.** For every AI client the wizard detects, it registers the `codesearch`
+and `locallm` MCP servers against the stable launcher path and writes a managed instruction
+block into that client's global instructions file — `~/.claude/CLAUDE.md` for Claude,
+`~/.codex/AGENTS.md` for Codex. A detected client defaults to both; a client that was not
+found is left alone, and an explicit choice always wins.
+
+The instruction block is delimited by `<!-- BEGIN LOCALAI MANAGED INSTRUCTIONS -->` and its
+matching end marker. Everything between them is replaced wholesale on the next install and
+everything outside them is preserved, so upgrading the rules never costs a user their own
+notes. The block covers routing — when to reach for `search_code` instead of a text search,
+what belongs to `read_image`, `triage_log` and `ask_local` — as well as the transport
+invariants: the shared broker only, never Ollama directly, full-VRAM validation. Transport
+rules alone proved insufficient in practice: they describe how a call must travel without
+ever saying when to make one, and an assistant reading only those keeps working in the cloud
+while the installed tools sit idle.
+
+**Models.** The wizard installs the models the machine can hold and skips the ones already
+present; the broker is asked what is installed rather than a list being assumed, and only
+missing models are pulled. Candidates come from the signed release manifest, never from the
+routing catalogue or the registry, because the broker installer refuses any model it cannot
+weigh against the signature. Automatic selection takes the largest context each model fits
+in; a model too large for the adapter at every context size is reported by name instead of
+being downloaded and left unusable. Anything downloaded is then preflighted, so a model that
+cannot load fully resident is reported rather than silently accepted.
+
+Because the selection is manifest-driven, a release published without a model list installs
+no models at all. Pass `--models` when signing.
+
+**Residency policy.** The video-memory page writes `%LOCALAPPDATA%\LocalAi\policy.json`.
+Relaxing it is deliberate and stays visible in the run report.
+
 ## Build and test
 
 From the repository root:
