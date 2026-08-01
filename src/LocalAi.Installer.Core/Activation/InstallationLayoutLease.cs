@@ -845,8 +845,16 @@ public sealed class InstallationLayoutLease : IDisposable
         return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static LocalAiPackageInstallationException Failure() =>
-        new("The LocalAi installation layout is unsafe.");
+    /// <summary>
+    /// Names the check that refused the layout.
+    ///
+    /// Every rejection used to produce the same sentence, so a refused installation reported
+    /// only that something, somewhere, was wrong — useless to the user and to whoever has to
+    /// diagnose it. The caller name costs nothing and turns the message into a lead.
+    /// </summary>
+    private static LocalAiPackageInstallationException Failure(
+        [System.Runtime.CompilerServices.CallerMemberName] string? check = null) =>
+        new($"The LocalAi installation layout is unsafe (check: {check ?? "unknown"}).");
 
     private static void DisposeDirectories(
         IEnumerable<DirectoryEvidence> evidence,

@@ -51,6 +51,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private EnvironmentDiagnosis? environmentDiagnosis;
     private CatalogRecommendation lastRecommendation = CatalogRecommendation.Empty;
     private string? resolvedTag;
+    private string? packageOutcome;
 
     public InstallerWizardViewModel()
     {
@@ -550,15 +551,25 @@ public sealed class InstallerWizardViewModel : ObservableObject
         CancelCommand.RaiseCanExecuteChanged();
     }
 
-    private static void AppendLog(StringBuilder report, string message)
+    /// <summary>
+    /// Appends a line and publishes it immediately.
+    ///
+    /// The log used to be assigned only after the run finished, so the progress page stayed
+    /// blank for the whole installation — including the minutes spent downloading — and gave
+    /// no sign that anything was happening.
+    /// </summary>
+    private void AppendLog(StringBuilder report, string message)
     {
-        if (!string.IsNullOrWhiteSpace(message))
+        if (string.IsNullOrWhiteSpace(message))
         {
-            report.AppendLine(message);
+            return;
         }
+
+        report.AppendLine(message);
+        finish.Progress = report.ToString().TrimEnd();
     }
 
-    private static string BuildFinishSummary(
+    private string BuildFinishSummary(
         int requestedActions,
         int successfulActions,
         int skippedActions,
@@ -566,7 +577,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
         string? fatalMessage = null)
     {
         var summary = new StringBuilder();
-        summary.AppendLine($"Requested: {requestedActions}.");
+        // The package is the point of the whole run, so it is reported first and by name.
+        // The counters below cover prerequisites only, and on their own they read as "0, 0,
+        // 0, 0" even when the package failed.
+        summary.AppendLine($"LocalAi package: {packageOutcome ?? "not attempted"}.");
+        summary.AppendLine();
+        summary.AppendLine($"Prerequisites requested: {requestedActions}.");
         summary.AppendLine($"Installed: {successfulActions}.");
         summary.AppendLine($"Skipped: {skippedActions}.");
         summary.AppendLine($"Failed: {failedActions}.");
@@ -685,14 +701,17 @@ public sealed class InstallerWizardViewModel : ObservableObject
         };
 
     /// <summary>
-    /// Scratch space for downloaded release assets, under the installer's own directory so a
-    /// failed run leaves nothing behind in the installed layout.
+    /// Scratch space for downloaded release assets.
+    ///
+    /// Deliberately outside the installation layout. It first lived in
+    /// %LOCALAPPDATA%\LocalAi\installer\downloads, which looked tidy and broke every
+    /// install: that directory belongs to the installer and must contain exactly "backups"
+    /// and "transaction.lock", so an extra folder made the layout unrecognisable to the
+    /// installer's own validation — after the package had already been downloaded.
     /// </summary>
     private static string WorkingDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "LocalAi",
-        "installer",
-        "downloads");
+        Path.GetTempPath(),
+        "LocalAi-installer");
 
     /// <summary>
     /// Resolves and verifies the requested release. Failures are shown on the package page
@@ -730,6 +749,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     {
         if (package.Resolved is not { } resolved)
         {
+            packageOutcome = "skipped, no verified release was selected";
             AppendLog(report, "LocalAi package: no verified release selected, skipping.");
             return;
         }
@@ -760,6 +780,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
             cancellationToken);
         SetProgress(90, "Installing the LocalAi package...");
 
+        packageOutcome = result.Installed
+            ? $"{result.Status}, version {result.Version}"
+            : $"{result.Status} — {result.Reason}".TrimEnd(' ', '—');
         AppendLog(
             report,
             result.Installed
