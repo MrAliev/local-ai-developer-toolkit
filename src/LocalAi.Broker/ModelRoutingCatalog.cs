@@ -51,14 +51,9 @@ public sealed class ModelRoutingCatalog
 
     public static ModelRoutingCatalog LoadEmbedded()
     {
-        var assembly = typeof(ModelRoutingCatalog).Assembly;
-        using var stream = assembly.GetManifestResourceStream("LocalAi.model-routing.json")
-            ?? throw new InvalidOperationException(
-                "Embedded model-routing.json was not found.");
-        var document = JsonSerializer.Deserialize<ModelRoutingCatalogDocument>(
-            stream,
-            LocalAiJson.Strict)
-            ?? throw new InvalidDataException("Model routing catalog is empty.");
+        // The document itself is owned by LocalAi.Contracts so the installer can read the
+        // same copy; validation and routing stay here.
+        var document = ModelRoutingCatalogResource.LoadDocument();
         Validate(document);
         return new ModelRoutingCatalog(document);
     }

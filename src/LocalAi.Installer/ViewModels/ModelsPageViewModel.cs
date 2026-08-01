@@ -1,29 +1,33 @@
 using System.Collections.ObjectModel;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.ViewModels;
 
 public sealed class ModelsPageViewModel : ObservableObject
 {
     private ModelSelectionMode mode = ModelSelectionMode.Automatic;
-    private string? manualModelId;
-    private int manualContext;
+    private ModelCatalogEntry? selectedModel;
+    private int selectedContext;
+
+    public ModelsPageViewModel()
+    {
+        foreach (var model in ModelRoutingCatalogResource.SelectableModels())
+        {
+            CatalogModels.Add(model);
+        }
+
+        SelectedModel = CatalogModels.FirstOrDefault();
+    }
 
     /// <summary>
-    /// The models LocalAi actually routes to, matching the shipped routing catalog. This list
-    /// used to name models the product does not use at all, which made the recommended option
-    /// meaningless. When a release manifest carries a model catalogue, it replaces this.
+    /// Everything the broker knows how to route. A model outside this list cannot be loaded
+    /// at all — the routing catalog is what supplies its capabilities and permitted context
+    /// sizes, and the model registry does not publish either. So the page offers a choice
+    /// from this list rather than a free-text box that would accept a guaranteed failure.
     /// </summary>
-    public ObservableCollection<RecommendedModel> RecommendedModels { get; } =
-    [
-        new("qwen3-embedding:8b-q8_0", "Code search embeddings",
-            "Required for repository indexing. Roughly 7.5 GB."),
-        new("qwen3.5:9b", "Text tasks",
-            "Summaries and routine file work. Roughly 6 GB."),
-        new("qwen2.5-coder:14b", "Code tasks",
-            "Code reading and review. Roughly 8.5 GB."),
-        new("qwen3-vl:8b-instruct-q8_0", "Images and OCR",
-            "Screenshots and scanned documents. Roughly 9 GB."),
-    ];
+    public ObservableCollection<ModelCatalogEntry> CatalogModels { get; } = [];
+
+    public ObservableCollection<int> AvailableContexts { get; } = [];
 
     public ModelSelectionMode Mode
     {
@@ -32,7 +36,7 @@ public sealed class ModelsPageViewModel : ObservableObject
         {
             SetProperty(ref mode, value);
             OnPropertyChanged(nameof(IsAutomatic));
-            OnPropertyChanged(nameof(IsManual));
+            OnPropertyChanged(nameof(IsChooseExact));
             OnPropertyChanged(nameof(IsSkip));
             OnPropertyChanged(nameof(CanContinue));
             OnPropertyChanged(nameof(ReviewText));
@@ -51,14 +55,14 @@ public sealed class ModelsPageViewModel : ObservableObject
         }
     }
 
-    public bool IsManual
+    public bool IsChooseExact
     {
-        get => Mode == ModelSelectionMode.Manual;
+        get => Mode == ModelSelectionMode.ChooseExact;
         set
         {
             if (value)
             {
-                Mode = ModelSelectionMode.Manual;
+                Mode = ModelSelectionMode.ChooseExact;
             }
         }
     }
@@ -75,44 +79,82 @@ public sealed class ModelsPageViewModel : ObservableObject
         }
     }
 
-    public string? ManualModelId
+    public ModelCatalogEntry? SelectedModel
     {
-        get => manualModelId;
+        get => selectedModel;
         set
         {
-            SetProperty(ref manualModelId, value);
+            SetProperty(ref selectedModel, value);
+            RebuildContexts();
+            OnPropertyChanged(nameof(SelectedModelPurpose));
             OnPropertyChanged(nameof(CanContinue));
             OnPropertyChanged(nameof(ReviewText));
         }
     }
 
-    public int ManualContextWindow
+    /// <summary>
+    /// Restricted to the context sizes the selected model actually declares. Choosing a
+    /// smaller context is the practical way to fit a model on a machine with little video
+    /// memory, so it is offered rather than hidden.
+    /// </summary>
+    public int SelectedContext
     {
-        get => manualContext;
+        get => selectedContext;
         set
         {
-            SetProperty(ref manualContext, value);
+            SetProperty(ref selectedContext, value);
             OnPropertyChanged(nameof(CanContinue));
             OnPropertyChanged(nameof(ReviewText));
         }
     }
+
+    public string SelectedModelPurpose => selectedModel is null
+        ? string.Empty
+        : string.Join(", ", selectedModel.Capabilities);
 
     public bool CanContinue => Mode switch
     {
         ModelSelectionMode.Skip => true,
-        ModelSelectionMode.Automatic => RecommendedModels.Count > 0,
-        ModelSelectionMode.Manual =>
-            !string.IsNullOrWhiteSpace(ManualModelId) && ManualContextWindow > 0,
+        ModelSelectionMode.Automatic => CatalogModels.Count > 0,
+        ModelSelectionMode.ChooseExact =>
+            selectedModel is not null &&
+            selectedContext > 0 &&
+            selectedModel.ContextTokens.Contains(selectedContext),
         _ => false,
     };
 
     public string ReviewText => Mode switch
     {
         ModelSelectionMode.Skip => "Models: skipped, nothing will be downloaded",
-        ModelSelectionMode.Manual =>
-            $"Models: {ManualModelId} with a {ManualContextWindow} token context",
-        _ => "Models: " + string.Join(
-            ", ",
-            RecommendedModels.Select(model => model.Id)),
+        ModelSelectionMode.ChooseExact =>
+            $"Models: {selectedModel?.Tag} with a {selectedContext} token context",
+        _ => "Models: chosen automatically from " +
+            $"{CatalogModels.Count} catalogue entries that fit this machine",
     };
+
+    private void RebuildContexts()
+    {
+        AvailableContexts.Clear();
+        if (selectedModel is null)
+        {
+            selectedContext = 0;
+            OnPropertyChanged(nameof(SelectedContext));
+            return;
+        }
+
+        foreach (var context in selectedModel.ContextTokens.OrderBy(value => value))
+        {
+            AvailableContexts.Add(context);
+        }
+
+        // Keep the current context when the new model also permits it, so switching models
+        // does not silently change a deliberate choice.
+        if (!AvailableContexts.Contains(selectedContext))
+        {
+            selectedContext = AvailableContexts.FirstOrDefault();
+        }
+
+        OnPropertyChanged(nameof(AvailableContexts));
+        OnPropertyChanged(nameof(SelectedContext));
+    }
 }

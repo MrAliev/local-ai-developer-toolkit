@@ -1,2 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- The routing catalog lives here so the broker and the installer read one copy.
+         The broker still owns validation and routing; this project only owns the document. -->
+    <EmbeddedResource Include="..\..\model-routing.json"
+                      Link="model-routing.json"
+                      LogicalName="LocalAi.model-routing.json" />
+  </ItemGroup>
+
 </Project>

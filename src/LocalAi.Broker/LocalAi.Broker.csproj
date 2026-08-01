@@ -8,10 +8,4 @@
     <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="..\..\model-routing.json"
-                      Link="model-routing.json"
-                      LogicalName="LocalAi.model-routing.json" />
-  </ItemGroup>
-
 </Project>

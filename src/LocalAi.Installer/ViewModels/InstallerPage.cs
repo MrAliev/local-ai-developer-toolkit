@@ -24,7 +24,14 @@ public enum InstallerPage
 public enum ModelSelectionMode
 {
     Automatic,
-    Manual,
+
+    /// <summary>
+    /// Pick one catalogue model and one of the context sizes it permits. This replaced a
+    /// free-text field that accepted any string: a model outside the routing catalogue
+    /// cannot be loaded, so that field could only ever configure a failure.
+    /// </summary>
+    ChooseExact,
+
     Skip,
 }
 

@@ -94,18 +94,57 @@ public sealed class InstallerWizardViewModelTests
     }
 
     [Fact]
-    public void Manual_model_selection_requires_both_values()
+    public void Exact_model_selection_offers_only_catalogue_models()
     {
         var wizard = SupportedWizard();
-        wizard.Models.Mode = ModelSelectionMode.Manual;
 
-        Assert.False(wizard.Models.CanContinue);
+        // Everything offered must be routable: a model outside the catalogue cannot be
+        // loaded at all, so it must never appear as a choice.
+        Assert.NotEmpty(wizard.Models.CatalogModels);
+        Assert.All(
+            wizard.Models.CatalogModels,
+            model =>
+            {
+                Assert.NotEmpty(model.Capabilities);
+                Assert.NotEmpty(model.ContextTokens);
+            });
+    }
 
-        wizard.Models.ManualModelId = "qwen3.5:9b";
-        wizard.Models.ManualContextWindow = 8192;
+    [Fact]
+    public void Exact_model_selection_restricts_contexts_to_the_selected_model()
+    {
+        var wizard = SupportedWizard();
+        wizard.Models.Mode = ModelSelectionMode.ChooseExact;
 
+        var model = wizard.Models.CatalogModels.First();
+        wizard.Models.SelectedModel = model;
+
+        Assert.Equal(
+            [.. model.ContextTokens.OrderBy(value => value)],
+            wizard.Models.AvailableContexts);
+        Assert.Contains(wizard.Models.SelectedContext, model.ContextTokens);
         Assert.True(wizard.Models.CanContinue);
-        Assert.Contains("qwen3.5:9b", wizard.Models.ReviewText, StringComparison.Ordinal);
+        Assert.Contains(model.Tag, wizard.Models.ReviewText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Switching_model_keeps_a_context_both_models_permit()
+    {
+        var wizard = SupportedWizard();
+        wizard.Models.Mode = ModelSelectionMode.ChooseExact;
+
+        var first = wizard.Models.CatalogModels.First();
+        wizard.Models.SelectedModel = first;
+        var shared = wizard.Models.AvailableContexts.First();
+        wizard.Models.SelectedContext = shared;
+
+        foreach (var candidate in wizard.Models.CatalogModels.Skip(1))
+        {
+            wizard.Models.SelectedModel = candidate;
+            // Either the deliberate choice survived, or it was replaced by one this model
+            // actually permits — never left at an unsupported value.
+            Assert.Contains(wizard.Models.SelectedContext, candidate.ContextTokens);
+        }
     }
 
     [Fact]

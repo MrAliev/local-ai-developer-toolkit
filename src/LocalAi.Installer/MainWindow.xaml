@@ -222,34 +222,34 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <RadioButton GroupName="ModelMode" Content="Set up the recommended models"
-                                     IsChecked="{Binding Models.IsAutomatic, Mode=TwoWay}" Margin="0,0,0,6" />
-                        <ItemsControl ItemsSource="{Binding Models.RecommendedModels}" Margin="20,0,0,8">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Margin="0,0,0,4" Style="{StaticResource Muted}" FontSize="11">
-                                        <Run Text="{Binding Id, Mode=OneWay}" FontWeight="SemiBold" />
-                                        <Run Text=" — " />
-                                        <Run Text="{Binding Purpose, Mode=OneWay}" />
-                                        <Run Text=". " />
-                                        <Run Text="{Binding Detail, Mode=OneWay}" />
-                                    </TextBlock>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <RadioButton GroupName="ModelMode" Content="Choose a model myself"
-                                     IsChecked="{Binding Models.IsManual, Mode=TwoWay}" Margin="0,0,0,6" />
-                        <StackPanel Margin="20,0,0,8"
-                                    Visibility="{Binding Models.IsManual, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="Model id" />
-                            <TextBox Text="{Binding Models.ManualModelId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     Width="280" Height="24" HorizontalAlignment="Left" Margin="0,4,0,6" />
-                            <TextBlock Text="Context window" />
-                            <TextBox Text="{Binding Models.ManualContextWindow, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     Width="120" Height="24" HorizontalAlignment="Left" Margin="0,4,0,0" />
+                        <RadioButton GroupName="ModelMode" Content="Choose automatically for this computer"
+                                     IsChecked="{Binding Models.IsAutomatic, Mode=TwoWay}" Margin="0,0,0,4" />
+                        <TextBlock Text="Picks catalogue models that fit the detected adapter and the video memory setting."
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,10" />
+
+                        <RadioButton GroupName="ModelMode" Content="Choose exactly"
+                                     IsChecked="{Binding Models.IsChooseExact, Mode=TwoWay}" Margin="0,0,0,4" />
+                        <StackPanel Margin="20,0,0,10"
+                                    Visibility="{Binding Models.IsChooseExact, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Model" />
+                            <ComboBox Width="320" Height="24" HorizontalAlignment="Left" Margin="0,4,0,2"
+                                      ItemsSource="{Binding Models.CatalogModels}"
+                                      SelectedItem="{Binding Models.SelectedModel, Mode=TwoWay}"
+                                      DisplayMemberPath="Tag" />
+                            <TextBlock Text="{Binding Models.SelectedModelPurpose}"
+                                       Style="{StaticResource Muted}" FontSize="11" Margin="0,0,0,8" />
+                            <TextBlock Text="Context size" />
+                            <ComboBox Width="160" Height="24" HorizontalAlignment="Left" Margin="0,4,0,2"
+                                      ItemsSource="{Binding Models.AvailableContexts}"
+                                      SelectedItem="{Binding Models.SelectedContext, Mode=TwoWay}" />
+                            <TextBlock Text="Only the sizes this model permits are offered. A smaller context needs less video memory."
+                                       Style="{StaticResource Muted}" FontSize="11" />
                         </StackPanel>
+
                         <RadioButton GroupName="ModelMode" Content="Skip model setup"
-                                     IsChecked="{Binding Models.IsSkip, Mode=TwoWay}" />
+                                     IsChecked="{Binding Models.IsSkip, Mode=TwoWay}" Margin="0,0,0,4" />
+                        <TextBlock Text="Nothing is downloaded now. Models can be set up later."
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,0" />
                     </StackPanel>
 
                     <!-- Video memory -->
