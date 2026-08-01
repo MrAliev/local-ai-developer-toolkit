@@ -20,7 +20,7 @@
       "noAnswer": false,
       "relevant": [
         {
-          "path": "src/LocalAi.Broker/RuntimeAcl.cs",
+          "path": "src/LocalAi.Broker.Core/RuntimeAcl.cs",
           "symbol": "RuntimeAcl.Ensure"
         }
       ]

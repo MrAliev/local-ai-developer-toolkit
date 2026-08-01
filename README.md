@@ -164,7 +164,19 @@ dotnet publish src/CodeSearch.Mcp/CodeSearch.Mcp.csproj --configuration Release 
 dotnet publish src/LocalLm.Mcp/LocalLm.Mcp.csproj --configuration Release --output publish/LocalLm.Mcp
 dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --output publish/LocalAi.Cli
 dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --output publish/LocalAi.Launcher
+dotnet publish src/LocalAi.Broker/LocalAi.Broker.csproj --configuration Release --output publish/LocalAi.Broker
 ```
+
+> The queue and the runtime ACL bootstrap live in `LocalAi.Broker.Core`, a library, and
+> `LocalAi.Broker.Client` references that rather than the broker executable. Keep it that
+> way. While the client referenced the `OutputType=Exe` project, every dependent publish
+> also emitted the broker's `apphost.exe`, `deps.json` and `runtimeconfig.json`, and a
+> RID-specific framework-dependent publish then failed with `NETSDK1152` — cleaning
+> `bin`/`obj` did not help, because the conflict was produced during the build.
+>
+> That reference also placed `LocalAi.Broker.exe` next to its dependants by accident, which
+> is how development builds could start a broker at all. The copy is now explicit, in
+> `src/BrokerBinary.props`, and applies to the projects that need it.
 
 For an installer that does not depend on preinstalled .NET runtime:
 
@@ -180,10 +192,104 @@ dotnet publish src/LocalAi.Installer/LocalAi.Installer.csproj --configuration Re
 The `publish/` directory is ignored. Publishing does not register executables with an
 AI client or install Git hooks.
 
+### Signing a release manifest
+
+An installed machine never needs a system-wide .NET runtime. Every component — the broker
+included — ships as a self-contained executable, and the broker is started as
+`LocalAi.Broker.exe` from the directory of whichever component needs it. That path is
+resolved through `AppContext.BaseDirectory`; **`Assembly.Location` must not be used**,
+because it returns an empty string in a single-file publish and the process dies with
+"The path is empty" before the broker is ever reached.
+
+The installer refuses any release whose manifest is not signed with the ECDSA P-256 key it
+trusts. This is a self-generated key pair, not a certificate: no certificate authority and
+no cost are involved. Generate it once and keep the private key outside the repository:
+
+```powershell
+$dir = "$env:LOCALAPPDATA\LocalAi\release-signing"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$ec = [System.Security.Cryptography.ECDsa]::Create(
+    [System.Security.Cryptography.ECCurve]::CreateFromFriendlyName("nistP256"))
+[IO.File]::WriteAllBytes("$dir\release-signing-private.pkcs8.der", $ec.ExportPkcs8PrivateKey())
+[IO.File]::WriteAllBytes("$dir\release-signing-public.spki.der", $ec.ExportSubjectPublicKeyInfo())
+$ec.Dispose()
+icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
+```
+
+Build the package first. The verifier compares the archive contents against
+`LocalAiPackageLayout.PackageArtifactFiles` with `SetEquals`, so it must hold exactly seven
+artifacts plus `localai-package.json`, flat and with nothing extra. **That is why the
+executables must be published self-contained**: the format has no room for sibling
+dependency assemblies, so a framework-dependent build cannot be shipped as a release.
+
+```powershell
+localai-release-signer pack `
+    --input publish\artifacts `
+    --release-version 0.1.2 `
+    --version-directory d9c52d2 `
+    --out publish\release\localai-package.zip
+```
+
+Then sign it with `localai-release-signer`. It builds the manifest through the same
+canonical serializer the verifier uses, normalises the signature to the canonical low-S
+form the verifier requires, and re-verifies the result before it can be published:
+
+```powershell
+localai-release-signer sign `
+    --package publish\localai-package.zip `
+    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.2/localai-package.zip `
+    --release-version 0.1.2 `
+    --version-directory d9c52d2 `
+    --out publish\release
+```
+
+Before publishing, run the finished artifacts through the installer's own package verifier.
+This exercises the archive inspection, extraction and metadata comparison an installer
+performs, so a structural mistake fails here rather than on someone else's machine:
+
+```powershell
+localai-release-signer verify-package `
+    --package publish\release\localai-package.zip `
+    --manifest publish\release\release-manifest.json `
+    --signature publish\release\release-manifest.sig
+```
+
+Verification uses the public key embedded in `LocalAi.Installer.Core`
+(`ReleaseTrustAnchor`), not a file next to the tool, so signing with a key the shipped
+installer does not trust fails immediately instead of on a user's machine. Nothing is
+written when verification fails. Commit the public half at
+`src/LocalAi.Installer.Core/Releases/release-signing-public.spki.der`; the private half
+must never enter the repository.
+
+Publish `release-manifest.json` and `release-manifest.sig` as release assets alongside the
+package. Field rules worth knowing before a release fails validation: `ReleaseVersion` is
+strict semver with **no leading `v`**, `PackageSha256` is **upper-case** hex, and
+`PackageUri` must be `https` without user info or a fragment.
+
+Authenticode is a separate and optional mechanism: leave `--require-authenticode` off and
+the installer skips executable trust checks entirely. Signed binaries are only needed to
+avoid the SmartScreen prompt on machines other than the build machine.
+
 ### Immutable versions and atomic activation
 
 Publish the CLI, MCP servers, broker, contracts, and their runtime dependencies into a
-fresh staging directory. Verify the complete output, then copy it once to
+fresh staging directory. Merge every per-project publish output into that one directory
+**including the `runtimes\` subtree** — a framework-dependent publish without an explicit
+RID places Windows-only assemblies such as `System.Diagnostics.EventLog.dll` under
+`runtimes\win\lib\net10.0\`, and `deps.json` resolves them from exactly that path. A flat
+copy of the top-level files alone produces a directory that fails at startup with
+`FileNotFoundException`.
+
+Verify the complete output before activating: the staging directory must contain every
+component executable (`codesearch.exe`, `codesearch-mcp.exe`, `locallm-mcp.exe`,
+`localai.exe`, `localai-launcher.exe`, `LocalAi.Broker.exe`) and every dependency
+(`CodeSearch.Core.dll`, `LocalLm.Core.dll`, `LocalAi.Broker.Client.dll`,
+`LocalAi.Repository.dll`, `ModelContextProtocol.dll`, the `Microsoft.Extensions.*` set).
+A directory holding only a couple of dozen files is a partial publish, not a release —
+launching a tool from it fails with a `System.Runtime` load error that comes from the
+child process, not from the launcher.
+
+Then copy it once to
 `bin\versions\<version>`. A published version directory is immutable: activation never
 updates or deletes it, and historical versions remain available for rollback.
 
@@ -203,19 +309,64 @@ The active version is the atomically replaced `bin\current.json` document:
 {"schemaVersion":1,"version":"<version>"}
 ```
 
-After the candidate directory has been verified, activate it with:
+After the candidate directory has been verified, activate it. Activation always requires
+an explicit expectation about the pointer you are replacing, so a concurrent activation
+cannot be overwritten silently:
 
 ```powershell
-bin\launcher\localai-launcher.exe activate <version>
-bin\launcher\localai-launcher.exe activate <version> --stop-running
+# Replacing a pointer that already exists: state its current SHA-256.
+$expected = (Get-FileHash bin\current.json -Algorithm SHA256).Hash
+bin\launcher\localai-launcher.exe activate <version> --if-current-sha256 $expected
+
+# First ever activation, when bin\current.json does not exist yet.
+bin\launcher\localai-launcher.exe activate <version> --if-current-missing
+
+# Add --stop-running when the previous version is still in use.
+bin\launcher\localai-launcher.exe activate <version> --if-current-sha256 $expected --stop-running
 ```
 
-The first form fails while a launcher-managed version is in use. The second form stops
-only processes whose exact executable or fresh broker assembly identity belongs to the
-previous version, then switches the pointer. It does not stop Ollama or unrelated
-`dotnet` processes. Roll back by activating a previously verified immutable directory.
+Omitting both guards is a usage error and exits with code 2. Activation also fails when
+the observed pointer does not match the stated expectation. Without `--stop-running` it
+fails while a launcher-managed version is in use; with it, only processes whose exact
+executable or fresh broker assembly identity belongs to the previous version are stopped,
+and then the pointer is switched. It does not stop Ollama or unrelated `dotnet`
+processes. Roll back by activating a previously verified immutable directory.
 All model requests, including compatibility commands, continue to use the shared FIFO
 broker; direct Ollama access is unsupported.
+
+### Model residency policy
+
+By default a model must be **fully resident in video memory**; anything less is refused. This
+is not a performance preference. A model that spills into system memory does not fail — it
+just becomes several times slower, and nothing in the answer says so.
+
+Machines without a usable discrete adapter can relax it:
+
+```powershell
+localai policy show
+localai policy set --residency AllowPartialOffload
+localai policy set --residency AllowCpu
+```
+
+| Setting | Admits | Refuses |
+| --- | --- | --- |
+| `RequireFullVram` (default) | fully resident loads | everything else |
+| `AllowPartialOffload` | part of the model on the adapter | pure CPU loads |
+| `AllowCpu` | anything that actually loaded | a model reporting no size |
+
+The policy lives in `%LOCALAPPDATA%\LocalAi\policy.json` and is read by the broker, the CLI
+and the installer alike. A missing, malformed or unknown-value document falls back to
+`RequireFullVram`: a parse error must never silently relax a safety check. A broker that is
+already running keeps the previous policy until it is restarted.
+
+Degradation stays visible: every load admitted below full residency carries a warning naming
+the share that reached video memory, and `FullyResident` reports the truth rather than a
+constant. Note that the agent instruction block still asks for full-VRAM validation, so
+relaxing this diverges from what those instructions promise.
+
+An NPU does not help here. Everything runs through Ollama, whose backends are CPU, CUDA,
+ROCm, Metal and Vulkan; NPUs are driven by a separate stack (OpenVINO, DirectML, Windows ML),
+and the residency numbers this policy is built on do not map onto NPU memory.
 
 ### Broker compatibility and startup
 

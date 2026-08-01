@@ -3,12 +3,14 @@
     <Project Path="src/CodeSearch.Cli/CodeSearch.Cli.csproj" />
     <Project Path="src/CodeSearch.Core/CodeSearch.Core.csproj" />
     <Project Path="src/CodeSearch.Mcp/CodeSearch.Mcp.csproj" />
+    <Project Path="src/LocalAi.Broker.Core/LocalAi.Broker.Core.csproj" />
     <Project Path="src/LocalAi.Broker/LocalAi.Broker.csproj" />
     <Project Path="src/LocalAi.Broker.Client/LocalAi.Broker.Client.csproj" />
     <Project Path="src/LocalAi.Contracts/LocalAi.Contracts.csproj" />
     <Project Path="src/LocalAi.Installer/LocalAi.Installer.csproj" />
     <Project Path="src/LocalAi.Installer.Core/LocalAi.Installer.Core.csproj" />
     <Project Path="src/LocalAi.Launcher/LocalAi.Launcher.csproj" />
+    <Project Path="src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj" />
     <Project Path="src/LocalAi.Repository/LocalAi.Repository.csproj" />
     <Project Path="src/LocalAi.Cli/LocalAi.Cli.csproj" />
     <Project Path="src/LocalLm.Core/LocalLm.Core.csproj" />

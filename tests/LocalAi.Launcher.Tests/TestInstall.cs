@@ -1,16 +1,13 @@
+using LocalAi.Contracts;
+
 namespace LocalAi.Launcher.Tests;
 
 internal sealed class TestInstall : IDisposable
 {
+    // Taken from the layout contract rather than repeated here: a duplicated list silently
+    // drifts from the real package and turns a contract change into a wall of failures.
     private static readonly string[] RequiredFiles =
-    [
-        "localai.exe",
-        "codesearch.exe",
-        "codesearch-mcp.exe",
-        "locallm-mcp.exe",
-        "LocalAi.Broker.dll",
-        "LocalAi.Contracts.dll"
-    ];
+        [.. LocalAiPackageLayout.VersionRequiredFiles];
 
     private TestInstall(string root)
     {

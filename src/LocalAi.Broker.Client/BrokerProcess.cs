@@ -58,11 +58,8 @@ public sealed class BrokerProcess : IBrokerProcess
 
     public static BrokerProcess CreateDefault(string runtimeRoot)
     {
-        var brokerAssembly = Path.GetFullPath(typeof(DurableQueue).Assembly.Location);
-        var arguments =
-            Quote(brokerAssembly) + " " + BuildArguments(runtimeRoot, null);
         return new BrokerProcess(
-            "dotnet",
+            ResolveBrokerExecutable(),
             runtimeRoot,
             ReadState,
             IsRunning,
@@ -72,7 +69,32 @@ public sealed class BrokerProcess : IBrokerProcess
                 delay,
                 TimeProvider.System,
                 cancellationToken),
-            arguments: arguments);
+            arguments: BuildArguments(runtimeRoot, null));
+    }
+
+    /// <summary>
+    /// The broker is a self-contained executable sitting next to its caller, so no system
+    /// .NET runtime is required to start it.
+    ///
+    /// This deliberately avoids <c>Assembly.Location</c>: in a single-file publish that
+    /// returns an empty string, which is exactly how the previous "dotnet &lt;dll&gt;" form
+    /// failed — every packaged build died with "The path is empty" before the broker was
+    /// ever reached. <see cref="AppContext.BaseDirectory"/> stays correct when bundled.
+    /// </summary>
+    private static string ResolveBrokerExecutable()
+    {
+        var executable = Path.Combine(
+            AppContext.BaseDirectory,
+            LocalAiPackageLayout.BrokerFile);
+        if (!File.Exists(executable))
+        {
+            throw new BrokerBootstrapException(
+                "broker_executable_missing",
+                "The LocalAi broker executable was not found next to the running component: " +
+                executable);
+        }
+
+        return executable;
     }
 
     public BrokerProcess(

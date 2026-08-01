@@ -1,3 +1,4 @@
+using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Diagnosis;
 
@@ -5,15 +6,9 @@ namespace LocalAi.Installer.Core.Tests;
 
 public sealed class ExistingLocalAiInspectorTests : IDisposable
 {
+    // Derived from the layout contract so the fixture cannot drift from the real package.
     private static readonly string[] RequiredFiles =
-    [
-        "localai.exe",
-        "codesearch.exe",
-        "codesearch-mcp.exe",
-        "locallm-mcp.exe",
-        "LocalAi.Broker.dll",
-        "LocalAi.Contracts.dll",
-    ];
+        [.. LocalAiPackageLayout.VersionRequiredFiles];
 
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),

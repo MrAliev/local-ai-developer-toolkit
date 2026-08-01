@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>localai-release-signer</AssemblyName>
+    <RootNamespace>LocalAi.ReleaseSigner</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Installer.Core\LocalAi.Installer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

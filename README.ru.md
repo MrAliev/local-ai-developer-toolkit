@@ -147,7 +147,19 @@ dotnet publish src/CodeSearch.Mcp/CodeSearch.Mcp.csproj --configuration Release 
 dotnet publish src/LocalLm.Mcp/LocalLm.Mcp.csproj --configuration Release --output publish/LocalLm.Mcp
 dotnet publish src/LocalAi.Cli/LocalAi.Cli.csproj --configuration Release --output publish/LocalAi.Cli
 dotnet publish src/LocalAi.Launcher/LocalAi.Launcher.csproj --configuration Release --output publish/LocalAi.Launcher
+dotnet publish src/LocalAi.Broker/LocalAi.Broker.csproj --configuration Release --output publish/LocalAi.Broker
 ```
+
+> Очередь и bootstrap runtime ACL живут в библиотеке `LocalAi.Broker.Core`, и
+> `LocalAi.Broker.Client` ссылается на неё, а не на исполняемый проект брокера. Так и
+> держите. Пока клиент ссылался на проект с `OutputType=Exe`, публикация любого
+> зависимого проекта выносила ещё и `apphost.exe`, `deps.json` и `runtimeconfig.json`
+> брокера, и RID-специфичная framework-dependent публикация падала с `NETSDK1152` —
+> очистка `bin`/`obj` не помогала, потому что коллизия рождалась в процессе сборки.
+>
+> Та же ссылка попутно клала `LocalAi.Broker.exe` рядом с зависимыми проектами, и именно
+> на этом держался запуск брокера при разработке. Теперь копирование объявлено явно, в
+> `src/BrokerBinary.props`, и применяется к тем проектам, которым это нужно.
 
 Для автономного установщика (без зависимости от системного .NET runtime):
 
@@ -162,10 +174,107 @@ dotnet publish src/LocalAi.Installer/LocalAi.Installer.csproj --configuration Re
 
 Каталог `publish/` игнорируется. Публикация не регистрирует исполняемые файлы с клиентом AI или устанавливает Git хуки.
 
+### Подпись манифеста релиза
+
+Установленной машине не нужен системный .NET. Все компоненты, включая брокер, поставляются
+самодостаточными исполняемыми файлами, а брокер запускается как `LocalAi.Broker.exe` из
+каталога того компонента, которому он понадобился. Путь берётся через
+`AppContext.BaseDirectory`; **`Assembly.Location` использовать нельзя** — в single-file
+публикации он возвращает пустую строку, и процесс умирает с «The path is empty», так и не
+дойдя до брокера.
+
+Установщик отвергает любой релиз, чей манифест не подписан доверенным ключом ECDSA P-256.
+Это самостоятельно сгенерированная пара ключей, а не сертификат: ни центра сертификации,
+ни расходов здесь нет. Создайте её один раз и держите приватный ключ вне репозитория:
+
+```powershell
+$dir = "$env:LOCALAPPDATA\LocalAi\release-signing"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$ec = [System.Security.Cryptography.ECDsa]::Create(
+    [System.Security.Cryptography.ECCurve]::CreateFromFriendlyName("nistP256"))
+[IO.File]::WriteAllBytes("$dir\release-signing-private.pkcs8.der", $ec.ExportPkcs8PrivateKey())
+[IO.File]::WriteAllBytes("$dir\release-signing-public.spki.der", $ec.ExportSubjectPublicKeyInfo())
+$ec.Dispose()
+icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
+```
+
+Сначала соберите пакет. Верификатор сверяет состав архива с
+`LocalAiPackageLayout.PackageArtifactFiles` через `SetEquals`, поэтому в нём должно быть
+ровно семь артефактов плюс `localai-package.json` — плоско и без единой лишней записи.
+**Именно поэтому исполняемые файлы обязаны публиковаться self-contained**: в формате нет
+места для соседних сборок-зависимостей, и framework-dependent сборку выложить релизом
+нельзя.
+
+```powershell
+localai-release-signer pack `
+    --input publish\artifacts `
+    --release-version 0.1.2 `
+    --version-directory d9c52d2 `
+    --out publish\release\localai-package.zip
+```
+
+Затем подпишите пакет утилитой `localai-release-signer`. Она собирает манифест тем же
+каноническим сериализатором, которым пользуется проверяющий, приводит подпись к
+канонической форме low-S, обязательной для верификатора, и перепроверяет результат ещё до
+публикации:
+
+```powershell
+localai-release-signer sign `
+    --package publish\localai-package.zip `
+    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.2/localai-package.zip `
+    --release-version 0.1.2 `
+    --version-directory d9c52d2 `
+    --out publish\release
+```
+
+Перед публикацией прогоните готовые артефакты через собственный верификатор пакета из
+установщика. Он выполняет тот же разбор архива, распаковку и сверку метаданных, что и
+установка, поэтому структурная ошибка вылезет здесь, а не на чужой машине:
+
+```powershell
+localai-release-signer verify-package `
+    --package publish\release\localai-package.zip `
+    --manifest publish\release\release-manifest.json `
+    --signature publish\release\release-manifest.sig
+```
+
+Проверка выполняется публичным ключом, встроенным в `LocalAi.Installer.Core`
+(`ReleaseTrustAnchor`), а не файлом рядом с утилитой. Поэтому подпись ключом, которому
+выпущенный установщик не доверяет, падает сразу, а не на машине пользователя. При провале
+проверки на диск не пишется ничего. Публичную половину держите в репозитории по пути
+`src/LocalAi.Installer.Core/Releases/release-signing-public.spki.der`, приватная не должна
+попадать в репозиторий никогда.
+
+Публикуйте `release-manifest.json` и `release-manifest.sig` ассетами релиза рядом с
+пакетом. Правила полей, о которые проще всего споткнуться: `ReleaseVersion` — строгий
+semver **без префикса `v`**, `PackageSha256` — hex **в верхнем регистре**, `PackageUri` —
+только `https`, без userinfo и фрагмента.
+
+Authenticode — отдельный и необязательный механизм: не указывайте
+`--require-authenticode`, и установщик полностью пропустит проверку доверия к
+исполняемым файлам. Подписанные бинарники нужны лишь для того, чтобы не появлялось
+предупреждение SmartScreen на машинах, отличных от сборочной.
+
 ### Неизменяемые версии и атомарная активация
 
 Опубликуйте CLI, MCP-серверы, брокер, контракты и их зависимости среды выполнения
-в новый промежуточный каталог. Проверьте полный результат, затем один раз скопируйте
+в новый промежуточный каталог. Сливайте выход публикации всех проектов в этот один
+каталог **вместе с подкаталогом `runtimes\`** — framework-dependent публикация без явного
+RID кладёт windows-специфичные сборки вроде `System.Diagnostics.EventLog.dll` в
+`runtimes\win\lib\net10.0\`, и `deps.json` разрешает их именно по этому пути. Плоское
+копирование только верхнего уровня даёт каталог, который падает на старте с
+`FileNotFoundException`.
+
+Проверьте полноту результата до активации: в промежуточном каталоге должны быть все
+исполняемые файлы компонентов (`codesearch.exe`, `codesearch-mcp.exe`, `locallm-mcp.exe`,
+`localai.exe`, `localai-launcher.exe`, `LocalAi.Broker.exe`) и все зависимости
+(`CodeSearch.Core.dll`, `LocalLm.Core.dll`, `LocalAi.Broker.Client.dll`,
+`LocalAi.Repository.dll`, `ModelContextProtocol.dll`, набор `Microsoft.Extensions.*`).
+Каталог из пары десятков файлов — это неполная публикация, а не релиз: запуск инструмента
+из него падает с ошибкой загрузки `System.Runtime`, и приходит она от дочернего процесса,
+а не от launcher.
+
+Затем один раз скопируйте
 его в `bin\versions\<version>`. Каталог опубликованной версии неизменяем: активация
 никогда не обновляет и не удаляет его, а исторические версии остаются доступными для
 отката.
@@ -187,20 +296,65 @@ localai-launcher.exe run localai
 {"schemaVersion":1,"version":"<version>"}
 ```
 
-После проверки каталога кандидата активируйте его:
+После проверки каталога кандидата активируйте его. Активация всегда требует явного
+ожидания относительно заменяемого указателя, чтобы параллельная активация не была
+затёрта молча:
 
 ```powershell
-bin\launcher\localai-launcher.exe activate <version>
-bin\launcher\localai-launcher.exe activate <version> --stop-running
+# Замена существующего указателя: укажите его текущий SHA-256.
+$expected = (Get-FileHash bin\current.json -Algorithm SHA256).Hash
+bin\launcher\localai-launcher.exe activate <version> --if-current-sha256 $expected
+
+# Самая первая активация, когда bin\current.json ещё не существует.
+bin\launcher\localai-launcher.exe activate <version> --if-current-missing
+
+# Добавьте --stop-running, если предыдущая версия ещё используется.
+bin\launcher\localai-launcher.exe activate <version> --if-current-sha256 $expected --stop-running
 ```
 
-Первая форма завершается ошибкой, пока версия используется процессом, запущенным через
-launcher. Вторая останавливает только процессы, чей точный путь исполняемого файла или
-свежая идентичность сборки брокера относится к предыдущей версии, а затем переключает
-указатель. Она не останавливает Ollama или несвязанные процессы `dotnet`. Для отката
-активируйте ранее проверенный неизменяемый каталог. Все запросы к моделям, включая
+Вызов без обоих флагов — ошибка использования, код возврата 2. Активация также
+завершается ошибкой, если наблюдаемый указатель не совпал с заявленным ожиданием. Без
+`--stop-running` она завершается ошибкой, пока версия используется процессом, запущенным
+через launcher; с этим флагом останавливаются только процессы, чей точный путь
+исполняемого файла или свежая идентичность сборки брокера относится к предыдущей версии,
+после чего указатель переключается. Она не останавливает Ollama или несвязанные процессы
+`dotnet`. Для отката активируйте ранее проверенный неизменяемый каталог. Все запросы к моделям, включая
 команды совместимости, по-прежнему проходят через общий FIFO-брокер; прямой доступ к
 Ollama не поддерживается.
+
+### Политика резидентности моделей
+
+По умолчанию модель обязана **целиком помещаться в видеопамять**, всё остальное
+отвергается. Это не настройка производительности. Модель, сползшая в системную память, не
+падает — она просто становится в разы медленнее, и в ответе об этом ничего не сказано.
+
+На машинах без пригодного дискретного адаптера политику можно ослабить:
+
+```powershell
+localai policy show
+localai policy set --residency AllowPartialOffload
+localai policy set --residency AllowCpu
+```
+
+| Значение | Допускает | Отвергает |
+| --- | --- | --- |
+| `RequireFullVram` (по умолчанию) | полностью резидентную загрузку | всё остальное |
+| `AllowPartialOffload` | часть модели на адаптере | чистую загрузку на CPU |
+| `AllowCpu` | всё, что реально загрузилось | модель с нулевым размером |
+
+Политика лежит в `%LOCALAPPDATA%\LocalAi\policy.json` и читается одинаково брокером, CLI и
+установщиком. Отсутствующий, повреждённый или неизвестный по значению документ откатывается
+к `RequireFullVram`: ошибка разбора не должна молча ослаблять проверку. Уже запущенный
+брокер сохраняет прежнюю политику до перезапуска.
+
+Деградация остаётся видимой: каждая загрузка ниже полной резидентности несёт предупреждение
+с долей, которая дошла до видеопамяти, а `FullyResident` сообщает правду, а не константу.
+Учтите, что блок инструкций для агентов по-прежнему требует full-VRAM валидации, поэтому
+ослабление политики расходится с тем, что эти инструкции обещают.
+
+NPU здесь не помогает. Всё идёт через Ollama, а её бэкенды — CPU, CUDA, ROCm, Metal и
+Vulkan; NPU программируются отдельным стеком (OpenVINO, DirectML, Windows ML), и показатели
+резидентности, на которых построена эта политика, к памяти NPU неприменимы.
 
 ### Совместимость брокера и запуск
 

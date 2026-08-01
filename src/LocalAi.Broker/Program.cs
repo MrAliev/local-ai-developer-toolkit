@@ -34,8 +34,12 @@ internal static class BrokerProgram
         var startedAt = new DateTimeOffset(
             process.StartTime.ToUniversalTime(),
             TimeSpan.Zero);
+        // Environment.ProcessPath rather than Assembly.Location: the broker ships as a
+        // single-file self-contained executable, and Location is empty when bundled.
         var brokerAssemblyPath = Path.GetFullPath(
-            typeof(BrokerHost).Assembly.Location);
+            Environment.ProcessPath
+            ?? throw new InvalidOperationException(
+                "The broker could not determine its own executable path."));
         var owner = new BrokerProcessState(
             process.Id,
             startedAt,
@@ -51,7 +55,19 @@ internal static class BrokerProgram
             var queue = new DurableQueue(runtimeRoot);
             using var transport = new OllamaTransport(ollamaUri);
             var catalog = ModelRoutingCatalog.LoadEmbedded();
-            var runtime = new ModelRuntime(transport, catalog);
+            var policy = new ModelResidencyPolicyStore(runtimeRoot).Read();
+            var runtime = new ModelRuntime(
+                transport,
+                catalog,
+                residencyPolicy: policy.ModelResidency);
+            if (policy.ModelResidency != ModelResidencyPolicy.RequireFullVram)
+            {
+                Console.Error.WriteLine(
+                    "LocalAi broker: model residency policy is relaxed to " +
+                    $"{policy.ModelResidency}. Responses may be substantially slower than a " +
+                    "fully resident load.");
+            }
+
             var experiments = new ExperimentStateStore(runtimeRoot);
             var telemetry = new ModelTelemetryStore(runtimeRoot);
             var coordinator = new ModelExecutionCoordinator(

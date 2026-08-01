@@ -1,80 +1,108 @@
+using System.Collections.ObjectModel;
+using System.IO;
 using System.Text;
-using System.Windows;
+using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Diagnosis;
+using LocalAi.Installer.Core.Models;
 
 namespace LocalAi.Installer.ViewModels;
 
 public sealed class InstallerWizardViewModel : ObservableObject
 {
+    private static readonly TimeSpan DependencyInstallTimeout = TimeSpan.FromMinutes(10);
+
+    private static readonly IReadOnlyList<(InstallerPage Page, string Title)> Steps =
+    [
+        (InstallerPage.Diagnose, "System check"),
+        (InstallerPage.Dependencies, "Prerequisites"),
+        (InstallerPage.Package, "LocalAi package"),
+        (InstallerPage.Models, "Models"),
+        (InstallerPage.Residency, "Video memory"),
+        (InstallerPage.Agents, "Client apps"),
+        (InstallerPage.Confirm, "Confirm"),
+        (InstallerPage.Progress, "Install"),
+        (InstallerPage.Finish, "Finished"),
+    ];
+
     private readonly DiagnosePageViewModel diagnose = new();
     private readonly DependenciesPageViewModel dependencies = new();
     private readonly PackagePageViewModel package = new();
     private readonly ModelsPageViewModel models = new();
+    private readonly ResidencyPageViewModel residency = new();
     private readonly AgentIntegrationPageViewModel agents = new();
     private readonly ReviewApplyPageViewModel review = new();
     private readonly FinishPageViewModel finish = new();
     private readonly WindowsEnvironmentDetector environmentDetector;
     private readonly IProcessRunner processRunner;
 
+    private CancellationTokenSource? runCancellation;
     private InstallerPage currentPage = InstallerPage.Diagnose;
-    private bool isCanceled;
-    private bool isComplete;
     private bool isRunning;
+    private bool isComplete;
+    private bool hasRunError;
+    private bool wasCancelled;
+    private bool hasInitialized;
     private int progress;
     private string progressText = "Ready";
-    private bool hasRunError;
     private string? rollbackMessage;
-    private string language = InstallerCulture.CurrentCultureCode;
-    private bool hasInitialized;
     private EnvironmentDiagnosis? environmentDiagnosis;
-
-    private static readonly TimeSpan DependencyInstallTimeout = TimeSpan.FromMinutes(10);
+    private CatalogRecommendation lastRecommendation = CatalogRecommendation.Empty;
 
     public InstallerWizardViewModel()
     {
-        var processRunner = new SystemProcessRunner();
-        this.processRunner = processRunner;
+        var runner = new SystemProcessRunner();
+        processRunner = runner;
         environmentDetector = new WindowsEnvironmentDetector(
             new SystemEnvironmentProbe(),
             new SystemFileSystemProbe(),
-            processRunner,
+            runner,
             new WindowsInstalledApplicationProbe(),
             new SystemDiskProbe(),
             new SystemNetworkProbe(),
             new WindowsGpuProbe(new DxgiNativeGpuAdapterEnumerator()));
 
-        package.SelectCompatibleRelease("latest", true);
+        BackCommand = new RelayCommand(() => MovePrevious(), () => CanMovePrevious);
+        NextCommand = new RelayCommand(() => MoveNext(), () => CanMoveNext);
+        InstallCommand = new AsyncRelayCommand(() => RunAsync(), () => CanRun);
+        CancelCommand = new RelayCommand(Cancel, () => CanCancel);
 
-        for (var i = 0; i < agents.Agents.Count; i++)
+        // Relaxing the residency policy immediately widens what the models page can offer,
+        // so the two pages stay consistent instead of contradicting each other.
+        residency.PropertyChanged += (_, args) =>
         {
-            var agent = agents.Agents[i];
-            agents.Agents[i] = agent with { Choice = AgentChoice.RunWithoutAgent };
-        }
+            if (args.PropertyName == nameof(ResidencyPageViewModel.Policy))
+            {
+                OnResidencyChanged();
+            }
+        };
 
-        foreach (var dependency in dependencies.Dependencies)
-        {
-            dependency.IsConsented = true;
-        }
-
-        OnPropertyChanged(nameof(Dependencies));
-
-        review.IsConfirmed = true;
+        RebuildSteps();
     }
+
+    public event EventHandler? CloseRequested;
 
     public bool EnableDependencyActions { get; set; }
 
-    public IReadOnlyList<string> PageNames { get; } =
-    [
-        "Diagnosis",
-        "Dependencies",
-        "Package",
-        "Models",
-        "Agents",
-        "Review",
-        "Apply",
-    ];
+    public RelayCommand BackCommand { get; }
+
+    public RelayCommand NextCommand { get; }
+
+    public AsyncRelayCommand InstallCommand { get; }
+
+    public RelayCommand CancelCommand { get; }
+
+    public DiagnosePageViewModel Diagnose => diagnose;
+    public DependenciesPageViewModel Dependencies => dependencies;
+    public PackagePageViewModel Package => package;
+    public ModelsPageViewModel Models => models;
+    public ResidencyPageViewModel Residency => residency;
+    public AgentIntegrationPageViewModel Agents => agents;
+    public ReviewApplyPageViewModel Review => review;
+    public FinishPageViewModel Finish => finish;
+
+    public ObservableCollection<WizardStep> StepList { get; } = [];
 
     public InstallerPage CurrentPage
     {
@@ -87,155 +115,102 @@ public sealed class InstallerWizardViewModel : ObservableObject
             }
 
             currentPage = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(StepTitle));
-            OnPropertyChanged(nameof(StepDescription));
-            OnPropertyChanged(nameof(StepStatus));
-            OnPropertyChanged(nameof(CanMovePrevious));
-            OnPropertyChanged(nameof(CanMoveNext));
-            OnPropertyChanged(nameof(CanRun));
-            OnPropertyChanged(nameof(RunButtonVisibility));
-            OnPropertyChanged(nameof(NextButtonVisibility));
-            OnPropertyChanged(nameof(BackButtonVisibility));
-            OnPropertyChanged(nameof(CloseButtonVisibility));
-            OnPropertyChanged(nameof(IsFinishPage));
+            RefreshAll();
         }
     }
 
-    private static string BuildFinishSummary(
-        int requestedActions,
-        int successfulActions,
-        int skippedActions,
-        int failedActions,
-        string? fatalMessage = null)
+    public string StepTitle => CurrentPage switch
     {
-        var summary = new StringBuilder();
-        summary.AppendLine("Execution summary:");
-        summary.AppendLine($"Requested dependency actions: {requestedActions}.");
-        summary.AppendLine($"Installed/reinstalled: {successfulActions}.");
-        summary.AppendLine($"Skipped: {skippedActions}.");
-        summary.AppendLine($"Failed: {failedActions}.");
-        if (!string.IsNullOrWhiteSpace(fatalMessage))
-        {
-            summary.AppendLine($"Fatal error: {fatalMessage}");
-        }
-
-        return summary.ToString().Trim();
-    }
-
-    public DiagnosePageViewModel Diagnose => diagnose;
-    public DependenciesPageViewModel Dependencies => dependencies;
-    public PackagePageViewModel Package => package;
-    public ModelsPageViewModel Models => models;
-    public AgentIntegrationPageViewModel Agents => agents;
-    public ReviewApplyPageViewModel Review => review;
-    public FinishPageViewModel Finish => finish;
-
-    public string StepTitle => PageNames[(int)CurrentPage];
+        InstallerPage.Diagnose => "Checking this computer",
+        InstallerPage.Dependencies => "Prerequisites",
+        InstallerPage.Package => "LocalAi package",
+        InstallerPage.Models => "Local models",
+        InstallerPage.Residency => "Video memory requirements",
+        InstallerPage.Agents => "Client applications",
+        InstallerPage.Confirm => "Ready to install",
+        InstallerPage.Progress => "Installing",
+        _ => hasRunError ? "Installation not completed" : "Installation complete",
+    };
 
     public string StepDescription => CurrentPage switch
     {
-        InstallerPage.Diagnose => "Run environment and compatibility checks.",
-        InstallerPage.Dependencies => "Select optional dependency installation and consent.",
-        InstallerPage.Package => "Choose a target package and confirm compatibility.",
-        InstallerPage.Models => "Pick model strategy: automatic or manual.",
-        InstallerPage.Agents => "Choose per-agent integration options.",
-        InstallerPage.ReviewApply => "Review planned actions before applying.",
-        _ => "Installation finished.",
+        InstallerPage.Diagnose =>
+            "Results of the environment check. Items marked as a warning still allow " +
+            "installation.",
+        InstallerPage.Dependencies =>
+            "Choose which prerequisites to install. Nothing is selected for you.",
+        InstallerPage.Package => "Choose the LocalAi release to install.",
+        InstallerPage.Models => "Choose which local models to set up.",
+        InstallerPage.Residency =>
+            "Decide how strictly models must fit into video memory.",
+        InstallerPage.Agents =>
+            "Choose how each client application should be integrated.",
+        InstallerPage.Confirm =>
+            "Review what is about to happen. To change anything click Back; to apply it " +
+            "click Install.",
+        InstallerPage.Progress => "Applying the selected actions.",
+        _ => hasRunError
+            ? "Some actions did not complete. The log below shows what happened."
+            : "All selected actions completed.",
     };
 
-    public string StepStatus => $"Step {(int)CurrentPage + 1} of {PageNames.Count}";
+    public string StepStatus => $"Step {StepIndex(CurrentPage) + 1} of {Steps.Count}";
 
-    public bool CanMovePrevious => CurrentPage > InstallerPage.Diagnose && !isCanceled && !isRunning;
+    public bool IsFinishPage => CurrentPage == InstallerPage.Finish;
 
-    public bool CanMoveNext => CurrentPage switch
-    {
-        InstallerPage.Diagnose => !isCanceled && diagnose.CanContinue,
-        InstallerPage.Dependencies => !isCanceled && dependencies.CanContinue,
-        InstallerPage.Package => !isCanceled && package.CanContinue,
-        InstallerPage.Models => !isCanceled && models.CanContinue,
-        InstallerPage.Agents => !isCanceled && agents.CanContinue,
-        InstallerPage.ReviewApply => !isCanceled && !isRunning && review.CanApply,
-        _ => false,
-    };
+    public bool IsProgressPage => CurrentPage == InstallerPage.Progress;
 
-    public bool CanRun =>
-        CurrentPage == InstallerPage.ReviewApply && !isCanceled && !isRunning && review.CanApply;
-
-    public Visibility RunButtonVisibility =>
-        CanRun ? Visibility.Visible : Visibility.Collapsed;
-
-    public bool IsCanceled => isCanceled;
+    public bool IsRunning => isRunning;
 
     public bool IsComplete => isComplete;
 
     public bool HasRunError => hasRunError;
 
-    public bool IsFinishPage => CurrentPage == InstallerPage.Finish;
+    public bool IsCanceled => wasCancelled;
 
     public int Progress => progress;
 
     public string ProgressText => progressText;
 
-    public string? ReviewText => review.Render(diagnose, dependencies, models, agents);
-
-    public string Language
-    {
-        get => language;
-        set
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                value = "en-US";
-            }
-
-            SetProperty(ref language, value);
-            InstallerCulture.CurrentCultureCode = value;
-            OnPropertyChanged(nameof(IsRussian));
-        }
-    }
-
-    public bool IsRussian => string.Equals(Language, "ru-RU", StringComparison.Ordinal);
-
-    public bool IsRunning => isRunning;
-
-    public bool RequiresRestart => finish.RequiresRestart;
-
     public string? RollbackResult => rollbackMessage;
-
-    public int CurrentPageIndex => (int)CurrentPage;
 
     public string? FinishSummary => finish.Summary;
 
-    public Visibility BackButtonVisibility =>
-        (IsFinishPage && !hasRunError) || !CanMovePrevious
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+    public int CurrentPageIndex => StepIndex(CurrentPage);
 
-    public Visibility NextButtonVisibility =>
-        CurrentPage == InstallerPage.Finish
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+    /// <summary>
+    /// Back and Next stay on screen for the whole wizard and only change availability.
+    /// Buttons that vanish make the panel jump and hide where the user is.
+    /// </summary>
+    public bool CanMovePrevious =>
+        CurrentPage is not (InstallerPage.Diagnose or InstallerPage.Progress) &&
+        !isRunning &&
+        !IsFinishPage;
 
-    public Visibility CloseButtonVisibility =>
-        IsFinishPage
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-    public void RefreshNavigationState()
+    public bool CanMoveNext => CurrentPage switch
     {
-        OnPropertyChanged(nameof(CanMoveNext));
-        OnPropertyChanged(nameof(CanRun));
-        OnPropertyChanged(nameof(RunButtonVisibility));
-        OnPropertyChanged(nameof(CanMovePrevious));
-        OnPropertyChanged(nameof(ReviewText));
-        OnPropertyChanged(nameof(HasRunError));
-        OnPropertyChanged(nameof(IsFinishPage));
-        OnPropertyChanged(nameof(BackButtonVisibility));
-        OnPropertyChanged(nameof(NextButtonVisibility));
-        OnPropertyChanged(nameof(CloseButtonVisibility));
-        OnPropertyChanged(nameof(FinishSummary));
-    }
+        InstallerPage.Diagnose => diagnose.CanContinue,
+        InstallerPage.Dependencies => dependencies.CanContinue,
+        InstallerPage.Package => package.CanContinue,
+        InstallerPage.Models => models.CanContinue,
+        InstallerPage.Residency => residency.CanContinue,
+        InstallerPage.Agents => agents.CanContinue,
+        _ => false,
+    };
+
+    public bool CanRun =>
+        CurrentPage == InstallerPage.Confirm && !isRunning && review.CanApply;
+
+    public bool CanCancel => !IsFinishPage || !isRunning;
+
+    public bool IsNextVisible => CurrentPage is not (
+        InstallerPage.Confirm or InstallerPage.Progress or InstallerPage.Finish);
+
+    public bool IsInstallVisible => CurrentPage == InstallerPage.Confirm;
+
+    public string CancelButtonText => IsFinishPage ? "Close" : "Cancel";
+
+    public string? ReviewText => BuildReview();
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -251,7 +226,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     public void SetReviewConfirmed(bool confirmed)
     {
         review.IsConfirmed = confirmed;
-        RefreshNavigationState();
+        RefreshAll();
     }
 
     public bool MoveNext()
@@ -261,19 +236,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return false;
         }
 
-        if (CurrentPage is InstallerPage.ReviewApply)
-        {
-            return false;
-        }
-
         CurrentPage = CurrentPage switch
         {
             InstallerPage.Diagnose => InstallerPage.Dependencies,
             InstallerPage.Dependencies => InstallerPage.Package,
             InstallerPage.Package => InstallerPage.Models,
-            InstallerPage.Models => InstallerPage.Agents,
-            InstallerPage.Agents => InstallerPage.ReviewApply,
-            InstallerPage.Finish => InstallerPage.Finish,
+            InstallerPage.Models => InstallerPage.Residency,
+            InstallerPage.Residency => InstallerPage.Agents,
+            InstallerPage.Agents => InstallerPage.Confirm,
             _ => CurrentPage,
         };
         return true;
@@ -281,7 +251,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     public bool MovePrevious()
     {
-        if (!CanMovePrevious || isCanceled)
+        if (!CanMovePrevious)
         {
             return false;
         }
@@ -291,117 +261,105 @@ public sealed class InstallerWizardViewModel : ObservableObject
             InstallerPage.Dependencies => InstallerPage.Diagnose,
             InstallerPage.Package => InstallerPage.Dependencies,
             InstallerPage.Models => InstallerPage.Package,
-            InstallerPage.Agents => InstallerPage.Models,
-            InstallerPage.ReviewApply => InstallerPage.Agents,
-            InstallerPage.Finish => InstallerPage.ReviewApply,
-            _ => InstallerPage.Diagnose,
+            InstallerPage.Residency => InstallerPage.Models,
+            InstallerPage.Agents => InstallerPage.Residency,
+            InstallerPage.Confirm => InstallerPage.Agents,
+            _ => CurrentPage,
         };
         return true;
     }
 
-    public bool Run()
+    /// <summary>
+    /// Cancels a running installation, or closes the wizard when nothing is running. Cancel
+    /// is never disabled while work is in flight: it is the only way out of a long install.
+    /// </summary>
+    public void Cancel()
     {
-        return RunAsync().GetAwaiter().GetResult();
+        if (isRunning)
+        {
+            runCancellation?.Cancel();
+            return;
+        }
+
+        wasCancelled = !IsFinishPage;
+        OnPropertyChanged(nameof(IsCanceled));
+        CloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
     public async Task<bool> RunAsync(CancellationToken cancellationToken = default)
     {
-        if (!CanRun || isCanceled)
+        if (!CanRun)
         {
             return false;
         }
 
-        if (!EnableDependencyActions)
-        {
-            finish.Progress = "Dry-run mode: execution step simulation only.";
-            finish.Summary = "Execution was started in dry-run mode. No changes were applied.";
-            CurrentPage = InstallerPage.Finish;
-            progress = 100;
-            progressText = "Completed";
-            isComplete = true;
-            hasRunError = false;
-            OnPropertyChanged(nameof(Progress));
-            OnPropertyChanged(nameof(ProgressText));
-            OnPropertyChanged(nameof(IsComplete));
-            OnPropertyChanged(nameof(RequiresRestart));
-            OnPropertyChanged(nameof(CanMoveNext));
-            OnPropertyChanged(nameof(CanRun));
-            OnPropertyChanged(nameof(RunButtonVisibility));
-            OnPropertyChanged(nameof(FinishSummary));
-            OnPropertyChanged(nameof(CloseButtonVisibility));
-            OnPropertyChanged(nameof(BackButtonVisibility));
-            return true;
-        }
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        runCancellation = linked;
+        var token = linked.Token;
 
         isRunning = true;
         isComplete = false;
         hasRunError = false;
-        RefreshNavigationState();
+        CurrentPage = InstallerPage.Progress;
+        RefreshAll();
+
         var report = new StringBuilder();
-        var totalDependencies = dependencies.Dependencies.Count(dependency => CanInstall(dependency.Id));
-        var actionsToRun = dependencies.Dependencies.Count(dependency => CanInstall(dependency.Id) && dependency.IsConsented);
         var successfulActions = 0;
         var failedActions = 0;
         var skippedActions = 0;
-        var requestedActions = Math.Max(actionsToRun, 0);
-        AppendExecutionLog(report, "Running selected dependency actions.");
-        if (totalDependencies == 0)
-        {
-            AppendExecutionLog(report, "No dependency actions were selected.");
-        }
-        else
-        {
-            AppendExecutionLog(report, $"Dependencies considered: {totalDependencies}, selected: {actionsToRun}.");
-        }
+        var requested = 0;
 
-        SetProgress(5, "Preparing...");
-        int nextProgress = 10;
         try
         {
-            await RefreshEnvironmentDiagnosticsAsync(cancellationToken);
+            // Applied first so an interrupted run still leaves the machine with the
+            // residency setting the user actually chose.
+            ApplyResidencyPolicy(report);
 
-            foreach (var dependency in dependencies.Dependencies)
+            if (!EnableDependencyActions)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    AppendExecutionLog(report, "Installation cancelled.");
-                    SetProgress(nextProgress, "Cancelled");
-                    break;
-                }
+                finish.Progress = report.ToString().Trim();
+                finish.Summary = "Dry run completed. Nothing was installed.";
+                SetProgress(100, "Completed");
+                isComplete = true;
+                CurrentPage = InstallerPage.Finish;
+                return true;
+            }
 
-                if (!CanInstall(dependency.Id))
-                {
-                    continue;
-                }
+            await RefreshEnvironmentDiagnosticsAsync(token);
 
-                if (!dependency.IsConsented)
-                {
-                    AppendExecutionLog(report, $"{dependency.Title}: skipped.");
-                    skippedActions++;
-                    continue;
-                }
+            var selected = dependencies.Dependencies
+                .Where(dependency => dependency.IsConsented && dependency.IsInstallable)
+                .ToArray();
+            requested = selected.Length;
+            AppendLog(report, selected.Length == 0
+                ? "No prerequisites were selected."
+                : $"Prerequisites selected: {selected.Length}.");
+
+            var step = 0;
+            foreach (var dependency in selected)
+            {
+                token.ThrowIfCancellationRequested();
+                SetProgress(
+                    10 + (80 * step++ / Math.Max(selected.Length, 1)),
+                    $"Installing {dependency.Title}...");
 
                 var definition = ResolveDependencyDefinition(dependency.Id);
                 if (definition is null)
                 {
-                    AppendExecutionLog(report, $"{dependency.Title}: no automatic installer recipe is available.");
-                    failedActions++;
-                    hasRunError = true;
+                    AppendLog(report, $"{dependency.Title}: no automated installer available.");
+                    skippedActions++;
                     continue;
                 }
 
-                SetProgress(nextProgress, $"Installing {dependency.Title}...");
-                AppendExecutionLog(report, $"Installing {dependency.Title}...");
-                nextProgress = Math.Clamp(nextProgress + 25, 0, 95);
+                AppendLog(report, $"{dependency.Title}: installing...");
                 var installed = await TryInstallDependencyWithWingetAsync(
-                        definition,
-                        dependency.Title,
-                        cancellationToken);
-                AppendExecutionLog(
-                    report,
-                    installed
-                        ? $"{dependency.Title}: {(dependency.IsInstalled ? "reinstalled." : "installed.")}"
-                        : $"{dependency.Title}: install attempt failed.");
+                    definition,
+                    dependency.Title,
+                    reinstall: dependency.IsInstalled,
+                    token);
+                AppendLog(report, installed
+                    ? $"{dependency.Title}: done."
+                    : $"{dependency.Title}: failed.");
                 if (installed)
                 {
                     successfulActions++;
@@ -412,43 +370,48 @@ public sealed class InstallerWizardViewModel : ObservableObject
                     hasRunError = true;
                 }
 
-                await RefreshEnvironmentDiagnosticsAsync(cancellationToken);
+                await RefreshEnvironmentDiagnosticsAsync(token);
             }
 
-            SetProgress(95, "Finalizing...");
+            SetProgress(95, "Finalising...");
+            AppendLog(report, "Finalising.");
             finish.Summary = BuildFinishSummary(
-                requestedActions,
+                requested,
                 successfulActions,
                 skippedActions,
                 failedActions);
-            AppendExecutionLog(report, "Finalizing changes.");
-            progress = 100;
-            isComplete = !hasRunError && !cancellationToken.IsCancellationRequested;
-            progressText = isComplete ? "Completed" : "Failed";
-            if (report.Length == 0)
-            {
-                AppendExecutionLog(report, "No dependency actions selected.");
-            }
-
+            SetProgress(100, hasRunError ? "Failed" : "Completed");
+            isComplete = !hasRunError;
             finish.Progress = report.ToString().Trim();
-            if (!isComplete)
-            {
-                hasRunError = true;
-            }
-
             SetRollbackInfo(report.ToString(), false);
             CurrentPage = InstallerPage.Finish;
-            return true;
+            return !hasRunError;
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog(report, "Cancelled. Actions already applied were left in place.");
+            wasCancelled = true;
+            hasRunError = true;
+            isComplete = false;
+            SetProgress(progress, "Cancelled");
+            finish.Summary = BuildFinishSummary(
+                requested,
+                successfulActions,
+                skippedActions,
+                failedActions,
+                "Cancelled by the user.");
+            finish.Progress = report.ToString().Trim();
+            CurrentPage = InstallerPage.Finish;
+            return false;
         }
         catch (Exception exception)
         {
-            AppendExecutionLog(report, $"Run failed: {exception.Message}");
-            progressText = "Failed";
-            progress = 100;
-            isComplete = false;
+            AppendLog(report, $"Failed: {exception.Message}");
             hasRunError = true;
+            isComplete = false;
+            SetProgress(100, "Failed");
             finish.Summary = BuildFinishSummary(
-                requestedActions,
+                requested,
                 successfulActions,
                 skippedActions,
                 failedActions,
@@ -461,34 +424,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         finally
         {
             isRunning = false;
-            OnPropertyChanged(nameof(IsRunning));
-            RefreshNavigationState();
-            OnPropertyChanged(nameof(Progress));
-            OnPropertyChanged(nameof(ProgressText));
-            OnPropertyChanged(nameof(IsComplete));
-            OnPropertyChanged(nameof(RequiresRestart));
+            runCancellation = null;
+            RefreshAll();
         }
-    }
-
-    private void AppendExecutionLog(StringBuilder report, string message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return;
-        }
-
-        report.AppendLine(message);
-        finish.Progress = report.ToString().Trim();
-    }
-
-    public void Cancel()
-    {
-        isCanceled = true;
-        isComplete = false;
-        OnPropertyChanged(nameof(IsCanceled));
-        OnPropertyChanged(nameof(CanMoveNext));
-        OnPropertyChanged(nameof(CanMovePrevious));
-        OnPropertyChanged(nameof(CanRun));
     }
 
     public void SetProgress(int value, string message)
@@ -505,61 +443,193 @@ public sealed class InstallerWizardViewModel : ObservableObject
         finish.RequiresRestart = requiresRestart;
         finish.RollbackNotes = message;
         OnPropertyChanged(nameof(RollbackResult));
-        OnPropertyChanged(nameof(RequiresRestart));
     }
 
-    public void ConfirmReview()
+    public void RefreshNavigationState() => RefreshAll();
+
+    private void ApplyResidencyPolicy(StringBuilder report)
     {
-        review.IsConfirmed = true;
+        try
+        {
+            var store = new ModelResidencyPolicyStore(
+                ModelResidencyPolicyStore.DefaultRuntimeRoot);
+            store.Write(store.Read() with { ModelResidency = residency.Policy });
+            AppendLog(report, $"Model residency policy: {residency.Policy}.");
+            if (residency.Policy != ModelResidencyPolicy.RequireFullVram)
+            {
+                AppendLog(
+                    report,
+                    "Warning: residency is relaxed, so models may be slower than a fully " +
+                    "resident load. Degraded answers will say so.");
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            AppendLog(report, $"Could not store the residency policy: {exception.Message}");
+            hasRunError = true;
+        }
+    }
+
+    private static int StepIndex(InstallerPage page)
+    {
+        for (var index = 0; index < Steps.Count; index++)
+        {
+            if (Steps[index].Page == page)
+            {
+                return index;
+            }
+        }
+
+        return 0;
+    }
+
+    private string BuildReview()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine(package.ReviewText);
+        builder.AppendLine(dependencies.ReviewText);
+        builder.AppendLine(models.ReviewText);
+        builder.AppendLine(residency.ReviewText);
+        builder.AppendLine(agents.ReviewText);
+        if (residency.HasWarning)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Warning: " + residency.Warning);
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private void RebuildSteps()
+    {
+        StepList.Clear();
+        var current = StepIndex(CurrentPage);
+        for (var index = 0; index < Steps.Count; index++)
+        {
+            StepList.Add(new WizardStep(
+                Steps[index].Page,
+                Steps[index].Title,
+                index == current,
+                index < current));
+        }
+    }
+
+    private void RefreshAll()
+    {
+        RebuildSteps();
+        OnPropertyChanged(nameof(CurrentPage));
+        OnPropertyChanged(nameof(StepTitle));
+        OnPropertyChanged(nameof(StepDescription));
+        OnPropertyChanged(nameof(StepStatus));
+        OnPropertyChanged(nameof(StepList));
+        OnPropertyChanged(nameof(CurrentPageIndex));
+        OnPropertyChanged(nameof(CanMovePrevious));
+        OnPropertyChanged(nameof(CanMoveNext));
         OnPropertyChanged(nameof(CanRun));
-        OnPropertyChanged(nameof(RunButtonVisibility));
+        OnPropertyChanged(nameof(CanCancel));
+        OnPropertyChanged(nameof(IsNextVisible));
+        OnPropertyChanged(nameof(IsInstallVisible));
+        OnPropertyChanged(nameof(CancelButtonText));
+        OnPropertyChanged(nameof(IsFinishPage));
+        OnPropertyChanged(nameof(IsProgressPage));
+        OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(IsComplete));
+        OnPropertyChanged(nameof(HasRunError));
+        OnPropertyChanged(nameof(ReviewText));
+        OnPropertyChanged(nameof(FinishSummary));
+        BackCommand.RaiseCanExecuteChanged();
+        NextCommand.RaiseCanExecuteChanged();
+        InstallCommand.RaiseCanExecuteChanged();
+        CancelCommand.RaiseCanExecuteChanged();
+    }
+
+    private static void AppendLog(StringBuilder report, string message)
+    {
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            report.AppendLine(message);
+        }
+    }
+
+    private static string BuildFinishSummary(
+        int requestedActions,
+        int successfulActions,
+        int skippedActions,
+        int failedActions,
+        string? fatalMessage = null)
+    {
+        var summary = new StringBuilder();
+        summary.AppendLine($"Requested: {requestedActions}.");
+        summary.AppendLine($"Installed: {successfulActions}.");
+        summary.AppendLine($"Skipped: {skippedActions}.");
+        summary.AppendLine($"Failed: {failedActions}.");
+        if (!string.IsNullOrWhiteSpace(fatalMessage))
+        {
+            summary.AppendLine(fatalMessage);
+        }
+
+        return summary.ToString().Trim();
     }
 
     private async Task RefreshEnvironmentDiagnosticsAsync(CancellationToken cancellationToken)
     {
-        var diagnosis = await environmentDetector
-            .DetectAsync(cancellationToken);
+        var diagnosis = await environmentDetector.DetectAsync(cancellationToken);
         environmentDiagnosis = diagnosis;
 
-        diagnose.SetResult(
-            diagnosis.IsSupported,
-            diagnosis.UnsupportedReasons.Count == 0
-                ? null
-                : string.Join("; ", diagnosis.UnsupportedReasons));
+        diagnose.Load(diagnosis);
+        residency.HasUsableAdapter = diagnose.HasUsableAdapter;
+        agents.ApplyDetection(diagnosis.Agents);
+        await RefreshRecommendationAsync(diagnosis, cancellationToken);
 
+        // Detection records presence only; it must not grant consent on the user's behalf.
         dependencies.SetInstalled("Git", diagnosis.Git.State == DependencyState.Detected);
         dependencies.SetInstalled("Ollama", diagnosis.Ollama.State == DependencyState.Detected);
 
-        if (diagnosis.Git.State == DependencyState.Detected)
-        {
-            dependencies.SetConsent("Git", true);
-        }
-
-        if (diagnosis.Ollama.State == DependencyState.Detected)
-        {
-            dependencies.SetConsent("Ollama", true);
-        }
-
-        if (diagnosis.UnsupportedReasons.Count > 0)
-        {
-            finish.Progress = string.Join(
-                Environment.NewLine,
-                diagnosis.UnsupportedReasons);
-        }
-
         OnPropertyChanged(nameof(Diagnose));
         OnPropertyChanged(nameof(Dependencies));
-        OnPropertyChanged(nameof(ProgressText));
-        RefreshNavigationState();
+        RefreshAll();
     }
 
-    private static bool CanInstall(string dependencyId) =>
-        dependencyId switch
+    /// <summary>
+    /// Recomputes which catalogue models fit this machine. Sizes come from the public model
+    /// registry, so this is a network call: it must never prevent the wizard from running,
+    /// and an offline machine simply gets the catalogue without sizes.
+    /// </summary>
+    private async Task RefreshRecommendationAsync(
+        EnvironmentDiagnosis diagnosis,
+        CancellationToken cancellationToken)
+    {
+        try
         {
-            "Git" => true,
-            "Ollama" => true,
-            _ => false,
-        };
+            using var registry = new OllamaRegistryClient();
+            var recommender = new CatalogModelRecommender(registry);
+            lastRecommendation = await recommender.RecommendAsync(
+                diagnosis.Gpu,
+                models.CatalogModels,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            lastRecommendation = CatalogRecommendation.Empty;
+        }
+
+        models.ApplyRecommendation(
+            lastRecommendation,
+            residency.Policy == ModelResidencyPolicy.RequireFullVram);
+    }
+
+    /// <summary>
+    /// Re-applies the last recommendation under the current residency choice, so relaxing
+    /// the policy immediately widens what the models page offers.
+    /// </summary>
+    public void OnResidencyChanged()
+    {
+        models.ApplyRecommendation(
+            lastRecommendation,
+            residency.Policy == ModelResidencyPolicy.RequireFullVram);
+        RefreshAll();
+    }
 
     private static DependencyDefinition? ResolveDependencyDefinition(string dependencyId) =>
         dependencyId switch
@@ -572,46 +642,49 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private async Task<bool> TryInstallDependencyWithWingetAsync(
         DependencyDefinition dependency,
         string displayName,
+        bool reinstall,
         CancellationToken cancellationToken)
     {
-        if (environmentDiagnosis is null)
+        if (environmentDiagnosis?.WinGet is not
+            { State: DependencyState.Detected, ExecutablePath: { } wingetPath })
         {
+            SetRollbackInfo(
+                $"WinGet is unavailable; install {displayName} manually from " +
+                $"{dependency.OfficialInstallerUri}.",
+                false);
             return false;
         }
 
-        if (environmentDiagnosis.WinGet.State != DependencyState.Detected ||
-            environmentDiagnosis.WinGet.ExecutablePath is null)
+        var arguments = new List<string>
         {
-            var message =
-                $"WinGet is not available; install {displayName} manually from {dependency.OfficialInstallerUri}.";
-            SetRollbackInfo(message, false);
-            finish.Progress = message + Environment.NewLine + (finish.Progress ?? string.Empty);
-            return false;
+            "install",
+            "--id",
+            dependency.PackageId,
+            "--exact",
+            "--source",
+            "winget",
+            "--silent",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+        };
+
+        // --force only when the user explicitly asked to reinstall something already
+        // present. Passing it unconditionally reinstalled working software on every run.
+        if (reinstall)
+        {
+            arguments.Add("--force");
         }
 
         var result = await processRunner.RunAsync(
-                environmentDiagnosis.WinGet.ExecutablePath,
-                [
-                    "install",
-                    "--id",
-                    dependency.PackageId,
-                    "--exact",
-                    "--source",
-                    "winget",
-                    "--silent",
-                    "--accept-package-agreements",
-                    "--accept-source-agreements",
-                    "--force",
-                ],
-                DependencyInstallTimeout,
-                cancellationToken);
-
+            wingetPath,
+            [.. arguments],
+            DependencyInstallTimeout,
+            cancellationToken);
         if (result.ExitCode is not 0)
         {
-            var message =
-                $"{displayName} installation via WinGet failed. Exit code: {result.ExitCode}.";
-            SetRollbackInfo(message, false);
-            finish.Progress = message + Environment.NewLine + (finish.Progress ?? string.Empty);
+            SetRollbackInfo(
+                $"{displayName} installation failed with exit code {result.ExitCode}.",
+                false);
             return false;
         }
 

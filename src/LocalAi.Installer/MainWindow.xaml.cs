@@ -4,6 +4,10 @@ using LocalAi.Installer.ViewModels;
 
 namespace LocalAi.Installer;
 
+/// <summary>
+/// Navigation lives in the view model and is bound through commands, so this file only
+/// forwards the few control events that WPF cannot express as a two-way binding.
+/// </summary>
 public partial class MainWindow : Window
 {
     private readonly InstallerWizardViewModel viewModel = new() { EnableDependencyActions = true };
@@ -12,127 +16,44 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+        viewModel.CloseRequested += (_, _) => Close();
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
-    {
+    private async void OnLoaded(object sender, RoutedEventArgs e) =>
         await viewModel.InitializeAsync();
-    }
-
-    private void OnPreviousClicked(object sender, RoutedEventArgs e)
-    {
-        viewModel.MovePrevious();
-    }
-
-    private async void OnNextClicked(object sender, RoutedEventArgs e)
-    {
-        if (viewModel.CurrentPage == InstallerPage.ReviewApply)
-        {
-            await viewModel.RunAsync();
-            return;
-        }
-
-        viewModel.MoveNext();
-    }
-
-    private async void OnRunClicked(object sender, RoutedEventArgs e)
-    {
-        await viewModel.RunAsync();
-    }
-
-    private void OnCloseClicked(object sender, RoutedEventArgs e)
-    {
-        Close();
-    }
 
     private void OnDependencyConsentChanged(object sender, RoutedEventArgs e)
     {
-        if (sender is not CheckBox checkBox)
+        if (sender is not CheckBox { Tag: string dependencyId })
         {
             return;
         }
 
-        var dependencyId = checkBox.Tag?.ToString();
-        if (string.IsNullOrWhiteSpace(dependencyId))
-        {
-            return;
-        }
-
-        viewModel.Dependencies.SetConsent(dependencyId, checkBox.IsChecked == true);
+        viewModel.Dependencies.SetConsent(dependencyId, ((CheckBox)sender).IsChecked == true);
         viewModel.RefreshNavigationState();
     }
 
-    private void OnPackageSelectRelease(object sender, RoutedEventArgs e)
+    private void OnPackageCheckRelease(object sender, RoutedEventArgs e)
     {
-        if (PackageVersionBox.Text is not string version || string.IsNullOrWhiteSpace(version))
-        {
-            version = "latest";
-        }
-
-        viewModel.Package.SelectCompatibleRelease(version.Trim(), true);
+        // No release feed is configured yet, and the page must not claim a package it has
+        // not resolved. Reporting the real state is the whole point of this button.
+        viewModel.Package.ReportUnavailable(
+            "No signed release manifest is published for this build yet, so the LocalAi " +
+            "package cannot be installed. Everything else on the following pages still " +
+            "applies.");
         viewModel.RefreshNavigationState();
-    }
-
-    private void OnModelModeAutomatic(object sender, RoutedEventArgs e)
-    {
-        viewModel.Models.Mode = ModelSelectionMode.Automatic;
-        viewModel.RefreshNavigationState();
-    }
-
-    private void OnModelModeSkip(object sender, RoutedEventArgs e)
-    {
-        viewModel.Models.Mode = ModelSelectionMode.Skip;
-        viewModel.RefreshNavigationState();
-    }
-
-    private void OnModelModeManual(object sender, RoutedEventArgs e)
-    {
-        viewModel.Models.Mode = ModelSelectionMode.Manual;
-        viewModel.RefreshNavigationState();
-    }
-
-    private void OnManualModelIdChanged(object sender, TextChangedEventArgs e)
-    {
-        if (sender is not TextBox textBox)
-        {
-            return;
-        }
-
-        viewModel.Models.ManualModelId = textBox.Text;
-        viewModel.RefreshNavigationState();
-    }
-
-    private void OnManualContextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (sender is not TextBox textBox)
-        {
-            return;
-        }
-
-        if (int.TryParse(textBox.Text, out var context))
-        {
-            viewModel.Models.ManualContextWindow = context;
-            viewModel.RefreshNavigationState();
-        }
     }
 
     private void OnAgentChoiceChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is not ComboBox comboBox)
+        if (sender is not ComboBox { Tag: string agent } comboBox ||
+            comboBox.SelectedItem is not AgentChoice choice)
         {
             return;
         }
 
-        if (comboBox.Tag is not string agent)
-        {
-            return;
-        }
-
-        if (comboBox.SelectedItem is ComboBoxItem item && item.Tag is AgentChoice choice)
-        {
-            viewModel.Agents.SetChoice(agent, choice);
-            viewModel.RefreshNavigationState();
-        }
+        viewModel.Agents.SetChoice(agent, choice);
+        viewModel.RefreshNavigationState();
     }
 
     private void OnReviewConfirmedChanged(object sender, RoutedEventArgs e)

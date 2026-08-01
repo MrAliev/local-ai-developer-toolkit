@@ -230,8 +230,7 @@ public static class ModelCommand
                 request.CatalogVersion,
                 StringComparison.Ordinal) ||
             proof.SizeBytes <= 0 ||
-            proof.SizeVramBytes != proof.SizeBytes ||
-            !proof.FullyResident ||
+            !IsResidencyAcceptable(proof) ||
             proof.VerifiedAtUtc == default ||
             proof.VerifiedAtUtc.Offset != TimeSpan.Zero ||
             proof.VerifiedAtUtc > DateTimeOffset.UtcNow.AddMinutes(5))
@@ -254,6 +253,22 @@ public static class ModelCommand
                 proof.VerifiedAtUtc));
         return SuccessExitCode;
     }
+
+    /// <summary>
+    /// Checks the proof against the configured residency policy rather than assuming full
+    /// residency. This validation guards against a broker reporting more than it delivered,
+    /// so it has to know which outcomes the installation actually permits — otherwise a
+    /// machine deliberately configured for integrated graphics would look like a liar.
+    /// </summary>
+    private static bool IsResidencyAcceptable(LocalModelPreflightOutput proof) =>
+        ModelResidencyPolicyStore.ReadDefault().ModelResidency switch
+        {
+            ModelResidencyPolicy.RequireFullVram =>
+                proof.FullyResident && proof.SizeVramBytes == proof.SizeBytes,
+            ModelResidencyPolicy.AllowPartialOffload => proof.SizeVramBytes > 0,
+            ModelResidencyPolicy.AllowCpu => true,
+            _ => false,
+        };
 
     private static string[] ValidateAndSortModels(IReadOnlyList<string>? models)
     {

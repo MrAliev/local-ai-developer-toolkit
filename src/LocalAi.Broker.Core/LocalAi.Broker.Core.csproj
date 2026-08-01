@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Holds the broker pieces that clients need as a library: the durable queue and the
+       runtime ACL bootstrap. They used to live in the broker executable, which forced
+       LocalAi.Broker.Client to reference an OutputType=Exe project. That pulled the broker's
+       apphost, deps.json and runtimeconfig.json into every dependent publish and made a
+       RID specific framework dependent publish fail with NETSDK1152.
+
+       The namespace stays LocalAi.Broker so no call site had to change. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

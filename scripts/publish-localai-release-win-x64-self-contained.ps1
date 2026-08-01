@@ -24,6 +24,10 @@ $projects = @(
     "src/LocalLm.Mcp/LocalLm.Mcp.csproj",
     "src/LocalAi.Cli/LocalAi.Cli.csproj",
     "src/LocalAi.Launcher/LocalAi.Launcher.csproj",
+    # The broker belongs in every version directory: a version without it cannot serve
+    # model requests. It ships self-contained so an installed machine never needs a
+    # system-wide .NET runtime to start it.
+    "src/LocalAi.Broker/LocalAi.Broker.csproj",
     "src/LocalAi.Installer/LocalAi.Installer.csproj"
 )
 

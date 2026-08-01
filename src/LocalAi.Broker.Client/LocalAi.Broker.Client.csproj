@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\LocalAi.Broker\LocalAi.Broker.csproj" />
+    <!-- Deliberately the library, not the broker executable: referencing an Exe project made
+         every dependent publish carry the broker's apphost and host files. -->
+    <ProjectReference Include="..\LocalAi.Broker.Core\LocalAi.Broker.Core.csproj" />
     <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
   </ItemGroup>
 

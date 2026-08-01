@@ -1,144 +1,292 @@
-﻿using LocalAi.Installer.ViewModels;
+using LocalAi.Contracts;
+using LocalAi.Installer.Core.Planning;
+using LocalAi.Installer.ViewModels;
 
 namespace LocalAi.Installer.Tests;
 
 public sealed class InstallerWizardViewModelTests
 {
-    [Fact]
-    public void Navigator_blocks_unsupported_diagnosis_and_advances_when_supported()
+    private static InstallerWizardViewModel SupportedWizard()
     {
-        var vm = new InstallerWizardViewModel();
-        vm.Diagnose.SetResult(false, "unsupported cpu");
-
-        Assert.False(vm.CanMoveNext);
-        Assert.False(vm.MoveNext());
-
-        vm.Diagnose.SetResult(true);
-        Assert.True(vm.MoveNext());
-        Assert.Equal(InstallerPage.Dependencies, vm.CurrentPage);
+        var wizard = new InstallerWizardViewModel();
+        wizard.Diagnose.SetResult(true);
+        return wizard;
     }
 
     [Fact]
-    public void Dependencies_supports_independent_consent()
+    public void Unsupported_environment_blocks_the_first_page()
     {
-        var vm = new InstallerWizardViewModel();
-        vm.MoveNext();
-        var dependencies = vm.Dependencies;
+        var wizard = new InstallerWizardViewModel();
+        wizard.Diagnose.SetResult(false, "unsupported cpu");
 
-        dependencies.SetConsent("Git", true);
-        dependencies.SetConsent("VisualCpp", false);
-        dependencies.MarkInstalled("Ollama");
-        Assert.NotEqual(dependencies.Dependencies[0].IsConsented, dependencies.Dependencies[1].IsConsented);
+        Assert.False(wizard.CanMoveNext);
+        Assert.False(wizard.MoveNext());
 
-        dependencies.SetConsent("VisualCpp", true);
-        Assert.True(vm.Dependencies.CanContinue);
+        wizard.Diagnose.SetResult(true);
+        Assert.True(wizard.MoveNext());
+        Assert.Equal(InstallerPage.Dependencies, wizard.CurrentPage);
     }
 
     [Fact]
-    public void Model_page_requires_manual_values_when_mode_is_manual()
+    public void Nothing_is_consented_before_the_user_says_so()
     {
-        var vm = new InstallerWizardViewModel();
-        vm.MoveNext(); // Dependencies
-        vm.MoveNext(); // Package
+        var wizard = SupportedWizard();
 
-        vm.Models.Mode = ModelSelectionMode.Manual;
-        vm.Models.ManualContextWindow = 8192;
-        vm.Models.ManualModelId = "llama3.1";
-
-        Assert.True(vm.Models.CanContinue);
-        Assert.Contains("manual llama3.1", vm.Models.ReviewText);
+        Assert.All(
+            wizard.Dependencies.Dependencies,
+            dependency => Assert.False(dependency.IsConsented));
+        Assert.False(wizard.Review.IsConfirmed);
     }
 
     [Fact]
-    public void Agents_allow_fourway_choices_per_agent()
+    public void A_required_dependency_blocks_until_it_is_installed_or_selected()
     {
-        var vm = new InstallerWizardViewModel();
-        vm.MoveNext(); // Dependencies
-        vm.MoveNext(); // Package
-        vm.MoveNext(); // Models
+        var wizard = SupportedWizard();
+        wizard.MoveNext();
 
-        vm.Agents.SetChoice("codex", AgentChoice.InstallManagedBlock);
-        vm.Agents.SetChoice("claude", AgentChoice.ConfigureExisting);
+        Assert.False(wizard.Dependencies.CanContinue);
 
-        Assert.Equal(2, vm.Agents.Agents.Count);
-        Assert.True(vm.Agents.CanContinue);
-        Assert.Contains("codex:InstallManagedBlock", vm.Agents.ReviewText, StringComparison.Ordinal);
+        wizard.Dependencies.SetConsent("Git", true);
+        Assert.False(wizard.Dependencies.CanContinue);
+
+        wizard.Dependencies.SetInstalled("Ollama", true);
+        Assert.True(wizard.Dependencies.CanContinue);
     }
 
     [Fact]
-    public void Review_renders_exact_summary_and_supports_confirmation_run_restart_notice()
+    public void Detecting_a_dependency_does_not_grant_consent_to_reinstall_it()
     {
-        var vm = new InstallerWizardViewModel();
-        vm.Diagnose.SetResult(true);
-        vm.MoveNext(); // Dependencies
-        vm.Dependencies.SetConsent("Git", true);
-        vm.MoveNext(); // Package
-        vm.Package.SelectCompatibleRelease("0.1.2", true);
-        vm.MoveNext(); // Models
-        vm.Models.Mode = ModelSelectionMode.Skip;
-        vm.MoveNext(); // Agents
-        vm.Agents.SetChoice("codex", AgentChoice.RunWithoutAgent);
-        vm.Agents.SetChoice("claude", AgentChoice.Skip);
-        vm.Review.IsConfirmed = true;
-        vm.MoveNext(); // Review
+        var wizard = SupportedWizard();
 
-        var review = vm.ReviewText!;
-        Assert.Contains("OS supported: True", review);
-        Assert.Contains("Agents:", review);
-        Assert.True(vm.CanRun);
+        wizard.Dependencies.SetInstalled("Git", true);
 
-        vm.SetProgress(35, "Installing");
-        vm.SetRollbackInfo("Manual restore path available.", true);
-        Assert.Equal(35, vm.Progress);
-        Assert.Equal("Installing", vm.ProgressText);
-        Assert.Equal("Manual restore path available.", vm.RollbackResult);
-        Assert.True(vm.RequiresRestart);
-
-        vm.ConfirmReview();
-        Assert.True(vm.CanRun);
-        Assert.True(vm.Run());
-        Assert.True(vm.IsComplete);
-        Assert.Equal("Completed", vm.ProgressText);
-        Assert.Equal(InstallerPage.Finish, vm.CurrentPage);
+        var git = wizard.Dependencies.Dependencies.Single(item => item.Id == "Git");
+        Assert.True(git.IsInstalled);
+        Assert.False(git.IsConsented);
     }
 
     [Fact]
-    public void Cancellation_moves_state_to_canceled_and_blocks_navigation()
+    public void A_dependency_without_an_installer_cannot_be_selected()
     {
-        var vm = new InstallerWizardViewModel();
-        vm.Diagnose.SetResult(true);
-        vm.Cancel();
+        var wizard = SupportedWizard();
 
-        Assert.True(vm.IsCanceled);
-        Assert.False(vm.CanMoveNext);
-        Assert.False(vm.MoveNext());
+        wizard.Dependencies.SetConsent("VisualCpp", true);
+
+        var msvc = wizard.Dependencies.Dependencies.Single(item => item.Id == "VisualCpp");
+        Assert.False(msvc.IsInstallable);
+        Assert.False(msvc.IsConsented);
     }
 
     [Fact]
-    public void Language_switching_switches_display_language()
+    public void The_package_page_never_claims_a_release_it_has_not_resolved()
     {
-        var vm = new InstallerWizardViewModel();
+        var wizard = SupportedWizard();
 
-        vm.Language = "ru-RU";
+        Assert.False(wizard.Package.HasPackage);
+        Assert.False(wizard.Package.IsCompatible);
 
-        Assert.True(vm.IsRussian);
-        Assert.Equal("ru-RU", InstallerCulture.CurrentCultureCode);
+        wizard.Package.ReportUnavailable("no manifest published");
+
+        Assert.False(wizard.Package.HasPackage);
+        Assert.Contains("not resolved", wizard.Package.ReviewText, StringComparison.Ordinal);
+        // An unresolved package must not trap the user on this page.
+        Assert.True(wizard.Package.CanContinue);
     }
 
     [Fact]
-    public void Defaults_allow_fast_navigation_to_run_step()
+    public void Exact_model_selection_offers_only_catalogue_models()
     {
-        var vm = new InstallerWizardViewModel();
-        vm.Diagnose.SetResult(true);
+        var wizard = SupportedWizard();
 
-        Assert.True(vm.MoveNext()); // Dependencies
-        Assert.True(vm.MoveNext()); // Package
-        Assert.True(vm.MoveNext()); // Models
-        Assert.True(vm.MoveNext()); // Agents
-        Assert.True(vm.MoveNext()); // Review
-        Assert.Equal(InstallerPage.ReviewApply, vm.CurrentPage);
+        // Everything offered must be routable: a model outside the catalogue cannot be
+        // loaded at all, so it must never appear as a choice.
+        Assert.NotEmpty(wizard.Models.CatalogModels);
+        Assert.All(
+            wizard.Models.CatalogModels,
+            model =>
+            {
+                Assert.NotEmpty(model.Capabilities);
+                Assert.NotEmpty(model.ContextTokens);
+            });
+    }
 
-        Assert.True(vm.Review.IsConfirmed);
-        Assert.True(vm.CanRun);
+    [Fact]
+    public void Exact_model_selection_restricts_contexts_to_the_selected_model()
+    {
+        var wizard = SupportedWizard();
+        wizard.Models.Mode = ModelSelectionMode.ChooseExact;
+
+        var model = wizard.Models.CatalogModels.First();
+        wizard.Models.SelectedModel = model;
+
+        Assert.Equal(
+            [.. model.ContextTokens.OrderBy(value => value)],
+            wizard.Models.AvailableContexts);
+        Assert.Contains(wizard.Models.SelectedContext, model.ContextTokens);
+        Assert.True(wizard.Models.CanContinue);
+        Assert.Contains(model.Tag, wizard.Models.ReviewText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Switching_model_keeps_a_context_both_models_permit()
+    {
+        var wizard = SupportedWizard();
+        wizard.Models.Mode = ModelSelectionMode.ChooseExact;
+
+        var first = wizard.Models.CatalogModels.First();
+        wizard.Models.SelectedModel = first;
+        var shared = wizard.Models.AvailableContexts.First();
+        wizard.Models.SelectedContext = shared;
+
+        foreach (var candidate in wizard.Models.CatalogModels.Skip(1))
+        {
+            wizard.Models.SelectedModel = candidate;
+            // Either the deliberate choice survived, or it was replaced by one this model
+            // actually permits — never left at an unsupported value.
+            Assert.Contains(wizard.Models.SelectedContext, candidate.ContextTokens);
+        }
+    }
+
+    [Fact]
+    public void Residency_defaults_to_strict_and_warns_only_when_relaxed()
+    {
+        var wizard = SupportedWizard();
+
+        Assert.Equal(ModelResidencyPolicy.RequireFullVram, wizard.Residency.Policy);
+        Assert.False(wizard.Residency.HasWarning);
+
+        wizard.Residency.IsAllowCpu = true;
+
+        Assert.Equal(ModelResidencyPolicy.AllowCpu, wizard.Residency.Policy);
+        Assert.True(wizard.Residency.HasWarning);
+    }
+
+    [Fact]
+    public void A_missing_adapter_hints_but_does_not_change_the_choice()
+    {
+        var wizard = SupportedWizard();
+
+        wizard.Residency.HasUsableAdapter = false;
+
+        Assert.True(wizard.Residency.HasAdapterHint);
+        // The installer states the consequence; it does not relax the policy on its own.
+        Assert.Equal(ModelResidencyPolicy.RequireFullVram, wizard.Residency.Policy);
+    }
+
+    [Fact]
+    public void Agents_default_to_leaving_a_client_alone_and_map_onto_the_core_choices()
+    {
+        var wizard = SupportedWizard();
+
+        Assert.All(
+            wizard.Agents.Agents,
+            agent => Assert.Equal(AgentChoice.NoChange, agent.Choice));
+
+        wizard.Agents.SetChoice("claude", AgentChoice.McpAndInstructions);
+
+        Assert.Equal(
+            AgentIntegrationChoice.McpAndInstructions,
+            wizard.Agents.Agents.Single(agent => agent.Agent == "claude").Choice.ToCore());
+        Assert.Equal(
+            AgentIntegrationChoice.NoChange,
+            AgentChoice.NoChange.ToCore());
+    }
+
+    [Fact]
+    public void Navigation_reaches_confirm_and_install_needs_an_explicit_confirmation()
+    {
+        var wizard = SupportedWizard();
+        wizard.Dependencies.SetInstalled("Git", true);
+        wizard.Dependencies.SetInstalled("Ollama", true);
+
+        Assert.True(wizard.MoveNext()); // Dependencies
+        Assert.True(wizard.MoveNext()); // Package
+        Assert.True(wizard.MoveNext()); // Models
+        Assert.True(wizard.MoveNext()); // Residency
+        Assert.True(wizard.MoveNext()); // Agents
+        Assert.True(wizard.MoveNext()); // Confirm
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
+
+        Assert.False(wizard.CanRun);
+        wizard.SetReviewConfirmed(true);
+        Assert.True(wizard.CanRun);
+    }
+
+    [Fact]
+    public void Confirm_offers_install_instead_of_next_and_keeps_back_available()
+    {
+        var wizard = SupportedWizard();
+        wizard.Dependencies.SetInstalled("Git", true);
+        wizard.Dependencies.SetInstalled("Ollama", true);
+        for (var step = 0; step < 6; step++)
+        {
+            wizard.MoveNext();
+        }
+
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
+        Assert.False(wizard.IsNextVisible);
+        Assert.True(wizard.IsInstallVisible);
+        Assert.True(wizard.CanMovePrevious);
+        Assert.True(wizard.CanCancel);
+    }
+
+    [Fact]
+    public void Back_is_unavailable_on_the_first_page()
+    {
+        var wizard = SupportedWizard();
+
+        Assert.False(wizard.CanMovePrevious);
+        Assert.False(wizard.MovePrevious());
+    }
+
+    [Fact]
+    public void The_review_summarises_every_page_and_repeats_a_relaxed_residency_warning()
+    {
+        var wizard = SupportedWizard();
+        wizard.Dependencies.SetConsent("Git", true);
+        wizard.Models.Mode = ModelSelectionMode.Skip;
+        wizard.Residency.IsAllowCpu = true;
+        wizard.Agents.SetChoice("claude", AgentChoice.McpOnly);
+
+        var review = wizard.ReviewText!;
+
+        Assert.Contains("LocalAi package", review, StringComparison.Ordinal);
+        Assert.Contains("Git", review, StringComparison.Ordinal);
+        Assert.Contains("skipped", review, StringComparison.Ordinal);
+        Assert.Contains("AllowCpu", review, StringComparison.Ordinal);
+        Assert.Contains("Claude Code", review, StringComparison.Ordinal);
+        Assert.Contains("Warning", review, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_dry_run_reports_completion_without_installing_anything()
+    {
+        var wizard = SupportedWizard();
+        wizard.Dependencies.SetInstalled("Git", true);
+        wizard.Dependencies.SetInstalled("Ollama", true);
+        for (var step = 0; step < 6; step++)
+        {
+            wizard.MoveNext();
+        }
+
+        wizard.SetReviewConfirmed(true);
+        Assert.True(await wizard.RunAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(wizard.IsComplete);
+        Assert.False(wizard.HasRunError);
+        Assert.Equal(InstallerPage.Finish, wizard.CurrentPage);
+        Assert.Equal("Installation complete", wizard.StepTitle);
+    }
+
+    [Fact]
+    public void Cancelling_outside_a_run_asks_the_window_to_close()
+    {
+        var wizard = SupportedWizard();
+        var closed = false;
+        wizard.CloseRequested += (_, _) => closed = true;
+
+        wizard.Cancel();
+
+        Assert.True(closed);
     }
 }

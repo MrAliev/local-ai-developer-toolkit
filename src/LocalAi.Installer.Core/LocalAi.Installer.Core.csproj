@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <!-- Public half of the release signing pair. Safe to commit; the private half never
+         leaves the machine that publishes releases. -->
+    <EmbeddedResource Include="Releases\release-signing-public.spki.der"
+                      LogicalName="LocalAi.release-signing-public.spki.der" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
     <!-- Tasks 6/8 must add clean library adapters before Installer.Core consumes these project types. -->
     <ProjectReference Include="..\LocalAi.Launcher\LocalAi.Launcher.csproj"
