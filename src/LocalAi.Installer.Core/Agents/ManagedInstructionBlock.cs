@@ -86,6 +86,33 @@ public static class ManagedInstructionBlock
         A literal sweep for one exact token, once the target is already known, is still a job
         for grep. Reading a file before editing it is never delegated to anything.
 
+        ### Any repository, not just the ones already set up
+
+        Indexing is opt-in per repository and costs two commands, so "this repository is new"
+        is a step to take, not a reason to stop using local tools. On opening one, run the
+        read-only check first:
+
+        ```
+        localai repo status
+        ```
+
+        If it is not connected, offer the whole kit — the immutable base generation, branch
+        overlays and the shared Git hooks that keep them current — and set nothing up without
+        an explicit yes:
+
+        ```
+        localai-launcher.exe run localai sync --root <repository>
+        localai-launcher.exe run localai hooks install --root <repository>
+        ```
+
+        Nothing here is tied to one repository or one path. A repository is identified by its
+        normalised Git common directory, so every worktree, client and CLI share a single
+        identity for it, and the same two commands work wherever it was cloned.
+
+        While a repository is still building its first generation the status is INITIALIZING.
+        A partial index is not a fast index: do not answer from it, and say the repository is
+        still indexing rather than quietly falling back to a text search.
+
         ### Images, logs, routine file work
 
         | Tool | What it is for |

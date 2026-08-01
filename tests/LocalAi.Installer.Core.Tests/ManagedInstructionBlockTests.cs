@@ -52,6 +52,12 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("Never access Ollama")]
     [InlineData("full-VRAM, zero-offload")]
     [InlineData("estimated cloud tokens avoided")]
+    // Indexing is opt-in per repository, so an assistant that does not know how to connect
+    // one is limited to whatever was set up before it arrived.
+    [InlineData("localai repo status")]
+    [InlineData("localai sync --root")]
+    [InlineData("localai hooks install --root")]
+    [InlineData("INITIALIZING")]
     public void The_block_states_every_rule_the_installation_depends_on(string rule) =>
         Assert.Contains(rule, ManagedInstructionBlock.Block, StringComparison.Ordinal);
 
