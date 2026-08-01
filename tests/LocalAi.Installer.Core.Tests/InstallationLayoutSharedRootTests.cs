@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using LocalAi.Installer.Core.Activation;
 
 namespace LocalAi.Installer.Core.Tests;
@@ -53,6 +55,38 @@ public sealed class InstallationLayoutSharedRootTests : IDisposable
             "ValidateRootShape",
             error?.Message ?? string.Empty,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_acl_stricter_than_required_is_accepted()
+    {
+        // Exactly what the broker writes on the shared root: the user and Administrators,
+        // no SYSTEM. Fewer principals than the installer grants itself is not a weaker
+        // directory, and demanding an exact match refused every machine the runtime had
+        // ever touched.
+        var layout = Layout();
+        Directory.CreateDirectory(layout.Root);
+        var security = new DirectorySecurity();
+        var user = WindowsIdentity.GetCurrent().User!;
+        security.SetOwner(user);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        const InheritanceFlags inheritance =
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+        security.AddAccessRule(new FileSystemAccessRule(
+            user, FileSystemRights.FullControl, inheritance, PropagationFlags.None,
+            AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            FileSystemRights.FullControl, inheritance, PropagationFlags.None,
+            AccessControlType.Allow));
+        new DirectoryInfo(layout.Root).SetAccessControl(security);
+        File.WriteAllText(Path.Combine(layout.Root, "host.json"), "{}");
+
+        using var lease = InstallationLayoutLease.Acquire(
+            layout,
+            requireFreshInstallerTree: true);
+
+        Assert.Equal(layout.Root, lease.Layout.Root);
     }
 
     [Fact]
