@@ -377,6 +377,21 @@ processes. Roll back by activating a previously verified immutable directory.
 All model requests, including compatibility commands, continue to use the shared FIFO
 broker; direct Ollama access is unsupported.
 
+Stopping the tools of a version is available on its own:
+
+```powershell
+bin\launcher\localai-launcher.exe stop [--version <version>]
+```
+
+It stops the processes running out of the active version — or the named one — and does not
+touch the pointer. Activation stops them too, but only as part of switching, and the step
+before that switch is replacing the stable launcher binary. Windows refuses to overwrite a
+running executable, and every connected client keeps one launcher process alive per tool it
+uses, so an installation could publish a new version, fail to put the new launcher in place,
+and roll the whole thing back — with the recovery for it sitting one step further on. The
+installer now stops the tools when, and only when, they are in the way: an upgrade on an idle
+machine touches nothing.
+
 Reading the pointer takes a **shared** lease; only the swap takes the lock exclusively.
 This matters because every launcher-run tool holds a shared lease for its whole lifetime, so
 on any machine that is actually using LocalAi a connected client is holding one — and an

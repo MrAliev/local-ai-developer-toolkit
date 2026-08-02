@@ -377,7 +377,8 @@ public sealed class LocalAiPackageInstaller
             retainedVersion.Revalidate();
             package.Revalidate();
 
-            if (File.Exists(layout.LauncherPath))
+            var launcherExisted = File.Exists(layout.LauncherPath);
+            if (launcherExisted)
             {
                 launcherBackup = layoutLease.CreateLauncherBackup();
             }
@@ -397,7 +398,13 @@ public sealed class LocalAiPackageInstaller
                     cancellationToken)
                 .ConfigureAwait(false);
             package.Revalidate();
-            File.Move(launcherTemporary, layout.LauncherPath, overwrite: true);
+            await MoveLauncherIntoPlaceAsync(
+                    package,
+                    launcherTemporary,
+                    layout.LauncherPath,
+                    launcherExisted,
+                    cancellationToken)
+                .ConfigureAwait(false);
             launcherTemporary = null;
             launcherReplaced = true;
             VerifyFile(layout.LauncherPath, FileMetadata(package, LocalAiPackageLayout.StableLauncherFile));
@@ -1150,6 +1157,89 @@ public sealed class LocalAiPackageInstaller
     /// launcher, and the swap itself stays guarded by <c>--if-current-sha256</c>, so a pointer
     /// that changes between this read and activation is still caught rather than overwritten.
     /// </summary>
+    /// <summary>
+    /// Asks the launcher that is about to be installed to stop the tools of the version that is
+    /// about to be replaced.
+    ///
+    /// Windows will not let a running executable be overwritten, and every connected client
+    /// keeps one launcher process alive per tool it uses, so the replacement below failed on
+    /// exactly the machines where LocalAi was in use. Activation stops those processes, but
+    /// activation runs after the replacement, so the recovery sat one step past the failure.
+    ///
+    /// The new launcher does the stopping, not the installed one: a launcher old enough to lack
+    /// the verb is precisely the one that has to be replaced, and asking it would fail for
+    /// every machine upgrading from before this existed. It is verified against the package
+    /// before it is executed.
+    ///
+    /// Best effort by design. A stop that fails leaves the move below to report the real
+    /// problem, which is a better error than a stop failure that says nothing about why the
+    /// installation could not continue.
+    /// </summary>
+    private async Task StopRunningToolsAsync(
+        string verifiedLauncherPath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await processRunner
+                .RunAsync(verifiedLauncherPath, ["stop"], activationTimeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (
+            exception is not OperationCanceledException && IsNativeHandoffFailure(exception))
+        {
+        }
+    }
+
+    /// <summary>
+    /// Puts the new launcher in place, stopping the running tools only if they are in the way.
+    ///
+    /// Deliberately reactive. Stopping a client's tools is disruptive, and on a machine where
+    /// nothing is running the replacement simply succeeds, so asking first would cost every
+    /// installation a process and every user their running tools for no reason at all.
+    ///
+    /// The retries after the stop cover the other half of the race: an editor notices its
+    /// server exit and starts a new one within milliseconds, and the new one takes the binary
+    /// again. A brief pause turns that into a wait rather than a failed installation.
+    /// </summary>
+    private async Task MoveLauncherIntoPlaceAsync(
+        VerifiedPackage package,
+        string temporaryPath,
+        string launcherPath,
+        bool mayNeedStop,
+        CancellationToken cancellationToken)
+    {
+        var stopped = false;
+        for (var attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                File.Move(temporaryPath, launcherPath, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (
+                mayNeedStop && !stopped &&
+                exception is IOException or UnauthorizedAccessException)
+            {
+                stopped = true;
+                VerifyFile(
+                    temporaryPath,
+                    FileMetadata(package, LocalAiPackageLayout.StableLauncherFile));
+                await StopRunningToolsAsync(temporaryPath, cancellationToken)
+                    .ConfigureAwait(false);
+                package.Revalidate();
+            }
+            catch (Exception exception) when (
+                stopped && attempt < 6 &&
+                exception is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
     private CurrentPointerSnapshot ReadPointerLocked(InstallationLayout layout)
     {
         using var activationLease = ActivationCoordinator.AcquireShared(
