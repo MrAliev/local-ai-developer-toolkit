@@ -83,11 +83,31 @@ public sealed class BrokerHost
         }
     }
 
-    public async Task RunAsync(CancellationToken cancellationToken)
+    public Task RunAsync(CancellationToken cancellationToken) =>
+        RunAsync(cancellationToken, drainRequested: null);
+
+    /// <summary>
+    /// Runs until cancelled, or until <paramref name="drainRequested"/> asks it to stop taking
+    /// work.
+    ///
+    /// The two are not the same thing and must not be conflated. Cancellation reaches into the
+    /// running job and abandons it; draining does not touch it at all — it only stops the loop
+    /// from leasing anything new, so the job in flight runs to completion and is reported
+    /// normally before the process exits. Stopping a broker mid-inference to replace a binary
+    /// is exactly the kind of thing that should never be the only option available.
+    /// </summary>
+    public async Task RunAsync(
+        CancellationToken cancellationToken,
+        Func<bool>? drainRequested)
     {
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (drainRequested?.Invoke() == true)
+            {
+                return;
+            }
+
             var lease = await LeaseNextAsync(cancellationToken);
             if (lease is null)
             {

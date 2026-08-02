@@ -1,3 +1,4 @@
+using LocalAi.Contracts;
 using LocalAi.Launcher;
 
 namespace LocalAi.Launcher.Tests;
@@ -49,6 +50,15 @@ public sealed class VersionStopperTests : IDisposable
         List<int> stopped) =>
         new(() => running, (process, _) => stopped.Add(process.ProcessId));
 
+    private VersionStopper Stopper(LocalAiProcessController controller) =>
+        new(
+            BinRoot,
+            controller,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(1),
+            // No real waiting: the fakes decide when the broker is gone.
+            _ => { });
+
     [Fact]
     public void Stops_the_tools_of_the_active_version_without_touching_the_pointer()
     {
@@ -63,8 +73,7 @@ public sealed class VersionStopperTests : IDisposable
         };
         var pointerBefore = File.ReadAllBytes(Path.Combine(BinRoot, "current.json"));
 
-        var result = new VersionStopper(BinRoot, Controller(running, stopped), TimeSpan.FromSeconds(5))
-            .Stop(null);
+        var result = Stopper(Controller(running, stopped)).Stop(null);
 
         Assert.Equal("v1", result.Version);
         Assert.True(result.StoppedAnything);
@@ -79,8 +88,7 @@ public sealed class VersionStopperTests : IDisposable
         Directory.CreateDirectory(BinRoot);
         var stopped = new List<int>();
 
-        var result = new VersionStopper(BinRoot, Controller([], stopped), TimeSpan.FromSeconds(5))
-            .Stop(null);
+        var result = Stopper(Controller([], stopped)).Stop(null);
 
         // A first installation must not have to explain an error it cannot act on.
         Assert.Null(result.Version);
@@ -100,11 +108,67 @@ public sealed class VersionStopperTests : IDisposable
             new ProcessSnapshot(51, DateTimeOffset.UtcNow, Path.Combine(old, "localai.exe"), null),
         };
 
-        var result = new VersionStopper(BinRoot, Controller(running, stopped), TimeSpan.FromSeconds(5))
-            .Stop("v1");
+        var result = Stopper(Controller(running, stopped)).Stop("v1");
 
         Assert.Equal("v1", result.Version);
         Assert.Equal([51], stopped);
+    }
+
+    [Fact]
+    public void The_broker_is_asked_to_finish_before_anything_is_killed()
+    {
+        var directory = PublishVersion("v1");
+        WritePointer("v1");
+        var startedAt = DateTimeOffset.UtcNow;
+        var brokerPath = Path.Combine(directory, "LocalAi.Broker.exe");
+        var broker = new ProcessSnapshot(61, startedAt, brokerPath, brokerPath);
+        var tool = new ProcessSnapshot(
+            62,
+            startedAt,
+            Path.Combine(directory, "codesearch-mcp.exe"),
+            null);
+        var stopped = new List<int>();
+        BrokerShutdownRequest? seenByBroker = null;
+        // Stands in for the broker's heartbeat: it reads the request and exits by itself, which
+        // is what a stop should look like when nothing has to be destroyed to achieve it.
+        var controller = new LocalAiProcessController(
+            () =>
+            {
+                seenByBroker ??= BrokerShutdownRequestStore.Read(root);
+                return seenByBroker is null
+                    ? [broker, tool]
+                    : [tool];
+            },
+            (process, _) => stopped.Add(process.ProcessId));
+
+        var result = Stopper(controller).Stop(null);
+
+        Assert.True(result.BrokerDrained);
+        Assert.Equal(61, seenByBroker?.ProcessId);
+        Assert.Equal(startedAt, seenByBroker?.StartedAtUtc);
+        // The broker left on its own; only the stdio tool, which has no channel to be asked
+        // through and nothing to lose, was terminated.
+        Assert.Equal([62], stopped);
+        // And the request does not outlive the stop, or it would shut down the next broker.
+        Assert.Null(BrokerShutdownRequestStore.Read(root));
+    }
+
+    [Fact]
+    public void A_broker_that_will_not_finish_is_still_stopped()
+    {
+        var directory = PublishVersion("v1");
+        WritePointer("v1");
+        var brokerPath = Path.Combine(directory, "LocalAi.Broker.exe");
+        var broker = new ProcessSnapshot(71, DateTimeOffset.UtcNow, brokerPath, brokerPath);
+        var stopped = new List<int>();
+
+        var result = Stopper(Controller([broker], stopped)).Stop(null);
+
+        // Asking is the first answer, not the only one.
+        Assert.False(result.BrokerDrained);
+        Assert.True(result.StoppedAnything);
+        Assert.Equal([71], stopped);
+        Assert.Null(BrokerShutdownRequestStore.Read(root));
     }
 
     [Fact]
@@ -114,8 +178,7 @@ public sealed class VersionStopperTests : IDisposable
         WritePointer("v1");
         var stopped = new List<int>();
 
-        var result = new VersionStopper(BinRoot, Controller([], stopped), TimeSpan.FromSeconds(5))
-            .Stop(null);
+        var result = Stopper(Controller([], stopped)).Stop(null);
 
         Assert.Equal("v1", result.Version);
         Assert.False(result.StoppedAnything);

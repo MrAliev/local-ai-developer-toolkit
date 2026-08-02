@@ -119,13 +119,19 @@ internal static class BrokerProgram
                 residentModel: () => executionRouter.ResidentModel,
                 durationObserver: scheduleMetadata.Observe,
                 idleUnload: executionRouter.UnloadResidentAsync);
+            // Set by the heartbeat loop, read by the host loop between jobs. A stopper asks for
+            // this instead of killing the process, so the job in flight is finished and
+            // reported rather than abandoned half way through an inference.
+            var drain = new DrainSignal();
             var heartbeat = PublishHeartbeatAsync(
                 stateStore,
                 owner,
+                runtimeRoot,
+                drain,
                 shutdown.Token);
             try
             {
-                await host.RunAsync(shutdown.Token);
+                await host.RunAsync(shutdown.Token, () => drain.Requested);
             }
             catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
             {
@@ -145,15 +151,47 @@ internal static class BrokerProgram
         }
     }
 
+    private sealed class DrainSignal
+    {
+        private volatile bool requested;
+
+        public bool Requested => requested;
+
+        public void Request() => requested = true;
+    }
+
+    /// <summary>
+    /// Publishes the heartbeat and, on the same tick, notices a shutdown request addressed to
+    /// this broker. The loop already runs once a second, so noticing costs one file check and
+    /// no watcher, port or protocol.
+    ///
+    /// The request is deleted as soon as it is accepted: leaving it behind would shut down the
+    /// broker that replaces this one, seconds after it starts.
+    /// </summary>
     private static async Task PublishHeartbeatAsync(
         BrokerRuntimeStateStore store,
         BrokerProcessState owner,
+        string runtimeRoot,
+        DrainSignal drain,
         CancellationToken cancellationToken)
     {
         while (true)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
             store.Publish(owner with { HeartbeatAtUtc = DateTimeOffset.UtcNow });
+            if (drain.Requested)
+            {
+                continue;
+            }
+
+            var request = BrokerShutdownRequestStore.Read(runtimeRoot);
+            if (request is not null &&
+                request.ProcessId == owner.ProcessId &&
+                request.StartedAtUtc == owner.StartedAtUtc)
+            {
+                BrokerShutdownRequestStore.Delete(runtimeRoot);
+                drain.Request();
+            }
         }
     }
 
