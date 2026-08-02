@@ -15,6 +15,28 @@ public enum RepositoryIndexState
     Failed
 }
 
+[JsonConverter(typeof(StrictJsonStringEnumConverter))]
+public enum RepositoryIndexProgressPhase
+{
+    Planning,
+    EmbeddingBase,
+    EmbeddingOverlay,
+    Publishing,
+    Completed,
+    Failed
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record RepositoryIndexProgress(
+    string RepositoryId,
+    RepositoryIndexProgressPhase Phase,
+    string WorkingRoot,
+    int ProcessedChunks,
+    int TotalChunks,
+    double ChunksPerSecond,
+    TimeSpan? EstimatedRemaining,
+    DateTimeOffset UpdatedAtUtc);
+
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record RepositoryWorktree(
     string Path,

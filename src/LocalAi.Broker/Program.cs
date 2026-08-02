@@ -118,7 +118,12 @@ internal static class BrokerProgram
                 },
                 residentModel: () => executionRouter.ResidentModel,
                 durationObserver: scheduleMetadata.Observe,
-                idleUnload: executionRouter.UnloadResidentAsync);
+                idleUnload: executionRouter.UnloadResidentAsync,
+                backendProbe: transport.ProbeActiveModelAsync,
+                diagnostic: diagnostic => Console.Error.WriteLine(
+                    $"LocalAi broker diagnostic: job={diagnostic.JobId:N} " +
+                    $"operation={diagnostic.Operation} " +
+                    $"exception={diagnostic.ExceptionType}."));
             // Set by the heartbeat loop, read by the host loop between jobs. A stopper asks for
             // this instead of killing the process, so the job in flight is finished and
             // reported rather than abandoned half way through an inference.

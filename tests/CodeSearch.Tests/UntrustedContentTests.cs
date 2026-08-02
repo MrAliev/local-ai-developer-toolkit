@@ -9,6 +9,7 @@ using CodeSearch.Core.Security;
 using CodeSearch.Core.Search;
 using CodeSearch.Mcp;
 using LocalAi.Contracts;
+using LocalAi.Repository;
 
 namespace CodeSearch.Tests;
 
@@ -317,6 +318,28 @@ public sealed class UntrustedContentMcpTests : IDisposable
             "<untrusted-content",
             maintenance,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Status_reports_durable_sync_progress_remaining_chunks_and_eta()
+    {
+        new RepositoryIndexProgressStore(_identity.RepositoryRuntimeRoot).Save(
+            new RepositoryIndexProgress(
+                _identity.RepositoryId,
+                RepositoryIndexProgressPhase.EmbeddingBase,
+                _root,
+                120,
+                300,
+                2.5,
+                TimeSpan.FromSeconds(72),
+                DateTimeOffset.UtcNow));
+
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        Assert.Contains("Sync phase: EmbeddingBase", status, StringComparison.Ordinal);
+        Assert.Contains("120/300 chunks (180 remaining)", status, StringComparison.Ordinal);
+        Assert.Contains("2.5 chunks/s", status, StringComparison.Ordinal);
+        Assert.Contains("ETA:        1.2 min", status, StringComparison.Ordinal);
     }
 
     private SearchChunkId CurrentId(int ordinal) =>

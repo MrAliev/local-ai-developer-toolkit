@@ -6,6 +6,8 @@ using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Security;
 using CodeSearch.Core.Search;
+using LocalAi.Contracts;
+using LocalAi.Repository;
 using ModelContextProtocol.Server;
 
 namespace CodeSearch.Mcp;
@@ -190,12 +192,15 @@ public static class CodeSearchTools
         string? root = null)
     {
         var status = service.Status(root);
+        var progress = ReadProgress(status.WorkingRoot);
+        var progressText = FormatProgress(progress);
         if (!status.Exists)
         {
             return $"""
                 Repository: {status.RepositoryRoot}
                 Index:      {status.IndexPath}
                 Status:     NOT BUILT
+                {progressText}
 
                 Build it with:
                   {IndexCommand(status.RepositoryRoot, DefaultModel)}
@@ -215,6 +220,47 @@ public static class CodeSearchTools
             Size:       {status.SizeBytes / 1024.0 / 1024.0:F1} MB
             Built:      {status.IndexedAtUtc:u} at commit {Short(status.IndexedCommit)}
             Status:     {staleness}
+            {progressText}
+            """;
+    }
+
+    private static RepositoryIndexProgress? ReadProgress(string workingRoot)
+    {
+        try
+        {
+            var identity = RuntimeIndexLayout.Inspect(workingRoot);
+            return new RepositoryIndexProgressStore(
+                identity.RepositoryRuntimeRoot).Read();
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+                UnauthorizedAccessException or
+                InvalidDataException or
+                InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string FormatProgress(RepositoryIndexProgress? progress)
+    {
+        if (progress is null)
+        {
+            return string.Empty;
+        }
+
+        var remaining = Math.Max(0, progress.TotalChunks - progress.ProcessedChunks);
+        var eta = progress.EstimatedRemaining is { } estimate
+            ? estimate == TimeSpan.Zero
+                ? "0"
+                : $"{estimate.TotalMinutes:F1} min"
+            : "calculating";
+        return $"""
+            Sync phase: {progress.Phase}
+            Progress:   {progress.ProcessedChunks}/{progress.TotalChunks} chunks ({remaining} remaining)
+            Rate:       {progress.ChunksPerSecond:F1} chunks/s
+            ETA:        {eta}
+            Updated:    {progress.UpdatedAtUtc:u}
             """;
     }
 

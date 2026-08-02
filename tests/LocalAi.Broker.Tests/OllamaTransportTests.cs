@@ -46,6 +46,98 @@ public sealed class OllamaTransportTests
     }
 
     [Fact]
+    public async Task Backend_probe_reports_unhealthy_when_the_active_model_disappears()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"embeddings":[[1,2,3]]}""");
+        fake.EnqueueJson(
+            HttpStatusCode.OK,
+            """
+            {"models":[{
+              "name":"embed-model",
+              "size":100,
+              "size_vram":100,
+              "context_length":8192,
+              "expires_at":"2026-08-02T12:00:00Z"
+            }]}
+            """);
+        fake.EnqueueJson(HttpStatusCode.OK, """{"models":[]}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await transport.ExecuteAsync(
+            LocalJobRequestFactory.CreateEmbed(
+                "probe-missing",
+                LocalJobPriority.Background,
+                "embed-model",
+                ["input"]),
+            TestContext.Current.CancellationToken);
+        var initialProbe = await transport.ProbeActiveModelAsync(
+            TestContext.Current.CancellationToken);
+        var probe = await transport.ProbeActiveModelAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BackendLiveness.Healthy, initialProbe.Liveness);
+        Assert.Equal(BackendLiveness.Unhealthy, probe.Liveness);
+        Assert.Equal("active_model_missing", probe.Code);
+    }
+
+    [Fact]
+    public async Task Backend_probe_keeps_a_long_job_alive_when_the_active_model_is_resident()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"embeddings":[[1,2,3]]}""");
+        fake.EnqueueJson(
+            HttpStatusCode.OK,
+            """
+            {"models":[{
+              "name":"embed-model",
+              "size":100,
+              "size_vram":100,
+              "context_length":8192,
+              "expires_at":"2026-08-02T12:00:00Z"
+            }]}
+            """);
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await transport.ExecuteAsync(
+            LocalJobRequestFactory.CreateEmbed(
+                "probe-healthy",
+                LocalJobPriority.Background,
+                "embed-model",
+                ["input"]),
+            TestContext.Current.CancellationToken);
+        var probe = await transport.ProbeActiveModelAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BackendLiveness.Healthy, probe.Liveness);
+    }
+
+    [Fact]
+    public async Task Backend_probe_is_inconclusive_until_the_active_model_is_first_observed()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"embeddings":[[1,2,3]]}""");
+        fake.EnqueueJson(HttpStatusCode.OK, """{"models":[]}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await transport.ExecuteAsync(
+            LocalJobRequestFactory.CreateEmbed(
+                "probe-loading",
+                LocalJobPriority.Background,
+                "embed-model",
+                ["input"]),
+            TestContext.Current.CancellationToken);
+        var probe = await transport.ProbeActiveModelAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BackendLiveness.Inconclusive, probe.Liveness);
+        Assert.Equal("active_model_loading", probe.Code);
+    }
+
+    [Fact]
     public async Task Runtime_pull_posts_non_streaming_request()
     {
         var fake = new FakeOllamaServer();
