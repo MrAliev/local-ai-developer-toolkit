@@ -65,11 +65,82 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
         Assert.StartsWith("User header\n", SinglePreview(@".codex\AGENTS.md", plan).AfterText, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The shape a Codex anybody uses actually has: quoted key segments for every plugin and
+    /// every project path, sub-tables carrying per-tool approvals, and Windows paths written as
+    /// literal strings. All of it was refused as "malformed", so the only Codex that could be
+    /// configured was an empty one.
+    /// </summary>
+    [Fact]
+    public void A_real_codex_configuration_is_updated_rather_than_refused()
+    {
+        var configPath = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(
+            configPath,
+            "approval_policy = \"never\"\n\n" +
+            "[plugins.\"github@openai-api-curated\"]\nenabled = true\n\n" +
+            "[projects.'r:\\intelwash']\ntrust_level = \"trusted\"\n\n" +
+            "[mcp_servers.codesearch]\n" +
+            "command = 'C:\\Old\\localai-launcher.exe'\n" +
+            "args = [\"run\", \"codesearch-mcp\"]\n\n" +
+            "[mcp_servers.codesearch.tools.search_code]\napproval_mode = \"approve\"\n\n" +
+            "[mcp_servers.locallm]\n" +
+            "command = 'C:\\Old\\localai-launcher.exe'\n" +
+            "args = [\"run\", \"locallm-mcp\"]\n\n" +
+            "[mcp_servers.locallm.tools.read_image]\napproval_mode = \"approve\"\n",
+            Encoding.UTF8);
+
+        var after = SinglePreview(
+            @".codex\config.toml",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterText;
+
+        // The command is repointed...
+        Assert.Contains(
+            "command = \"C:\\\\LocalAi\\\\bin\\\\launcher\\\\localai-launcher.exe\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("C:\\Old\\localai-launcher.exe", after, StringComparison.Ordinal);
+        // ...and the user's own settings are still there. Deleting a per-tool approval to
+        // update a command line would be worse than not configuring anything.
+        Assert.Contains(
+            "[mcp_servers.codesearch.tools.search_code]\napproval_mode = \"approve\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[mcp_servers.locallm.tools.read_image]\napproval_mode = \"approve\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.Contains("[plugins.\"github@openai-api-curated\"]", after, StringComparison.Ordinal);
+        Assert.Contains("[projects.'r:\\intelwash']", after, StringComparison.Ordinal);
+        Assert.Contains("approval_policy = \"never\"", after, StringComparison.Ordinal);
+        // Each server is still declared exactly once.
+        Assert.Equal(
+            1,
+            after.Split("[mcp_servers.codesearch]\n", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void A_quoted_key_containing_an_equals_sign_is_not_cut_in_half()
+    {
+        var configPath = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(
+            configPath,
+            "[projects]\n'c:\\repo\\a=b' = \"trusted\"\n",
+            Encoding.UTF8);
+
+        var after = SinglePreview(
+            @".codex\config.toml",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterText;
+
+        Assert.Contains("'c:\\repo\\a=b' = \"trusted\"", after, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("[mcp_servers.codesearch]\ncommand = 1\nargs = []\n")]
     [InlineData("[mcp_servers.codesearch]\ncommand = \"x\"\nargs = [1]\n")]
     [InlineData("[mcp_servers.codesearch]\ncommand = \"x\"\nargs = []\n[mcp_servers.codesearch]\ncommand = \"y\"\nargs = []\n")]
-    [InlineData("[mcp_servers.codesearch]\ncommand = \"x\"\nargs = []\n[mcp_servers.codesearch.env]\nTOKEN = \"secret\"\n")]
     [InlineData("[mcp_servers]\ncodesearch = { command = \"old\", args = [] }\n")]
     [InlineData("mcp_servers.codesearch.command = \"old\"\n")]
     [InlineData("not valid toml = [\n")]

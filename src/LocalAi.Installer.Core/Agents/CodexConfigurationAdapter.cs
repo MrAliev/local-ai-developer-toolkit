@@ -39,16 +39,70 @@ public sealed class CodexConfigurationAdapter(
     public Task ApplyAsync(AgentConfigurationPlan plan, CancellationToken cancellationToken) =>
         AgentConfigurationFileOperations.ApplyAsync(plan, readBack, cancellationToken);
 
+    /// <summary>
+    /// Updates the two managed servers in place rather than replacing them.
+    ///
+    /// The previous version deleted each managed section and appended a fresh one, which is why
+    /// it had to refuse a configuration that carried sub-tables such as
+    /// <c>[mcp_servers.codesearch.tools.search_code]</c>. Those sub-tables are the user's
+    /// per-tool approval settings, and a real Codex accumulates them; deleting them to update a
+    /// command line would be a worse outcome than not configuring anything at all.
+    ///
+    /// So only the command and its arguments are rewritten, inside the section that is already
+    /// there, and everything else the user put in it survives untouched.
+    /// </summary>
     private string UpdateToml(string before)
     {
         ValidateToml(before);
-        var withoutManaged = RemoveManagedTomlSections(before).TrimEnd();
-        var sections = ClientCommandPlan.Plan(installationDirectory).CodexTomlSections;
-        var suffix = string.Join("\n\n", sections) + "\n";
-        return withoutManaged.Length == 0
-            ? suffix
-            : withoutManaged + "\n\n" + suffix;
+        var plan = ClientCommandPlan.Plan(installationDirectory);
+        var updated = UpsertServer(before, "codesearch", plan.CodeSearch);
+        return UpsertServer(updated, "locallm", plan.LocalLm);
     }
+
+    private static string UpsertServer(
+        string toml,
+        string name,
+        ClientToolRegistration registration)
+    {
+        var header = Regex.Match(toml, @"(?m)^[ \t]*\[mcp_servers\." + name + @"\][ \t]*$");
+        if (!header.Success)
+        {
+            var prefix = toml.TrimEnd();
+            var section = TomlSection(name, registration);
+            return prefix.Length == 0 ? section + "\n" : prefix + "\n\n" + section + "\n";
+        }
+
+        // The section runs to the next table header, which is where its own sub-tables begin.
+        var bodyStart = header.Index + header.Length;
+        var next = Regex.Match(toml[bodyStart..], @"(?m)^[ \t]*\[");
+        var bodyEnd = next.Success ? bodyStart + next.Index : toml.Length;
+        var body = toml[bodyStart..bodyEnd];
+        body = ReplaceAssignment(body, "command", TomlString(registration.Command));
+        body = ReplaceAssignment(
+            body,
+            "args",
+            "[" + string.Join(
+                ", ",
+                registration.Arguments.Select(TomlString)) + "]");
+        return toml[..bodyStart] + body + toml[bodyEnd..];
+    }
+
+    private static string ReplaceAssignment(string body, string key, string value)
+    {
+        var assignment = Regex.Match(body, @"(?m)^[ \t]*" + key + @"[ \t]*=.*$");
+        return assignment.Success
+            ? body[..assignment.Index] + key + " = " + value +
+                body[(assignment.Index + assignment.Length)..]
+            : body.TrimEnd('\n') + "\n" + key + " = " + value + "\n";
+    }
+
+    private static string TomlString(string value) =>
+        "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+
+    private static string TomlSection(string name, ClientToolRegistration registration) =>
+        "[mcp_servers." + name + "]\n" +
+        "command = " + TomlString(registration.Command) + "\n" +
+        "args = [" + string.Join(", ", registration.Arguments.Select(TomlString)) + "]";
 
     private static void ValidateToml(string toml)
     {
@@ -60,11 +114,6 @@ public sealed class CodexConfigurationAdapter(
         if (toml.Count(character => character == '[') != toml.Count(character => character == ']'))
         {
             throw new InvalidOperationException("Malformed TOML MCP layout.");
-        }
-
-        if (Regex.IsMatch(toml, @"(?m)^\s*\[mcp_servers\.(?:codesearch|locallm)\."))
-        {
-            throw new InvalidOperationException("Unsupported TOML MCP layout.");
         }
 
         if (Regex.IsMatch(toml, @"(?m)^\s*\[mcp_servers\]\s*$") ||
@@ -85,15 +134,39 @@ public sealed class CodexConfigurationAdapter(
             var sectionStart = match.Index + match.Length;
             var next = Regex.Match(toml[sectionStart..], @"(?m)^\s*\[");
             var body = next.Success ? toml.Substring(sectionStart, next.Index) : toml[sectionStart..];
+            // Both quote forms, and each assignment on one line. The literal form is the
+            // natural way to write a Windows path — Codex writes it that way itself — and
+            // insisting on double quotes refused a configuration it had produced. The
+            // one-line requirement stays: the rewrite replaces an assignment line, so an
+            // array split across lines would leave half of itself behind.
             if (name is ("codesearch" or "locallm") &&
-                (!Regex.IsMatch(body, @"(?m)^\s*command\s*=\s*""[^""]*""\s*$") ||
-                !Regex.IsMatch(body, @"(?m)^\s*args\s*=\s*\[(\s*""[^""]*""\s*,?)*\s*\]\s*$"))
+                (!Regex.IsMatch(body, @"(?m)^[ \t]*command[ \t]*=[ \t]*" + TomlStringValue + @"[ \t]*$") ||
+                !Regex.IsMatch(
+                    body,
+                    @"(?m)^[ \t]*args[ \t]*=[ \t]*\[[ \t]*(?:" + TomlStringValue +
+                    @"[ \t]*,?[ \t]*)*\][ \t]*$"))
             )
             {
                 throw new InvalidOperationException("Malformed TOML MCP layout.");
             }
         }
     }
+
+    /// <summary>
+    /// A TOML key is a dotted path whose segments are bare or quoted. The quoted form used to
+    /// be rejected outright, which declared a perfectly valid configuration malformed and
+    /// refused to touch it — and Codex writes quoted segments itself, for every plugin
+    /// (<c>[plugins."github@openai-api-curated"]</c>) and every project path
+    /// (<c>[projects.'r:\repo']</c>). The result was that a Codex anybody actually used could
+    /// never be configured, while an empty one could.
+    /// </summary>
+    private const string TomlStringValue = @"(?:""(?:[^""\\]|\\.)*""|'[^']*')";
+
+    private const string KeySegment = @"(?:[A-Za-z0-9_-]+|""(?:[^""\\]|\\.)*""|'[^']*')";
+
+    private static readonly Regex KeyPath = new(
+        "^" + KeySegment + @"(?:[ \t]*\.[ \t]*" + KeySegment + ")*$",
+        RegexOptions.Compiled);
 
     private static void ValidateSupportedTomlLine(string line)
     {
@@ -105,7 +178,8 @@ public sealed class CodexConfigurationAdapter(
 
         if (trimmed.StartsWith('['))
         {
-            if (!Regex.IsMatch(trimmed, @"^\[[A-Za-z0-9_.-]+\]$"))
+            if (!trimmed.EndsWith(']') ||
+                !KeyPath.IsMatch(trimmed[1..^1].Trim()))
             {
                 throw new InvalidOperationException("Malformed TOML MCP layout.");
             }
@@ -113,7 +187,7 @@ public sealed class CodexConfigurationAdapter(
             return;
         }
 
-        var equals = trimmed.IndexOf('=');
+        var equals = IndexOfAssignment(trimmed);
         if (equals <= 0)
         {
             throw new InvalidOperationException("Malformed TOML MCP layout.");
@@ -121,10 +195,48 @@ public sealed class CodexConfigurationAdapter(
 
         var key = trimmed[..equals].Trim();
         var value = trimmed[(equals + 1)..].Trim();
-        if (!Regex.IsMatch(key, @"^[A-Za-z0-9_.-]+$") || !IsSupportedTomlValue(value))
+        if (!KeyPath.IsMatch(key) || !IsSupportedTomlValue(value))
         {
             throw new InvalidOperationException("Malformed TOML MCP layout.");
         }
+    }
+
+    /// <summary>
+    /// The first '=' outside a quoted key segment. A quoted key may contain one — a Windows
+    /// path in a project section routinely does — and splitting on the first '=' anywhere would
+    /// cut such a line in half and call the result malformed.
+    /// </summary>
+    private static int IndexOfAssignment(string line)
+    {
+        var quote = '\0';
+        for (var index = 0; index < line.Length; index++)
+        {
+            var character = line[index];
+            if (quote != '\0')
+            {
+                if (character == '\\' && quote == '"')
+                {
+                    index++;
+                }
+                else if (character == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (character is '"' or '\'')
+            {
+                quote = character;
+            }
+            else if (character == '=')
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     private static bool IsSupportedTomlValue(string value)
@@ -139,12 +251,6 @@ public sealed class CodexConfigurationAdapter(
 
         return Regex.IsMatch(value, @"^\[(\s*""([^""\\]|\\.)*""\s*,?)*\s*\]$");
     }
-
-    private static string RemoveManagedTomlSections(string toml) =>
-        Regex.Replace(
-            toml,
-            @"(?ms)^\s*\[mcp_servers\.(?:codesearch|locallm)\]\s*.*?(?=^\s*\[|\z)",
-            string.Empty).TrimEnd();
 
     private void AddInstructions(List<AgentConfigurationFilePlan> files, string path)
     {
