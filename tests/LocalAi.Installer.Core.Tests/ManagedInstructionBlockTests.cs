@@ -52,6 +52,9 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("Never access Ollama")]
     [InlineData("full-VRAM, zero-offload")]
     [InlineData("estimated cloud tokens avoided")]
+    [InlineData("exact `index_unload` tool name")]
+    [InlineData("processed, total and remaining chunks")]
+    [InlineData("current ETA")]
     // Indexing is opt-in per repository, so an assistant that does not know how to connect
     // one is limited to whatever was set up before it arrived.
     [InlineData("localai repo status")]
