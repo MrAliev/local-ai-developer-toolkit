@@ -206,6 +206,70 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(layout.LauncherDirectory));
     }
 
+    /// <summary>
+    /// The case that made the wizard unusable on any machine that actually ran LocalAi.
+    ///
+    /// Every tool started through the launcher — each MCP server of a connected client — holds
+    /// a shared lease on current.lock for its whole lifetime. Reading the pointer exclusively
+    /// meant the installation was refused before it reached the activation that passes
+    /// --stop-running, and refused with a message blaming the pointer, which was intact.
+    /// </summary>
+    [Fact]
+    public async Task A_client_holding_the_shared_lease_does_not_block_an_upgrade()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        using var connectedClient = ActivationCoordinator.AcquireShared(
+            layout.BinRoot,
+            TimeSpan.FromSeconds(5));
+        var runner = new RecordingRunner((_, arguments, _, _) =>
+        {
+            WritePointer(arguments[1]);
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Installed, result.Status);
+        Assert.Equal("v2", result.Version);
+        // Stopping those very processes is the activation's job, and it is finally reached.
+        Assert.Contains("--stop-running", Assert.Single(runner.Calls).Arguments);
+    }
+
+    [Fact]
+    public async Task A_contended_lock_is_reported_as_busy_rather_than_as_a_broken_pointer()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        // Another activation in flight — the one thing a reader genuinely has to wait for.
+        // Held as the coordinator's exclusive lease holds it, by the file share mode alone: an
+        // ActivationExclusiveLease also owns a named mutex, and a Win32 mutex has to be
+        // released by the thread that took it, which an await in this test cannot promise.
+        using var otherActivation = new FileStream(
+            Path.Combine(layout.BinRoot, "current.lock"),
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            FileShare.None);
+        var runner = new RecordingRunner((_, _, _, _) =>
+            Task.FromResult(new ProcessResult(0, "", "", false, false)));
+
+        var result = await new LocalAiPackageInstaller(
+                runner,
+                new ExistingLocalAiInspector(new SystemFileSystemProbe()),
+                TimeSpan.FromMilliseconds(250))
+            .InstallAsync(package, layout, TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Busy, result.Status);
+        Assert.Contains("activating", result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("pointer", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(runner.Calls);
+    }
+
     [Fact]
     public async Task Compatible_upgrade_backs_up_launcher_and_activates_new_version()
     {

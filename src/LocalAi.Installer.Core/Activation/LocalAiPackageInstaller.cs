@@ -226,6 +226,22 @@ public sealed class LocalAiPackageInstaller
                 {
                     priorPointer = ReadPointerLocked(layout);
                 }
+                catch (ActivationCoordinationException exception) when (
+                    exception.Code is "version_in_use" or "activation_timeout")
+                {
+                    // A contended lock and a corrupt pointer used to share one message, which
+                    // sent people to inspect a file that was perfectly fine. They are different
+                    // problems: this one clears itself, and the only useful thing to say is
+                    // what to wait for.
+                    return new(
+                        LocalAiPackageInstallStatus.Busy,
+                        version,
+                        existing.Version,
+                        versionPath,
+                        null,
+                        "Another process is activating a LocalAi version. Wait for it to " +
+                        "finish and run the installer again.");
+                }
                 catch (Exception exception) when (
                     exception is CurrentPointerException or ActivationCoordinationException ||
                     IsNativeHandoffFailure(exception))
@@ -1116,9 +1132,27 @@ public sealed class LocalAiPackageInstaller
         }
     }
 
+    /// <summary>
+    /// Reads the pointer under a shared lease, never an exclusive one.
+    ///
+    /// Every tool started through the launcher holds a shared lease on <c>current.lock</c> for
+    /// its whole lifetime, which on a machine where LocalAi is actually used means a connected
+    /// client is holding one at all times. Taking the lock exclusively just to read the pointer
+    /// therefore refused the installation before it reached the activation step — the step that
+    /// passes <c>--stop-running</c> and exists precisely to clear those processes. The recovery
+    /// was written and then made unreachable by the check in front of it.
+    ///
+    /// The same exclusivity broke the post-activation verification below in the opposite
+    /// direction: a client restarting its servers immediately after <c>--stop-running</c> retook
+    /// a shared lease, the verifying read failed, and a successful activation was rolled back.
+    ///
+    /// Reading has never needed exclusivity. Writers take the lock exclusively inside the
+    /// launcher, and the swap itself stays guarded by <c>--if-current-sha256</c>, so a pointer
+    /// that changes between this read and activation is still caught rather than overwritten.
+    /// </summary>
     private CurrentPointerSnapshot ReadPointerLocked(InstallationLayout layout)
     {
-        using var activationLease = ActivationCoordinator.AcquireExclusive(
+        using var activationLease = ActivationCoordinator.AcquireShared(
             layout.BinRoot,
             activationTimeout);
         return CurrentPointerSnapshot.Read(activationLease);

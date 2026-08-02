@@ -377,6 +377,14 @@ processes. Roll back by activating a previously verified immutable directory.
 All model requests, including compatibility commands, continue to use the shared FIFO
 broker; direct Ollama access is unsupported.
 
+Reading the pointer takes a **shared** lease; only the swap takes the lock exclusively.
+This matters because every launcher-run tool holds a shared lease for its whole lifetime, so
+on any machine that is actually using LocalAi a connected client is holding one — and an
+installer that took the lock exclusively merely to read the pointer refused the upgrade
+before reaching the activation that would have cleared those processes. A read has never
+needed exclusivity: the swap stays guarded by `--if-current-sha256`, which catches a pointer
+that changed in between rather than overwriting it.
+
 ### Model residency policy
 
 By default a model must be **fully resident in video memory**; anything less is refused. This
