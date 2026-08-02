@@ -137,6 +137,12 @@ public static class ManagedInstructionBlock
         return that line themselves, computed from what they actually processed; carry it
         through instead of inventing a number. Using a local tool silently and showing only
         the result defeats the point of having one.
+
+        After CodeSearch work, always include the exact `index_unload` tool name so the user
+        can release cached index memory immediately; explain that it leaves the on-disk index
+        intact and that idle indexes are also evicted automatically. While an index is still
+        building, use `index_status` and report processed, total and remaining chunks together
+        with the current ETA instead of saying only that indexing is in progress.
         """;
 
     private static List<int> AllIndexesOf(string content, string marker)
