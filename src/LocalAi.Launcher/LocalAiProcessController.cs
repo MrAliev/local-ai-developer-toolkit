@@ -34,6 +34,12 @@ public sealed class LocalAiProcessController
         _pathComparison = PathComparison;
     }
 
+    /// <summary>
+    /// The processes as they are right now. Exposed so a caller can ask a broker to finish its
+    /// work and then watch for it to go, rather than only being able to kill it.
+    /// </summary>
+    public IReadOnlyList<ProcessSnapshot> Snapshot() => _snapshot();
+
     public IReadOnlyList<ProcessSnapshot> SelectOwnedByVersion(
         string versionDirectory,
         IReadOnlyList<ProcessSnapshot> snapshots)

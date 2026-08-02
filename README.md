@@ -383,6 +383,17 @@ Stopping the tools of a version is available on its own:
 bin\launcher\localai-launcher.exe stop [--version <version>]
 ```
 
+The broker is asked to finish rather than killed. A shutdown request naming its process id and
+start time is written next to `host.json`; the broker notices it on the heartbeat it already
+publishes every second, stops leasing new work, lets the job in flight run to completion, and
+exits. Only a broker that has not gone by the deadline is terminated. It owns a durable queue
+and can be minutes into an inference, so destroying it is the answer of last resort rather than
+the mechanism. The request names a start time as well as an id so a stale one cannot shut down
+a healthy broker that inherited the id, and it is deleted as soon as it is accepted.
+
+The stdio tools have no durable state and no channel to be asked through, and their client
+restarts them on demand, so for those termination is all there is — and all that is needed.
+
 It stops the processes running out of the active version — or the named one — and does not
 touch the pointer. Activation stops them too, but only as part of switching, and the step
 before that switch is replacing the stable launcher binary. Windows refuses to overwrite a
