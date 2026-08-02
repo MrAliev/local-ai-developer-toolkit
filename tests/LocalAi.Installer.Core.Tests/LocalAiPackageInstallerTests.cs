@@ -240,6 +240,90 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         Assert.Contains("--stop-running", Assert.Single(runner.Calls).Arguments);
     }
 
+    /// <summary>
+    /// Windows refuses to overwrite a running executable, and every connected client keeps a
+    /// launcher process alive per tool it uses, so the replacement failed on exactly the
+    /// machines that were using LocalAi. Activation stops those processes — one step past the
+    /// failure — so the new launcher is asked to stop them before it takes the old one's place.
+    /// </summary>
+    [Fact]
+    public async Task A_launcher_held_by_a_running_tool_is_stopped_and_then_replaced()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        // How Windows holds a running executable: readable, and refusing to be replaced.
+        var runningTool = new FileStream(
+            layout.LauncherPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+        string? stoppedBy = null;
+        byte[]? launcherWhenStopped = null;
+        var runner = new RecordingRunner((executable, arguments, _, _) =>
+        {
+            if (arguments is ["stop"])
+            {
+                stoppedBy = executable;
+                launcherWhenStopped = File.ReadAllBytes(layout.LauncherPath);
+                runningTool.Dispose();
+            }
+            else
+            {
+                WritePointer(arguments[1]);
+            }
+
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+
+        try
+        {
+            var result = await Installer(runner).InstallAsync(
+                package,
+                layout,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(LocalAiPackageInstallStatus.Installed, result.Status);
+            Assert.Equal(["stop"], runner.Calls[0].Arguments);
+            // Asked of the new launcher, not the installed one: a launcher old enough to lack
+            // the verb is precisely the one that has to be replaced.
+            Assert.NotEqual(layout.LauncherPath, stoppedBy);
+            // And while the old one was still in place, which is the whole point of the order.
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes("prior-launcher"), launcherWhenStopped);
+            Assert.Contains("activate", runner.Calls[1].Arguments);
+            Assert.Equal(
+                Content(LocalAiPackageLayout.StableLauncherFile),
+                File.ReadAllBytes(layout.LauncherPath));
+        }
+        finally
+        {
+            runningTool.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Nothing_is_stopped_when_the_launcher_can_simply_be_replaced()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        using var package = Package("v2");
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var runner = new RecordingRunner((_, arguments, _, _) =>
+        {
+            WritePointer(arguments[1]);
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Installed, result.Status);
+        // Stopping a client's tools is disruptive; nothing was in the way, so nothing was
+        // touched, and the activation that follows still carries --stop-running for itself.
+        Assert.DoesNotContain(runner.Calls, call => call.Arguments is ["stop"]);
+    }
+
     [Fact]
     public async Task A_contended_lock_is_reported_as_busy_rather_than_as_a_broken_pointer()
     {

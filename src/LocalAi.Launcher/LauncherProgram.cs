@@ -8,6 +8,7 @@ public static class LauncherProgram
         """
         Usage: localai-launcher run <tool> [arguments...]
                localai-launcher activate <version> (--if-current-missing | --if-current-sha256 <SHA256>) [--stop-running]
+               localai-launcher stop [--version <version>]
         """;
 
     public static async Task<int> RunAsync(
@@ -40,6 +41,27 @@ public static class LauncherProgram
             }
         }
 
+        if (TryParseStop(args, out var stopVersion))
+        {
+            try
+            {
+                // Deliberately does not touch the pointer. Replacing the stable launcher needs
+                // the running tools gone and nothing else; folding that into activation is what
+                // made the two impossible to order correctly.
+                var stopper = new VersionStopper(
+                    binRoot,
+                    new LocalAiProcessController(),
+                    TimeSpan.FromSeconds(15));
+                stopper.Stop(stopVersion);
+                return 0;
+            }
+            catch (LauncherException exception)
+            {
+                await error.WriteLineAsync($"{exception.Code}: {exception.Message}");
+                return 1;
+            }
+        }
+
         if (TryParseActivation(args, out var activation))
         {
             try
@@ -64,6 +86,35 @@ public static class LauncherProgram
 
         await error.WriteLineAsync(Usage);
         return 2;
+    }
+
+    /// <summary>
+    /// `stop` on its own means the active version. An explicit `--version` is for the case
+    /// where the pointer has already moved on and something is still running out of the old
+    /// directory.
+    /// </summary>
+    private static bool TryParseStop(IReadOnlyList<string> args, out string? version)
+    {
+        version = null;
+        if (args.Count == 0 || !string.Equals(args[0], "stop", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (args.Count == 1)
+        {
+            return true;
+        }
+
+        if (args.Count != 3 ||
+            !string.Equals(args[1], "--version", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(args[2]))
+        {
+            return false;
+        }
+
+        version = args[2];
+        return true;
     }
 
     private static bool TryParseActivation(
