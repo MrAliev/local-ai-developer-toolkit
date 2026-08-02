@@ -65,6 +65,32 @@ public sealed class IndexBuilderNormalizationTests : IDisposable
         Assert.Equal(1, result.FilesEmbedded);
     }
 
+    [Fact]
+    public async Task Build_reports_structured_processed_total_rate_and_eta()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(
+            Path.Combine(_root, "notes.md"),
+            "line one\nline two\n");
+        var progress = new List<IndexBuildProgress>();
+        var builder = new IndexBuilder(
+            new RecordingEmbedder(),
+            progress: progress.Add);
+
+        var result = await builder.BuildAsync(
+            _root,
+            Path.Combine(_root, "index.cidx"),
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(progress);
+        Assert.Equal(0, progress[0].ProcessedChunks);
+        Assert.Equal(result.ChunksEmbedded, progress[0].TotalChunks);
+        var completed = progress[^1];
+        Assert.Equal(completed.TotalChunks, completed.ProcessedChunks);
+        Assert.True(completed.ChunksPerSecond > 0);
+        Assert.Equal(TimeSpan.Zero, completed.EstimatedRemaining);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

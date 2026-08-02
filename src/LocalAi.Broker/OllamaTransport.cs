@@ -20,6 +20,11 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
     private readonly Uri _baseUri;
     private readonly Func<TimeSpan, CancellationToken, Task> _retryDelay;
     private readonly bool _ownsHttpClient;
+    private readonly object _activeModelGate = new();
+    private string? _activeModel;
+    private int _activeModelObserved;
+
+    public string? ActiveModel => Volatile.Read(ref _activeModel);
 
     public OllamaTransport(
         HttpClient httpClient,
@@ -152,7 +157,57 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
                 model.ExpiresAt.ToUniversalTime()));
         }
 
+        var active = ActiveModel;
+        if (active is not null && processes.Any(process => string.Equals(
+                process.Model,
+                active,
+                StringComparison.Ordinal)))
+        {
+            Volatile.Write(ref _activeModelObserved, 1);
+        }
+
         return processes.AsReadOnly();
+    }
+
+    public async Task<BackendProbeResult> ProbeActiveModelAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var processes = await ListProcessesAsync(cancellationToken);
+            var expected = ActiveModel;
+            if (expected is not null &&
+                !processes.Any(process => string.Equals(
+                    process.Model,
+                    expected,
+                    StringComparison.Ordinal)))
+            {
+                return Volatile.Read(ref _activeModelObserved) == 1
+                    ? BackendProbeResult.Unhealthy("active_model_missing")
+                    : BackendProbeResult.Inconclusive("active_model_loading");
+            }
+
+            return BackendProbeResult.Healthy();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return BackendProbeResult.Inconclusive("probe_cancelled");
+        }
+        catch (HttpRequestException exception)
+        {
+            return BackendProbeResult.Unhealthy(
+                exception.StatusCode is null
+                    ? "backend_unreachable"
+                    : $"backend_http_{(int)exception.StatusCode.Value}");
+        }
+        catch (IOException)
+        {
+            return BackendProbeResult.Unhealthy("backend_io_failure");
+        }
+        catch
+        {
+            return BackendProbeResult.Inconclusive("probe_failed");
+        }
     }
 
     public async Task PullAsync(
@@ -190,6 +245,7 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        TrackActiveModel(model);
         if (!LocalContextTiers.IsSupported(contextTokens))
         {
             throw new ArgumentOutOfRangeException(nameof(contextTokens));
@@ -216,6 +272,7 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        TrackActiveModel(model);
         if (!LocalContextTiers.IsSupported(contextTokens))
         {
             throw new ArgumentOutOfRangeException(nameof(contextTokens));
@@ -261,6 +318,14 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
             [model],
             cancellationToken);
         RequireObject(document, "unload");
+        lock (_activeModelGate)
+        {
+            if (string.Equals(_activeModel, model, StringComparison.Ordinal))
+            {
+                Volatile.Write(ref _activeModel, null);
+                Volatile.Write(ref _activeModelObserved, 0);
+            }
+        }
     }
 
     private async Task<BrokerExecutionResult> ExecuteNativeAsync(
@@ -314,6 +379,7 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         EmbedJobPayload payload,
         CancellationToken cancellationToken)
     {
+        TrackActiveModel(payload.Model);
         var body = JsonSerializer.Serialize(new EmbedRequest(
             payload.Model,
             payload.Inputs,
@@ -376,6 +442,7 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         var model = payload.Model
             ?? throw new InvalidOperationException(
                 "Routed chat must be resolved to a concrete model before transport.");
+        TrackActiveModel(model);
         var messages = new List<ChatRequestMessage>();
         if (payload.System is not null)
         {
@@ -529,6 +596,20 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
 
     private static BrokerExecutionResult Result<T>(T output) =>
         new(JsonSerializer.SerializeToElement(output, LocalAiJson.Strict));
+
+    private void TrackActiveModel(string model)
+    {
+        lock (_activeModelGate)
+        {
+            if (string.Equals(_activeModel, model, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            Volatile.Write(ref _activeModel, model);
+            Volatile.Write(ref _activeModelObserved, 0);
+        }
+    }
 
     private static JsonSerializerOptions CreateExternalResponseJsonOptions()
     {

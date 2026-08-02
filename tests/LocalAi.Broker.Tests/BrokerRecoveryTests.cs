@@ -363,6 +363,107 @@ public sealed class BrokerRecoveryTests
         Assert.DoesNotContain("heartbeat storage", JsonSerializer.Serialize(diagnostic));
     }
 
+    [Fact]
+    public async Task BrokerHost_watchdog_fails_only_after_confirmed_unhealthy_probes()
+    {
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var lease = TestLease("watchdog-unhealthy", "worker");
+        var queue = new ScriptedBrokerQueue(lease);
+        var executionCancelled = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var probes = 0;
+
+        async Task<BrokerExecutionResult> Execute(
+            LocalJobRequest request,
+            CancellationToken token)
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            }
+            catch (OperationCanceledException)
+            {
+                executionCancelled.SetResult();
+                throw;
+            }
+
+            throw new UnreachableException();
+        }
+
+        var host = new BrokerHost(
+            queue,
+            "worker",
+            Execute,
+            idleDelay: static (delay, token) => Task.Delay(delay, token),
+            heartbeatInterval: TimeSpan.FromMilliseconds(5),
+            backendProbe: _ => Task.FromResult(
+                BackendProbeResult.Unhealthy($"missing-{++probes}")),
+            watchdogPolicy: new BackendWatchdogPolicy(
+                TimeSpan.FromMilliseconds(1),
+                TimeSpan.FromMilliseconds(1),
+                TimeSpan.FromSeconds(1),
+                RequiredUnhealthyProbes: 2));
+
+        var run = host.RunAsync(stop.Token);
+        await executionCancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        while (queue.FailCalls == 0)
+        {
+            await Task.Delay(5, TestContext.Current.CancellationToken);
+        }
+
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        Assert.Equal(2, probes);
+        Assert.Equal(1, queue.FailCalls);
+        Assert.Equal(0, queue.CancelCalls);
+    }
+
+    [Fact]
+    public async Task BrokerHost_watchdog_never_times_out_a_healthy_long_running_job()
+    {
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var lease = TestLease("watchdog-healthy", "worker");
+        var queue = new ScriptedBrokerQueue(lease);
+        var probes = 0;
+
+        async Task<BrokerExecutionResult> Execute(
+            LocalJobRequest request,
+            CancellationToken token)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            throw new UnreachableException();
+        }
+
+        Task<BackendProbeResult> Probe(CancellationToken token)
+        {
+            if (Interlocked.Increment(ref probes) == 3)
+            {
+                stop.Cancel();
+            }
+
+            return Task.FromResult(BackendProbeResult.Healthy());
+        }
+
+        var host = new BrokerHost(
+            queue,
+            "worker",
+            Execute,
+            idleDelay: static (delay, token) => Task.Delay(delay, token),
+            heartbeatInterval: TimeSpan.FromMilliseconds(5),
+            backendProbe: Probe,
+            watchdogPolicy: new BackendWatchdogPolicy(
+                TimeSpan.FromMilliseconds(1),
+                TimeSpan.FromMilliseconds(1),
+                TimeSpan.FromSeconds(1),
+                RequiredUnhealthyProbes: 2));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => host.RunAsync(stop.Token));
+        Assert.Equal(3, probes);
+        Assert.Equal(0, queue.FailCalls);
+        Assert.Equal(1, queue.CancelCalls);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

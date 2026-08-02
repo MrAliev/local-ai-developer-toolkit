@@ -26,139 +26,215 @@ public static class CodeSearchSyncCommand
         CancellationToken cancellationToken = default)
     {
         var requested = RuntimeIndexLayout.Inspect(workingRoot);
-        var worktrees = ReadWorktrees(requested.WorkingRoot);
+        var progressStore = new RepositoryIndexProgressStore(
+            requested.RepositoryRuntimeRoot);
         var manifestStore = new RepositoryManifestStore(
             requested.RepositoryRuntimeRoot);
-        var mainline = ResolveMainline(
-            requested,
-            manifestStore.Read()?.DevRef);
-        var generationIdentity = new GenerationIdentity(
+        var lastProgress = new RepositoryIndexProgress(
             requested.RepositoryId,
-            mainline.Identity.HeadCommit,
-            mainline.Identity.HeadTree,
-            model,
-            DefaultDimension,
-            1,
-            CodeIndex.CurrentVersion,
-            CurrentNormalizationVersion,
-            1);
-        var commonDirectory = RepositoryIdentity.FromCommonDirectory(
-            RepoLocator.GitOutput(
-                requested.WorkingRoot,
-                "rev-parse --path-format=absolute --git-common-dir")
-            ?? throw new InvalidOperationException("Git common directory is unavailable."))
-            .CommonDirectory;
-        manifestStore.Save(new RepositoryManifest(
-            requested.RepositoryId,
-            commonDirectory,
-            mainline.Ref,
+            RepositoryIndexProgressPhase.Planning,
+            requested.WorkingRoot,
+            0,
+            0,
+            0,
             null,
-            null,
-            model,
-            DefaultDimension,
-            1,
-            CodeIndex.CurrentVersion,
-            RepositoryIndexState.Initializing,
-            worktrees
-                .Where(item => !item.IsPrunable)
-                .Select(item => new RepositoryWorktree(item.Path, item.Head, item.Branch))
-                .ToArray(),
-            DateTimeOffset.UtcNow));
-        var store = new GenerationStore(requested.RepositoryRuntimeRoot);
-        var current = store.ReadCurrent();
-        var generationChanged = !string.Equals(
-            current?.GenerationId,
-            generationIdentity.Id,
-            StringComparison.Ordinal);
+            DateTimeOffset.UtcNow);
+        progressStore.Save(lastProgress);
 
-        GenerationManifest generation;
+        void ReportProgress(
+            RepositoryIndexProgressPhase phase,
+            string root,
+            IndexBuildProgress progress)
+        {
+            lastProgress = new RepositoryIndexProgress(
+                requested.RepositoryId,
+                phase,
+                root,
+                progress.ProcessedChunks,
+                progress.TotalChunks,
+                progress.ChunksPerSecond,
+                progress.EstimatedRemaining,
+                DateTimeOffset.UtcNow);
+            progressStore.Save(lastProgress);
+        }
+
         try
         {
-            generation = store.ReadManifest(generationIdentity.Id);
-        }
-        catch (Exception error) when (
-            error is DirectoryNotFoundException or FileNotFoundException)
-        {
-            generation = await BuildGenerationAsync(
-                store,
-                current,
-                generationIdentity,
-                mainline.Identity,
-                cancellationToken);
-        }
+            var worktrees = ReadWorktrees(requested.WorkingRoot);
+            var mainline = ResolveMainline(
+                requested,
+                manifestStore.Read()?.DevRef);
+            var generationIdentity = new GenerationIdentity(
+                requested.RepositoryId,
+                mainline.Identity.HeadCommit,
+                mainline.Identity.HeadTree,
+                model,
+                DefaultDimension,
+                1,
+                CodeIndex.CurrentVersion,
+                CurrentNormalizationVersion,
+                1);
+            var commonDirectory = RepositoryIdentity.FromCommonDirectory(
+                RepoLocator.GitOutput(
+                    requested.WorkingRoot,
+                    "rev-parse --path-format=absolute --git-common-dir")
+                ?? throw new InvalidOperationException("Git common directory is unavailable."))
+                .CommonDirectory;
+            manifestStore.Save(new RepositoryManifest(
+                requested.RepositoryId,
+                commonDirectory,
+                mainline.Ref,
+                null,
+                null,
+                model,
+                DefaultDimension,
+                1,
+                CodeIndex.CurrentVersion,
+                RepositoryIndexState.Initializing,
+                worktrees
+                    .Where(item => !item.IsPrunable)
+                    .Select(item => new RepositoryWorktree(item.Path, item.Head, item.Branch))
+                    .ToArray(),
+                DateTimeOffset.UtcNow));
+            var store = new GenerationStore(requested.RepositoryRuntimeRoot);
+            var current = store.ReadCurrent();
+            var generationChanged = !string.Equals(
+                current?.GenerationId,
+                generationIdentity.Id,
+                StringComparison.Ordinal);
 
-        var targets = generationChanged
-            ? worktrees
-            : worktrees.Where(
-                item => SamePath(item.Path, requested.WorkingRoot)).ToArray();
-        var overlaysBuilt = 0;
-        foreach (var worktree in targets.Where(item => !item.IsPrunable))
-        {
-            var identity = RuntimeIndexLayout.Inspect(worktree.Path);
-            if (string.Equals(
-                    identity.HeadTree,
-                    generation.Identity.DevTree,
-                    StringComparison.Ordinal) &&
-                identity.DirtyHash is null)
+            GenerationManifest generation;
+            try
             {
-                continue;
+                generation = store.ReadManifest(generationIdentity.Id);
+            }
+            catch (Exception error) when (
+                error is DirectoryNotFoundException or FileNotFoundException)
+            {
+                generation = await BuildGenerationAsync(
+                    store,
+                    current,
+                    generationIdentity,
+                    mainline.Identity,
+                    progress => ReportProgress(
+                        RepositoryIndexProgressPhase.EmbeddingBase,
+                        mainline.Identity.WorkingRoot,
+                        progress),
+                    cancellationToken);
             }
 
-            var overlayPath = RuntimeIndexLayout.OverlayPath(
-                identity,
-                generation.Identity.Id);
-            if (File.Exists(overlayPath))
+            var targets = generationChanged
+                ? worktrees
+                : worktrees.Where(
+                    item => SamePath(item.Path, requested.WorkingRoot)).ToArray();
+            var overlaysBuilt = 0;
+            foreach (var worktree in targets.Where(item => !item.IsPrunable))
             {
-                continue;
-            }
+                var identity = RuntimeIndexLayout.Inspect(worktree.Path);
+                if (string.Equals(
+                        identity.HeadTree,
+                        generation.Identity.DevTree,
+                        StringComparison.Ordinal) &&
+                    identity.DirtyHash is null)
+                {
+                    continue;
+                }
 
-            var embedder = new BrokerEmbeddingClient(
-                generation.Identity.EmbeddingModel,
-                BrokerClientFactory.CreateDefault());
-            var builder = new IndexBuilder(embedder, Console.Error.WriteLine);
-            await builder.BuildOverlayAsync(
-                identity.WorkingRoot,
-                store.IndexPath(generation.Identity.Id),
-                overlayPath,
-                cancellationToken,
-                new IndexBuildContext(
+                var overlayPath = RuntimeIndexLayout.OverlayPath(
+                    identity,
+                    generation.Identity.Id);
+                if (File.Exists(overlayPath))
+                {
+                    continue;
+                }
+
+                var embedder = new BrokerEmbeddingClient(
+                    generation.Identity.EmbeddingModel,
+                    BrokerClientFactory.CreateDefault());
+                var builder = new IndexBuilder(
+                    embedder,
+                    Console.Error.WriteLine,
+                    progress => ReportProgress(
+                        RepositoryIndexProgressPhase.EmbeddingOverlay,
+                        identity.WorkingRoot,
+                        progress));
+                await builder.BuildOverlayAsync(
                     identity.WorkingRoot,
-                    identity.HeadCommit,
-                    identity.HeadTree,
-                    identity.RepositoryId,
-                    generation.Identity.Id,
-                    identity.DirtyHash));
-            overlaysBuilt++;
+                    store.IndexPath(generation.Identity.Id),
+                    overlayPath,
+                    cancellationToken,
+                    new IndexBuildContext(
+                        identity.WorkingRoot,
+                        identity.HeadCommit,
+                        identity.HeadTree,
+                        identity.RepositoryId,
+                        generation.Identity.Id,
+                        identity.DirtyHash));
+                overlaysBuilt++;
+            }
+
+            progressStore.Save(lastProgress = lastProgress with
+            {
+                Phase = RepositoryIndexProgressPhase.Publishing,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            });
+            store.SetCurrent(generation);
+            var manifest = new RepositoryManifest(
+                requested.RepositoryId,
+                commonDirectory,
+                mainline.Ref,
+                generation.Identity.Id,
+                generation.Identity.DevTree,
+                generation.Identity.EmbeddingModel,
+                generation.Identity.EmbeddingDimension,
+                generation.Identity.ChunkFormatVersion,
+                generation.Identity.IndexFormatVersion,
+                RepositoryIndexState.Current,
+                worktrees
+                    .Where(item => !item.IsPrunable)
+                    .Select(item => new RepositoryWorktree(
+                        item.Path,
+                        item.Head,
+                        item.Branch))
+                    .ToArray(),
+                DateTimeOffset.UtcNow);
+            manifestStore.Save(manifest);
+
+            progressStore.Save(lastProgress = lastProgress with
+            {
+                Phase = RepositoryIndexProgressPhase.Completed,
+                ProcessedChunks = lastProgress.TotalChunks,
+                EstimatedRemaining = TimeSpan.Zero,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            });
+
+            return new CodeSearchSyncResult(
+                requested.RepositoryId,
+                generation.Identity.Id,
+                store.IndexPath(generation.Identity.Id),
+                overlaysBuilt,
+                generationChanged);
         }
+        catch
+        {
+            try
+            {
+                progressStore.Save(lastProgress with
+                {
+                    Phase = RepositoryIndexProgressPhase.Failed,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow
+                });
+            }
+            catch (Exception progressError) when (
+                progressError is IOException or
+                    UnauthorizedAccessException or
+                    InvalidDataException)
+            {
+                // Progress is observational and cannot replace the indexing failure.
+            }
 
-        store.SetCurrent(generation);
-        var manifest = new RepositoryManifest(
-            requested.RepositoryId,
-            commonDirectory,
-            mainline.Ref,
-            generation.Identity.Id,
-            generation.Identity.DevTree,
-            generation.Identity.EmbeddingModel,
-            generation.Identity.EmbeddingDimension,
-            generation.Identity.ChunkFormatVersion,
-            generation.Identity.IndexFormatVersion,
-            RepositoryIndexState.Current,
-            worktrees
-                .Where(item => !item.IsPrunable)
-                .Select(item => new RepositoryWorktree(
-                    item.Path,
-                    item.Head,
-                    item.Branch))
-                .ToArray(),
-            DateTimeOffset.UtcNow);
-        manifestStore.Save(manifest);
-
-        return new CodeSearchSyncResult(
-            requested.RepositoryId,
-            generation.Identity.Id,
-            store.IndexPath(generation.Identity.Id),
-            overlaysBuilt,
-            generationChanged);
+            throw;
+        }
     }
 
     private static Mainline ResolveMainline(
@@ -210,6 +286,7 @@ public static class CodeSearchSyncCommand
         GenerationPointer? current,
         GenerationIdentity generation,
         WorkingIndexIdentity dev,
+        Action<IndexBuildProgress> progress,
         CancellationToken cancellationToken)
     {
         var stagingRoot = Path.Combine(
@@ -236,7 +313,10 @@ public static class CodeSearchSyncCommand
             var embedder = new BrokerEmbeddingClient(
                 generation.EmbeddingModel,
                 BrokerClientFactory.CreateDefault());
-            var builder = new IndexBuilder(embedder, Console.Error.WriteLine);
+            var builder = new IndexBuilder(
+                embedder,
+                Console.Error.WriteLine,
+                progress);
             await builder.BuildAsync(
                 snapshot.Root,
                 workIndex,

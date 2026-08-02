@@ -22,6 +22,8 @@ public sealed class BrokerHost
     private readonly Action<LocalJobRequest, LocalRoutingReceipt?, TimeSpan> _durationObserver;
     private readonly Func<CancellationToken, Task> _idleUnload;
     private readonly TimeSpan _idleUnloadAfter;
+    private readonly Func<CancellationToken, Task<BackendProbeResult>>? _backendProbe;
+    private readonly BackendWatchdogPolicy _watchdogPolicy;
     private DateTimeOffset _lastActivityAtUtc;
     private bool _idleUnloadIssued;
 
@@ -42,7 +44,9 @@ public sealed class BrokerHost
         Func<string?>? residentModel = null,
         Action<LocalJobRequest, LocalRoutingReceipt?, TimeSpan>? durationObserver = null,
         Func<CancellationToken, Task>? idleUnload = null,
-        TimeSpan? idleUnloadAfter = null)
+        TimeSpan? idleUnloadAfter = null,
+        Func<CancellationToken, Task<BackendProbeResult>>? backendProbe = null,
+        BackendWatchdogPolicy? watchdogPolicy = null)
     {
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
         ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
@@ -60,6 +64,9 @@ public sealed class BrokerHost
         _durationObserver = durationObserver ?? ((_, _, _) => { });
         _idleUnload = idleUnload ?? (_ => Task.CompletedTask);
         _idleUnloadAfter = idleUnloadAfter ?? TimeSpan.FromMinutes(30);
+        _backendProbe = backendProbe;
+        _watchdogPolicy = watchdogPolicy ?? BackendWatchdogPolicy.Default;
+        _watchdogPolicy.Validate();
         _lastActivityAtUtc = clock.GetUtcNow();
         if ((_scheduler is null) != (_scheduleMetadata is null))
         {
@@ -175,6 +182,8 @@ public sealed class BrokerHost
     {
         using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(hostCancellation);
         var executionStartedAtUtc = _timeProvider.GetUtcNow();
+        DateTimeOffset? lastProbeAtUtc = null;
+        var consecutiveUnhealthyProbes = 0;
         Task<BrokerExecutionResult> execution;
         try
         {
@@ -209,6 +218,39 @@ public sealed class BrokerHost
                     _workerId,
                     lease.LeaseId,
                     hostCancellation);
+
+                var now = _timeProvider.GetUtcNow();
+                if (_backendProbe is null ||
+                    now - executionStartedAtUtc < _watchdogPolicy.SilenceBeforeProbe ||
+                    lastProbeAtUtc is { } previousProbe &&
+                    now - previousProbe < _watchdogPolicy.ProbeInterval)
+                {
+                    continue;
+                }
+
+                lastProbeAtUtc = now;
+                var probe = await ProbeBackendAsync(hostCancellation);
+                if (probe.Liveness != BackendLiveness.Unhealthy)
+                {
+                    consecutiveUnhealthyProbes = 0;
+                    continue;
+                }
+
+                consecutiveUnhealthyProbes++;
+                Report(
+                    lease,
+                    $"watchdog-unhealthy:{probe.Code}",
+                    new BackendUnavailableException(probe.Code));
+                if (consecutiveUnhealthyProbes < _watchdogPolicy.RequiredUnhealthyProbes)
+                {
+                    continue;
+                }
+
+                var backendFailure = new BackendUnavailableException(probe.Code);
+                attemptCancellation.Cancel();
+                await ObserveCancellationAsync(execution);
+                await TryFailAsync(lease, backendFailure);
+                return;
             }
         }
         catch (LeaseLostException exception)
@@ -287,6 +329,25 @@ public sealed class BrokerHost
         catch (Exception exception)
         {
             Report(lease, "complete", exception);
+        }
+    }
+
+    private async Task<BackendProbeResult> ProbeBackendAsync(
+        CancellationToken hostCancellation)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(hostCancellation);
+        timeout.CancelAfter(_watchdogPolicy.ProbeTimeout);
+        try
+        {
+            return await _backendProbe!(timeout.Token);
+        }
+        catch (OperationCanceledException) when (!hostCancellation.IsCancellationRequested)
+        {
+            return BackendProbeResult.Inconclusive("probe_timeout");
+        }
+        catch (Exception exception)
+        {
+            return BackendProbeResult.Inconclusive(exception.GetType().Name);
         }
     }
 

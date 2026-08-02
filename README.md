@@ -17,6 +17,13 @@ toolkit rather than renaming those stable contracts.
 
 - A durable machine-wide FIFO broker is the only supported Ollama transport, keeping
   concurrent Codex, Claude, CodeSearch, and LocalLm workloads sequential.
+- A backend watchdog is separate from the lease heartbeat. Long-running jobs have no total
+  duration limit; after ten minutes without completion the broker probes backend/model residency and only
+  fails an attempt after two consecutive confirmed unhealthy results. Probe timeouts and
+  inconclusive results never classify a healthy multi-hour operation as failed.
+- Repository synchronization persists a safe progress snapshot. `index_status` reports the
+  phase, processed/total/remaining chunks, measured rate, and ETA while a generation builds,
+  without exposing source chunks or job prompts.
 - Task-aware routing selects an eligible model by capability, current VRAM residency,
   context limit, experiment state, and established fallback order.
 - Model-aware snapshots group work for the same model, run shorter compatible tasks

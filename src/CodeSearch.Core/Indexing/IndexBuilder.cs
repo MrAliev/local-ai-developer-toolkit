@@ -19,6 +19,12 @@ public sealed record BuildResult(
 
 public sealed record BuildPlan(int FileCount, int FilesChanged, int ChunksToEmbed);
 
+public sealed record IndexBuildProgress(
+    int ProcessedChunks,
+    int TotalChunks,
+    double ChunksPerSecond,
+    TimeSpan? EstimatedRemaining);
+
 public sealed record IndexBuildContext(
     string Root,
     string GitCommit,
@@ -32,7 +38,10 @@ public sealed record IndexBuildContext(
 /// unchanged file keeps its existing chunks and vectors verbatim, so a refresh right after a
 /// commit only re-embeds what that commit touched.
 /// </summary>
-public sealed class IndexBuilder(IEmbeddingClient embedder, Action<string>? log = null)
+public sealed class IndexBuilder(
+    IEmbeddingClient embedder,
+    Action<string>? log = null,
+    Action<IndexBuildProgress>? progress = null)
 {
     /// <summary>
     /// Batches are capped by total characters, not item count. Chunk sizes vary by an order of
@@ -43,6 +52,7 @@ public sealed class IndexBuilder(IEmbeddingClient embedder, Action<string>? log 
     private const int BatchMaxItems = 96;
 
     private readonly Action<string> _log = log ?? (_ => { });
+    private readonly Action<IndexBuildProgress> _progress = progress ?? (_ => { });
 
     public async Task<BuildResult> BuildAsync(
         string root,
@@ -66,6 +76,7 @@ public sealed class IndexBuilder(IEmbeddingClient embedder, Action<string>? log 
         var freshChunks = ChunkFiles(root, changed, ct);
         var totalToEmbed = freshChunks.Values.Sum(c => c.Count);
         _log($"Chunked {changed.Count} files into {totalToEmbed} chunks to embed.");
+        _progress(new IndexBuildProgress(0, totalToEmbed, 0, null));
 
         var vectorsByPath = await EmbedAsync(freshChunks, totalToEmbed, ct);
 
@@ -160,6 +171,7 @@ public sealed class IndexBuilder(IEmbeddingClient embedder, Action<string>? log 
 
         var freshChunks = ChunkFiles(workingRoot, toChunk, ct);
         var totalToEmbed = freshChunks.Values.Sum(c => c.Count);
+        _progress(new IndexBuildProgress(0, totalToEmbed, 0, null));
         var vectorsByPath = await EmbedAsync(freshChunks, totalToEmbed, ct);
 
         var assembled = Assemble(
@@ -428,6 +440,7 @@ public sealed class IndexBuilder(IEmbeddingClient embedder, Action<string>? log 
             var rate = done / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
             var remaining = TimeSpan.FromSeconds((queue.Count - done) / Math.Max(0.001, rate));
             _log($"Embedded {done}/{queue.Count} chunks ({rate:F1}/s, ~{remaining.TotalMinutes:F1} min left)");
+            _progress(new IndexBuildProgress(done, queue.Count, rate, remaining));
         }
 
         return vectors;
