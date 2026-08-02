@@ -283,8 +283,20 @@ public sealed class BrokerModelInstaller : IDisposable
         }
     }
 
+    public Task<BrokerModelInstallBatchResult> InstallAsync(
+        IReadOnlyList<BrokerModelInstallRequest> requests,
+        CancellationToken cancellationToken = default) =>
+        InstallAsync(requests, progress: null, cancellationToken);
+
+    /// <summary>
+    /// Reports each model as it is reached. A pull is a multi-gigabyte download and a preflight
+    /// loads the model into video memory, so a batch of six runs for minutes; saying which one
+    /// is being worked on is the difference between a slow installation and one that appears to
+    /// have died.
+    /// </summary>
     public async Task<BrokerModelInstallBatchResult> InstallAsync(
         IReadOnlyList<BrokerModelInstallRequest> requests,
+        IProgress<ModelProvisioningProgress>? progress,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -337,7 +349,7 @@ public sealed class BrokerModelInstaller : IDisposable
 
         using (activeVersion)
         {
-            var result = await InstallCoreAsync(snapshot, cancellationToken);
+            var result = await InstallCoreAsync(snapshot, progress, cancellationToken);
             try
             {
                 activeVersion.Revalidate();
@@ -357,6 +369,7 @@ public sealed class BrokerModelInstaller : IDisposable
 
     private async Task<BrokerModelInstallBatchResult> InstallCoreAsync(
         BrokerModelInstallRequest[] snapshot,
+        IProgress<ModelProvisioningProgress>? progress,
         CancellationToken cancellationToken)
     {
         ModelStatusCommandSuccess status;
@@ -385,6 +398,13 @@ public sealed class BrokerModelInstaller : IDisposable
             var action = request.Action;
             var pullAttempted = false;
             var pullCompleted = false;
+            // Reported before the work, not after: the wait is what needs explaining.
+            progress?.Report(new ModelProvisioningProgress(
+                installed.Contains(action.Model)
+                    ? $"{action.Model}: checking it fits in video memory"
+                    : $"{action.Model}: downloading",
+                results.Count,
+                snapshot.Length));
             try
             {
                 if (!installed.Contains(action.Model))

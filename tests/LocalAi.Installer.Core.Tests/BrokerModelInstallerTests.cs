@@ -68,6 +68,43 @@ public sealed class BrokerModelInstallerTests : IDisposable
         Assert.Equal(4, launcher.RevalidationCount);
     }
 
+    /// <summary>
+    /// A preflight loads a model into video memory and a pull is measured in gigabytes, so a
+    /// batch runs for minutes. Reporting only at the end left the progress bar frozen on the
+    /// previous phase, which reads as a hung installer with nothing to press but Cancel.
+    /// </summary>
+    [Fact]
+    public async Task Each_model_is_reported_before_the_wait_it_causes()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status(["model-b"], [], "signed-7")),
+            Success(Pull("model-a", "signed-7")),
+            Success(Preflight("model-a", 2048, 80, 80, true)),
+            Success(Preflight("model-b", 4096, 90, 90, true)));
+        var installer = Installer(runner, Launcher());
+        var steps = new List<ModelProvisioningProgress>();
+
+        await installer.InstallAsync(
+            [
+                Request("a", "model-a", 2048, "signed-7"),
+                Request("b", "model-b", 4096, "signed-7"),
+            ],
+            new Progress<ModelProvisioningProgress>(steps.Add),
+            TestContext.Current.CancellationToken);
+
+        // Progress<T> posts, so the reports may arrive after the batch; order and content are
+        // what matter, not the moment of delivery.
+        Assert.Equal(2, steps.Count);
+        // Missing and present are different waits and say so.
+        Assert.Contains("model-a", steps[0].Message, StringComparison.Ordinal);
+        Assert.Contains("downloading", steps[0].Message, StringComparison.Ordinal);
+        Assert.Equal(0, steps[0].Completed);
+        Assert.Contains("model-b", steps[1].Message, StringComparison.Ordinal);
+        Assert.Contains("video memory", steps[1].Message, StringComparison.Ordinal);
+        Assert.Equal(1, steps[1].Completed);
+        Assert.All(steps, step => Assert.Equal(2, step.Total));
+    }
+
     [Fact]
     public async Task Missing_models_pull_with_exact_catalog_then_preflight_sequentially()
     {

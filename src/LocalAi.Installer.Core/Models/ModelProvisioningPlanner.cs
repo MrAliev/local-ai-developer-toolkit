@@ -24,6 +24,17 @@ public sealed record ModelProvisioningPlan(
     IReadOnlyList<string> Excluded);
 
 /// <summary>
+/// One step of model setup, as it happens.
+///
+/// Preflighting six models loads each one into video memory in turn and takes minutes, and it
+/// used to report nothing at all until the whole batch was over. A progress bar that says
+/// "downloading 208 of 208 MB" for two minutes while a model is quietly being loaded is not a
+/// slow installation, it is an installation that looks hung — and the only button on offer is
+/// Cancel.
+/// </summary>
+public sealed record ModelProvisioningProgress(string Message, int Completed, int Total);
+
+/// <summary>
 /// Turns a model choice into requests the broker installer will actually accept.
 ///
 /// The installer refuses anything it cannot tie back to the signed manifest: the model and

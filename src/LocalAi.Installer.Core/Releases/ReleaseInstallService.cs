@@ -68,7 +68,7 @@ public sealed class ReleaseInstallService(
         IProgress<long>? bytesDownloaded = null,
         ModelProvisioningSelection? models = null,
         GpuSnapshot? gpu = null,
-        IProgress<string>? modelProgress = null,
+        IProgress<ModelProvisioningProgress>? modelProgress = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(release);
@@ -137,7 +137,7 @@ public sealed class ReleaseInstallService(
         VerifiedPackage package,
         ModelProvisioningSelection selection,
         GpuSnapshot gpu,
-        IProgress<string>? progress,
+        IProgress<ModelProvisioningProgress>? progress,
         CancellationToken cancellationToken)
     {
         var plan = ModelProvisioningPlanner.Create(
@@ -146,7 +146,7 @@ public sealed class ReleaseInstallService(
             selection);
         foreach (var excluded in plan.Excluded)
         {
-            progress?.Report(excluded);
+            progress?.Report(new ModelProvisioningProgress(excluded, 0, plan.Requests.Count));
         }
 
         if (plan.Requests.Count == 0)
@@ -154,13 +154,15 @@ public sealed class ReleaseInstallService(
             return new(plan.Excluded, null);
         }
 
-        progress?.Report(
+        progress?.Report(new ModelProvisioningProgress(
             "Models: " +
             string.Join(
                 ", ",
                 plan.Requests.Select(request =>
                     $"{request.Action.Model} at {request.Action.ContextSize} tokens")) +
-            ". Anything already installed is left alone; the rest is downloaded now.");
+            ". Anything already installed is left alone; the rest is downloaded now.",
+            0,
+            plan.Requests.Count));
 
         using var lease = InstallationLayoutLease.Acquire(InstallationLayout.CreateDefault());
         using var modelInstaller = new BrokerModelInstaller(
@@ -169,7 +171,7 @@ public sealed class ReleaseInstallService(
             package,
             ModelInstallTimeout);
         var batch = await modelInstaller
-            .InstallAsync(plan.Requests, cancellationToken)
+            .InstallAsync(plan.Requests, progress, cancellationToken)
             .ConfigureAwait(false);
         return new(plan.Excluded, batch);
     }

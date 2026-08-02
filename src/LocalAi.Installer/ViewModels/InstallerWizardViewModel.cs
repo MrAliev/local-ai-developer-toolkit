@@ -904,21 +904,41 @@ public sealed class InstallerWizardViewModel : ObservableObject
         // Real byte progress: the expected size comes from the verified manifest, and the
         // downloaded bytes are observed as the file grows.
         var total = resolved.Manifest.PackageSize;
+        // Progress callbacks are posted, not called, so the last download report can land after
+        // the model phase has already begun. Without this the bar sat at "downloading 208 of
+        // 208 MB" for the whole of a two-minute preflight, which reads as a hung installer with
+        // nothing to press but Cancel.
+        var downloadFinished = false;
         var downloadProgress = new Progress<long>(bytes =>
+        {
+            if (downloadFinished)
+            {
+                return;
+            }
+
             SetProgress(
                 40 + (int)(50 * Math.Clamp(bytes, 0, total) / Math.Max(total, 1)),
                 $"Downloading the LocalAi package: " +
-                $"{bytes / (1024d * 1024):N0} of {total / (1024d * 1024):N0} MB"));
+                $"{bytes / (1024d * 1024):N0} of {total / (1024d * 1024):N0} MB");
+        });
         SetProgress(40, "Downloading the LocalAi package...");
 
         var service = new ReleaseInstallService(
             new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath),
             processRunner,
             new SystemFileSystemProbe());
-        var modelProgress = new Progress<string>(message =>
+        var modelProgress = new Progress<ModelProvisioningProgress>(step =>
         {
-            SetProgress(92, "Setting up local models...");
-            AppendLog(report, message);
+            downloadFinished = true;
+            // 90 to 95: the package is in, the models are the tail of the run. The count is
+            // what makes a long wait legible — "3 of 6" is a queue, a frozen bar is a fault.
+            var share = step.Total <= 0 ? 0 : 5 * step.Completed / step.Total;
+            SetProgress(
+                90 + share,
+                step.Total > 0
+                    ? $"Local models: {step.Completed} of {step.Total} — {step.Message}"
+                    : step.Message);
+            AppendLog(report, step.Message);
         });
         var result = await service.InstallAsync(
             resolved,
