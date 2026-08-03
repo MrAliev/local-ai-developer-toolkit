@@ -32,6 +32,62 @@ public sealed class ClaudeConfigurationAdapterTests : IDisposable
         Assert.Contains("\"API_KEY\":\"<redacted>\"", plan.PreviewText, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The client owns this file and reserialises the whole document in its own style whenever
+    /// it saves, so a registration that is already correct never looks like the text this
+    /// adapter would write. Comparing bytes therefore reported a change on every install: the
+    /// file was rewritten and a backup left behind, with nothing about the meaning moved.
+    /// </summary>
+    [Fact]
+    public void An_already_correct_registration_is_left_alone_whatever_its_formatting()
+    {
+        var mcp = Path.Combine(home, ".claude.json");
+        Directory.CreateDirectory(home);
+        var launcher = @"C:\\LocalAi\\bin\\launcher\\localai-launcher.exe";
+        // Written the way the client writes it: UTF-8 with no byte order mark.
+        File.WriteAllText(
+            mcp,
+            "{\n  \"mcpServers\": {\n" +
+            "    \"codesearch\": {\n      \"command\": \"" + launcher + "\",\n" +
+            "      \"args\": [\n        \"run\",\n        \"codesearch-mcp\"\n      ]\n    },\n" +
+            "    \"locallm\": {\n      \"command\": \"" + launcher + "\",\n" +
+            "      \"args\": [\n        \"run\",\n        \"locallm-mcp\"\n      ]\n    }\n  }\n}");
+
+        var plan = Adapter().Preview(AgentIntegrationChoice.McpOnly);
+
+        // The client's pretty-printed form differs from this adapter's compact one in every
+        // byte of whitespace, and means exactly the same thing.
+        Assert.DoesNotContain(
+            plan.Files,
+            file => file.Path.EndsWith(".claude.json", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_registration_that_moved_is_updated_and_keeps_its_other_settings()
+    {
+        var mcp = Path.Combine(home, ".claude.json");
+        Directory.CreateDirectory(home);
+        File.WriteAllText(
+            mcp,
+            "{\"mcpServers\":{\"codesearch\":{\"command\":\"C:\\\\Old\\\\launcher.exe\"," +
+            "\"args\":[\"run\",\"codesearch-mcp\"],\"env\":{\"TRACE\":\"1\"},\"disabled\":false}}}",
+            Encoding.UTF8);
+
+        var after = SinglePreview(
+            @".claude.json",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterText;
+
+        Assert.Contains(
+            "\"command\":\"C:\\\\LocalAi\\\\bin\\\\launcher\\\\localai-launcher.exe\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("C:\\\\Old\\\\launcher.exe", after, StringComparison.Ordinal);
+        // The entry is replaced wholesale, so anything not re-emitted would be destroyed —
+        // a command-line update must not cost the user their own settings.
+        Assert.Contains("\"env\":{\"TRACE\":\"1\"}", after, StringComparison.Ordinal);
+        Assert.Contains("\"disabled\":false", after, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Preview_preserves_unrelated_json_bytes_outside_managed_servers()
     {

@@ -79,7 +79,52 @@ public sealed class ClaudeConfigurationAdapter(
             }
         }
 
-        return ReplaceManagedServers(before, ClientCommandPlan.Plan(installationDirectory));
+        var plan = ClientCommandPlan.Plan(installationDirectory);
+        if (IsCurrent(serverObject, "codesearch", plan.CodeSearch) &&
+            IsCurrent(serverObject, "locallm", plan.LocalLm))
+        {
+            return before;
+        }
+
+        return ReplaceManagedServers(before, plan, serverObject);
+    }
+
+    /// <summary>
+    /// Whether the registration already says what this install would say.
+    ///
+    /// Compared by value, never by bytes. This file belongs to the client, which rewrites it
+    /// constantly and reserialises the whole document in its own style, so a registration that
+    /// is already correct still looks different from the text this adapter would produce. Byte
+    /// comparison therefore reported a change on every single install: the file was rewritten,
+    /// a backup was left behind, and nothing about the meaning had moved. Matching the client's
+    /// formatting instead would only trade that for a guess about somebody else's serialiser.
+    /// </summary>
+    private static bool IsCurrent(
+        JsonObject servers,
+        string name,
+        ClientToolRegistration registration)
+    {
+        if (servers[name] is not JsonObject server ||
+            server["command"] is not JsonValue command ||
+            !command.TryGetValue<string>(out var commandValue) ||
+            !string.Equals(commandValue, registration.Command, StringComparison.Ordinal) ||
+            server["args"] is not JsonArray args ||
+            args.Count != registration.Arguments.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (args[index] is not JsonValue argument ||
+                !argument.TryGetValue<string>(out var value) ||
+                !string.Equals(value, registration.Arguments[index], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static JsonObject ToServer(string command, IReadOnlyList<string> arguments) =>
@@ -101,7 +146,10 @@ public sealed class ClaudeConfigurationAdapter(
         }
     }
 
-    private static string ReplaceManagedServers(string json, ClientRegistrationPlan plan)
+    private static string ReplaceManagedServers(
+        string json,
+        ClientRegistrationPlan plan,
+        JsonObject servers)
     {
         var rootStart = NextNonWhitespace(json, 0);
         if (rootStart < 0 || json[rootStart] != '{')
@@ -123,8 +171,10 @@ public sealed class ClaudeConfigurationAdapter(
         var body = json[bodyStart..objectEnd];
         body = RemoveProperty(body, "codesearch");
         body = RemoveProperty(body, "locallm");
-        var insert = FormatServer("codesearch", plan.CodeSearch) + "," + Environment.NewLine +
-            FormatServer("locallm", plan.LocalLm);
+        var insert =
+            FormatServer("codesearch", plan.CodeSearch, servers["codesearch"] as JsonObject) +
+            "," + Environment.NewLine +
+            FormatServer("locallm", plan.LocalLm, servers["locallm"] as JsonObject);
         body = string.IsNullOrWhiteSpace(body)
             ? Environment.NewLine + insert + Environment.NewLine
             : body.TrimEnd() + "," + Environment.NewLine + insert + Environment.NewLine;
@@ -162,11 +212,31 @@ public sealed class ClaudeConfigurationAdapter(
         return beforeClose + property + json[rootEnd..];
     }
 
-    private static string FormatServer(string name, ClientToolRegistration registration) =>
-        "    \"" + name + "\": {\"command\":\"" + JsonEncodedText(registration.Command) +
-        "\",\"args\":[" +
-        string.Join(",", registration.Arguments.Select(argument => "\"" + JsonEncodedText(argument) + "\"")) +
-        "]}";
+    /// <summary>
+    /// Rewrites the command and its arguments, and carries everything else in the entry across.
+    ///
+    /// The entry is replaced rather than edited in place, so anything this method does not
+    /// re-emit is destroyed. A user who set an environment variable or a per-tool option on
+    /// these servers would have lost it to a command-line update — the same way Codex lost its
+    /// per-tool approvals before that adapter was taught to leave them alone.
+    /// </summary>
+    private static string FormatServer(
+        string name,
+        ClientToolRegistration registration,
+        JsonObject? existing = null)
+    {
+        var preserved = existing is null
+            ? string.Empty
+            : string.Concat(existing
+                .Where(property => property.Key is not ("command" or "args"))
+                .Select(property =>
+                    ",\"" + JsonEncodedText(property.Key) + "\":" +
+                    (property.Value?.ToJsonString() ?? "null")));
+        return "    \"" + name + "\": {\"command\":\"" + JsonEncodedText(registration.Command) +
+            "\",\"args\":[" +
+            string.Join(",", registration.Arguments.Select(argument => "\"" + JsonEncodedText(argument) + "\"")) +
+            "]" + preserved + "}";
+    }
 
     private static string JsonEncodedText(string value) =>
         JsonSerializer.Serialize(value)[1..^1];
