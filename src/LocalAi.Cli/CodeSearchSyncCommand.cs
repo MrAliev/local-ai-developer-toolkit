@@ -12,7 +12,10 @@ public sealed record CodeSearchSyncResult(
     string GenerationId,
     string BaseIndexPath,
     int OverlaysBuilt,
-    bool GenerationChanged);
+    bool GenerationChanged,
+    // Reported rather than counted silently: fewer overlays than worktrees is otherwise
+    // indistinguishable from a sync that decided they were all up to date.
+    int WorktreesSkipped = 0);
 
 public static class CodeSearchSyncCommand
 {
@@ -128,9 +131,30 @@ public static class CodeSearchSyncCommand
                 : worktrees.Where(
                     item => SamePath(item.Path, requested.WorkingRoot)).ToArray();
             var overlaysBuilt = 0;
-            foreach (var worktree in targets.Where(item => !item.IsPrunable))
+            var present = SelectPresentWorktrees(
+                targets.Where(item => !item.IsPrunable),
+                path => Console.Error.WriteLine(
+                    $"Worktree {path} no longer exists; skipping its overlay."));
+            var worktreesSkipped = present.Skipped;
+            foreach (var worktree in present.Worktrees)
             {
-                var identity = RuntimeIndexLayout.Inspect(worktree.Path);
+                WorkingIndexIdentity identity;
+                try
+                {
+                    identity = RuntimeIndexLayout.Inspect(worktree.Path);
+                }
+                catch (Exception exception) when (
+                    exception is InvalidOperationException or IOException or
+                        UnauthorizedAccessException &&
+                    !Directory.Exists(worktree.Path))
+                {
+                    Console.Error.WriteLine(
+                        $"Worktree {worktree.Path} disappeared while it was being inspected; " +
+                        "skipping its overlay.");
+                    worktreesSkipped++;
+                    continue;
+                }
+
                 if (string.Equals(
                         identity.HeadTree,
                         generation.Identity.DevTree,
@@ -213,7 +237,8 @@ public static class CodeSearchSyncCommand
                 generation.Identity.Id,
                 store.IndexPath(generation.Identity.Id),
                 overlaysBuilt,
-                generationChanged);
+                generationChanged,
+                worktreesSkipped);
         }
         catch
         {
@@ -345,6 +370,39 @@ public static class CodeSearchSyncCommand
                 File.Delete(workIndex);
             }
         }
+    }
+
+    /// <summary>
+    /// Drops the worktrees that are no longer on disk, and says which.
+    ///
+    /// A worktree can be removed while this runs — it belongs to somebody else, and a sync of a
+    /// large repository takes tens of minutes. Losing the whole run to that, after an hour of
+    /// embedding, is the wrong answer: that overlay is gone either way, and every other
+    /// worktree still deserves its own.
+    ///
+    /// Only absence is tolerated. A worktree that exists but cannot be read still stops the
+    /// run, because publishing a generation with overlays quietly missing is worse than
+    /// failing.
+    /// </summary>
+    internal static (IReadOnlyList<GitWorktree> Worktrees, int Skipped) SelectPresentWorktrees(
+        IEnumerable<GitWorktree> targets,
+        Action<string> report)
+    {
+        var present = new List<GitWorktree>();
+        var skipped = 0;
+        foreach (var worktree in targets)
+        {
+            if (Directory.Exists(worktree.Path))
+            {
+                present.Add(worktree);
+                continue;
+            }
+
+            report(worktree.Path);
+            skipped++;
+        }
+
+        return (present, skipped);
     }
 
     private static IReadOnlyList<GitWorktree> ReadWorktrees(string root)

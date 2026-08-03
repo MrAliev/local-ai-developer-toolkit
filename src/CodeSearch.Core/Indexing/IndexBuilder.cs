@@ -48,8 +48,27 @@ public sealed class IndexBuilder(
     /// magnitude, so a fixed count either starves the GPU on small chunks or sends an oversized
     /// request on large ones.
     /// </summary>
-    private const int BatchChars = 48_000;
-    private const int BatchMaxItems = 96;
+    private const int InitialBatchChars = 48_000;
+    private const int MinimumBatchChars = 8_000;
+    private const int MaximumBatchChars = 400_000;
+    private const int BatchMaxItems = 512;
+
+    /// <summary>
+    /// The size is measured, not configured, because the right one differs by an order of
+    /// magnitude between machines.
+    ///
+    /// Every request carries a fixed cost that has nothing to do with the model: assembling the
+    /// batch, writing the job to the durable queue, polling for its result, writing the vectors
+    /// back. Measured here, that was around 2.4 seconds against 3.6 seconds of actual embedding
+    /// — the adapter idle for 40% of the run. Bigger batches amortise it away.
+    ///
+    /// A larger constant would have paid for that on a fast adapter and charged for it on a slow
+    /// one: the same batch that takes 4 seconds on a desktop card takes minutes on an integrated
+    /// one, and the broker's watchdog starts probing a job that has been silent for ten minutes.
+    /// So the budget follows the observed throughput toward a target duration instead, and a
+    /// slow machine simply keeps sending small batches.
+    /// </summary>
+    private static readonly TimeSpan TargetBatchDuration = TimeSpan.FromSeconds(15);
 
     private readonly Action<string> _log = log ?? (_ => { });
     private readonly Action<IndexBuildProgress> _progress = progress ?? (_ => { });
@@ -415,6 +434,7 @@ public sealed class IndexBuilder(
         var stopwatch = Stopwatch.StartNew();
         var done = 0;
         var position = 0;
+        var budget = InitialBatchChars;
 
         while (position < queue.Count)
         {
@@ -423,14 +443,16 @@ public sealed class IndexBuilder(
             var batch = new List<(string RelPath, int Slot, string Text)>();
             var chars = 0;
             while (position < queue.Count && batch.Count < BatchMaxItems &&
-                   (batch.Count == 0 || chars + queue[position].Text.Length <= BatchChars))
+                   (batch.Count == 0 || chars + queue[position].Text.Length <= budget))
             {
                 chars += queue[position].Text.Length;
                 batch.Add(queue[position]);
                 position++;
             }
 
+            var batchStarted = stopwatch.Elapsed;
             var embeddings = await EmbedBatchAsync(batch, ct);
+            budget = NextBudget(budget, chars, stopwatch.Elapsed - batchStarted);
             for (var i = 0; i < batch.Count; i++)
             {
                 vectors[batch[i].RelPath][batch[i].Slot] = embeddings[i];
@@ -444,6 +466,26 @@ public sealed class IndexBuilder(
         }
 
         return vectors;
+    }
+
+    /// <summary>
+    /// The next character budget, from what the last batch actually cost.
+    ///
+    /// Moves by at most a factor of two per step. A single slow batch — a cold model, another
+    /// client's job ahead in the queue — should nudge the size, not halve or double it, and the
+    /// clamp keeps a machine that is briefly starved from collapsing to one chunk per request.
+    /// </summary>
+    internal static int NextBudget(int budget, int chars, TimeSpan elapsed)
+    {
+        if (chars <= 0 || elapsed <= TimeSpan.Zero)
+        {
+            return budget;
+        }
+
+        var perSecond = chars / elapsed.TotalSeconds;
+        var target = perSecond * TargetBatchDuration.TotalSeconds;
+        var bounded = Math.Clamp(target, budget / 2d, budget * 2d);
+        return (int)Math.Clamp(bounded, MinimumBatchChars, MaximumBatchChars);
     }
 
     /// <summary>

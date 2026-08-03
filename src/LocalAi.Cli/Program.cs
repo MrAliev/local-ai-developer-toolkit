@@ -116,7 +116,10 @@ static async Task<int> RunAsync(string[] args)
         var result = await CodeSearchSyncCommand.ExecuteAsync(root);
         Console.WriteLine(
             $"SYNCED repository={result.RepositoryId} generation={result.GenerationId} " +
-            $"overlays={result.OverlaysBuilt}");
+            $"overlays={result.OverlaysBuilt}" +
+            (result.WorktreesSkipped > 0
+                ? $" skipped={result.WorktreesSkipped}"
+                : string.Empty));
         return 0;
     }
 
@@ -138,7 +141,11 @@ static async Task<int> RunAsync(string[] args)
         var result = await CodeSearchSyncCommand.ExecuteAsync(root);
         Console.Error.WriteLine(
             $"LocalAi index synchronized: generation={result.GenerationId}, " +
-            $"overlays={result.OverlaysBuilt}.");
+            $"overlays={result.OverlaysBuilt}" +
+            (result.WorktreesSkipped > 0
+                ? $", skipped worktrees={result.WorktreesSkipped}"
+                : string.Empty) +
+            ".");
         return 0;
     }
 
