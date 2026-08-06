@@ -4,9 +4,22 @@ using Microsoft.CodeAnalysis.MSBuild;
 
 namespace CodeSearch.Core.Semantics;
 
-public sealed class LoadedRoslynSolution(MSBuildWorkspace workspace, Solution solution)
-    : IAsyncDisposable
+public sealed class LoadedRoslynSolution : IAsyncDisposable
 {
+    private readonly MSBuildWorkspace workspace;
+    private readonly Solution solution;
+    private readonly RoslynBuildHostLease? buildHostLease;
+
+    internal LoadedRoslynSolution(
+        MSBuildWorkspace workspace,
+        Solution solution,
+        RoslynBuildHostLease? buildHostLease = null)
+    {
+        this.workspace = workspace;
+        this.solution = solution;
+        this.buildHostLease = buildHostLease;
+    }
+
     public Task<SemanticIndex> BuildIndexAsync(
         string repositoryRoot,
         SemanticIndexBuildIdentity identity,
@@ -20,6 +33,7 @@ public sealed class LoadedRoslynSolution(MSBuildWorkspace workspace, Solution so
     public ValueTask DisposeAsync()
     {
         workspace.Dispose();
+        buildHostLease?.Dispose();
         return ValueTask.CompletedTask;
     }
 }
@@ -59,31 +73,51 @@ public static class RoslynSolutionLoader
             return null;
         }
 
-        EnsureMsBuildRegistered();
-        var workspace = MSBuildWorkspace.Create();
-        workspace.RegisterWorkspaceFailedHandler(
-            args => diagnostic?.Invoke(args.Diagnostic.Message));
-        try
+        using (await RoslynBuildHostLease.AcquireLoadLockAsync(cancellationToken))
         {
-            var solution = selected.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-                ? (await workspace.OpenProjectAsync(
-                    selected,
-                    cancellationToken: cancellationToken)).Solution
-                : await workspace.OpenSolutionAsync(
-                    selected,
-                    cancellationToken: cancellationToken);
-            if (candidates.Length + projectCandidates.Length > 1)
+            EnsureMsBuildRegistered();
+            var buildHostLease = RoslynBuildHostLease.CreateIfNeeded();
+            var originalBaseDirectory = AppContext.GetData(
+                RoslynBuildHostLease.BaseDirectoryDataName);
+            if (buildHostLease is not null)
             {
-                diagnostic?.Invoke(
-                    $"Multiple C# entry points found; semantic indexing selected '{selected}'.");
+                AppContext.SetData(
+                    RoslynBuildHostLease.BaseDirectoryDataName,
+                    buildHostLease.RootPath);
             }
 
-            return new LoadedRoslynSolution(workspace, solution);
-        }
-        catch
-        {
-            workspace.Dispose();
-            throw;
+            var workspace = MSBuildWorkspace.Create();
+            workspace.RegisterWorkspaceFailedHandler(
+                args => diagnostic?.Invoke(args.Diagnostic.Message));
+            try
+            {
+                var solution = selected.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                    ? (await workspace.OpenProjectAsync(
+                        selected,
+                        cancellationToken: cancellationToken)).Solution
+                    : await workspace.OpenSolutionAsync(
+                        selected,
+                        cancellationToken: cancellationToken);
+                if (candidates.Length + projectCandidates.Length > 1)
+                {
+                    diagnostic?.Invoke(
+                        $"Multiple C# entry points found; semantic indexing selected '{selected}'.");
+                }
+
+                return new LoadedRoslynSolution(workspace, solution, buildHostLease);
+            }
+            catch
+            {
+                workspace.Dispose();
+                buildHostLease?.Dispose();
+                throw;
+            }
+            finally
+            {
+                AppContext.SetData(
+                    RoslynBuildHostLease.BaseDirectoryDataName,
+                    originalBaseDirectory);
+            }
         }
     }
 
