@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
+using CodeSearch.Core.Semantics;
 using LocalAi.Contracts;
 
 namespace CodeSearch.Core.Indexing;
@@ -15,7 +16,8 @@ public sealed record GenerationIdentity(
     int ChunkFormatVersion,
     int IndexFormatVersion,
     int NormalizationVersion,
-    int RankingVersion)
+    int RankingVersion,
+    int SemanticIndexVersion = 0)
 {
     public bool CanReuseCorpusFrom(GenerationIdentity previous)
     {
@@ -36,8 +38,8 @@ public sealed record GenerationIdentity(
     {
         get
         {
-            var value = string.Join(
-                "\n",
+            var values = new List<object>
+            {
                 RepositoryId,
                 DevCommit,
                 DevTree,
@@ -46,7 +48,16 @@ public sealed record GenerationIdentity(
                 ChunkFormatVersion,
                 IndexFormatVersion,
                 NormalizationVersion,
-                RankingVersion);
+                RankingVersion,
+            };
+            // Preserve IDs of all pre-SIDX generations. Once semantic data participates in a
+            // generation, its format version becomes part of the immutable identity.
+            if (SemanticIndexVersion > 0)
+            {
+                values.Add(SemanticIndexVersion);
+            }
+
+            var value = string.Join("\n", values);
             return Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(value)))
                 .ToLowerInvariant();
@@ -59,7 +70,10 @@ public sealed record GenerationManifest(
     GenerationIdentity Identity,
     string IndexFile,
     string IndexChecksum,
-    DateTimeOffset PublishedAtUtc);
+    DateTimeOffset PublishedAtUtc,
+    string? SemanticIndexFile = null,
+    string? SemanticIndexChecksum = null,
+    IReadOnlyList<SemanticAdapterStatus>? SemanticAdapters = null);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record GenerationPointer(

@@ -89,11 +89,11 @@ public sealed class BrokerModelInstallerTests : IDisposable
                 Request("a", "model-a", 2048, "signed-7"),
                 Request("b", "model-b", 4096, "signed-7"),
             ],
-            new Progress<ModelProvisioningProgress>(steps.Add),
+            new ImmediateProgress<ModelProvisioningProgress>(steps.Add),
             TestContext.Current.CancellationToken);
 
-        // Progress<T> posts, so the reports may arrive after the batch; order and content are
-        // what matter, not the moment of delivery.
+        // A synchronous test observer makes order and content deterministic without depending
+        // on the xUnit synchronization context draining Progress<T> callbacks.
         Assert.Equal(2, steps.Count);
         // Missing and present are different waits and say so.
         Assert.Contains("model-a", steps[0].Message, StringComparison.Ordinal);
@@ -989,6 +989,11 @@ public sealed class BrokerModelInstallerTests : IDisposable
             Calls.Add(new Call(executable, arguments.ToArray(), timeout));
             return Task.FromResult(results.Dequeue());
         }
+    }
+
+    private sealed class ImmediateProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
     private sealed record Call(

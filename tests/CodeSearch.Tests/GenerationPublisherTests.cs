@@ -32,6 +32,28 @@ public sealed class GenerationPublisherTests : IDisposable
         Assert.Equal(identity.Id, store.ReadCurrent()!.GenerationId);
     }
 
+    [Fact]
+    public void Semantic_sidecar_is_published_before_current_pointer_switches()
+    {
+        Directory.CreateDirectory(_root);
+        var source = Path.Combine(_root, "source.cidx");
+        var semantic = Path.Combine(_root, "source.sidx");
+        File.WriteAllText(source, "INDEX");
+        File.WriteAllText(semantic, "SEMANTIC");
+        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var publisher = new GenerationPublisher(store);
+        var identity = GenerationStoreTests.Identity() with
+        {
+            SemanticIndexVersion = 1,
+        };
+
+        var manifest = publisher.Publish(source, identity, [], semantic);
+
+        Assert.Equal("semantic.sidx", manifest.SemanticIndexFile);
+        Assert.True(File.Exists(store.SemanticIndexPath(identity.Id)));
+        Assert.Equal(identity.Id, store.ReadCurrent()!.GenerationId);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

@@ -28,6 +28,7 @@ public sealed class ModelResidencyPolicyTests : IDisposable
         var policy = new ModelResidencyPolicyStore(_root).Read();
 
         Assert.Equal(ModelResidencyPolicy.RequireFullVram, policy.ModelResidency);
+        Assert.Equal(0, policy.IdleModelKeepAliveSeconds);
     }
 
     [Fact]
@@ -70,9 +71,34 @@ public sealed class ModelResidencyPolicyTests : IDisposable
     public void Written_policy_round_trips(ModelResidencyPolicy residency)
     {
         var store = new ModelResidencyPolicyStore(_root);
-        store.Write(new BrokerPolicy(1, residency));
+        store.Write(new BrokerPolicy(1, residency, IdleModelKeepAliveSeconds: 45));
 
         Assert.Equal(residency, store.Read().ModelResidency);
+        Assert.Equal(45, store.Read().IdleModelKeepAliveSeconds);
+    }
+
+    [Fact]
+    public void Existing_policy_without_idle_keep_alive_uses_immediate_unload()
+    {
+        File.WriteAllText(
+            Path.Combine(_root, BrokerPolicy.FileName),
+            """{"SchemaVersion":1,"ModelResidency":"RequireFullVram"}""");
+
+        var policy = new ModelResidencyPolicyStore(_root).Read();
+
+        Assert.Equal(0, policy.IdleModelKeepAliveSeconds);
+    }
+
+    [Fact]
+    public void Negative_idle_keep_alive_falls_back_to_default_policy()
+    {
+        File.WriteAllText(
+            Path.Combine(_root, BrokerPolicy.FileName),
+            """{"SchemaVersion":1,"ModelResidency":"AllowCpu","IdleModelKeepAliveSeconds":-1}""");
+
+        var policy = new ModelResidencyPolicyStore(_root).Read();
+
+        Assert.Equal(BrokerPolicy.Default, policy);
     }
 
     [Fact]

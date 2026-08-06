@@ -1,0 +1,77 @@
+{
+  "SchemaVersion": 1,
+  "Iterations": 200,
+  "Cases": [
+    {
+      "Name": "csharp-definition",
+      "Operation": "Definition",
+      "Source": {
+        "Path": "src/CodeSearch.Core/Semantics/SemanticNavigationGateway.cs",
+        "Marker": "FindImplementations(",
+        "Occurrence": 1
+      },
+      "Expected": [
+        {
+          "Path": "src/CodeSearch.Core/Semantics/SemanticNavigationService.cs",
+          "Marker": "FindImplementations("
+        }
+      ]
+    },
+    {
+      "Name": "csharp-references",
+      "Operation": "References",
+      "Source": {
+        "Path": "src/CodeSearch.Core/Semantics/SemanticNavigationService.cs",
+        "Marker": "FindImplementations("
+      },
+      "Expected": [
+        {
+          "Path": "src/CodeSearch.Core/Semantics/SemanticNavigationGateway.cs",
+          "Marker": "FindImplementations(",
+          "Occurrence": 1
+        }
+      ],
+      "AllowAdditional": true,
+      "IncludeDefinition": true
+    },
+    {
+      "Name": "csharp-implementations",
+      "Operation": "Implementations",
+      "Source": {
+        "Path": "src/CodeSearch.Core/Semantics/LanguageServerSessionManager.cs",
+        "Marker": "GoToDefinitionAsync("
+      },
+      "Expected": [
+        {
+          "Path": "src/CodeSearch.Core/Semantics/StdioLanguageServerClient.cs",
+          "Marker": "GoToDefinitionAsync("
+        },
+        {
+          "Path": "tests/CodeSearch.Tests/LanguageServerSessionManagerTests.cs",
+          "Marker": "GoToDefinitionAsync(",
+          "Occurrence": 3
+        },
+        {
+          "Path": "tests/CodeSearch.Tests/LiveSemanticNavigationOverlayTests.cs",
+          "Marker": "GoToDefinitionAsync(",
+          "Occurrence": 5
+        }
+      ]
+    },
+    {
+      "Name": "csharp-outgoing-relationship",
+      "Operation": "RelationshipsOutgoing",
+      "Source": {
+        "Path": "src/CodeSearch.Core/Semantics/StdioLanguageServerClient.cs",
+        "Marker": "GoToDefinitionAsync("
+      },
+      "Expected": [
+        {
+          "Path": "src/CodeSearch.Core/Semantics/LanguageServerSessionManager.cs",
+          "Marker": "GoToDefinitionAsync("
+        }
+      ],
+      "RelationshipKind": "Implementation"
+    }
+  ]
+}

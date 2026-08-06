@@ -119,6 +119,7 @@ internal static class BrokerProgram
                 residentModel: () => executionRouter.ResidentModel,
                 durationObserver: scheduleMetadata.Observe,
                 idleUnload: executionRouter.UnloadResidentAsync,
+                idleUnloadAfter: TimeSpan.FromSeconds(policy.IdleModelKeepAliveSeconds),
                 backendProbe: transport.ProbeActiveModelAsync,
                 diagnostic: diagnostic => Console.Error.WriteLine(
                     $"LocalAi broker diagnostic: job={diagnostic.JobId:N} " +

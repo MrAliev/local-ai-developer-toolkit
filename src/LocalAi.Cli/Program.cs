@@ -89,6 +89,11 @@ static async Task<int> RunAsync(string[] args)
         return PolicyCommand.Execute(args.AsSpan(1).ToArray());
     }
 
+    if (args is ["semantic", .. var semanticArguments])
+    {
+        return SemanticNavigationCommand.Execute(semanticArguments);
+    }
+
     if (args is ["bootstrap", "--dry-run", ..])
     {
         var runtimeRoot = Path.Combine(

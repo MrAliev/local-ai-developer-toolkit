@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using CodeSearch.Core.Semantics;
 using LocalAi.Contracts;
 
 namespace CodeSearch.Core.Indexing;
@@ -20,7 +21,9 @@ public sealed class GenerationStore
     public GenerationManifest PublishIndex(
         string sourceIndexPath,
         GenerationIdentity identity,
-        DateTimeOffset? publishedAtUtc = null)
+        string? sourceSemanticIndexPath = null,
+        DateTimeOffset? publishedAtUtc = null,
+        IReadOnlyList<SemanticAdapterStatus>? semanticAdapterStatuses = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceIndexPath);
         ArgumentNullException.ThrowIfNull(identity);
@@ -28,7 +31,20 @@ public sealed class GenerationStore
         var target = Path.Combine(_generationsRoot, identity.Id);
         if (Directory.Exists(target))
         {
-            return ReadManifest(identity.Id);
+            var existing = ReadManifest(identity.Id);
+            if (sourceSemanticIndexPath is not null && existing.SemanticIndexFile is null)
+            {
+                throw new InvalidOperationException(
+                    "The immutable generation already exists without a semantic index.");
+            }
+
+            return existing;
+        }
+
+        if ((sourceSemanticIndexPath is null) != (identity.SemanticIndexVersion == 0))
+        {
+            throw new InvalidOperationException(
+                "Semantic index input and generation semantic format version must be supplied together.");
         }
 
         var staging = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -39,11 +55,24 @@ public sealed class GenerationStore
             var stagedIndex = Path.Combine(staging, indexFile);
             File.Copy(sourceIndexPath, stagedIndex, overwrite: false);
             var checksum = Checksum(stagedIndex);
+            string? semanticIndexFile = null;
+            string? semanticChecksum = null;
+            if (sourceSemanticIndexPath is not null)
+            {
+                semanticIndexFile = "semantic.sidx";
+                var stagedSemanticIndex = Path.Combine(staging, semanticIndexFile);
+                File.Copy(sourceSemanticIndexPath, stagedSemanticIndex, overwrite: false);
+                semanticChecksum = Checksum(stagedSemanticIndex);
+            }
+
             var manifest = new GenerationManifest(
                 identity,
                 indexFile,
                 checksum,
-                publishedAtUtc ?? DateTimeOffset.UtcNow);
+                publishedAtUtc ?? DateTimeOffset.UtcNow,
+                semanticIndexFile,
+                semanticChecksum,
+                semanticAdapterStatuses);
             AtomicWriteJson(Path.Combine(staging, "manifest.json"), manifest);
             Directory.Move(staging, target);
             return manifest;
@@ -80,6 +109,37 @@ public sealed class GenerationStore
             throw new InvalidDataException("Generation index checksum does not match.");
         }
 
+        if ((manifest.SemanticIndexFile is null) != (manifest.SemanticIndexChecksum is null) ||
+            (manifest.SemanticIndexFile is null) != (manifest.Identity.SemanticIndexVersion == 0))
+        {
+            throw new InvalidDataException(
+                "Generation semantic index metadata is inconsistent with its identity.");
+        }
+
+        if (manifest.SemanticIndexFile is not null)
+        {
+            var semanticPath = Path.Combine(directory, manifest.SemanticIndexFile);
+            if (!File.Exists(semanticPath) ||
+                !string.Equals(
+                    Checksum(semanticPath),
+                    manifest.SemanticIndexChecksum,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("Generation semantic index checksum does not match.");
+            }
+        }
+
+        if (manifest.SemanticAdapters is not null &&
+            (manifest.SemanticAdapters.Any(status =>
+                 string.IsNullOrWhiteSpace(status.Name) ||
+                 !Enum.IsDefined(status.State) ||
+                 status.DurationMilliseconds < 0) ||
+             manifest.SemanticAdapters.Select(status => status.Name)
+                 .Distinct(StringComparer.Ordinal).Count() != manifest.SemanticAdapters.Count))
+        {
+            throw new InvalidDataException("Generation semantic adapter metadata is invalid.");
+        }
+
         return manifest;
     }
 
@@ -104,6 +164,9 @@ public sealed class GenerationStore
 
     public string IndexPath(string generationId) =>
         Path.Combine(_generationsRoot, generationId, "base.cidx");
+
+    public string SemanticIndexPath(string generationId) =>
+        Path.Combine(_generationsRoot, generationId, "semantic.sidx");
 
     private static string Checksum(string path)
     {

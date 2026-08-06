@@ -63,7 +63,7 @@ public sealed class BrokerHost
         _residentModel = residentModel ?? (() => null);
         _durationObserver = durationObserver ?? ((_, _, _) => { });
         _idleUnload = idleUnload ?? (_ => Task.CompletedTask);
-        _idleUnloadAfter = idleUnloadAfter ?? TimeSpan.FromMinutes(30);
+        _idleUnloadAfter = idleUnloadAfter ?? TimeSpan.Zero;
         _backendProbe = backendProbe;
         _watchdogPolicy = watchdogPolicy ?? BackendWatchdogPolicy.Default;
         _watchdogPolicy.Validate();
@@ -78,7 +78,7 @@ public sealed class BrokerHost
             throw new ArgumentOutOfRangeException(nameof(idleInterval));
         }
 
-        if (_idleUnloadAfter <= TimeSpan.Zero)
+        if (_idleUnloadAfter < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(idleUnloadAfter));
         }
@@ -139,9 +139,30 @@ public sealed class BrokerHost
         }
 
         var queued = await selectable.ListQueuedAsync(cancellationToken);
-        if (queued.Count > 0)
+        var residentModel = _residentModel();
+        if (string.IsNullOrWhiteSpace(residentModel))
         {
             return;
+        }
+
+        if (queued.Count > 0)
+        {
+            // Without routing metadata the host cannot prove that the queued work targets a
+            // different model, so retain the resident model conservatively.
+            if (_scheduleMetadata is null)
+            {
+                return;
+            }
+
+            var scheduled = await _scheduleMetadata(queued, cancellationToken);
+            if (scheduled.Any(candidate =>
+                    string.Equals(
+                        candidate.Model,
+                        residentModel,
+                        StringComparison.Ordinal)))
+            {
+                return;
+            }
         }
 
         await _idleUnload(cancellationToken);

@@ -5,9 +5,13 @@ public sealed class GenerationPublisher(GenerationStore store)
     public GenerationManifest Publish(
         string sourceIndexPath,
         GenerationIdentity identity,
-        IReadOnlyList<OverlayReadiness> activeOverlays)
+        IReadOnlyList<OverlayReadiness> activeOverlays,
+        string? sourceSemanticIndexPath = null)
     {
-        var generation = store.PublishIndex(sourceIndexPath, identity);
+        var generation = store.PublishIndex(
+            sourceIndexPath,
+            identity,
+            sourceSemanticIndexPath);
         var allReady = activeOverlays.All(
             overlay => overlay.Ready &&
                        string.Equals(
