@@ -140,7 +140,7 @@ public sealed class BrokerHost
 
         var queued = await selectable.ListQueuedAsync(cancellationToken);
         var residentModel = _residentModel();
-        if (string.IsNullOrWhiteSpace(residentModel))
+        if (queued.Count > 0 && string.IsNullOrWhiteSpace(residentModel))
         {
             return;
         }
