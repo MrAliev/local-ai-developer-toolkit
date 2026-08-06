@@ -1,5 +1,6 @@
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
+using CodeSearch.Core.Semantics;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
 using LocalAi.Repository;
@@ -22,6 +23,11 @@ public static class CodeSearchSyncCommand
     public const string DefaultModel = "qwen3-embedding:8b-q8_0";
     public const int DefaultDimension = 4096;
     public const int CurrentNormalizationVersion = 4;
+    public const int CurrentSemanticGenerationVersion = 2;
+
+    private sealed record SemanticBuildResult(
+        SemanticIndex Index,
+        IReadOnlyList<SemanticAdapterStatus> AdapterStatuses);
 
     public static async Task<CodeSearchSyncResult> ExecuteAsync(
         string workingRoot,
@@ -76,7 +82,8 @@ public static class CodeSearchSyncCommand
                 1,
                 CodeIndex.CurrentVersion,
                 CurrentNormalizationVersion,
-                1);
+                1,
+                CurrentSemanticGenerationVersion);
             var commonDirectory = RepositoryIdentity.FromCommonDirectory(
                 RepoLocator.GitOutput(
                     requested.WorkingRoot,
@@ -167,34 +174,61 @@ public static class CodeSearchSyncCommand
                 var overlayPath = RuntimeIndexLayout.OverlayPath(
                     identity,
                     generation.Identity.Id);
-                if (File.Exists(overlayPath))
+                var semanticOverlayPath = RuntimeIndexLayout.SemanticOverlayPath(
+                    identity,
+                    generation.Identity.Id);
+                var builtOverlay = false;
+                if (!File.Exists(overlayPath))
                 {
-                    continue;
+                    var embedder = new BrokerEmbeddingClient(
+                        generation.Identity.EmbeddingModel,
+                        BrokerClientFactory.CreateDefault());
+                    var builder = new IndexBuilder(
+                        embedder,
+                        Console.Error.WriteLine,
+                        progress => ReportProgress(
+                            RepositoryIndexProgressPhase.EmbeddingOverlay,
+                            identity.WorkingRoot,
+                            progress));
+                    await builder.BuildOverlayAsync(
+                        identity.WorkingRoot,
+                        store.IndexPath(generation.Identity.Id),
+                        overlayPath,
+                        cancellationToken,
+                        new IndexBuildContext(
+                            identity.WorkingRoot,
+                            identity.HeadCommit,
+                            identity.HeadTree,
+                            identity.RepositoryId,
+                            generation.Identity.Id,
+                            identity.DirtyHash));
+                    builtOverlay = true;
                 }
 
-                var embedder = new BrokerEmbeddingClient(
-                    generation.Identity.EmbeddingModel,
-                    BrokerClientFactory.CreateDefault());
-                var builder = new IndexBuilder(
-                    embedder,
-                    Console.Error.WriteLine,
-                    progress => ReportProgress(
-                        RepositoryIndexProgressPhase.EmbeddingOverlay,
+                if (!IsCurrentSemanticOverlay(
+                        semanticOverlayPath,
+                        identity,
+                        generation.Identity))
+                {
+                    var semanticBuild = await BuildSemanticIndexAsync(
                         identity.WorkingRoot,
-                        progress));
-                await builder.BuildOverlayAsync(
-                    identity.WorkingRoot,
-                    store.IndexPath(generation.Identity.Id),
-                    overlayPath,
-                    cancellationToken,
-                    new IndexBuildContext(
-                        identity.WorkingRoot,
-                        identity.HeadCommit,
-                        identity.HeadTree,
-                        identity.RepositoryId,
-                        generation.Identity.Id,
-                        identity.DirtyHash));
-                overlaysBuilt++;
+                        identity,
+                        generation.Identity,
+                        cancellationToken);
+                    var baseSemanticIndex = SemanticIndex.Load(
+                        store.SemanticIndexPath(generation.Identity.Id));
+                    var semanticOverlay = SemanticIndexOverlay.Create(
+                        baseSemanticIndex,
+                        semanticBuild.Index,
+                        RuntimeIndexLayout.GetDirtyPaths(identity.WorkingRoot));
+                    semanticOverlay.Save(semanticOverlayPath);
+                    builtOverlay = true;
+                }
+
+                if (builtOverlay)
+                {
+                    overlaysBuilt++;
+                }
             }
 
             progressStore.Save(lastProgress = lastProgress with
@@ -321,6 +355,9 @@ public static class CodeSearchSyncCommand
         var workIndex = Path.Combine(
             stagingRoot,
             generation.Id + "." + Guid.NewGuid().ToString("N") + ".cidx");
+        var workSemanticIndex = Path.Combine(
+            stagingRoot,
+            generation.Id + "." + Guid.NewGuid().ToString("N") + ".sidx");
         try
         {
             if (current is not null)
@@ -361,7 +398,18 @@ public static class CodeSearchSyncCommand
                     $"{generation.EmbeddingDimension}.");
             }
 
-            return store.PublishIndex(workIndex, generation);
+            var semanticIndex = await BuildSemanticIndexAsync(
+                snapshot.Root,
+                dev,
+                generation,
+                cancellationToken);
+
+            semanticIndex.Index.Save(workSemanticIndex);
+            return store.PublishIndex(
+                workIndex,
+                generation,
+                workSemanticIndex,
+                semanticAdapterStatuses: semanticIndex.AdapterStatuses);
         }
         finally
         {
@@ -369,7 +417,209 @@ public static class CodeSearchSyncCommand
             {
                 File.Delete(workIndex);
             }
+
+            if (File.Exists(workSemanticIndex))
+            {
+                File.Delete(workSemanticIndex);
+            }
         }
+    }
+
+    private static async Task<SemanticBuildResult> BuildSemanticIndexAsync(
+        string sourceRoot,
+        WorkingIndexIdentity snapshot,
+        GenerationIdentity generation,
+        CancellationToken cancellationToken)
+    {
+        await using var loaded = await RoslynSolutionLoader.LoadAsync(
+            sourceRoot,
+            message => Console.Error.WriteLine($"Roslyn: {message}"),
+            cancellationToken);
+        SemanticIndex languageIndex;
+        if (loaded is null)
+        {
+            var empty = EmptySemanticIndex(generation) with
+            {
+                GitTree = snapshot.HeadTree,
+                DirtyHash = snapshot.DirtyHash,
+                BaseCommit = snapshot.HeadCommit,
+            };
+            languageIndex = new XamlSemanticIndexer().Supplement(empty, sourceRoot);
+        }
+        else
+        {
+            var csharp = await loaded.BuildIndexAsync(
+                sourceRoot,
+                new SemanticIndexBuildIdentity(
+                    generation.RepositoryId,
+                    generation.Id,
+                    snapshot.HeadTree,
+                    snapshot.DirtyHash,
+                    snapshot.HeadCommit,
+                    CommitTimestamp(snapshot.WorkingRoot, snapshot.HeadCommit)),
+                cancellationToken);
+            languageIndex = new XamlSemanticIndexer().Supplement(csharp, sourceRoot);
+        }
+
+        return await RunScipAdaptersAsync(
+            languageIndex,
+            sourceRoot,
+            cancellationToken);
+    }
+
+    private static bool IsCurrentSemanticOverlay(
+        string path,
+        WorkingIndexIdentity snapshot,
+        GenerationIdentity generation)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            var overlay = SemanticIndexOverlay.Load(path);
+            return string.Equals(overlay.RepositoryId, snapshot.RepositoryId, StringComparison.Ordinal) &&
+                   string.Equals(overlay.GenerationId, generation.Id, StringComparison.Ordinal) &&
+                   string.Equals(overlay.BaseGitTree, generation.DevTree, StringComparison.Ordinal) &&
+                   string.Equals(overlay.GitTree, snapshot.HeadTree, StringComparison.Ordinal) &&
+                   string.Equals(overlay.DirtyHash, snapshot.DirtyHash, StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task<SemanticBuildResult> RunScipAdaptersAsync(
+        SemanticIndex index,
+        string sourceRoot,
+        CancellationToken cancellationToken)
+    {
+        var policy = SemanticIndexingPolicyStore.ReadDefault();
+        var statuses = new List<SemanticAdapterStatus>();
+        var files = FileScanner.Enumerate(sourceRoot)
+            .Select(path => path.Replace('\\', '/'))
+            .ToArray();
+        if (!policy.Enabled)
+        {
+            statuses.Add(Skipped("typescript", "Semantic external adapters are disabled."));
+            statuses.Add(Skipped("python", "Semantic external adapters are disabled."));
+            return new SemanticBuildResult(index, statuses);
+        }
+
+        var importer = new ScipImporter(policy.ImportLimits());
+        var runner = new ScipAdapterRunner(importer);
+        var hasTypeScript = files.Any(path =>
+            path.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".mjs", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".cjs", StringComparison.OrdinalIgnoreCase));
+        var typeScript = policy.TypeScript;
+        if (!hasTypeScript)
+        {
+            statuses.Add(Skipped("typescript", "No TypeScript or JavaScript files detected."));
+        }
+        else if (!typeScript.Enabled)
+        {
+            statuses.Add(Skipped("typescript", "Adapter is disabled by policy."));
+        }
+        else
+        {
+            var arguments = typeScript.Arguments.ToList();
+            if (arguments.SequenceEqual(["index"], StringComparer.Ordinal) &&
+                !files.Any(path =>
+                    string.Equals(
+                        Path.GetFileName(path),
+                        "tsconfig.json",
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                arguments.Add("--infer-tsconfig");
+            }
+
+            var result = await runner.RunAsync(
+                index,
+                sourceRoot,
+                Spec("typescript", typeScript, arguments, policy),
+                cancellationToken);
+            index = result.Index;
+            statuses.Add(result.Status);
+            ReportAdapter(result.Status);
+        }
+
+        var hasPython = files.Any(path =>
+            path.EndsWith(".py", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".pyi", StringComparison.OrdinalIgnoreCase));
+        var python = policy.Python;
+        if (!hasPython)
+        {
+            statuses.Add(Skipped("python", "No Python files detected."));
+        }
+        else if (!python.Enabled)
+        {
+            statuses.Add(Skipped("python", "Adapter is disabled by policy."));
+        }
+        else
+        {
+            var result = await runner.RunAsync(
+                index,
+                sourceRoot,
+                Spec("python", python, python.Arguments, policy),
+                cancellationToken);
+            index = result.Index;
+            statuses.Add(result.Status);
+            ReportAdapter(result.Status);
+        }
+
+        return new SemanticBuildResult(index, statuses);
+    }
+
+    private static ScipAdapterSpec Spec(
+        string name,
+        ScipLanguageAdapterPolicy adapter,
+        IReadOnlyList<string> arguments,
+        SemanticIndexingPolicy policy) =>
+        new(
+            name,
+            adapter.Executable,
+            arguments,
+            adapter.OutputFile,
+            TimeSpan.FromSeconds(policy.TimeoutSeconds),
+            policy.MaximumProcessOutputBytes,
+            adapter.UnspecifiedPositionEncoding);
+
+    private static SemanticAdapterStatus Skipped(string name, string message) =>
+        new(name, SemanticAdapterState.Skipped, message, 0);
+
+    private static void ReportAdapter(SemanticAdapterStatus status) =>
+        Console.Error.WriteLine(
+            $"SCIP {status.Name}: {status.State.ToString().ToLowerInvariant()} — {status.Message}");
+
+    private static SemanticIndex EmptySemanticIndex(GenerationIdentity generation) =>
+        new()
+        {
+            RepositoryId = generation.RepositoryId,
+            GenerationId = generation.Id,
+            GitTree = generation.DevTree,
+            DirtyHash = null,
+            BaseCommit = generation.DevCommit,
+            IndexedAtUtc = DateTime.UnixEpoch,
+            Documents = [],
+            Symbols = [],
+            Occurrences = [],
+            Relationships = [],
+        };
+
+    private static DateTime CommitTimestamp(string root, string commit)
+    {
+        var value = GitValue(root, "show", "-s", "--format=%cI", commit);
+        return DateTimeOffset.TryParse(value, out var timestamp)
+            ? timestamp.UtcDateTime
+            : DateTime.UnixEpoch;
     }
 
     /// <summary>

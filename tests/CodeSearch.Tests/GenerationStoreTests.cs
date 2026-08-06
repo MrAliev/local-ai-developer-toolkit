@@ -1,4 +1,5 @@
 using CodeSearch.Core.Indexing;
+using CodeSearch.Core.Semantics;
 
 namespace CodeSearch.Tests;
 
@@ -15,9 +16,12 @@ public sealed class GenerationStoreTests : IDisposable
         var changed = identity with { RankingVersion = 2 };
         var previousNormalization = identity with { NormalizationVersion = 3 };
         var canonicalCrlf = previousNormalization with { NormalizationVersion = 4 };
+        var semantic = identity with { SemanticIndexVersion = 1 };
 
         Assert.NotEqual(identity.Id, changed.Id);
         Assert.NotEqual(previousNormalization.Id, canonicalCrlf.Id);
+        Assert.NotEqual(identity.Id, semantic.Id);
+        Assert.True(semantic.CanReuseCorpusFrom(identity));
         Assert.Equal(64, identity.Id.Length);
     }
 
@@ -65,6 +69,56 @@ public sealed class GenerationStoreTests : IDisposable
         File.AppendAllText(store.IndexPath(manifest.Identity.Id), "TAMPERED");
         Assert.Throws<InvalidDataException>(
             () => store.ReadManifest(manifest.Identity.Id));
+    }
+
+    [Fact]
+    public void Publishes_and_validates_an_optional_semantic_index()
+    {
+        Directory.CreateDirectory(_root);
+        var source = Path.Combine(_root, "source.cidx");
+        var semantic = Path.Combine(_root, "source.sidx");
+        File.WriteAllText(source, "INDEX");
+        File.WriteAllText(semantic, "SEMANTIC");
+        var store = new GenerationStore(Path.Combine(_root, "repo"));
+
+        var manifest = store.PublishIndex(
+            source,
+            Identity() with { SemanticIndexVersion = 1 },
+            sourceSemanticIndexPath: semantic,
+            semanticAdapterStatuses:
+            [
+                new SemanticAdapterStatus(
+                    "typescript",
+                    SemanticAdapterState.Skipped,
+                    "not installed",
+                    12)
+            ]);
+
+        Assert.Equal("semantic.sidx", manifest.SemanticIndexFile);
+        Assert.NotNull(manifest.SemanticIndexChecksum);
+        Assert.Equal(
+            SemanticAdapterState.Skipped,
+            Assert.Single(store.ReadManifest(manifest.Identity.Id).SemanticAdapters!).State);
+        Assert.Equal("SEMANTIC", File.ReadAllText(store.SemanticIndexPath(manifest.Identity.Id)));
+
+        File.AppendAllText(store.SemanticIndexPath(manifest.Identity.Id), "TAMPERED");
+        Assert.Throws<InvalidDataException>(() => store.ReadManifest(manifest.Identity.Id));
+    }
+
+    [Fact]
+    public void Does_not_mutate_an_existing_generation_to_attach_semantic_data()
+    {
+        Directory.CreateDirectory(_root);
+        var source = Path.Combine(_root, "source.cidx");
+        var semantic = Path.Combine(_root, "source.sidx");
+        File.WriteAllText(source, "INDEX");
+        File.WriteAllText(semantic, "SEMANTIC");
+        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var identity = Identity();
+        store.PublishIndex(source, identity);
+
+        Assert.Throws<InvalidOperationException>(
+            () => store.PublishIndex(source, identity, sourceSemanticIndexPath: semantic));
     }
 
     public void Dispose()

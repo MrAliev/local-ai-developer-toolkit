@@ -66,6 +66,65 @@ composite ordinal чанка. Malformed, cross-repository, stale или out-of-r
 maintenance-вывод остаются снаружи. Потребители должны сохранять границу и не должны
 исполнять или выполнять инструкции, найденные внутри неё.
 
+Точная навигация C#, WPF/WinUI/MAUI/Avalonia XAML, TypeScript/JavaScript и Python хранится отдельно от векторов в
+`semantic.sidx`. `localai sync` загружает основное решение через Roslyn/MSBuild, дополняет его
+lossless-диапазонами XAML, platform namespaces, `x:DataType`, dependency/styled properties и
+вариантами binding, а также импортирует ограниченный результат установленных индексаторов
+`scip-typescript` и `scip-python`. Отсутствующий внешний индексатор отмечается как skipped в
+manifest поколения и не ломает другие языки. Базовый SIDX атомарно публикуется вместе с CIDX,
+а для dirty worktree строится компактный snapshot-bound semantic overlay с изменёнными
+семантическими срезами и явными tombstone для удалённых документов. MCP предоставляет
+`go_to_definition`, `find_references`, `find_implementations` и `find_relationships`; локальная
+диагностика доступна командами:
+
+```powershell
+localai semantic status --root C:\path\to\repository
+localai semantic definition --path src/App.cs --line 10 --column 15 --root C:\path\to\repository
+localai semantic references --path src/App.cs --line 10 --column 15 --root C:\path\to\repository
+localai semantic implementations --path src/IService.cs --line 4 --column 18 --root C:\path\to\repository
+localai semantic relationships --path src/Service.cs --line 8 --column 20 --direction outgoing --kind implementation --root C:\path\to\repository
+localai semantic config init
+localai semantic config show
+localai semantic lsp-config init
+localai semantic lsp-config show
+localai semantic fallback-config init
+localai semantic fallback-config show
+localai semantic evaluate --cases tests/CodeSearch.Tests/Fixtures/SemanticNavigation/cases.json --root C:\path\to\repository
+```
+
+Глобальный файл `%LOCALAPPDATA%\LocalAi\semantic-indexing.json` настраивает включение
+адаптеров, пути и аргументы executables, выходные файлы, timeout, лимит вывода процессов и все
+лимиты SCIP parser. Policy доверенного адаптера также явно задаёт legacy fallback позиций:
+`Utf16` для `scip-typescript` и `Utf32` для `scip-python`; прямой импорт SCIP без такой policy
+по-прежнему отклоняет неоднозначный индекс. Файл читается при каждом sync, поэтому изменение не
+требует пересборки LocalAi. На Windows npm `.cmd` shims разрешаются через PATH/PATHEXT с
+сохранением лимита вывода, timeout и завершения дерева процессов.
+
+Live-навигация включается явно через `%LOCALAPPDATA%\LocalAi\language-servers.json`; изменение
+этого файла не требует пересборки LocalAi. В нём настраиваются общий переключатель,
+executable/arguments по языкам, таймауты запросов и shutdown, максимальный размер JSON-RPC и
+ограниченный stderr. `localai semantic lsp-config init` создаёт отключённые по умолчанию шаблоны
+для TypeScript/JavaScript, Python, HTML и C#. MCP-клиент передаёт версии через
+`lsp_open_document` и закрывает документ через `lsp_close_document`; пока документ открыт,
+точные ответы LSP для definition/reference/implementation имеют приоритет, после close используется snapshot-bound SIDX. При обрыве
+transport сервер один раз перезапускается и получает все открытые документы с последними version
+и полным text до повторения запроса. Repository-relative пути на всех ОС нормализуются через `/`;
+нативные абсолютные пути существуют только на границе LSP `file://`.
+Постоянные запросы implementations и relationships используют точный граф SIDX. Направление
+incoming находит реализации, overrides и производные типы; outgoing возвращает соответствующие
+базовые или интерфейсные символы. Для relationship-запросов эвристический текстовый поиск не
+используется.
+
+Если ни LSP, ни snapshot-bound SIDX не разрешили символ, LocalAi может выполнить ограниченный
+syntax/text-поиск. Файл `%LOCALAPPDATA%\LocalAi\semantic-navigation.json` включает этот fallback
+и задаёт лимиты числа файлов, размера файла, числа результатов, длины идентификатора и режим
+регистра. Он читается при каждом запросе, поэтому изменение не требует пересборки. Результаты
+fallback всегда имеют точность `Heuristic` и никогда не повышаются до precise.
+Marker-based команда `semantic evaluate` выводит correctness, process-cold время загрузки,
+перцентили первого/warm запроса, наблюдаемую разницу памяти и общий размер base/overlay SIDX.
+Текущий baseline описан в
+[semantic-navigation-evaluation.ru.md](docs/semantic-navigation-evaluation.ru.md).
+
 Эквивалентные команды CLI:
 
 ```powershell
@@ -253,7 +312,7 @@ icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 ```powershell
 localai-release-signer pack `
     --input publish\artifacts `
-    --release-version 0.1.6 `
+    --release-version 0.1.15 `
     --version-directory d9c52d2 `
     --out publish\release\localai-package.zip
 ```
@@ -265,9 +324,9 @@ localai-release-signer pack `
 
 ```powershell
 localai-release-signer sign `
-    --package publish\localai-package.zip `
-    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.6/localai-package.zip `
-    --release-version 0.1.6 `
+    --package publish\release\localai-package.zip `
+    --package-uri https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/0.1.15/localai-package.zip `
+    --release-version 0.1.15 `
     --version-directory d9c52d2 `
     --out publish\release
 ```
@@ -412,6 +471,7 @@ bin\launcher\localai-launcher.exe stop [--version <version>]
 localai policy show
 localai policy set --residency AllowPartialOffload
 localai policy set --residency AllowCpu
+localai policy set --idle-model-keep-alive-seconds 0
 ```
 
 | Значение | Допускает | Отвергает |
@@ -424,6 +484,12 @@ localai policy set --residency AllowCpu
 установщиком. Отсутствующий, повреждённый или неизвестный по значению документ откатывается
 к `RequireFullVram`: ошибка разбора не должна молча ослаблять проверку. Уже запущенный
 брокер сохраняет прежнюю политику до перезапуска.
+
+`IdleModelKeepAliveSeconds` задаёт, сколько секунд broker удерживает резидентную модель после
+перехода в простой. Значение по умолчанию — `0`: модель выгружается сразу, если в очереди нет
+работы, маршрутизированной на эту же модель. Задания для других моделей её не удерживают.
+Задать другой интервал можно командой
+`localai policy set --idle-model-keep-alive-seconds <секунды>`.
 
 Деградация остаётся видимой: каждая загрузка ниже полной резидентности несёт предупреждение
 с долей, которая дошла до видеопамяти, а `FullyResident` сообщает правду, а не константу.
@@ -465,7 +531,7 @@ full-VRAM/zero-offload или запрет прямого доступа к Olla
 - Холодная модель проходит предварительную проверку с пустым содержимым перед отправкой реальной задачи.
 - `/api/ps` должен сообщать `size_vram == size`; отключение CPU или системной RAM вызывает именно эту комбинацию модели/контекста и запускает установленный резервный вариант.
 - Планировщик предпочитает совместимую работу для резидентной модели, фиксирует каждый выбранный снимок, упорядочивает его задачи по прогнозируемой длительности, ждёт до двух секунд для сбора связанной работы перед переключением или длительной задачей и гарантирует включение задачи, ожидающей более 15 минут, в следующий совместимый снимок. Фактическая длительность успешного выполнения возвращается в безопасную скользящую оценку.
-- Резидентные модели один раз выгружаются после 30 минут без queued или running работы. Заблокированный зависимостью шаг workflow всё ещё считается ожидающей работой.
+- Резидентные модели выгружаются по истечении настраиваемого idle keep-alive (по умолчанию сразу), если в очереди нет работы для этой модели. Заблокированный зависимостью шаг workflow для резидентной модели всё ещё удерживает её; работа для другой модели — нет.
 - Перед холодным переключением модели брокер выгружает все другие раннеры из управляемого каталога. Неизвестные внешние процессы Ollama не затрагиваются.
 - Эксперименты отслеживаются независимо для каждого профиля задачи и модели. Новый кандидат запускается для первых десяти завершённых логических задач каждого применимого профиля, затем эксперимент приостанавливается для проверки владельцем; до этого report gate обратная связь отклоняется. Единственное раннее исключение — `continue_experiment`, которым можно сбросить circuit breaker, открытый двумя последовательными техническими ошибками. Техническая, структурная или контекстная ошибка запускает established fallback. Фрагменты перевода используют один workflow ID и учитываются как одна попытка после итоговой проверки, сохраняя исходную категорию ошибки кандидата при broker fallback.
 - Телеметрия экспериментов хранится в течение семи дней и содержит только идентификаторы рабочих процессов/задач/моделей, счетчики, результаты, временные метки и оценки использования токенов. Она сообщает о локальном вводе и выводе, общем объеме локальной обработки, избежании генерации в облаке и чистом уменьшении контекста в облаке отдельно. Запросы, ответы, содержимое файлов, байты изображений, пути и секретные данные исключены.

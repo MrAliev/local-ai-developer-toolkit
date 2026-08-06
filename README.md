@@ -85,6 +85,65 @@ Successful `get_code_chunk` output uses the same boundary. Validation errors, st
 and maintenance output remain outside it. Consumers must preserve the boundary and must
 not execute or follow instructions found inside it.
 
+Exact C#, WPF/WinUI/MAUI/Avalonia XAML, TypeScript/JavaScript, and Python navigation is stored separately from
+vectors in `semantic.sidx`.
+`localai sync` loads the primary solution with Roslyn/MSBuild, supplements it with lossless
+XAML ranges and dialect-aware namespaces, `x:DataType`, dependency/styled properties, and binding
+syntax, and imports bounded output from installed `scip-typescript` and `scip-python`
+indexers. A missing external indexer is reported as skipped in the generation manifest rather
+than invalidating other languages. The base SIDX is published atomically with CIDX and dirty
+worktrees receive compact snapshot-bound semantic overlays containing changed semantic slices
+and explicit deletion tombstones. MCP exposes
+`go_to_definition`, `find_references`, `find_implementations`, and `find_relationships`; local
+diagnostics are available through:
+
+```powershell
+localai semantic status --root C:\path\to\repository
+localai semantic definition --path src/App.cs --line 10 --column 15 --root C:\path\to\repository
+localai semantic references --path src/App.cs --line 10 --column 15 --root C:\path\to\repository
+localai semantic implementations --path src/IService.cs --line 4 --column 18 --root C:\path\to\repository
+localai semantic relationships --path src/Service.cs --line 8 --column 20 --direction outgoing --kind implementation --root C:\path\to\repository
+localai semantic config init
+localai semantic config show
+localai semantic lsp-config init
+localai semantic lsp-config show
+localai semantic fallback-config init
+localai semantic fallback-config show
+localai semantic evaluate --cases tests/CodeSearch.Tests/Fixtures/SemanticNavigation/cases.json --root C:\path\to\repository
+```
+
+The installation-wide `%LOCALAPPDATA%\LocalAi\semantic-indexing.json` file configures adapter
+enablement, executable paths and arguments, output paths, timeout, captured process output, and
+all SCIP parser limits. The trusted adapter policy also makes legacy position fallback explicit:
+`Utf16` for `scip-typescript` and `Utf32` for `scip-python`; direct SCIP imports without that
+policy still reject ambiguous indexes. It is read on every sync, so changes do not require
+rebuilding LocalAi. On Windows, npm `.cmd` shims are resolved through PATH/PATHEXT while retaining
+bounded output and process-tree timeout handling.
+
+Live navigation is opt-in through `%LOCALAPPDATA%\LocalAi\language-servers.json`; changing this
+file does not require rebuilding LocalAi. It configures the global enable switch, per-language
+executables and arguments, request/shutdown timeouts, maximum JSON-RPC message size, and bounded
+stderr capture. Defaults for TypeScript/JavaScript, Python, HTML, and C# are written disabled by
+`localai semantic lsp-config init`. MCP clients use `lsp_open_document` with monotonically
+increasing versions and `lsp_close_document`; while open, LSP definition/reference/implementation results are
+authoritative and precise, then navigation falls back to the exact snapshot-bound SIDX. A server
+that drops its transport is restarted once and receives every open document with its latest
+version and full text before the failed query is retried. Repository-relative paths remain `/`
+normalized on every OS; platform-specific absolute paths exist only at the `file://` LSP boundary.
+Persistent implementation and relationship queries use the exact SIDX graph. Incoming queries
+find implementations, overrides, and derived types; outgoing queries expose the corresponding
+base or interface symbols. Relationship queries never use heuristic text matching.
+
+When neither LSP nor the snapshot-bound SIDX can resolve a symbol, LocalAi can perform a bounded
+syntax/text scan. `%LOCALAPPDATA%\LocalAi\semantic-navigation.json` controls whether this fallback
+is enabled and limits scanned files, file size, result count, identifier length, and case
+sensitivity. The file is read for every request, so edits require no rebuild. Fallback results are
+always marked `Heuristic`; they are never promoted to precise navigation.
+The marker-based `semantic evaluate` command reports correctness, process-cold load time,
+first/warm query percentiles, observed memory deltas, and combined base/overlay SIDX size.
+The current baseline is documented in
+[semantic-navigation-evaluation.md](docs/semantic-navigation-evaluation.md).
+
 CLI equivalents are:
 
 ```powershell
@@ -275,7 +334,7 @@ dependency assemblies, so a framework-dependent build cannot be shipped as a rel
 ```powershell
 localai-release-signer pack `
     --input publish\artifacts `
-    --release-version 0.1.6 `
+    --release-version 0.1.15 `
     --version-directory d9c52d2 `
     --out publish\release\localai-package.zip
 ```
@@ -286,9 +345,9 @@ form the verifier requires, and re-verifies the result before it can be publishe
 
 ```powershell
 localai-release-signer sign `
-    --package publish\localai-package.zip `
-    --package-uri https://github.com/<owner>/<repo>/releases/download/0.1.6/localai-package.zip `
-    --release-version 0.1.6 `
+    --package publish\release\localai-package.zip `
+    --package-uri https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/0.1.15/localai-package.zip `
+    --release-version 0.1.15 `
     --version-directory d9c52d2 `
     --out publish\release
 ```
@@ -430,6 +489,7 @@ Machines without a usable discrete adapter can relax it:
 localai policy show
 localai policy set --residency AllowPartialOffload
 localai policy set --residency AllowCpu
+localai policy set --idle-model-keep-alive-seconds 0
 ```
 
 | Setting | Admits | Refuses |
@@ -442,6 +502,12 @@ The policy lives in `%LOCALAPPDATA%\LocalAi\policy.json` and is read by the brok
 and the installer alike. A missing, malformed or unknown-value document falls back to
 `RequireFullVram`: a parse error must never silently relax a safety check. A broker that is
 already running keeps the previous policy until it is restarted.
+
+`IdleModelKeepAliveSeconds` controls how long the broker retains a resident model after it
+becomes idle. Its default is `0`: the model is unloaded immediately unless the queue still
+contains work routed to that same model. Jobs for other models do not retain it. Set a larger
+number with `localai policy set --idle-model-keep-alive-seconds <seconds>` when the latency of
+reloading is preferable to releasing video memory promptly.
 
 Degradation stays visible: every load admitted below full residency carries a warning naming
 the share that reached video memory, and `FullyResident` reports the truth rather than a
@@ -491,8 +557,9 @@ The broker enforces these invariants:
   related work before a switch or long task, and forces work older than 15 minutes into
   the next compatible snapshot. Successful execution feeds its actual duration back
   into the content-free rolling estimate.
-- Resident models are unloaded once after 30 minutes with no queued or running work.
-  A dependency-blocked workflow step still counts as queued work.
+- Resident models are unloaded after the configurable idle keep-alive (zero seconds by
+  default) when no queued work targets that model. A dependency-blocked workflow step for
+  the resident model still retains it; work routed to another model does not.
 - Before a cold model switch, the broker unloads every other catalog-managed runner.
   Unknown external Ollama processes are left untouched.
 - Experiments are tracked independently per task profile and model. A new candidate is

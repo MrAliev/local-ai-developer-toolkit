@@ -6,6 +6,7 @@ using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Security;
 using CodeSearch.Core.Search;
+using CodeSearch.Core.Semantics;
 using LocalAi.Contracts;
 using LocalAi.Repository;
 using ModelContextProtocol.Server;
@@ -26,6 +27,250 @@ public static class CodeSearchTools
     /// card: the bare `:8b` tag is Q4_K_M, and fp16 only runs split across two GPUs.
     /// </summary>
     private const string DefaultModel = "qwen3-embedding:8b-q8_0";
+
+    [McpServerTool(Name = "go_to_definition")]
+    [Description("""
+        Resolves the symbol at a zero-based line and UTF-16 column. Prefers precise live LSP and
+        snapshot SIDX locations, then uses an explicitly Heuristic bounded text fallback.
+        Source-derived output is wrapped in nonce-bound <untrusted-content> markers.
+        """)]
+    public static string GoToDefinition(
+        SemanticNavigationGateway gateway,
+        [Description("Repository-relative source path.")]
+        string path,
+        [Description("Zero-based line number.")]
+        int line,
+        [Description("Zero-based UTF-16 column.")]
+        int utf16Column,
+        [Description("Repository root. Defaults to the repository containing the working directory.")]
+        string? root = null)
+    {
+        try
+        {
+            var locations = gateway.GoToDefinition(path, line, utf16Column, root);
+            return locations.Count == 0
+                ? "No definition found."
+                : FormatSemanticLocations("Definitions", "go_to_definition", locations);
+        }
+        catch (SemanticNavigationNotReadyException ex)
+        {
+            return $"semantic_navigation_not_ready: {ex.Message}";
+        }
+        catch (SemanticSnapshotMismatchException ex)
+        {
+            return $"semantic_snapshot_mismatch: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            return $"go_to_definition failed: {ex.Message}";
+        }
+    }
+
+    [McpServerTool(Name = "find_references")]
+    [Description("""
+        Resolves the symbol at a zero-based line and UTF-16 column. Prefers precise live LSP and
+        snapshot SIDX references, then uses an explicitly Heuristic bounded text fallback.
+        Source-derived output is wrapped in nonce-bound <untrusted-content> markers.
+        """)]
+    public static string FindReferences(
+        SemanticNavigationGateway gateway,
+        [Description("Repository-relative source path.")]
+        string path,
+        [Description("Zero-based line number.")]
+        int line,
+        [Description("Zero-based UTF-16 column.")]
+        int utf16Column,
+        [Description("Include definition locations in the result. Defaults to true.")]
+        bool includeDefinition = true,
+        [Description("Repository root. Defaults to the repository containing the working directory.")]
+        string? root = null)
+    {
+        try
+        {
+            var locations = gateway.FindReferences(
+                path,
+                line,
+                utf16Column,
+                includeDefinition,
+                root);
+            return locations.Count == 0
+                ? "No references found."
+                : FormatSemanticLocations("References", "find_references", locations);
+        }
+        catch (SemanticNavigationNotReadyException ex)
+        {
+            return $"semantic_navigation_not_ready: {ex.Message}";
+        }
+        catch (SemanticSnapshotMismatchException ex)
+        {
+            return $"semantic_snapshot_mismatch: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            return $"find_references failed: {ex.Message}";
+        }
+    }
+
+    [McpServerTool(Name = "find_implementations")]
+    [Description("""
+        Finds precise implementations, overrides, and derived types for the symbol at a zero-based
+        line and UTF-16 column. Prefers an authoritative open-document LSP result, then queries the
+        snapshot-bound SIDX relationship graph. No text heuristic is used.
+        Source-derived output is wrapped in nonce-bound <untrusted-content> markers.
+        """)]
+    public static string FindImplementations(
+        SemanticNavigationGateway gateway,
+        [Description("Repository-relative source path.")]
+        string path,
+        [Description("Zero-based line number.")]
+        int line,
+        [Description("Zero-based UTF-16 column.")]
+        int utf16Column,
+        [Description("Repository root. Defaults to the repository containing the working directory.")]
+        string? root = null)
+    {
+        try
+        {
+            var locations = gateway.FindImplementations(
+                path,
+                line,
+                utf16Column,
+                root);
+            return locations.Count == 0
+                ? "No implementations found."
+                : FormatSemanticLocations(
+                    "Implementations",
+                    "find_implementations",
+                    locations);
+        }
+        catch (SemanticNavigationNotReadyException ex)
+        {
+            return $"semantic_navigation_not_ready: {ex.Message}";
+        }
+        catch (SemanticSnapshotMismatchException ex)
+        {
+            return $"semantic_snapshot_mismatch: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            return $"find_implementations failed: {ex.Message}";
+        }
+    }
+
+    [McpServerTool(Name = "find_relationships")]
+    [Description("""
+        Queries the exact snapshot-bound SIDX relationship graph for the symbol at a zero-based
+        line and UTF-16 column. Direction is incoming or outgoing; kind can be implementation,
+        override, or type-definition. Omitting kind returns every relationship kind.
+        """)]
+    public static string FindRelationships(
+        SemanticNavigationGateway gateway,
+        string path,
+        int line,
+        int utf16Column,
+        [Description("incoming or outgoing")]
+        string direction = "outgoing",
+        [Description("Optional: implementation, override, or type-definition")]
+        string? kind = null,
+        string? root = null)
+    {
+        try
+        {
+            var parsedDirection = Enum.Parse<SemanticRelationshipDirection>(
+                direction, ignoreCase: true);
+            SemanticRelationshipKind? parsedKind = kind is null
+                ? null
+                : Enum.Parse<SemanticRelationshipKind>(
+                    kind.Replace("-", string.Empty, StringComparison.Ordinal),
+                    ignoreCase: true);
+            var locations = gateway.FindRelationships(
+                path, line, utf16Column, parsedDirection, parsedKind, root);
+            if (locations.Count == 0)
+            {
+                return "No relationships found.";
+            }
+
+            var report = new StringBuilder()
+                .Append("Relationships: ").Append(locations.Count).AppendLine();
+            foreach (var related in locations)
+            {
+                var location = related.Location;
+                var body = $"{location.DocumentPath}:{location.Range.StartLine}:" +
+                           $"{location.Range.StartCharacter}-{location.Range.EndLine}:" +
+                           $"{location.Range.EndCharacter}\nsymbol: {location.SymbolId}\n" +
+                           $"relationship: {related.Kind}\ndirection: {related.Direction}\n" +
+                           $"precision: {location.Precision}";
+                report.AppendLine(UntrustedContent.Wrap(
+                    body,
+                    $"find_relationships:{location.DocumentPath}"));
+            }
+
+            return report.ToString();
+        }
+        catch (SemanticNavigationNotReadyException ex)
+        {
+            return $"semantic_navigation_not_ready: {ex.Message}";
+        }
+        catch (SemanticSnapshotMismatchException ex)
+        {
+            return $"semantic_snapshot_mismatch: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            return $"find_relationships failed: {ex.Message}";
+        }
+    }
+
+    [McpServerTool(Name = "lsp_open_document")]
+    [Description("""
+        Opens or replaces an in-memory document in its configured language server. Versions must
+        increase monotonically. This live document becomes authoritative for definition/reference
+        queries until it is closed. Language servers are disabled by default and configured in
+        the installation-wide language-servers.json file.
+        """)]
+    public static async Task<string> LspOpenDocument(
+        LanguageServerSessionManager sessions,
+        [Description("Repository root containing the document.")]
+        string root,
+        [Description("Repository-relative document path.")]
+        string path,
+        [Description("LSP language id, for example typescript, python, html, or csharp.")]
+        string languageId,
+        [Description("Monotonically increasing document version.")]
+        int version,
+        [Description("Complete current UTF-8 document text.")]
+        string text)
+    {
+        try
+        {
+            await sessions.OpenOrUpdateAsync(root, path, languageId, version, text);
+            return $"LSP document open: {path} version {version} ({languageId}).";
+        }
+        catch (Exception exception)
+        {
+            return $"lsp_open_document failed: {exception.Message}";
+        }
+    }
+
+    [McpServerTool(Name = "lsp_close_document")]
+    [Description("Closes an in-memory document and restores persistent SIDX navigation for it.")]
+    public static async Task<string> LspCloseDocument(
+        LanguageServerSessionManager sessions,
+        [Description("Repository root containing the document.")]
+        string root,
+        [Description("Repository-relative document path.")]
+        string path)
+    {
+        try
+        {
+            await sessions.CloseAsync(root, path);
+            return $"LSP document closed: {path}.";
+        }
+        catch (Exception exception)
+        {
+            return $"lsp_close_document failed: {exception.Message}";
+        }
+    }
 
     [McpServerTool(Name = "search_code")]
     [Description("""
@@ -339,6 +584,35 @@ public static class CodeSearchTools
         $""""{Path.Combine(AppContext.BaseDirectory, "localai.exe")}" sync --root "{root}"""";
 
     private static string Short(string commit) => commit.Length >= 9 ? commit[..9] : commit;
+
+    private static string FormatSemanticLocations(
+        string heading,
+        string origin,
+        IReadOnlyList<SemanticLocation> locations)
+    {
+        var report = new StringBuilder()
+            .Append(heading).Append(": ").Append(locations.Count).AppendLine();
+        foreach (var location in locations)
+        {
+            var body = new StringBuilder()
+                .Append(location.DocumentPath)
+                .Append(':').Append(location.Range.StartLine)
+                .Append(':').Append(location.Range.StartCharacter)
+                .Append('-').Append(location.Range.EndLine)
+                .Append(':').Append(location.Range.EndCharacter)
+                .AppendLine()
+                .Append("symbol: ").AppendLine(location.SymbolId)
+                .Append("roles: ").AppendLine(location.Roles.ToString())
+                .Append("precision: ").Append(location.Precision)
+                .ToString();
+            report.AppendLine(
+                UntrustedContent.Wrap(
+                    body,
+                    $"{origin}:{location.DocumentPath}"));
+        }
+
+        return report.ToString();
+    }
 
     private static string Indent(string text) =>
         string.Join('\n', SourceLines.Split(text).Select(line => "   | " + line));

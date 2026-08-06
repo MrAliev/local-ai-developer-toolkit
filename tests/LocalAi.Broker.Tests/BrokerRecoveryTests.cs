@@ -111,7 +111,7 @@ public sealed class BrokerRecoveryTests
     }
 
     [Fact]
-    public async Task BrokerHost_unloads_resident_model_once_after_thirty_idle_minutes()
+    public async Task BrokerHost_unloads_resident_model_immediately_when_queue_is_empty()
     {
         using var root = new TemporaryRuntimeRoot();
         var clock = new ManualTimeProvider(
@@ -130,6 +130,7 @@ public sealed class BrokerRecoveryTests
                 return Task.CompletedTask;
             },
             idleInterval: TimeSpan.FromMinutes(10),
+            residentModel: () => "resident-model",
             idleUnload: _ =>
             {
                 Interlocked.Increment(ref unloadCalls);
@@ -141,6 +142,44 @@ public sealed class BrokerRecoveryTests
             () => host.RunAsync(stop.Token));
 
         Assert.Equal(1, unloadCalls);
+    }
+
+    [Fact]
+    public async Task BrokerHost_respects_configured_idle_model_keep_alive()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        var startedAt = new DateTimeOffset(2026, 7, 29, 8, 0, 0, TimeSpan.Zero);
+        var clock = new ManualTimeProvider(startedAt);
+        var queue = new DurableQueue(root.Path, clock);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var unloadCalls = 0;
+        DateTimeOffset? unloadedAt = null;
+        var host = new BrokerHost(
+            queue,
+            "configured-idle-unload-worker",
+            (_, _) => throw new UnreachableException(),
+            clock,
+            idleDelay: (delay, _) =>
+            {
+                clock.Advance(delay);
+                return Task.CompletedTask;
+            },
+            idleInterval: TimeSpan.FromMinutes(10),
+            residentModel: () => "resident-model",
+            idleUnload: _ =>
+            {
+                Interlocked.Increment(ref unloadCalls);
+                unloadedAt = clock.GetUtcNow();
+                stop.Cancel();
+                return Task.CompletedTask;
+            },
+            idleUnloadAfter: TimeSpan.FromMinutes(30));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => host.RunAsync(stop.Token));
+
+        Assert.Equal(1, unloadCalls);
+        Assert.Equal(startedAt + TimeSpan.FromMinutes(30), unloadedAt);
     }
 
     [Fact]
@@ -179,6 +218,9 @@ public sealed class BrokerRecoveryTests
         var resolver = new ScheduleMetadataResolver(
             ModelRoutingCatalog.LoadEmbedded(),
             new DurationEstimator());
+        var queuedCandidate = Assert.Single(
+            await queue.ListQueuedAsync(TestContext.Current.CancellationToken));
+        var residentModel = resolver.Resolve(queuedCandidate).Model;
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var idleCycles = 0;
         var unloadCalls = 0;
@@ -203,6 +245,7 @@ public sealed class BrokerRecoveryTests
                 (IReadOnlyList<ScheduledJobCandidate>)candidates
                     .Select(candidate => resolver.Resolve(candidate))
                     .ToArray()),
+            residentModel: () => residentModel,
             idleUnload: _ =>
             {
                 Interlocked.Increment(ref unloadCalls);
@@ -213,6 +256,52 @@ public sealed class BrokerRecoveryTests
             () => host.RunAsync(stop.Token));
 
         Assert.Equal(0, unloadCalls);
+    }
+
+    [Fact]
+    public async Task BrokerHost_unloads_resident_model_when_only_another_model_is_queued()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 7, 29, 8, 0, 0, TimeSpan.Zero));
+        var queue = new DurableQueue(root.Path, clock);
+        await queue.EnqueueAsync(
+            Request("other-model-work"),
+            TestContext.Current.CancellationToken);
+        var resolver = new ScheduleMetadataResolver(
+            ModelRoutingCatalog.LoadEmbedded(),
+            new DurationEstimator());
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var unloadCalls = 0;
+        var host = new BrokerHost(
+            queue,
+            "different-model-unload-worker",
+            (_, _) => throw new UnreachableException(),
+            clock,
+            idleDelay: (delay, _) =>
+            {
+                clock.Advance(delay);
+                return Task.CompletedTask;
+            },
+            scheduler: new ModelAwareScheduler(clock),
+            scheduleMetadata: (candidates, _) => Task.FromResult(
+                (IReadOnlyList<ScheduledJobCandidate>)candidates
+                    .Select(candidate => resolver.Resolve(
+                        candidate,
+                        selectedModel: "queued-model"))
+                    .ToArray()),
+            residentModel: () => "resident-model",
+            idleUnload: _ =>
+            {
+                Interlocked.Increment(ref unloadCalls);
+                stop.Cancel();
+                return Task.CompletedTask;
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => host.RunAsync(stop.Token));
+
+        Assert.Equal(1, unloadCalls);
     }
 
     [Fact]

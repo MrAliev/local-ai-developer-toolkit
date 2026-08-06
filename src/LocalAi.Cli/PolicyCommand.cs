@@ -20,6 +20,8 @@ internal static class PolicyCommand
         {
             ["show", ..] or [] => Show(store),
             ["set", "--residency", var value, ..] => Set(store, value),
+            ["set", "--idle-model-keep-alive-seconds", var value, ..] =>
+                SetIdleModelKeepAlive(store, value),
             _ => Usage(),
         };
     }
@@ -30,12 +32,15 @@ internal static class PolicyCommand
             """
             Usage: localai policy show
                    localai policy set --residency <RequireFullVram|AllowPartialOffload|AllowCpu>
+                   localai policy set --idle-model-keep-alive-seconds <non-negative integer>
 
               RequireFullVram      Models must sit entirely in video memory. Default.
               AllowPartialOffload  Part of a model may spill to system memory. Requires an
                                    adapter that holds at least some of it. Slower.
               AllowCpu             Models may run entirely on the CPU. Works without a usable
                                    adapter; substantially slower.
+              Idle keep-alive      Seconds to retain an idle model when no queued job targets
+                                   it. Zero unloads it immediately and is the default.
             """);
         return 2;
     }
@@ -44,6 +49,8 @@ internal static class PolicyCommand
     {
         var policy = store.Read();
         Console.WriteLine($"model residency: {policy.ModelResidency}");
+        Console.WriteLine(
+            $"idle model keep-alive: {policy.IdleModelKeepAliveSeconds} seconds");
         if (policy.ModelResidency != ModelResidencyPolicy.RequireFullVram)
         {
             Console.WriteLine(
@@ -51,6 +58,23 @@ internal static class PolicyCommand
                 "than a fully resident load.");
         }
 
+        return 0;
+    }
+
+    private static int SetIdleModelKeepAlive(ModelResidencyPolicyStore store, string value)
+    {
+        if (!int.TryParse(value, out var seconds) || seconds < 0)
+        {
+            Console.Error.WriteLine(
+                $"Invalid idle model keep-alive '{value}'; expected a non-negative integer.");
+            return Usage();
+        }
+
+        store.Write(store.Read() with { IdleModelKeepAliveSeconds = seconds });
+        Console.WriteLine($"idle model keep-alive: {seconds} seconds");
+        Console.WriteLine(
+            "note: a broker that is already running keeps the previous policy until it is " +
+            "restarted.");
         return 0;
     }
 

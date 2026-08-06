@@ -33,7 +33,7 @@ public static class RuntimeIndexLayout
             ?? throw new InvalidOperationException("Git HEAD is unavailable.");
         var tree = RepoLocator.GitOutput(workingRoot, "rev-parse HEAD^{tree}")
             ?? throw new InvalidOperationException("Git HEAD tree is unavailable.");
-        var dirtyPaths = DirtyPaths(workingRoot);
+        var dirtyPaths = GetDirtyPaths(workingRoot);
         var dirtyHash = dirtyPaths.Count == 0
             ? null
             : DirtyCorpusPolicy.ComputeWorkingContentHash(workingRoot, dirtyPaths);
@@ -76,8 +76,14 @@ public static class RuntimeIndexLayout
             (identity.DirtyHash ?? "clean") + ".cidx");
     }
 
-    private static List<string> DirtyPaths(string workingRoot)
+    public static string SemanticOverlayPath(
+        WorkingIndexIdentity identity,
+        string generationId) =>
+        Path.ChangeExtension(OverlayPath(identity, generationId), ".sidx");
+
+    public static List<string> GetDirtyPaths(string workingRoot)
     {
+        workingRoot = RepoLocator.ResolveWorkingRoot(workingRoot);
         var changed = RepoLocator.GitOutputBytes(
             workingRoot,
             ["diff", "--name-only", "-z", "HEAD", "--"]);

@@ -5,12 +5,13 @@ namespace LocalAi.Contracts;
 
 public sealed record BrokerPolicy(
     int SchemaVersion,
-    ModelResidencyPolicy ModelResidency)
+    ModelResidencyPolicy ModelResidency,
+    int IdleModelKeepAliveSeconds = 0)
 {
     public const string FileName = "policy.json";
 
     public static BrokerPolicy Default { get; } =
-        new(1, ModelResidencyPolicy.RequireFullVram);
+        new(1, ModelResidencyPolicy.RequireFullVram, IdleModelKeepAliveSeconds: 0);
 }
 
 /// <summary>
@@ -61,7 +62,8 @@ public sealed class ModelResidencyPolicyStore
                 SerializerOptions);
             if (policy is null ||
                 policy.SchemaVersion != BrokerPolicy.Default.SchemaVersion ||
-                !Enum.IsDefined(policy.ModelResidency))
+                !Enum.IsDefined(policy.ModelResidency) ||
+                policy.IdleModelKeepAliveSeconds < 0)
             {
                 return BrokerPolicy.Default;
             }

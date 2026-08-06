@@ -1,0 +1,257 @@
+using CodeSearch.Core.Indexing;
+using LocalAi.Repository;
+
+namespace CodeSearch.Core.Semantics;
+
+public sealed record SemanticNavigationContext(
+    SemanticNavigationService Service,
+    SemanticSnapshotIdentity Snapshot);
+
+public sealed class SemanticNavigationNotReadyException(string message)
+    : InvalidOperationException(message);
+
+/// <summary>Loads the exact current semantic generation and executes snapshot-bound queries.</summary>
+public sealed class SemanticNavigationGateway
+{
+    private readonly Func<string?, SemanticNavigationContext> _contextFactory;
+    private readonly ILiveSemanticNavigation? _liveNavigation;
+    private readonly IHeuristicSemanticNavigation? _heuristicNavigation;
+
+    public SemanticNavigationGateway(
+        Func<string?, SemanticNavigationContext>? contextFactory = null,
+        ILiveSemanticNavigation? liveNavigation = null,
+        IHeuristicSemanticNavigation? heuristicNavigation = null)
+    {
+        _contextFactory = contextFactory ?? LoadCurrent;
+        _liveNavigation = liveNavigation;
+        _heuristicNavigation = heuristicNavigation;
+    }
+
+    public IReadOnlyList<SemanticLocation> GoToDefinition(
+        string documentPath,
+        int line,
+        int utf16Column,
+        string? root = null)
+    {
+        return GoToDefinitionAsync(documentPath, line, utf16Column, root)
+            .GetAwaiter().GetResult();
+    }
+
+    public async Task<IReadOnlyList<SemanticLocation>> GoToDefinitionAsync(
+        string documentPath,
+        int line,
+        int utf16Column,
+        string? root = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_liveNavigation is not null)
+        {
+            var workingRoot = ResolveLiveRoot(root);
+            var live = await _liveNavigation.GoToDefinitionAsync(
+                workingRoot,
+                documentPath,
+                line,
+                utf16Column,
+                cancellationToken);
+            if (live.Handled)
+            {
+                return live.Locations;
+            }
+        }
+
+        try
+        {
+            var context = _contextFactory(root);
+            var precise = context.Service.GoToDefinition(
+                documentPath,
+                line,
+                utf16Column,
+                context.Snapshot);
+            if (precise.Count > 0 || _heuristicNavigation is null)
+            {
+                return precise;
+            }
+        }
+        catch (SemanticNavigationNotReadyException) when (_heuristicNavigation is not null)
+        {
+        }
+
+        return await _heuristicNavigation!.GoToDefinitionAsync(
+            ResolveLiveRoot(root),
+            documentPath,
+            line,
+            utf16Column,
+            cancellationToken);
+    }
+
+    public IReadOnlyList<SemanticLocation> FindReferences(
+        string documentPath,
+        int line,
+        int utf16Column,
+        bool includeDefinition,
+        string? root = null)
+    {
+        return FindReferencesAsync(
+            documentPath,
+            line,
+            utf16Column,
+            includeDefinition,
+            root).GetAwaiter().GetResult();
+    }
+
+    public async Task<IReadOnlyList<SemanticLocation>> FindReferencesAsync(
+        string documentPath,
+        int line,
+        int utf16Column,
+        bool includeDefinition,
+        string? root = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_liveNavigation is not null)
+        {
+            var workingRoot = ResolveLiveRoot(root);
+            var live = await _liveNavigation.FindReferencesAsync(
+                workingRoot,
+                documentPath,
+                line,
+                utf16Column,
+                includeDefinition,
+                cancellationToken);
+            if (live.Handled)
+            {
+                return live.Locations;
+            }
+        }
+
+        try
+        {
+            var context = _contextFactory(root);
+            var precise = context.Service.FindReferences(
+                documentPath,
+                line,
+                utf16Column,
+                includeDefinition,
+                context.Snapshot);
+            if (precise.Count > 0 || _heuristicNavigation is null)
+            {
+                return precise;
+            }
+        }
+        catch (SemanticNavigationNotReadyException) when (_heuristicNavigation is not null)
+        {
+        }
+
+        return await _heuristicNavigation!.FindReferencesAsync(
+            ResolveLiveRoot(root),
+            documentPath,
+            line,
+            utf16Column,
+            includeDefinition,
+            cancellationToken);
+    }
+
+    public IReadOnlyList<SemanticLocation> FindImplementations(
+        string documentPath,
+        int line,
+        int utf16Column,
+        string? root = null) =>
+        FindImplementationsAsync(documentPath, line, utf16Column, root)
+            .GetAwaiter().GetResult();
+
+    public async Task<IReadOnlyList<SemanticLocation>> FindImplementationsAsync(
+        string documentPath,
+        int line,
+        int utf16Column,
+        string? root = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_liveNavigation is not null)
+        {
+            var live = await _liveNavigation.FindImplementationsAsync(
+                ResolveLiveRoot(root),
+                documentPath,
+                line,
+                utf16Column,
+                cancellationToken);
+            if (live.Handled)
+            {
+                return live.Locations;
+            }
+        }
+
+        var context = _contextFactory(root);
+        return context.Service.FindImplementations(
+            documentPath,
+            line,
+            utf16Column,
+            context.Snapshot);
+    }
+
+    public IReadOnlyList<SemanticRelatedLocation> FindRelationships(
+        string documentPath,
+        int line,
+        int utf16Column,
+        SemanticRelationshipDirection direction,
+        SemanticRelationshipKind? kind = null,
+        string? root = null)
+    {
+        var context = _contextFactory(root);
+        return context.Service.FindRelationships(
+            documentPath,
+            line,
+            utf16Column,
+            direction,
+            kind,
+            context.Snapshot);
+    }
+
+    private static string ResolveLiveRoot(string? root) =>
+        root is null
+            ? RepoLocator.ResolveWorkingRoot(null)
+            : Path.GetFullPath(root);
+
+    private static SemanticNavigationContext LoadCurrent(string? root)
+    {
+        var workingRoot = RepoLocator.ResolveWorkingRoot(root);
+        var identity = RuntimeIndexLayout.Inspect(workingRoot);
+        var store = new GenerationStore(identity.RepositoryRuntimeRoot);
+        var current = store.ReadCurrent()
+            ?? throw new SemanticNavigationNotReadyException(
+                "No current repository generation is published. Run localai sync first.");
+        var manifest = store.ReadManifest(current.GenerationId);
+        if (manifest.SemanticIndexFile is null)
+        {
+            throw new SemanticNavigationNotReadyException(
+                $"Generation '{current.GenerationId}' has no semantic.sidx. Rebuild it with semantic indexing enabled.");
+        }
+
+        var usesBaseSnapshot =
+            string.Equals(identity.HeadTree, manifest.Identity.DevTree, StringComparison.Ordinal) &&
+            identity.DirtyHash is null;
+        SemanticIndex semanticIndex;
+        try
+        {
+            var baseIndex = SemanticIndex.Load(store.SemanticIndexPath(current.GenerationId));
+            semanticIndex = usesBaseSnapshot
+                ? baseIndex
+                : SemanticIndexOverlay.Load(
+                    RuntimeIndexLayout.SemanticOverlayPath(identity, current.GenerationId))
+                    .Materialize(baseIndex);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            throw new SemanticNavigationNotReadyException(
+                $"Semantic index for the current worktree snapshot is unavailable: {exception.Message}. " +
+                "Run localai sync to build it.");
+        }
+
+        return new SemanticNavigationContext(
+            new SemanticNavigationService(semanticIndex),
+            new SemanticSnapshotIdentity(
+                identity.RepositoryId,
+                current.GenerationId,
+                identity.HeadTree,
+                identity.DirtyHash));
+    }
+}
