@@ -118,8 +118,50 @@ public sealed class BrokerExecutionRouter
                 ExecuteMaintenanceAsync(maintenance, cancellationToken),
             ModelControlJobPayload control =>
                 ExecuteControlAsync(control, cancellationToken),
-            _ => _executeDirect(request, cancellationToken)
+            _ => ExecuteDirectAsync(request, cancellationToken)
         };
+    }
+
+    private async Task<BrokerExecutionResult> ExecuteDirectAsync(
+        LocalJobRequest request,
+        CancellationToken cancellationToken)
+    {
+        TrackResidentModel(ModelFromDirectPayload(request.Payload));
+        return await _executeDirect(request, cancellationToken);
+    }
+
+    private void TrackResidentModel(string? model)
+    {
+        if (!string.IsNullOrWhiteSpace(model) &&
+            _catalog.Models.Any(candidate =>
+                string.Equals(candidate.Tag, model, StringComparison.Ordinal)))
+        {
+            Volatile.Write(ref _residentModel, model);
+        }
+    }
+
+    private static string? ModelFromDirectPayload(LocalJobPayload payload) =>
+        payload switch
+        {
+            EmbedJobPayload embed => embed.Model,
+            ChatJobPayload chat => chat.Model,
+            NativeOllamaJobPayload native when native.Operation is
+                NativeOllamaOperation.Chat or
+                NativeOllamaOperation.Embed or
+                NativeOllamaOperation.Generate => NativeModel(native.RequestBody),
+            _ => null
+        };
+
+    private static string? NativeModel(JsonElement? requestBody)
+    {
+        if (requestBody is not { ValueKind: JsonValueKind.Object } body ||
+            !body.TryGetProperty("model", out var model) ||
+            model.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return model.GetString();
     }
 
     private async Task<BrokerExecutionResult> ExecuteRoutedChatAsync(
@@ -146,7 +188,7 @@ public sealed class BrokerExecutionRouter
 
         if (result.Routing is { } routing)
         {
-            Volatile.Write(ref _residentModel, routing.SelectedModel);
+            TrackResidentModel(routing.SelectedModel);
         }
 
         return result;

@@ -145,6 +145,33 @@ public sealed class BrokerRecoveryTests
     }
 
     [Fact]
+    public async Task BrokerHost_checks_backend_for_idle_models_when_resident_marker_is_missing()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        var queue = new DurableQueue(root.Path);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var unloadCalls = 0;
+        var host = new BrokerHost(
+            queue,
+            "idle-unload-without-marker",
+            (_, _) => throw new InvalidOperationException("No job should execute."),
+            idleInterval: TimeSpan.FromMilliseconds(1),
+            residentModel: () => null,
+            idleUnload: _ =>
+            {
+                Interlocked.Increment(ref unloadCalls);
+                stop.Cancel();
+                return Task.CompletedTask;
+            },
+            idleUnloadAfter: TimeSpan.Zero);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => host.RunAsync(stop.Token));
+
+        Assert.Equal(1, unloadCalls);
+    }
+
+    [Fact]
     public async Task BrokerHost_respects_configured_idle_model_keep_alive()
     {
         using var root = new TemporaryRuntimeRoot();

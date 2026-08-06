@@ -188,6 +188,54 @@ public sealed class BrokerExecutionRouterTests : IDisposable
     }
 
     [Fact]
+    public async Task Direct_embedding_is_tracked_for_idle_unload()
+    {
+        var fixture = CreateFixture();
+        var request = LocalJobRequestFactory.CreateEmbed(
+            "embedding",
+            LocalJobPriority.Foreground,
+            "qwen3-embedding:8b-q8_0",
+            ["semantic navigation"]);
+
+        await fixture.Router.ExecuteAsync(
+            request,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("qwen3-embedding:8b-q8_0", fixture.Router.ResidentModel);
+
+        await fixture.Router.UnloadResidentAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(["qwen3-embedding:8b-q8_0"], fixture.Transport.UnloadedModels);
+        Assert.Null(fixture.Router.ResidentModel);
+    }
+
+    [Fact]
+    public async Task Direct_native_generate_is_tracked_for_idle_unload()
+    {
+        var fixture = CreateFixture();
+        using var body = JsonDocument.Parse(
+            """{"model":"gpt-oss:20b","prompt":"smoke","stream":false}""");
+        var request = LocalJobRequestFactory.CreateNativeOllama(
+            "native-generate",
+            LocalJobPriority.Foreground,
+            NativeOllamaOperation.Generate,
+            body.RootElement.Clone());
+
+        await fixture.Router.ExecuteAsync(
+            request,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("gpt-oss:20b", fixture.Router.ResidentModel);
+
+        await fixture.Router.UnloadResidentAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(["gpt-oss:20b"], fixture.Transport.UnloadedModels);
+        Assert.Null(fixture.Router.ResidentModel);
+    }
+
+    [Fact]
     public async Task Prepared_schedule_selection_is_reused_by_execution()
     {
         var fixture = CreateFixture();
