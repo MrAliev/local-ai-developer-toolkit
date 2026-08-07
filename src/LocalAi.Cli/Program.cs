@@ -118,7 +118,9 @@ static async Task<int> RunAsync(string[] args)
         var root = rootIndex >= 0 && rootIndex + 1 < args.Length
             ? args[rootIndex + 1]
             : Environment.CurrentDirectory;
-        var result = await CodeSearchSyncCommand.ExecuteAsync(root);
+        var result = await CodeSearchSyncCommand.ExecuteAsync(
+            root,
+            includeOverlays: !args.Contains("--base-only", StringComparer.Ordinal));
         Console.WriteLine(
             $"SYNCED repository={result.RepositoryId} generation={result.GenerationId} " +
             $"overlays={result.OverlaysBuilt}" +
