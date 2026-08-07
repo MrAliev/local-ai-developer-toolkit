@@ -453,7 +453,8 @@ public static class CodeSearchTools
         }
 
         var staleness = status.CommitDrifted
-            ? $"STALE - built at {Short(status.IndexedCommit)}, HEAD is now {Short(status.CurrentCommit)}"
+            ? $"STALE - built at {Short(status.IndexedCommit)}, HEAD is now {Short(status.CurrentCommit)}" +
+              InFlight(progress)
             : "current";
 
         return $"""
@@ -468,6 +469,23 @@ public static class CodeSearchTools
             {progressText}
             """;
     }
+
+    /// <summary>
+    /// Says that a sync got somewhere short of publishing, when the recorded phase says so.
+    ///
+    /// Staleness and an unfinished sync are separate facts that look like one contradiction when
+    /// only the first is printed: a generation is built well before the pointer moves to it, and
+    /// during that window the index really is stale and really is about to stop being. This
+    /// states what was recorded and when, and claims nothing about whether the process behind it
+    /// is still alive — a killed sync leaves its last phase behind, and inferring liveness from
+    /// that would trade one misleading line for another.
+    /// </summary>
+    private static string InFlight(RepositoryIndexProgress? progress) =>
+        progress is null ||
+        progress.Phase is RepositoryIndexProgressPhase.Completed
+            or RepositoryIndexProgressPhase.Failed
+            ? string.Empty
+            : $"; a sync reached {progress.Phase} at {progress.UpdatedAtUtc:u}";
 
     private static RepositoryIndexProgress? ReadProgress(string workingRoot)
     {
@@ -492,6 +510,18 @@ public static class CodeSearchTools
         if (progress is null)
         {
             return string.Empty;
+        }
+
+        // Chunk counters belong to embedding. A semantic build or a generation publish counts
+        // nothing, and printing the previous phase's finished tally next to it is what made a
+        // build that still had minutes to run read as one that had finished and stalled.
+        if (!progress.Phase.CountsChunks())
+        {
+            return $"""
+                Sync phase: {progress.Phase}
+                Progress:   not counted in this phase
+                Updated:    {progress.UpdatedAtUtc:u}
+                """;
         }
 
         var remaining = Math.Max(0, progress.TotalChunks - progress.ProcessedChunks);

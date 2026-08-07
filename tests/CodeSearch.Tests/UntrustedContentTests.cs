@@ -343,6 +343,100 @@ public sealed class UntrustedContentMcpTests : IDisposable
     }
 
     [Fact]
+    public void A_phase_that_counts_no_chunks_does_not_show_the_last_phase_tally()
+    {
+        // This exact shape is what a finished embedding pass left behind while the semantic
+        // build and the generation publish ran for another two and a half minutes: a full
+        // counter with nothing remaining, beside a phase that was not counting anything.
+        Save(RepositoryIndexProgressPhase.SemanticBase, 1415, 1415);
+
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        Assert.Contains("Sync phase: SemanticBase", status, StringComparison.Ordinal);
+        Assert.Contains("not counted in this phase", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("1415/1415", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("0 remaining", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Publishing_a_generation_is_a_phase_of_its_own()
+    {
+        Save(RepositoryIndexProgressPhase.PublishingGeneration, 1415, 1415);
+
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        Assert.Contains("Sync phase: PublishingGeneration", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("ETA:", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Staleness_names_the_unfinished_sync_that_explains_it()
+    {
+        DriftMainlinePastTheIndexedCommit();
+        Save(RepositoryIndexProgressPhase.SemanticBase, 0, 0);
+
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        // Stale and mid-build are two facts, and printing only the first is what made a
+        // generation that was minutes from publishing look like one nobody was building.
+        Assert.Contains("STALE", status, StringComparison.Ordinal);
+        Assert.Contains("a sync reached SemanticBase at", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_finished_sync_adds_nothing_to_the_staleness_line()
+    {
+        DriftMainlinePastTheIndexedCommit();
+        Save(RepositoryIndexProgressPhase.Completed, 1415, 1415);
+
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        Assert.Contains("STALE", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("a sync reached", status, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Moves the mainline on, and records the manifest that makes the move visible.
+    ///
+    /// Staleness is measured against the base branch named by the repository manifest, not
+    /// against this worktree's HEAD, so a fixture without a manifest can never look stale
+    /// whatever git does.
+    /// </summary>
+    private void DriftMainlinePastTheIndexedCommit()
+    {
+        Git("commit", "--allow-empty", "-m", "Moves the mainline past the indexed commit");
+        new RepositoryManifestStore(_identity.RepositoryRuntimeRoot).Save(
+            new RepositoryManifest(
+                _identity.RepositoryId,
+                Path.Combine(_root, ".git"),
+                "refs/heads/main",
+                _generation.Id,
+                _generation.DevTree,
+                Model,
+                2,
+                1,
+                CodeIndex.CurrentVersion,
+                RepositoryIndexState.Current,
+                [],
+                DateTimeOffset.UtcNow));
+    }
+
+    private void Save(
+        RepositoryIndexProgressPhase phase,
+        int processedChunks,
+        int totalChunks) =>
+        new RepositoryIndexProgressStore(_identity.RepositoryRuntimeRoot).Save(
+            new RepositoryIndexProgress(
+                _identity.RepositoryId,
+                phase,
+                _root,
+                processedChunks,
+                totalChunks,
+                0,
+                null,
+                DateTimeOffset.UtcNow));
+
+    [Fact]
     public void Status_ignores_corrupted_durable_sync_progress()
     {
         File.WriteAllBytes(
