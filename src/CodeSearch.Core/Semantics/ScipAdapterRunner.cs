@@ -357,22 +357,26 @@ public sealed class ScipAdapterRunner(ScipImporter? importer = null)
 
     private static string? ResolveCandidate(string candidate)
     {
-        if (File.Exists(candidate))
+        if (OperatingSystem.IsWindows() && !Path.HasExtension(candidate))
         {
-            return Path.GetFullPath(candidate);
-        }
+            // npm installs both a POSIX shell script with no extension and a Windows
+            // .cmd shim. File.Exists(candidate) is therefore true on Windows, but that
+            // extensionless script is not a valid Win32 executable. Match PATHEXT
+            // semantics before considering the bare file.
+            foreach (var extension in new[] { ".exe", ".cmd", ".bat" })
+            {
+                if (File.Exists(candidate + extension))
+                {
+                    return Path.GetFullPath(candidate + extension);
+                }
+            }
 
-        if (!OperatingSystem.IsWindows() || Path.HasExtension(candidate))
-        {
             return null;
         }
 
-        foreach (var extension in new[] { ".exe", ".cmd", ".bat" })
+        if (File.Exists(candidate))
         {
-            if (File.Exists(candidate + extension))
-            {
-                return Path.GetFullPath(candidate + extension);
-            }
+            return Path.GetFullPath(candidate);
         }
 
         return null;
