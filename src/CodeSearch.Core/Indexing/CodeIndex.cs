@@ -23,6 +23,7 @@ public sealed class ChunkMeta
     public required string Symbol { get; init; }
     public required string Signature { get; init; }
     public required string Namespace { get; init; }
+    public string LexicalText { get; init; } = string.Empty;
     public required int StartLine { get; init; }
     public required int EndLine { get; init; }
 }
@@ -38,7 +39,7 @@ public sealed class ChunkMeta
 ///   long indexedAtUtcTicks
 ///   int fileCount   -> per file: string relPath, byte[32] hash, int chunkStart, int chunkCount
 ///   int chunkCount  -> per chunk: int fileIndex, byte kind, string symbol, string signature,
-///                                 string ns, int startLine, int endLine
+///                                 string ns, string lexicalText, int startLine, int endLine
 ///   float32[chunkCount * dim]  (contiguous, L2-normalized)
 /// </code>
 /// Vectors live in one contiguous trailing block so they can be read and written in bulk slabs.
@@ -47,11 +48,12 @@ public sealed class CodeIndex : ISearchableIndex
 {
     /// <summary>
     /// v2 adds the overlay fields. v3 adds exact repository/generation/tree/dirty identities.
-    /// Older files remain readable so an existing base index can be
-    /// migrated by a normal incremental rebuild - the vectors are reused by hash and only the
-    /// container is rewritten, which costs seconds instead of re-embedding everything.
+    /// v4 persists lexical chunk text so exact identifiers work in every indexed language.
+    /// Older files remain readable for diagnostics. Moving to v4 intentionally performs one
+    /// full rebuild because older containers do not retain the source text needed to populate
+    /// the language-independent lexical field.
     /// </summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     private const string Magic = "CIDX";
 
@@ -69,6 +71,8 @@ public sealed class CodeIndex : ISearchableIndex
     public required DateTime IndexedAtUtc { get; init; }
     public required List<IndexedFile> Files { get; init; }
     public required List<ChunkMeta> Chunks { get; init; }
+
+    public int FormatVersion { get; init; } = CurrentVersion;
 
     public string RepositoryId { get; init; } = string.Empty;
 
@@ -181,6 +185,7 @@ public sealed class CodeIndex : ISearchableIndex
                 Symbol = reader.ReadString(),
                 Signature = reader.ReadString(),
                 Namespace = reader.ReadString(),
+                LexicalText = version >= 4 ? reader.ReadString() : string.Empty,
                 StartLine = reader.ReadInt32(),
                 EndLine = reader.ReadInt32(),
             });
@@ -204,6 +209,7 @@ public sealed class CodeIndex : ISearchableIndex
             GenerationId = generationId,
             GitTree = gitTree,
             DirtyHash = dirtyHash,
+            FormatVersion = version,
         };
     }
 
@@ -262,6 +268,7 @@ public sealed class CodeIndex : ISearchableIndex
                 writer.Write(chunk.Symbol);
                 writer.Write(chunk.Signature);
                 writer.Write(chunk.Namespace);
+                writer.Write(chunk.LexicalText);
                 writer.Write(chunk.StartLine);
                 writer.Write(chunk.EndLine);
             }

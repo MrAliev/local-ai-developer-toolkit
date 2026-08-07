@@ -9,13 +9,13 @@ param(
     [string] $PublishRoot = "publish",
 
     [Parameter(Mandatory = $false)]
-    [string] $ReleaseVersion = "0.1.17",
+    [string] $ReleaseVersion = "0.1.18",
 
     [Parameter(Mandatory = $false)]
     [string] $VersionDirectory = "",
 
     [Parameter(Mandatory = $false)]
-    [string] $PackageUri = "https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/0.1.17/localai-package.zip",
+    [string] $PackageUri = "https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/0.1.18/localai-package.zip",
 
     [Parameter(Mandatory = $false)]
     [switch] $SignManifest

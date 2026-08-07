@@ -230,6 +230,13 @@ public static class SearchEngine
                 {
                     score += 2;
                 }
+                else if (chunk.LexicalText.Contains(token, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Body matches are deliberately weaker than declarations, but unlike the
+                    // old metadata-only scorer they make exact identifiers reliable in Python,
+                    // TypeScript, HTML, XAML and every other generic text chunk.
+                    score += 1;
+                }
                 else if (relPath.Contains(token, StringComparison.OrdinalIgnoreCase))
                 {
                     score += 1;

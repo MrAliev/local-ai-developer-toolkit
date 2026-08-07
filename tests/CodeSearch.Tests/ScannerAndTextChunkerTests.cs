@@ -42,6 +42,8 @@ public class ChunkerFactoryTests
     [Theory]
     [InlineData("Services/OrderService.cs", true)]
     [InlineData("app/main.ts", true)]
+    [InlineData("config/settings.xml", true)]
+    [InlineData("legacy/index.htm", true)]
     [InlineData("Migrations/001_init.sql", true)]
     [InlineData("README.md", true)]
     [InlineData("logo.png", false)]

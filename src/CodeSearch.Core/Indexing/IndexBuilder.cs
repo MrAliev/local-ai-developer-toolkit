@@ -303,6 +303,13 @@ public sealed class IndexBuilder(
         try
         {
             var index = CodeIndex.Load(indexPath);
+            if (index.FormatVersion < CodeIndex.CurrentVersion)
+            {
+                _log($"Existing index is format v{index.FormatVersion}; v{CodeIndex.CurrentVersion} " +
+                     "adds language-independent lexical text - rebuilding once.");
+                return null;
+            }
+
             if (!string.Equals(index.Model, embedder.Model, StringComparison.OrdinalIgnoreCase))
             {
                 // Vectors from different models are not comparable, so a model switch is a full
@@ -625,6 +632,7 @@ public sealed class IndexBuilder(
                         Symbol = source.Symbol,
                         Signature = source.Signature,
                         Namespace = source.Namespace,
+                        LexicalText = source.LexicalText,
                         StartLine = source.StartLine,
                         EndLine = source.EndLine,
                     });
@@ -658,6 +666,7 @@ public sealed class IndexBuilder(
         Symbol = chunk.Symbol,
         Signature = chunk.Signature,
         Namespace = chunk.Namespace,
+        LexicalText = CanonicalIndexText.Normalize(chunk.EmbedText),
         StartLine = chunk.StartLine,
         EndLine = chunk.EndLine,
     };
