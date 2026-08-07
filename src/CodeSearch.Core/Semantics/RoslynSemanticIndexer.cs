@@ -261,6 +261,14 @@ public sealed class RoslynSemanticIndexer
                     : SemanticRelationshipKind.Override);
         }
 
+        if (symbol is INamedTypeSymbol namedType)
+        {
+            foreach (var @interface in namedType.Interfaces)
+            {
+                yield return (@interface, SemanticRelationshipKind.Implementation);
+            }
+        }
+
         IEnumerable<ISymbol> implemented = symbol switch
         {
             IMethodSymbol method => method.ExplicitInterfaceImplementations,
