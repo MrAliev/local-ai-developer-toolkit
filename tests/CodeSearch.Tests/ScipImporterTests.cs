@@ -88,6 +88,27 @@ public sealed class ScipImporterTests
     }
 
     [Fact]
+    public void IgnoresUnscopedExternalLocalSymbolsAndKeepsDocumentLocalNavigation()
+    {
+        var payload = Index(index =>
+        {
+            index.Message(3, symbol =>
+            {
+                symbol.String(1, "local 0");
+                symbol.String(3, "documentation emitted by scip-python");
+            });
+            AddLocalDocument(index, "candidate.py");
+        });
+
+        var imported = Import(payload);
+        var occurrence = Assert.Single(imported.Occurrences);
+        var symbol = Assert.Single(imported.Symbols);
+
+        Assert.Equal("scip-local candidate.py 0", occurrence.SymbolId);
+        Assert.Equal(occurrence.SymbolId, symbol.Id);
+    }
+
+    [Fact]
     public void RejectsTraversalPaths()
     {
         var payload = Index(index => index.Message(2, document =>

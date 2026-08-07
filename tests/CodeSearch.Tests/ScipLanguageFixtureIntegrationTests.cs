@@ -71,10 +71,26 @@ public sealed class ScipLanguageFixtureIntegrationTests : IDisposable
     {
         var node = Environment.GetEnvironmentVariable("LOCALAI_SCIP_NODE");
         var script = Environment.GetEnvironmentVariable("LOCALAI_SCIP_PYTHON_SCRIPT");
-        if (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(script))
+        var installedExecutable = Environment.GetEnvironmentVariable(
+            "LOCALAI_SCIP_PYTHON_EXECUTABLE");
+        if (string.IsNullOrWhiteSpace(installedExecutable) && OperatingSystem.IsWindows())
+        {
+            var candidate = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "npm",
+                "scip-python.cmd");
+            if (File.Exists(candidate))
+            {
+                installedExecutable = candidate;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(installedExecutable) &&
+            (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(script)))
         {
             Assert.Skip(
-                "Set LOCALAI_SCIP_NODE and LOCALAI_SCIP_PYTHON_SCRIPT to run the real fixture.");
+                "Install scip-python or set LOCALAI_SCIP_NODE and " +
+                "LOCALAI_SCIP_PYTHON_SCRIPT to run the real fixture.");
         }
 
         Write("definition.py", """
@@ -89,8 +105,10 @@ public sealed class ScipLanguageFixtureIntegrationTests : IDisposable
 
         var result = await RunAsync(
             "python",
-            node,
-            [script, "index", ".", "--project-name", "fixture", "--project-version", "1.0"],
+            installedExecutable ?? node!,
+            installedExecutable is null
+                ? [script!, "index", ".", "--project-name", "fixture", "--project-version", "1.0"]
+                : ["index", ".", "--project-name", "fixture", "--project-version", "1.0"],
             ScipPositionEncoding.Utf32,
             TestContext.Current.CancellationToken);
 
