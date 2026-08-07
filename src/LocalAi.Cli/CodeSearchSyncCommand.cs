@@ -32,7 +32,8 @@ public static class CodeSearchSyncCommand
     public static async Task<CodeSearchSyncResult> ExecuteAsync(
         string workingRoot,
         string model = DefaultModel,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeOverlays = true)
     {
         var requested = RuntimeIndexLayout.Inspect(workingRoot);
         var progressStore = new RepositoryIndexProgressStore(
@@ -133,10 +134,12 @@ public static class CodeSearchSyncCommand
                     cancellationToken);
             }
 
-            var targets = generationChanged
-                ? worktrees
-                : worktrees.Where(
-                    item => SamePath(item.Path, requested.WorkingRoot)).ToArray();
+            var targets = includeOverlays
+                ? generationChanged
+                    ? worktrees
+                    : worktrees.Where(
+                        item => SamePath(item.Path, requested.WorkingRoot)).ToArray()
+                : [];
             var overlaysBuilt = 0;
             var present = SelectPresentWorktrees(
                 targets.Where(item => !item.IsPrunable),
@@ -180,6 +183,7 @@ public static class CodeSearchSyncCommand
                 var builtOverlay = false;
                 if (!File.Exists(overlayPath))
                 {
+                    var embeddingCheckpointPath = overlayPath + ".embedding-checkpoint";
                     var embedder = new BrokerEmbeddingClient(
                         generation.Identity.EmbeddingModel,
                         BrokerClientFactory.CreateDefault());
@@ -201,7 +205,10 @@ public static class CodeSearchSyncCommand
                             identity.HeadTree,
                             identity.RepositoryId,
                             generation.Identity.Id,
-                            identity.DirtyHash));
+                            identity.DirtyHash),
+                        embeddingCheckpointPath,
+                        generation.Identity.EmbeddingDimension);
+                    DeleteEmbeddingCheckpoint(embeddingCheckpointPath);
                     builtOverlay = true;
                 }
 
@@ -358,6 +365,9 @@ public static class CodeSearchSyncCommand
         var workSemanticIndex = Path.Combine(
             stagingRoot,
             generation.Id + "." + Guid.NewGuid().ToString("N") + ".sidx");
+        var embeddingCheckpointPath = Path.Combine(
+            stagingRoot,
+            generation.Id + ".embedding-checkpoint");
         try
         {
             if (current is not null)
@@ -389,7 +399,9 @@ public static class CodeSearchSyncCommand
                     dev.HeadCommit,
                     dev.HeadTree,
                     dev.RepositoryId,
-                    generation.Id));
+                    generation.Id),
+                embeddingCheckpointPath,
+                generation.EmbeddingDimension);
             var header = CodeIndex.Load(workIndex, withVectors: false);
             if (header.Dim != generation.EmbeddingDimension)
             {
@@ -405,11 +417,13 @@ public static class CodeSearchSyncCommand
                 cancellationToken);
 
             semanticIndex.Index.Save(workSemanticIndex);
-            return store.PublishIndex(
+            var published = store.PublishIndex(
                 workIndex,
                 generation,
                 workSemanticIndex,
                 semanticAdapterStatuses: semanticIndex.AdapterStatuses);
+            DeleteEmbeddingCheckpoint(embeddingCheckpointPath);
+            return published;
         }
         finally
         {
@@ -422,6 +436,22 @@ public static class CodeSearchSyncCommand
             {
                 File.Delete(workSemanticIndex);
             }
+        }
+    }
+
+    private static void DeleteEmbeddingCheckpoint(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine(
+                $"Embedding checkpoint '{path}' could not be removed: {exception.Message}");
         }
     }
 

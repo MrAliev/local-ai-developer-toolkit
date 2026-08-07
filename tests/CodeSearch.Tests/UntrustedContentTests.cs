@@ -342,6 +342,19 @@ public sealed class UntrustedContentMcpTests : IDisposable
         Assert.Contains("ETA:        1.2 min", status, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Status_ignores_corrupted_durable_sync_progress()
+    {
+        File.WriteAllBytes(
+            Path.Combine(_identity.RepositoryRuntimeRoot, "progress.json"),
+            new byte[337]);
+
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        Assert.Contains("Chunks:     2", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sync phase:", status, StringComparison.Ordinal);
+    }
+
     private SearchChunkId CurrentId(int ordinal) =>
         new(
             _identity.RepositoryId,

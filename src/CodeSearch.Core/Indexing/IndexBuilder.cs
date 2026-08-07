@@ -78,7 +78,9 @@ public sealed class IndexBuilder(
         string indexPath,
         bool force = false,
         CancellationToken ct = default,
-        IndexBuildContext? context = null)
+        IndexBuildContext? context = null,
+        string? embeddingCheckpointPath = null,
+        int? expectedEmbeddingDimension = null)
     {
         var stopwatch = Stopwatch.StartNew();
         root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
@@ -97,7 +99,14 @@ public sealed class IndexBuilder(
         _log($"Chunked {changed.Count} files into {totalToEmbed} chunks to embed.");
         _progress(new IndexBuildProgress(0, totalToEmbed, 0, null));
 
-        var vectorsByPath = await EmbedAsync(freshChunks, totalToEmbed, ct);
+        var checkpoint = embeddingCheckpointPath is null
+            ? null
+            : new EmbeddingCheckpointStore(
+                embeddingCheckpointPath,
+                embedder.Model,
+                expectedEmbeddingDimension,
+                _log);
+        var vectorsByPath = await EmbedAsync(freshChunks, totalToEmbed, checkpoint, ct);
 
         var assembled = Assemble(files, previousByPath, existing, freshChunks, vectorsByPath, hashes, out var dim);
 
@@ -153,7 +162,9 @@ public sealed class IndexBuilder(
         string baseIndexPath,
         string overlayPath,
         CancellationToken ct = default,
-        IndexBuildContext? context = null)
+        IndexBuildContext? context = null,
+        string? embeddingCheckpointPath = null,
+        int? expectedEmbeddingDimension = null)
     {
         var stopwatch = Stopwatch.StartNew();
         workingRoot = Path.GetFullPath(workingRoot).TrimEnd(Path.DirectorySeparatorChar);
@@ -191,7 +202,14 @@ public sealed class IndexBuilder(
         var freshChunks = ChunkFiles(workingRoot, toChunk, ct);
         var totalToEmbed = freshChunks.Values.Sum(c => c.Count);
         _progress(new IndexBuildProgress(0, totalToEmbed, 0, null));
-        var vectorsByPath = await EmbedAsync(freshChunks, totalToEmbed, ct);
+        var checkpoint = embeddingCheckpointPath is null
+            ? null
+            : new EmbeddingCheckpointStore(
+                embeddingCheckpointPath,
+                embedder.Model,
+                expectedEmbeddingDimension ?? baseIndex.Dim,
+                _log);
+        var vectorsByPath = await EmbedAsync(freshChunks, totalToEmbed, checkpoint, ct);
 
         var assembled = Assemble(
             changed, overlayByPath, existingOverlay, freshChunks, vectorsByPath, hashes, out var dim);
@@ -417,7 +435,10 @@ public sealed class IndexBuilder(
     }
 
     private async Task<Dictionary<string, float[][]>> EmbedAsync(
-        Dictionary<string, List<Chunk>> chunksByFile, int total, CancellationToken ct)
+        Dictionary<string, List<Chunk>> chunksByFile,
+        int total,
+        EmbeddingCheckpointStore? checkpoint,
+        CancellationToken ct)
     {
         var vectors = chunksByFile.ToDictionary(
             kv => kv.Key,
@@ -430,16 +451,37 @@ public sealed class IndexBuilder(
         }
 
         var queue = new List<(string RelPath, int Slot, string Text)>(total);
+        var restored = 0;
         foreach (var (relPath, chunks) in chunksByFile)
         {
             for (var i = 0; i < chunks.Count; i++)
             {
-                queue.Add((relPath, i, CanonicalIndexText.Normalize(chunks[i].EmbedText)));
+                var text = CanonicalIndexText.Normalize(chunks[i].EmbedText);
+                if (checkpoint?.TryGet(text, out var vector) == true)
+                {
+                    vectors[relPath][i] = vector;
+                    restored++;
+                }
+                else
+                {
+                    queue.Add((relPath, i, text));
+                }
             }
         }
 
+        if (restored > 0)
+        {
+            _log($"Restored {restored}/{total} chunks from the embedding checkpoint.");
+            _progress(new IndexBuildProgress(
+                restored,
+                total,
+                0,
+                restored == total ? TimeSpan.Zero : null));
+        }
+
         var stopwatch = Stopwatch.StartNew();
-        var done = 0;
+        var done = restored;
+        var embeddedThisRun = 0;
         var position = 0;
         var budget = InitialBatchChars;
 
@@ -459,6 +501,9 @@ public sealed class IndexBuilder(
 
             var batchStarted = stopwatch.Elapsed;
             var embeddings = await EmbedBatchAsync(batch, ct);
+            checkpoint?.SaveBatch(
+                batch.Select(item => item.Text).ToArray(),
+                embeddings);
             budget = NextBudget(budget, chars, stopwatch.Elapsed - batchStarted);
             for (var i = 0; i < batch.Count; i++)
             {
@@ -466,7 +511,8 @@ public sealed class IndexBuilder(
             }
 
             done += batch.Count;
-            var rate = done / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
+            embeddedThisRun += batch.Count;
+            var rate = embeddedThisRun / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
             var remaining = TimeSpan.FromSeconds((queue.Count - done) / Math.Max(0.001, rate));
             _log($"Embedded {done}/{queue.Count} chunks ({rate:F1}/s, ~{remaining.TotalMinutes:F1} min left)");
             _progress(new IndexBuildProgress(done, queue.Count, rate, remaining));

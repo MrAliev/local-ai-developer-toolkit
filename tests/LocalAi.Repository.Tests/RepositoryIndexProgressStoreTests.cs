@@ -49,6 +49,18 @@ public sealed class RepositoryIndexProgressStoreTests : IDisposable
         Assert.Throws<InvalidDataException>(() => store.Save(progress));
     }
 
+    [Fact]
+    public void Read_reports_zero_filled_progress_as_invalid_data()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllBytes(Path.Combine(_root, "progress.json"), new byte[337]);
+
+        var error = Assert.Throws<InvalidDataException>(
+            () => new RepositoryIndexProgressStore(_root).Read());
+
+        Assert.IsType<System.Text.Json.JsonException>(error.InnerException);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

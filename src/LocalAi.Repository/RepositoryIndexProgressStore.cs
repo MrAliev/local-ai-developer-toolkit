@@ -25,11 +25,21 @@ public sealed class RepositoryIndexProgressStore
         var temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(
-                temporary,
+            using (var stream = new FileStream(
+                       temporary,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.WriteThrough))
+            {
                 JsonSerializer.Serialize(
+                    stream,
                     new ProgressDocument(1, progress),
-                    LocalAiJson.Strict));
+                    LocalAiJson.Strict);
+                stream.Flush(flushToDisk: true);
+            }
+
             File.Move(temporary, _path, overwrite: true);
         }
         finally
@@ -48,10 +58,18 @@ public sealed class RepositoryIndexProgressStore
             return null;
         }
 
-        var document = JsonSerializer.Deserialize<ProgressDocument>(
-            File.ReadAllText(_path),
-            LocalAiJson.Strict)
-            ?? throw new InvalidDataException("Repository progress is empty.");
+        ProgressDocument document;
+        try
+        {
+            document = JsonSerializer.Deserialize<ProgressDocument>(
+                File.ReadAllText(_path),
+                LocalAiJson.Strict)
+                ?? throw new InvalidDataException("Repository progress is empty.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Repository progress JSON is invalid.", exception);
+        }
         if (document.SchemaVersion != 1)
         {
             throw new InvalidDataException("Repository progress schema is unsupported.");

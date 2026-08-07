@@ -13,5 +13,5 @@ internal static class CliUsage
         "Usage: localai native <operation> [--request file] | " +
         ModelStatus + " | " + ModelPull + " | " + ModelPreflight + " | " +
         "localai repo status [git-common-dir] | localai bootstrap --dry-run | " +
-        "localai sync [--root dir] | localai hooks install [--root dir]";
+        "localai sync [--root dir] [--base-only] | localai hooks install [--root dir]";
 }
