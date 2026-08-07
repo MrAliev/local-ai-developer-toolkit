@@ -6,10 +6,10 @@
     <LangVersion>latest</LangVersion>
     <InvariantGlobalization>true</InvariantGlobalization>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <VersionPrefix>0.1.19</VersionPrefix>
-    <Version>0.1.19</Version>
-    <AssemblyVersion>0.1.19.0</AssemblyVersion>
-    <FileVersion>0.1.19.0</FileVersion>
-    <InformationalVersion>0.1.19</InformationalVersion>
+    <VersionPrefix>0.1.20</VersionPrefix>
+    <Version>0.1.20</Version>
+    <AssemblyVersion>0.1.20.0</AssemblyVersion>
+    <FileVersion>0.1.20.0</FileVersion>
+    <InformationalVersion>0.1.20</InformationalVersion>
   </PropertyGroup>
 </Project>

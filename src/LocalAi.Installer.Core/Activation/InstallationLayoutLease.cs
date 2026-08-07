@@ -401,9 +401,7 @@ public sealed class InstallationLayoutLease : IDisposable
                     throw Failure();
                 }
 
-                ValidateExactVersionDirectory(
-                    entry,
-                    LocalAiPackageLayout.VersionRequiredFiles);
+                ValidateExistingVersionDirectory(entry);
 
                 var versionHandle = NativeDirectory.OpenExisting(
                     versions.Handle,
@@ -494,9 +492,7 @@ public sealed class InstallationLayoutLease : IDisposable
         foreach (var directory in directories.Where(directory =>
                      IsBelow(directory.CanonicalPath, Layout.VersionsRoot)))
         {
-            ValidateExactVersionDirectory(
-                directory.CanonicalPath,
-                LocalAiPackageLayout.VersionRequiredFiles);
+            ValidateExistingVersionDirectory(directory.CanonicalPath);
         }
 
 
@@ -653,6 +649,33 @@ public sealed class InstallationLayoutLease : IDisposable
         if (required.Count != 0)
         {
             throw Failure();
+        }
+    }
+
+    private static void ValidateExistingVersionDirectory(string directory)
+    {
+        ValidateDirectoryPath(directory);
+        var entries = Directory.EnumerateFileSystemEntries(directory).ToArray();
+        var names = entries
+            .Select(Path.GetFileName)
+            .ToHashSet(StringComparer.Ordinal);
+        var runtimeFiles = LocalAiPackageLayout.VersionRequiredFiles
+            .ToHashSet(StringComparer.Ordinal);
+        var expandedPackageFiles = LocalAiPackageLayout.PackageArtifactFiles
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Older repair and pre-release builds sometimes published the verified stable
+        // launcher beside the runtime executables. The versioned launcher is never executed;
+        // the trusted copy under bin\launcher remains the only activation entry point. Accept
+        // that one known expanded package shape, while continuing to reject every other extra.
+        if (!names.SetEquals(runtimeFiles) && !names.SetEquals(expandedPackageFiles))
+        {
+            throw Failure();
+        }
+
+        foreach (var entry in entries)
+        {
+            ValidateOptionalFile(entry);
         }
     }
 

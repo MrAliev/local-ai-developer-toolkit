@@ -517,6 +517,34 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task Existing_version_with_packaged_launcher_can_be_upgraded()
+    {
+        CreateExisting("v1", System.Text.Encoding.UTF8.GetBytes("prior-launcher"));
+        var layout = InstallationLayout.FromLocalAppData(localAppData);
+        var packagedLauncher = Path.Combine(
+            layout.VersionsRoot,
+            "v1",
+            LocalAiPackageLayout.StableLauncherFile);
+        File.WriteAllBytes(packagedLauncher, System.Text.Encoding.UTF8.GetBytes("versioned-launcher"));
+        using var package = Package("v2");
+        var runner = new RecordingRunner((_, _, _, _) =>
+        {
+            WritePointer("v2");
+            return Task.FromResult(new ProcessResult(0, "", "", false, false));
+        });
+
+        var result = await Installer(runner).InstallAsync(
+            package,
+            layout,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(LocalAiPackageInstallStatus.Installed, result.Status);
+        Assert.Contains("\"version\":\"v2\"", File.ReadAllText(layout.CurrentPointerPath));
+        Assert.True(File.Exists(packagedLauncher));
+        Assert.Single(runner.Calls);
+    }
+
+    [Fact]
     [SupportedOSPlatform("windows")]
     public void Layout_lease_atomically_creates_and_blocks_root_rename()
     {

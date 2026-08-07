@@ -32,6 +32,7 @@ public sealed class RoslynSemanticIndexer
 
         var root = Path.GetFullPath(repositoryRoot);
         var documents = new List<SemanticDocument>();
+        var documentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var symbols = new Dictionary<string, SemanticSymbol>(StringComparer.Ordinal);
         var occurrences = new List<SemanticOccurrence>();
         var occurrenceKeys = new HashSet<OccurrenceKey>();
@@ -44,6 +45,14 @@ public sealed class RoslynSemanticIndexer
                 cancellationToken.ThrowIfCancellationRequested();
                 if (document.SourceCodeKind != SourceCodeKind.Regular ||
                     !TryRelativeSourcePath(root, document.FilePath, out var relativePath))
+                {
+                    continue;
+                }
+
+                // A source file can be linked into several projects in one solution. Its
+                // repository path is the semantic document identity, so index the first
+                // deterministic project occurrence and do not emit duplicate documents.
+                if (!documentPaths.Add(relativePath))
                 {
                     continue;
                 }
