@@ -213,44 +213,56 @@ public sealed class BrokerProcess : IBrokerProcess
             "initial state observation",
             observation.Detail);
         using var startAttempt = _start(_executablePath, _arguments);
-        cancellationToken.ThrowIfCancellationRequested();
-        observation = ObserveStartAttempt(
-            startAttempt,
-            observation,
-            cancellationToken);
-        var lastObservation = observation.Detail;
-        ThrowIfStartupTimedOut(
-            startupTimestamp,
-            "process creation",
-            lastObservation);
-        while (true)
+        var ownsCompatibleHost = false;
+        try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            observation = ReadObservation();
-            cancellationToken.ThrowIfCancellationRequested();
-            lastObservation = observation.Detail;
-            if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
-            {
-                return;
-            }
-
-            ThrowIfIncompatible(observation);
-
             observation = ObserveStartAttempt(
                 startAttempt,
                 observation,
                 cancellationToken);
-            lastObservation = observation.Detail;
-
-            cancellationToken.ThrowIfCancellationRequested();
+            var lastObservation = observation.Detail;
             ThrowIfStartupTimedOut(
                 startupTimestamp,
-                "startup observation",
+                "process creation",
                 lastObservation);
-            var remaining = RemainingStartupBudget(startupTimestamp);
-            await _delay(
-                remaining < StartupPollInterval ? remaining : StartupPollInterval,
-                cancellationToken);
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                observation = ReadObservation();
+                cancellationToken.ThrowIfCancellationRequested();
+                lastObservation = observation.Detail;
+                if (observation.Status == BrokerObservationStatus.CompatibleHealthy)
+                {
+                    ownsCompatibleHost = observation.OwnerProcessId == startAttempt.ProcessId;
+                    return;
+                }
+
+                ThrowIfIncompatible(observation);
+
+                observation = ObserveStartAttempt(
+                    startAttempt,
+                    observation,
+                    cancellationToken);
+                lastObservation = observation.Detail;
+
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfStartupTimedOut(
+                    startupTimestamp,
+                    "startup observation",
+                    lastObservation);
+                var remaining = RemainingStartupBudget(startupTimestamp);
+                await _delay(
+                    remaining < StartupPollInterval ? remaining : StartupPollInterval,
+                    cancellationToken);
+            }
+        }
+        finally
+        {
+            if (!ownsCompatibleHost)
+            {
+                startAttempt.StopIfRunning();
+            }
         }
     }
 
@@ -313,7 +325,8 @@ public sealed class BrokerProcess : IBrokerProcess
 
         return new(
             BrokerObservationStatus.CompatibleHealthy,
-            "host broker assembly path: " + state.BrokerAssemblyPath);
+            "host broker assembly path: " + state.BrokerAssemblyPath,
+            state.ProcessId);
     }
 
     private BrokerObservation ReadObservation()
@@ -587,6 +600,10 @@ public sealed class BrokerProcess : IBrokerProcess
             return false;
         }
 
+        public void StopIfRunning()
+        {
+        }
+
         public void Dispose()
         {
         }
@@ -628,6 +645,23 @@ internal sealed class ProcessStartAttempt : IBrokerStartAttempt
         {
             exitCode = default;
             return false;
+        }
+    }
+
+    public void StopIfRunning()
+    {
+        try
+        {
+            if (!_process.HasExited)
+            {
+                _process.Kill(entireProcessTree: false);
+            }
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or
+            Win32Exception or
+            NotSupportedException)
+        {
         }
     }
 

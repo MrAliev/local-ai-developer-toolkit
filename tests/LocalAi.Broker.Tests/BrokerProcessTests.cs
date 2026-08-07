@@ -956,6 +956,7 @@ public sealed class BrokerProcessTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => process.EnsureRunningAsync(cancellation.Token));
 
+        Assert.Equal(1, startAttempt.StopIfRunningCallCount);
         Assert.True(startAttempt.IsDisposed);
     }
 
@@ -996,8 +997,67 @@ public sealed class BrokerProcessTests
 
         Assert.Equal(1, starts);
         Assert.True(startAttempt.TryGetExitCodeCallCount > 0);
+        Assert.Equal(1, startAttempt.StopIfRunningCallCount);
         Assert.True(startAttempt.IsDisposed);
         Assert.Equal(1, delays);
+    }
+
+    [Fact]
+    public async Task Running_redundant_child_is_stopped_after_compatible_owner_appears()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reads = 0;
+        var startAttempt = FakeStartAttempt.Running(42);
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => ++reads < 3
+                ? null
+                : new BrokerProcessState(
+                    99,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
+            state => state.ProcessId == 99,
+            (_, _) => startAttempt,
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, startAttempt.StopIfRunningCallCount);
+        Assert.True(startAttempt.IsDisposed);
+    }
+
+    [Fact]
+    public async Task Running_child_is_preserved_when_it_publishes_compatible_state()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reads = 0;
+        var startAttempt = FakeStartAttempt.Running(42);
+        var process = BrokerProcess.CreateForTesting(
+            BrokerAssemblyPath,
+            "runtime",
+            _ => ++reads < 3
+                ? null
+                : new BrokerProcessState(
+                    42,
+                    now,
+                    now,
+                    BrokerCompatibilityContract.HostStateSchemaVersion,
+                    BrokerAssemblyPath,
+                    BrokerCompatibilityContract.Current),
+            state => state.ProcessId == 42,
+            (_, _) => startAttempt,
+            TimeProvider.System,
+            static (_, _) => Task.CompletedTask);
+
+        await process.EnsureRunningAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, startAttempt.StopIfRunningCallCount);
+        Assert.True(startAttempt.IsDisposed);
     }
 
     [Fact]
@@ -1147,6 +1207,8 @@ public sealed class BrokerProcessTests
 
         public int TryGetExitCodeCallCount { get; private set; }
 
+        public int StopIfRunningCallCount { get; private set; }
+
         public bool IsDisposed { get; private set; }
 
         public static FakeStartAttempt Running(int processId) => new(processId, null);
@@ -1159,6 +1221,8 @@ public sealed class BrokerProcessTests
             exitCode = _exitCode.GetValueOrDefault();
             return _exitCode.HasValue;
         }
+
+        public void StopIfRunning() => StopIfRunningCallCount++;
 
         public void Dispose() => IsDisposed = true;
     }
