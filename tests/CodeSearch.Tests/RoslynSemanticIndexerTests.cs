@@ -123,6 +123,40 @@ public sealed class RoslynSemanticIndexerTests : IDisposable
             definition.Range.StartCharacter));
     }
 
+    [Fact]
+    public async Task Linked_source_in_multiple_projects_is_indexed_once()
+    {
+        Directory.CreateDirectory(_root);
+        using var workspace = new AdhocWorkspace();
+        const string source = "namespace Shared; public sealed class Linked { }";
+        var sharedPath = Path.Combine(_root, "Shared", "Linked.cs");
+        var first = AddProject(workspace.CurrentSolution, "First");
+        var solution = first.Solution.AddDocument(
+            DocumentId.CreateNewId(first.Id),
+            "Linked.cs",
+            SourceText.From(source),
+            filePath: sharedPath);
+        var second = AddProject(solution, "Second");
+        solution = second.Solution.AddDocument(
+            DocumentId.CreateNewId(second.Id),
+            "Linked.cs",
+            SourceText.From(source),
+            filePath: sharedPath);
+
+        var index = await new RoslynSemanticIndexer().BuildAsync(
+            solution,
+            _root,
+            Identity(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(index.Documents);
+        Assert.Equal("Shared/Linked.cs", index.Documents[0].RelPath);
+        Assert.Single(index.Occurrences, occurrence =>
+            occurrence.Roles.HasFlag(SemanticOccurrenceRoles.Definition) &&
+            index.Symbols.Single(symbol => symbol.Id == occurrence.SymbolId).DisplayName == "Linked");
+        index.NormalizeForUse();
+    }
+
     private (Microsoft.CodeAnalysis.Solution Solution, string AppSource) Solution()
     {
         Directory.CreateDirectory(_root);
