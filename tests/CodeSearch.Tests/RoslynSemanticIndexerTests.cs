@@ -140,6 +140,13 @@ public sealed class RoslynSemanticIndexerTests : IDisposable
         Assert.Equal(Position(source, "PairAlias ="), new LinePosition(
             definition.Range.StartLine,
             definition.Range.StartCharacter));
+        Assert.DoesNotContain(
+            index.Symbols,
+            symbol => symbol.Id.Contains(_root, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            index.Symbols,
+            symbol => symbol.DisplayName == "PairAlias" &&
+                      symbol.Id.Contains("Aliases.cs", StringComparison.Ordinal));
     }
 
     [Fact]

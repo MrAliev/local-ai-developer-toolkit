@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Text.Json;
+using CodeSearch.Core.Semantics;
 using LocalAi.Cli;
 using LocalAi.Repository;
 
@@ -51,6 +53,67 @@ public sealed class CodeSearchSyncTests : IDisposable
             manifest.State);
     }
 
+    [Fact]
+    public void Semantic_generation_accepts_succeeded_and_skipped_adapters()
+    {
+        CodeSearchSyncCommand.EnsureSemanticAdaptersSucceeded(
+            [
+                Status("typescript", SemanticAdapterState.Succeeded, "indexed"),
+                Status("python", SemanticAdapterState.Skipped, "no files"),
+            ]);
+    }
+
+    [Fact]
+    public void Semantic_generation_rejects_failed_adapters_before_publish()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            CodeSearchSyncCommand.EnsureSemanticAdaptersSucceeded(
+                [
+                    Status("typescript", SemanticAdapterState.Failed, "bad shim"),
+                    Status("python", SemanticAdapterState.Failed, "bad interpreter"),
+                ]));
+
+        Assert.Contains("typescript: bad shim", exception.Message);
+        Assert.Contains("python: bad interpreter", exception.Message);
+        Assert.Contains("not published", exception.Message);
+    }
+
+    [Fact]
+    public void Synthetic_typescript_project_includes_javascript_without_touching_repository()
+    {
+        Directory.CreateDirectory(_root);
+        var relative = Path.Combine("wwwroot", "app.js");
+        var source = Path.Combine(_root, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        File.WriteAllText(source, "window.app = true;");
+
+        var workspace = CodeSearchSyncCommand.CreateSyntheticTypeScriptWorkspace(
+            _root,
+            [relative]);
+        try
+        {
+            Assert.Equal(
+                Path.GetTempPath(),
+                Path.GetDirectoryName(workspace) + Path.DirectorySeparatorChar);
+            var configPath = Path.Combine(workspace, "tsconfig.json");
+            using var config = JsonDocument.Parse(File.ReadAllText(configPath));
+            Assert.True(config.RootElement
+                .GetProperty("compilerOptions")
+                .GetProperty("allowJs")
+                .GetBoolean());
+            Assert.Equal(
+                relative.Replace('\\', '/'),
+                Assert.Single(config.RootElement.GetProperty("files").EnumerateArray())
+                    .GetString());
+            Assert.True(File.Exists(Path.Combine(workspace, relative)));
+            Assert.False(File.Exists(Path.Combine(_root, "tsconfig.json")));
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
     public void Dispose()
     {
         if (_repositoryRuntimeRoot is not null &&
@@ -101,4 +164,9 @@ public sealed class CodeSearchSyncTests : IDisposable
 
         return stdout.Trim();
     }
+
+    private static SemanticAdapterStatus Status(
+        string name,
+        SemanticAdapterState state,
+        string message) => new(name, state, message, 0);
 }

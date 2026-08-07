@@ -85,7 +85,8 @@ public sealed class RoslynSemanticIndexer
                             symbols,
                             occurrences,
                             occurrenceKeys,
-                            relationships);
+                            relationships,
+                            root);
                     }
 
                     if (node is not SimpleNameSyntax name)
@@ -111,7 +112,8 @@ public sealed class RoslynSemanticIndexer
                         symbols,
                         occurrences,
                         occurrenceKeys,
-                        relationships);
+                        relationships,
+                        root);
                 }
             }
         }
@@ -172,14 +174,15 @@ public sealed class RoslynSemanticIndexer
         Dictionary<string, SemanticSymbol> symbols,
         List<SemanticOccurrence> occurrences,
         HashSet<OccurrenceKey> occurrenceKeys,
-        HashSet<SemanticRelationship> relationships)
+        HashSet<SemanticRelationship> relationships,
+        string repositoryRoot)
     {
         if (!IsNavigable(symbol))
         {
             return;
         }
 
-        var id = AddSymbol(symbol, symbols, relationships);
+        var id = AddSymbol(symbol, symbols, relationships, repositoryRoot);
         var range = ToRange(text.Lines.GetLinePositionSpan(span));
         var key = new OccurrenceKey(relativePath, range, id);
         if (!occurrenceKeys.Add(key))
@@ -208,9 +211,10 @@ public sealed class RoslynSemanticIndexer
     private static string AddSymbol(
         ISymbol symbol,
         Dictionary<string, SemanticSymbol> symbols,
-        HashSet<SemanticRelationship> relationships)
+        HashSet<SemanticRelationship> relationships,
+        string repositoryRoot)
     {
-        var id = CanonicalId(symbol);
+        var id = CanonicalId(symbol, repositoryRoot);
         if (!symbols.ContainsKey(id))
         {
             symbols.Add(id, new SemanticSymbol
@@ -229,7 +233,7 @@ public sealed class RoslynSemanticIndexer
                 continue;
             }
 
-            var targetId = AddSymbol(target, symbols, relationships);
+            var targetId = AddSymbol(target, symbols, relationships, repositoryRoot);
             relationships.Add(new SemanticRelationship
             {
                 SourceSymbolId = id,
@@ -295,7 +299,7 @@ public sealed class RoslynSemanticIndexer
         }
     }
 
-    private static string CanonicalId(ISymbol symbol)
+    private static string CanonicalId(ISymbol symbol, string repositoryRoot)
     {
         var original = symbol.OriginalDefinition;
         if (original.GetDocumentationCommentId() is { } documentationId)
@@ -310,7 +314,9 @@ public sealed class RoslynSemanticIndexer
         var source = original.Locations.FirstOrDefault(location => location.IsInSource);
         var suffix = source is null
             ? original.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-            : $"{source.SourceTree?.FilePath}:{source.SourceSpan.Start}";
+            : TryRelativeSourcePath(repositoryRoot, source.SourceTree?.FilePath, out var relative)
+                ? $"{relative}:{source.SourceSpan.Start}"
+                : $"source:{source.SourceSpan.Start}";
         return $"dotnet-local {containing} {original.Kind} {original.Name} {suffix}";
     }
 

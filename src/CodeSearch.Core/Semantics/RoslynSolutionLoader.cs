@@ -43,6 +43,14 @@ public sealed class LoadedRoslynSolution : IAsyncDisposable
 public static class RoslynSolutionLoader
 {
     private static readonly object RegistrationLock = new();
+    private static readonly IDictionary<string, string> WorkspaceProperties =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Semantic indexing only evaluates the project graph. Vulnerability audit
+            // warnings must not become build-stopping errors in repositories that use
+            // TreatWarningsAsErrors; production restore/build remains unchanged.
+            ["NuGetAudit"] = "false",
+        };
 
     public static async Task<LoadedRoslynSolution?> LoadAsync(
         string repositoryRoot,
@@ -92,7 +100,7 @@ public static class RoslynSolutionLoader
                     buildHostLease.RootPath);
             }
 
-            var workspace = MSBuildWorkspace.Create();
+            var workspace = MSBuildWorkspace.Create(WorkspaceProperties);
             workspace.RegisterWorkspaceFailedHandler(
                 args => diagnostic?.Invoke(args.Diagnostic.Message));
             try
@@ -157,6 +165,7 @@ public static class RoslynSolutionLoader
                      "--nologo",
                      "--verbosity",
                      "quiet",
+                     "-p:NuGetAudit=false",
                  })
         {
             start.ArgumentList.Add(argument);
