@@ -130,8 +130,18 @@ static async Task<int> RunAsync(string[] args)
         return 0;
     }
 
-    if (args is ["hook", var hookName, ..])
+    if (args is ["hook", .. var hookArguments])
     {
+        // Git hooks are the only caller of this command, so its failures are read from a hook
+        // log or not at all. Both of them now name the events that exist instead of printing
+        // the top-level usage, which used to omit this command entirely.
+        if (hookArguments is not [var hookName, ..])
+        {
+            Console.Error.WriteLine(
+                $"localai hook requires an event. Usage: {LocalAi.Cli.CliUsage.Hook}");
+            return 2;
+        }
+
         var rootIndex = Array.IndexOf(args, "--root");
         var root = rootIndex >= 0 && rootIndex + 1 < args.Length
             ? args[rootIndex + 1]
@@ -141,7 +151,9 @@ static async Task<int> RunAsync(string[] args)
                 ignoreCase: true,
                 out _))
         {
-            Console.Error.WriteLine($"Unsupported LocalAi hook '{hookName}'.");
+            Console.Error.WriteLine(
+                $"Unsupported LocalAi hook '{hookName}'. " +
+                $"Supported events: {LocalAi.Cli.CliUsage.HookEvents}.");
             return 2;
         }
 
@@ -153,6 +165,24 @@ static async Task<int> RunAsync(string[] args)
                 ? $", skipped worktrees={result.WorktreesSkipped}"
                 : string.Empty) +
             ".");
+        return 0;
+    }
+
+    if (args is ["prune", ..])
+    {
+        var runtimeRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LocalAi");
+        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
+        var report = PruneCommand.Execute(runtimeRoot, dryRun, DateTimeOffset.UtcNow);
+        foreach (var line in report.Lines)
+        {
+            Console.WriteLine(line);
+        }
+
+        Console.WriteLine(
+            (dryRun ? "WOULD RECLAIM " : "RECLAIMED ") +
+            PruneCommand.Megabytes(report.BytesReclaimed));
         return 0;
     }
 

@@ -518,6 +518,46 @@ An NPU does not help here. Everything runs through Ollama, whose backends are CP
 ROCm, Metal and Vulkan; NPUs are driven by a separate stack (OpenVINO, DirectML, Windows ML),
 and the residency numbers this policy is built on do not map onto NPU memory.
 
+### Retention
+
+Everything the runtime produces is bounded, and the bounds live in
+`%LOCALAPPDATA%\LocalAi\retention.json`. A missing or malformed document yields the defaults
+below.
+
+| Bound | Default | Applies to |
+| --- | --- | --- |
+| `ResponseGraceMinutes` | 10 | floor: no response body younger than this is ever dropped |
+| `ResponseRetentionMinutes` | 60 | age at which an archived response body is dropped |
+| `ResponseBudgetBytes` | 512 MB | total retained response bodies, oldest dropped first |
+| `ArchiveRetentionDays` | 14 | age at which an archived job is deleted outright |
+| `ArchiveEntryLimit` | 2000 | archived jobs kept, oldest deleted first |
+| `GenerationsPerRepository` | 3 | index generations kept, including the current one |
+| `InstalledVersions` | 3 | version directories kept under `bin\versions` |
+| `LauncherBackups` | 3 | launcher backups kept under `installer\backups` |
+
+The archive is a handover, not a record: a client collects its response on the next poll after
+the job turns terminal and never asks again, yet one embedding batch leaves megabytes of
+vectors behind. The broker applies the archive bounds continuously — throttled to one pass a
+minute and capped per pass, so the queue never stalls behind housekeeping — and drops the body
+while keeping the request and state documents as the audit trail.
+
+`ResponseGraceMinutes` is the one value here that protects correctness rather than disk.
+Nothing may remove a body inside it, whatever the other bounds ask for, and a hand-edited
+document that sets it to zero is clamped rather than obeyed.
+
+To reclaim a backlog, or to reach the parts a background sweep does not own:
+
+```powershell
+localai prune --dry-run
+localai prune
+```
+
+`prune` never removes the generation a repository's pointer names, the version
+`bin\current.json` names, or a job that has not been terminal for longer than the response
+grace. A version whose files are still mapped by a running tool refuses to be deleted, which is
+the right answer — the next prune collects it. It also forgets repository records whose
+checkout no longer exists, which is what a throwaway worktree leaves behind.
+
 ### Broker compatibility and startup
 
 The broker `host.json` schema 3 publishes an explicit protocol version and stable build
