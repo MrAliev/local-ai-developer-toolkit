@@ -23,7 +23,10 @@ public static class CodeSearchSyncCommand
     public const string DefaultModel = "qwen3-embedding:8b-q8_0";
     public const int DefaultDimension = 4096;
     public const int CurrentNormalizationVersion = 4;
-    public const int CurrentSemanticGenerationVersion = 2;
+    // Bump whenever semantic extraction changes even if the SIDX binary format does not.
+    // Generations are immutable, so changing relationships without changing this value
+    // would keep serving the previous semantic graph for an already indexed commit.
+    public const int CurrentSemanticGenerationVersion = 3;
 
     private sealed record SemanticBuildResult(
         SemanticIndex Index,
