@@ -123,20 +123,27 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
     }
 
     /// <summary>
-    /// The bare name first, then each PATHEXT extension. Only the bare name used to be tried,
-    /// so resolving "gh" searched for a file literally called `gh` and found nothing next to
-    /// `gh.exe`. Every current caller happens to pass a full name like `winget.exe`, which is
-    /// why that never showed - the next caller to pass a bare command would have hit it.
+    /// On Windows, PATHEXT candidates must come before the extensionless name. npm installs a
+    /// POSIX shell script and a Windows .cmd shim side by side; choosing the extensionless file
+    /// makes Process.Start fail even though the dependency is correctly installed.
     /// </summary>
     private static IEnumerable<string> CandidateNames(string executableName)
+        => CandidateNames(
+            executableName,
+            OperatingSystem.IsWindows(),
+            Environment.GetEnvironmentVariable("PATHEXT"));
+
+    internal static IEnumerable<string> CandidateNames(
+        string executableName,
+        bool isWindows,
+        string? pathExt)
     {
-        yield return executableName;
-        if (!OperatingSystem.IsWindows() || Path.HasExtension(executableName))
+        if (!isWindows || Path.HasExtension(executableName))
         {
+            yield return executableName;
             yield break;
         }
 
-        var pathExt = Environment.GetEnvironmentVariable("PATHEXT");
         var extensions = string.IsNullOrWhiteSpace(pathExt)
             ? [".COM", ".EXE", ".BAT", ".CMD"]
             : pathExt.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
@@ -148,6 +155,8 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
                 yield return executableName + trimmed;
             }
         }
+
+        yield return executableName;
     }
 
     private static string ReadWindowsProductName()
