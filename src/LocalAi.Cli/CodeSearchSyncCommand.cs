@@ -26,7 +26,7 @@ public static class CodeSearchSyncCommand
     // Bump whenever semantic extraction changes even if the SIDX binary format does not.
     // Generations are immutable, so changing relationships without changing this value
     // would keep serving the previous semantic graph for an already indexed commit.
-    public const int CurrentSemanticGenerationVersion = 3;
+    public const int CurrentSemanticGenerationVersion = 5;
 
     private sealed record SemanticBuildResult(
         SemanticIndex Index,

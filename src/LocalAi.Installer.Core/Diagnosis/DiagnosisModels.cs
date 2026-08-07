@@ -143,6 +143,12 @@ public sealed record EnvironmentDiagnosis
         DependencySnapshot git,
         DependencySnapshot gitHubCli,
         DependencySnapshot ollama,
+        DependencySnapshot dotNetSdk,
+        DependencySnapshot nodeJs,
+        DependencySnapshot npm,
+        DependencySnapshot scipTypeScript,
+        DependencySnapshot python,
+        DependencySnapshot scipPython,
         GpuSnapshot gpu,
         ExistingLocalAiSnapshot existingLocalAi,
         IEnumerable<AgentSnapshot> agents,
@@ -155,6 +161,12 @@ public sealed record EnvironmentDiagnosis
         Git = git;
         GitHubCli = gitHubCli;
         Ollama = ollama;
+        DotNetSdk = dotNetSdk;
+        NodeJs = nodeJs;
+        Npm = npm;
+        ScipTypeScript = scipTypeScript;
+        Python = python;
+        ScipPython = scipPython;
         Gpu = new GpuSnapshot(gpu.State, gpu.Adapters, gpu.Reason);
         ExistingLocalAi = existingLocalAi;
         Agents = Array.AsReadOnly(
@@ -179,6 +191,12 @@ public sealed record EnvironmentDiagnosis
     /// </summary>
     public DependencySnapshot GitHubCli { get; }
     public DependencySnapshot Ollama { get; }
+    public DependencySnapshot DotNetSdk { get; }
+    public DependencySnapshot NodeJs { get; }
+    public DependencySnapshot Npm { get; }
+    public DependencySnapshot ScipTypeScript { get; }
+    public DependencySnapshot Python { get; }
+    public DependencySnapshot ScipPython { get; }
     public GpuSnapshot Gpu { get; }
     public ExistingLocalAiSnapshot ExistingLocalAi { get; }
     public IReadOnlyList<AgentSnapshot> Agents { get; }

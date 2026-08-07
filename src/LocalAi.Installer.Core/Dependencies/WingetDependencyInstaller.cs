@@ -108,7 +108,8 @@ public sealed class WingetDependencyInstaller
 
         if (!DependencyCatalog.TryGetByActionId(
                 action.ActionId,
-                out var dependency))
+                out var dependency) ||
+            dependency.InstallerKind != DependencyInstallerKind.WinGet)
         {
             return Result(
                 DependencyInstallOutcome.UnsupportedAction,

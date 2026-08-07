@@ -1,6 +1,7 @@
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
+using System.Diagnostics;
 
 namespace CodeSearch.Core.Semantics;
 
@@ -73,6 +74,11 @@ public static class RoslynSolutionLoader
             return null;
         }
 
+        await RestoreProjectDependenciesAsync(
+            selected,
+            diagnostic,
+            cancellationToken).ConfigureAwait(false);
+
         using (await RoslynBuildHostLease.AcquireLoadLockAsync(cancellationToken))
         {
             EnsureMsBuildRegistered();
@@ -129,6 +135,104 @@ public static class RoslynSolutionLoader
             {
                 MSBuildLocator.RegisterDefaults();
             }
+        }
+    }
+
+    private static async Task RestoreProjectDependenciesAsync(
+        string entryPoint,
+        Action<string>? diagnostic,
+        CancellationToken cancellationToken)
+    {
+        var start = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in new[]
+                 {
+                     "restore",
+                     entryPoint,
+                     "--nologo",
+                     "--verbosity",
+                     "quiet",
+                 })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = new Process { StartInfo = start };
+        try
+        {
+            if (!process.Start())
+            {
+                diagnostic?.Invoke(
+                    $"Project dependency restore did not start for '{entryPoint}'.");
+                return;
+            }
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            diagnostic?.Invoke(
+                $"Project dependencies were not restored: {exception.Message}");
+            return;
+        }
+
+        var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            diagnostic?.Invoke(
+                $"Project dependency restore timed out for '{entryPoint}'.");
+            return;
+        }
+
+        var output = await stdout.ConfigureAwait(false);
+        var error = await stderr.ConfigureAwait(false);
+        if (process.ExitCode != 0)
+        {
+            var detail = string.IsNullOrWhiteSpace(error) ? output : error;
+            detail = detail.Trim();
+            if (detail.Length > 2_000)
+            {
+                detail = detail[^2_000..];
+            }
+
+            diagnostic?.Invoke(
+                $"Project dependency restore failed for '{entryPoint}' " +
+                $"with exit code {process.ExitCode}: {detail}");
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or
+            System.ComponentModel.Win32Exception or NotSupportedException)
+        {
         }
     }
 

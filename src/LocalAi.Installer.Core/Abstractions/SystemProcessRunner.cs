@@ -166,20 +166,46 @@ public sealed class SystemProcessRunner : IProcessRunner
         string executable,
         IReadOnlyList<string> arguments)
     {
+        var isCommandScript = OperatingSystem.IsWindows() &&
+            (executable.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
+             executable.EndsWith(".bat", StringComparison.OrdinalIgnoreCase));
         var startInfo = new ProcessStartInfo
         {
-            FileName = executable,
+            FileName = isCommandScript
+                ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe"
+                : executable,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
+        if (isCommandScript)
+        {
+            startInfo.Arguments =
+                "/d /s /c \"" + CommandScriptInvocation(executable, arguments) + "\"";
+            return startInfo;
+        }
+
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
 
         return startInfo;
+    }
+
+    private static string CommandScriptInvocation(
+        string executable,
+        IReadOnlyList<string> arguments)
+    {
+        var values = new[] { executable }.Concat(arguments).ToArray();
+        if (values.Any(value => value.IndexOfAny(['\"', '\r', '\n', '%', '!']) >= 0))
+        {
+            throw new ArgumentException(
+                "Windows command-script paths and arguments contain unsafe characters.");
+        }
+
+        return string.Join(" ", values.Select(value => $"\"{value}\""));
     }
 
     private async Task<CapturedText> DrainBoundedAsync(

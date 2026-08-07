@@ -72,6 +72,11 @@ public sealed class InstallerWizardViewModelTests
 
         wizard.Dependencies.SetInstalled("Ollama", true);
         wizard.Dependencies.SetInstalled("GitHubCli", true);
+        wizard.Dependencies.SetInstalled("DotNetSdk", true);
+        wizard.Dependencies.SetInstalled("NodeJs", true);
+        wizard.Dependencies.SetInstalled("ScipTypeScript", true);
+        wizard.Dependencies.SetInstalled("Python", true);
+        wizard.Dependencies.SetInstalled("ScipPython", true);
         Assert.True(wizard.Dependencies.CanContinue);
     }
 
@@ -229,6 +234,11 @@ public sealed class InstallerWizardViewModelTests
         wizard.Dependencies.SetInstalled("Git", true);
         wizard.Dependencies.SetInstalled("Ollama", true);
         wizard.Dependencies.SetInstalled("GitHubCli", true);
+        wizard.Dependencies.SetInstalled("DotNetSdk", true);
+        wizard.Dependencies.SetInstalled("NodeJs", true);
+        wizard.Dependencies.SetInstalled("ScipTypeScript", true);
+        wizard.Dependencies.SetInstalled("Python", true);
+        wizard.Dependencies.SetInstalled("ScipPython", true);
 
         Assert.True(wizard.MoveNext()); // Dependencies
         Assert.True(wizard.MoveNext()); // Package
@@ -250,6 +260,11 @@ public sealed class InstallerWizardViewModelTests
         wizard.Dependencies.SetInstalled("Git", true);
         wizard.Dependencies.SetInstalled("Ollama", true);
         wizard.Dependencies.SetInstalled("GitHubCli", true);
+        wizard.Dependencies.SetInstalled("DotNetSdk", true);
+        wizard.Dependencies.SetInstalled("NodeJs", true);
+        wizard.Dependencies.SetInstalled("ScipTypeScript", true);
+        wizard.Dependencies.SetInstalled("Python", true);
+        wizard.Dependencies.SetInstalled("ScipPython", true);
         for (var step = 0; step < 6; step++)
         {
             wizard.MoveNext();
@@ -297,6 +312,11 @@ public sealed class InstallerWizardViewModelTests
         wizard.Dependencies.SetInstalled("Git", true);
         wizard.Dependencies.SetInstalled("Ollama", true);
         wizard.Dependencies.SetInstalled("GitHubCli", true);
+        wizard.Dependencies.SetInstalled("DotNetSdk", true);
+        wizard.Dependencies.SetInstalled("NodeJs", true);
+        wizard.Dependencies.SetInstalled("ScipTypeScript", true);
+        wizard.Dependencies.SetInstalled("Python", true);
+        wizard.Dependencies.SetInstalled("ScipPython", true);
         for (var step = 0; step < 6; step++)
         {
             wizard.MoveNext();

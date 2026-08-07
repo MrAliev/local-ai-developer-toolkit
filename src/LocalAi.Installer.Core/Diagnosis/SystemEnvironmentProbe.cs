@@ -50,6 +50,17 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
     private static IEnumerable<string> SearchDirectories()
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (OperatingSystem.IsWindows())
+        {
+            var npmDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "npm");
+            if (seen.Add(npmDirectory))
+            {
+                yield return npmDirectory;
+            }
+        }
+
         foreach (var source in PathSources())
         {
             foreach (var entry in source.Split(
@@ -66,7 +77,7 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
     }
 
     /// <summary>
-    /// The process PATH first, then the machine and user PATH as the registry holds them now.
+    /// The machine and user PATH as the registry holds them now, then the inherited process PATH.
     ///
     /// Windows hands PATH to a process by inheriting the parent's environment block at creation,
     /// not by reading the registry. A dependency installed during an open session is therefore
@@ -80,9 +91,9 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
     /// </summary>
     private static IEnumerable<string> PathSources()
     {
-        yield return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         if (!OperatingSystem.IsWindows())
         {
+            yield return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
             yield break;
         }
 
@@ -107,6 +118,8 @@ public sealed class SystemEnvironmentProbe : IEnvironmentProbe
                 yield return value;
             }
         }
+
+        yield return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
     }
 
     /// <summary>

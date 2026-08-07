@@ -88,6 +88,88 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
     }
 
     [Fact]
+    public async Task Detects_Node_npm_and_scip_typescript_with_version_calls()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["node.exe"] = @"C:\Tools\node.exe";
+        fixture.Environment.Executables["npm.cmd"] = @"C:\Tools\npm.cmd";
+        fixture.Environment.Executables["scip-typescript"] =
+            @"C:\Users\me\AppData\Roaming\npm\scip-typescript.cmd";
+        fixture.Process.Results[@"C:\Tools\node.exe"] =
+            new ProcessResult(0, "v20.20.2", "", false, false);
+        fixture.Process.Results[@"C:\Tools\npm.cmd"] =
+            new ProcessResult(0, "10.8.2", "", false, false);
+        fixture.Process.Results[@"C:\Users\me\AppData\Roaming\npm\scip-typescript.cmd"] =
+            new ProcessResult(0, "scip-typescript 0.4.0", "", false, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("v20.20.2", diagnosis.NodeJs.Version);
+        Assert.Equal("10.8.2", diagnosis.Npm.Version);
+        Assert.Equal("scip-typescript 0.4.0", diagnosis.ScipTypeScript.Version);
+    }
+
+    [Fact]
+    public async Task Rejects_incompatible_dotnet_node_and_scip_versions()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["dotnet.exe"] = @"C:\Tools\dotnet.exe";
+        fixture.Environment.Executables["node.exe"] = @"C:\Tools\node.exe";
+        fixture.Environment.Executables["scip-typescript"] = @"C:\Tools\scip.cmd";
+        fixture.Process.Results[@"C:\Tools\dotnet.exe"] =
+            new ProcessResult(0, "8.0.419", "", false, false);
+        fixture.Process.Results[@"C:\Tools\node.exe"] =
+            new ProcessResult(0, "v26.7.0", "", false, false);
+        fixture.Process.Results[@"C:\Tools\scip.cmd"] =
+            new ProcessResult(0, "scip-typescript 0.3.0", "", false, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Failed, diagnosis.DotNetSdk.State);
+        Assert.Equal(DependencyState.Failed, diagnosis.NodeJs.State);
+        Assert.Equal(DependencyState.Failed, diagnosis.ScipTypeScript.State);
+        Assert.Contains("10", diagnosis.DotNetSdk.Reason, StringComparison.Ordinal);
+        Assert.Contains("20", diagnosis.NodeJs.Reason, StringComparison.Ordinal);
+        Assert.Contains("0.4.0", diagnosis.ScipTypeScript.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Accepts_supported_Python_and_scip_python_versions()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["python.exe"] = @"C:\Python311\python.exe";
+        fixture.Environment.Executables["scip-python"] = @"C:\Tools\scip-python.cmd";
+        fixture.Process.Results[@"C:\Python311\python.exe"] =
+            new ProcessResult(0, "", "Python 3.11.9", false, false);
+        fixture.Process.Results[@"C:\Tools\scip-python.cmd"] =
+            new ProcessResult(0, "scip-python 0.6.6", "", false, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Detected, diagnosis.Python.State);
+        Assert.Equal("Python 3.11.9", diagnosis.Python.Version);
+        Assert.Equal(DependencyState.Detected, diagnosis.ScipPython.State);
+    }
+
+    [Fact]
+    public async Task Rejects_unsupported_Python_version()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["python.exe"] = @"C:\Python39\python.exe";
+        fixture.Process.Results[@"C:\Python39\python.exe"] =
+            new ProcessResult(0, "Python 3.9.13", "", false, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Failed, diagnosis.Python.State);
+        Assert.Contains("3.10", diagnosis.Python.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Detects_Ollama_only_from_registry_and_file_metadata()
     {
         var fixture = CreateFixture();
