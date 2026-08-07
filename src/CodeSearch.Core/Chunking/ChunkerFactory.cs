@@ -19,7 +19,7 @@ public static class ChunkerFactory
         ".py", ".go", ".java", ".kt", ".rs", ".rb", ".php",
         ".c", ".h", ".cpp", ".hpp", ".cc", ".ino",
         ".sql", ".graphql", ".proto",
-        ".xaml", ".razor", ".cshtml", ".html", ".css", ".scss", ".less",
+        ".xaml", ".xml", ".razor", ".cshtml", ".html", ".htm", ".css", ".scss", ".less",
         ".md", ".mdx", ".txt", ".adoc",
         ".yml", ".yaml", ".toml", ".ini", ".conf",
         ".ps1", ".psm1", ".sh", ".bash",

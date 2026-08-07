@@ -19,9 +19,9 @@ public enum ChunkKind : byte
 }
 
 /// <summary>
-/// One unit of retrieval. <see cref="EmbedText"/> is what gets embedded, and is deliberately
-/// NOT persisted in the index — snippets are re-read from disk at query time, which keeps the
-/// index to vectors plus metadata and means displayed code is never stale relative to the file.
+/// One unit of retrieval. <see cref="EmbedText"/> is embedded and normalized into the index's
+/// lexical field. Displayed snippets are still re-read from disk, so returned code cannot be
+/// stale relative to the indexed file identity.
 /// </summary>
 public sealed record Chunk
 {

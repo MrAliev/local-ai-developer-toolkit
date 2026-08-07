@@ -73,6 +73,30 @@ public class SearchEngineTests : IDisposable
         Assert.True(hits.Single(h => h.Symbol == "RobotScenario.TrustSetFlags").LexicalScore > 0);
     }
 
+    [Theory]
+    [InlineData("worker.py", "def reconcile_customer_ledger():", "reconcile_customer_ledger")]
+    [InlineData("service.ts", "export function hydrateSessionCache() {}", "hydrateSessionCache")]
+    [InlineData("view.html", "<section data-feature=\"billing-dashboard\">", "billing-dashboard")]
+    [InlineData("Main.xaml", "<Button Command=\"{Binding RefreshOrdersCommand}\" />", "RefreshOrdersCommand")]
+    [InlineData("settings.xml", "<handler name=\"ArchiveExpiredInvoices\" />", "ArchiveExpiredInvoices")]
+    public void Lexical_only_search_matches_identifiers_inside_generic_chunk_bodies(
+        string relPath,
+        string body,
+        string query)
+    {
+        File.WriteAllText(Path.Combine(_root, relPath), body);
+        var index = SingleTextIndex(relPath, body);
+
+        var hit = Assert.Single(SearchEngine.SearchLexically(
+            index,
+            query,
+            new SearchOptions { TopK = 1 },
+            _root));
+
+        Assert.Equal(relPath, hit.RelPath);
+        Assert.True(hit.LexicalScore > 0);
+    }
+
     [Fact]
     public void MaxPerFileStopsOneClassTakingEverySlot()
     {
@@ -362,6 +386,44 @@ public class SearchEngineTests : IDisposable
                     "class External",
                     1,
                     1)
+            ],
+            Vectors = [1f, 0f, 0f]
+        };
+
+    private CodeIndex SingleTextIndex(string relPath, string body) =>
+        new()
+        {
+            Dim = 3,
+            Model = "test-model",
+            Root = _root,
+            GitCommit = "abc123",
+            RepositoryId = "repository",
+            GenerationId = "generation",
+            GitTree = "tree",
+            IndexedAtUtc = DateTime.UtcNow,
+            Files =
+            [
+                new IndexedFile
+                {
+                    RelPath = relPath,
+                    Hash = CanonicalIndexText.Hash(body),
+                    ChunkStart = 0,
+                    ChunkCount = 1
+                }
+            ],
+            Chunks =
+            [
+                new ChunkMeta
+                {
+                    FileIndex = 0,
+                    Kind = ChunkKind.Text,
+                    Symbol = Path.GetFileName(relPath),
+                    Signature = relPath + ":1-1",
+                    Namespace = string.Empty,
+                    LexicalText = body,
+                    StartLine = 1,
+                    EndLine = 1
+                }
             ],
             Vectors = [1f, 0f, 0f]
         };

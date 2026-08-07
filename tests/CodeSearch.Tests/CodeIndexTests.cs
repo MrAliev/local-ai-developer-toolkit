@@ -34,7 +34,7 @@ public class CodeIndexTests
             Chunks =
             [
                 Meta(0, ChunkKind.Type, "A", "public class A", "Ns", 1, 20),
-                Meta(0, ChunkKind.Method, "A.Go", "public void Go()", "Ns", 5, 9),
+                Meta(0, ChunkKind.Method, "A.Go", "public void Go()", "Ns", 5, 9, "Go hidden_token"),
                 Meta(1, ChunkKind.Text, "Б.cs", "Б.cs:1-60", "Src", 1, 60),
             ],
             Vectors = vectors,
@@ -67,6 +67,7 @@ public class CodeIndexTests
 
             Assert.Equal(original.Chunks.Count, loaded.Chunks.Count);
             Assert.Equal("A.Go", loaded.Chunks[1].Symbol);
+            Assert.Equal("Go hidden_token", loaded.Chunks[1].LexicalText);
             Assert.Equal(ChunkKind.Text, loaded.Chunks[2].Kind);
             Assert.Equal(60, loaded.Chunks[2].EndLine);
         }
@@ -121,7 +122,15 @@ public class CodeIndexTests
         }
     }
 
-    private static ChunkMeta Meta(int file, ChunkKind kind, string symbol, string signature, string ns, int start, int end) =>
+    private static ChunkMeta Meta(
+        int file,
+        ChunkKind kind,
+        string symbol,
+        string signature,
+        string ns,
+        int start,
+        int end,
+        string lexicalText = "") =>
         new()
         {
             FileIndex = file,
@@ -129,6 +138,7 @@ public class CodeIndexTests
             Symbol = symbol,
             Signature = signature,
             Namespace = ns,
+            LexicalText = lexicalText,
             StartLine = start,
             EndLine = end,
         };
