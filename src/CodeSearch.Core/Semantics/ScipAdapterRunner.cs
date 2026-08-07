@@ -126,6 +126,16 @@ public sealed class ScipAdapterRunner(ScipImporter? importer = null)
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        if (OperatingSystem.IsWindows())
+        {
+            // An installer can add Python, Node, or npm shims after the parent process
+            // started. Give the indexer the current registry PATH in the same priority
+            // order used for executable discovery, rather than its parent's stale copy.
+            start.Environment["PATH"] = string.Join(
+                Path.PathSeparator,
+                ExecutableSearchDirectories());
+        }
+
         if (isCommandScript)
         {
             try

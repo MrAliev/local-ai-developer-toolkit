@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
@@ -1128,6 +1129,73 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 $"{displayName} installation failed with exit code {result.ExitCode}.",
                 false);
             return false;
+        }
+
+        if (string.Equals(
+                dependency.PackageId,
+                DependencyCatalog.ScipPython.PackageId,
+                StringComparison.Ordinal))
+        {
+            var npmRootResult = await processRunner.RunAsync(
+                npmPath,
+                ["root", "--global"],
+                DependencyInstallTimeout,
+                cancellationToken);
+            var npmGlobalRoot = npmRootResult.StandardOutput.Trim();
+            if (npmRootResult.ExitCode is not 0 ||
+                string.IsNullOrWhiteSpace(npmGlobalRoot) ||
+                npmGlobalRoot.Contains('\n', StringComparison.Ordinal) ||
+                npmGlobalRoot.Contains('\r', StringComparison.Ordinal))
+            {
+                SetRollbackInfo(
+                    "SCIP Python was installed, but npm did not return a valid global " +
+                    "package directory.",
+                    false);
+                return false;
+            }
+
+            try
+            {
+                _ = new ScipPythonWindowsCompatibilityPatch().Apply(
+                    npmGlobalRoot,
+                    packageVersion);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or
+                InvalidOperationException or JsonException)
+            {
+                SetRollbackInfo(
+                    $"SCIP Python Windows compatibility patch failed: {exception.Message}",
+                    false);
+                return false;
+            }
+
+            var globalPrefix = Directory.GetParent(npmGlobalRoot)?.FullName;
+            var scipPythonPath = globalPrefix is null
+                ? null
+                : Path.Combine(globalPrefix, "scip-python.cmd");
+            if (scipPythonPath is null || !File.Exists(scipPythonPath))
+            {
+                SetRollbackInfo(
+                    "SCIP Python was patched, but its npm command shim was not found.",
+                    false);
+                return false;
+            }
+
+            var verification = await processRunner.RunAsync(
+                scipPythonPath,
+                ["--version"],
+                DependencyInstallTimeout,
+                cancellationToken);
+            var versionOutput = verification.StandardOutput + verification.StandardError;
+            if (verification.ExitCode is not 0 ||
+                !versionOutput.Contains(packageVersion, StringComparison.Ordinal))
+            {
+                SetRollbackInfo(
+                    "SCIP Python was patched, but its executable verification failed.",
+                    false);
+                return false;
+            }
         }
 
         return true;
