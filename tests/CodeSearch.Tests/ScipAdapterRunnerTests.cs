@@ -81,6 +81,37 @@ public sealed class ScipAdapterRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task PrefersWindowsCommandShimOverExtensionlessNpmScript()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var payload = MinimalIndex("demo.ts", "x");
+        var executable = Path.Combine(_root, "fixture-indexer");
+        await File.WriteAllTextAsync(
+            executable,
+            "#!/bin/sh\nexit 1\n",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            executable + ".cmd",
+            "@powershell.exe -NoProfile -NonInteractive -Command \"" +
+            "[IO.File]::WriteAllBytes('index.scip'," +
+            "[Convert]::FromBase64String('" + Convert.ToBase64String(payload) + "'))\"\r\n",
+            TestContext.Current.CancellationToken);
+
+        var result = await new ScipAdapterRunner().RunAsync(
+            EmptyIndex(),
+            _root,
+            new ScipAdapterSpec("typescript", executable, []),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(SemanticAdapterState.Succeeded, result.Status.State);
+        Assert.Equal("demo.ts", Assert.Single(result.Index.Documents).RelPath);
+    }
+
+    [Fact]
     public async Task RejectsExpandableCommandScriptArguments()
     {
         if (!OperatingSystem.IsWindows())
