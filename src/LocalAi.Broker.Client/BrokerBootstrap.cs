@@ -11,6 +11,8 @@ internal interface IBrokerStartAttempt : IDisposable
     int ProcessId { get; }
 
     bool TryGetExitCode(out int exitCode);
+
+    void StopIfRunning();
 }
 
 internal enum BrokerObservationStatus
@@ -23,4 +25,5 @@ internal enum BrokerObservationStatus
 
 internal sealed record BrokerObservation(
     BrokerObservationStatus Status,
-    string Detail);
+    string Detail,
+    int? OwnerProcessId = null);

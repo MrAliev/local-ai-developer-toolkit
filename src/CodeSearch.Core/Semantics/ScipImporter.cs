@@ -68,6 +68,15 @@ public sealed class ScipImporter
 
         foreach (var external in parsed.ExternalSymbols)
         {
+            // scip-python 0.6.6 can emit documentation-only local symbols in the
+            // index-wide external_symbols collection. A local identifier has no
+            // meaning outside its document, so it cannot be imported or safely
+            // associated with one of the document-scoped occurrences.
+            if (external.Symbol.StartsWith("local ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             AddSymbol(symbols, external, documentPath: null);
         }
 
