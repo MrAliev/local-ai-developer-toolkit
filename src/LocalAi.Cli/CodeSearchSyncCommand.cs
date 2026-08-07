@@ -5,6 +5,7 @@ using LocalAi.Broker.Client;
 using LocalAi.Contracts;
 using LocalAi.Repository;
 using System.Text;
+using System.Text.Json;
 
 namespace LocalAi.Cli;
 
@@ -26,7 +27,7 @@ public static class CodeSearchSyncCommand
     // Bump whenever semantic extraction changes even if the SIDX binary format does not.
     // Generations are immutable, so changing relationships without changing this value
     // would keep serving the previous semantic graph for an already indexed commit.
-    public const int CurrentSemanticGenerationVersion = 5;
+    public const int CurrentSemanticGenerationVersion = 10;
 
     private sealed record SemanticBuildResult(
         SemanticIndex Index,
@@ -419,6 +420,7 @@ public static class CodeSearchSyncCommand
                 generation,
                 cancellationToken);
 
+            EnsureSemanticAdaptersSucceeded(semanticIndex.AdapterStatuses);
             semanticIndex.Index.Save(workSemanticIndex);
             var published = store.PublishIndex(
                 workIndex,
@@ -440,6 +442,26 @@ public static class CodeSearchSyncCommand
                 File.Delete(workSemanticIndex);
             }
         }
+    }
+
+    internal static void EnsureSemanticAdaptersSucceeded(
+        IReadOnlyList<SemanticAdapterStatus> statuses)
+    {
+        ArgumentNullException.ThrowIfNull(statuses);
+        var failures = statuses
+            .Where(status => status.State == SemanticAdapterState.Failed)
+            .ToArray();
+        if (failures.Length == 0)
+        {
+            return;
+        }
+
+        var details = string.Join(
+            "; ",
+            failures.Select(failure => $"{failure.Name}: {failure.Message}"));
+        throw new InvalidOperationException(
+            "Semantic generation was not published because required adapters failed: " +
+            details);
     }
 
     private static void DeleteEmbeddingCheckpoint(string path)
@@ -564,24 +586,56 @@ public static class CodeSearchSyncCommand
         else
         {
             var arguments = typeScript.Arguments.ToList();
-            if (arguments.SequenceEqual(["index"], StringComparer.Ordinal) &&
-                !files.Any(path =>
-                    string.Equals(
-                        Path.GetFileName(path),
-                        "tsconfig.json",
-                        StringComparison.OrdinalIgnoreCase)))
+            string? syntheticWorkspace = null;
+            var adapterRoot = sourceRoot;
+            try
             {
-                arguments.Add("--infer-tsconfig");
-            }
+                if (arguments.SequenceEqual(["index"], StringComparer.Ordinal))
+                {
+                    var projects = files
+                        .Where(path => string.Equals(
+                            Path.GetFileName(path),
+                            "tsconfig.json",
+                            StringComparison.OrdinalIgnoreCase))
+                        .Select(path => Path.GetDirectoryName(Path.GetFullPath(Path.Combine(
+                            sourceRoot,
+                            path.Replace('/', Path.DirectorySeparatorChar))))!)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    if (projects.Length == 0)
+                    {
+                        syntheticWorkspace = CreateSyntheticTypeScriptWorkspace(
+                            sourceRoot,
+                            files.Where(IsTypeScriptSourceFile).ToArray());
+                        adapterRoot = syntheticWorkspace;
+                        projects = [syntheticWorkspace];
+                    }
 
-            var result = await runner.RunAsync(
-                index,
-                sourceRoot,
-                Spec("typescript", typeScript, arguments, policy),
-                cancellationToken);
-            index = result.Index;
-            statuses.Add(result.Status);
-            ReportAdapter(result.Status);
+                    // scip-typescript 0.4.0 compares its project root with
+                    // slash-normalized source paths using ordinal equality. Windows
+                    // backslashes make it walk to the drive root and encode the
+                    // temporary absolute path into every local symbol.
+                    arguments.AddRange(projects.Select(project =>
+                        project.Replace('\\', '/')));
+                }
+
+                var result = await runner.RunAsync(
+                    index,
+                    adapterRoot,
+                    Spec("typescript", typeScript, arguments, policy),
+                    cancellationToken);
+                index = result.Index;
+                statuses.Add(result.Status);
+                ReportAdapter(result.Status);
+            }
+            finally
+            {
+                if (syntheticWorkspace is not null &&
+                    Directory.Exists(syntheticWorkspace))
+                {
+                    Directory.Delete(syntheticWorkspace, recursive: true);
+                }
+            }
         }
 
         var hasPython = files.Any(path =>
@@ -624,6 +678,96 @@ public static class CodeSearchSyncCommand
             TimeSpan.FromSeconds(policy.TimeoutSeconds),
             policy.MaximumProcessOutputBytes,
             adapter.UnspecifiedPositionEncoding);
+
+    internal static string CreateSyntheticTypeScriptWorkspace(
+        string sourceRoot,
+        IReadOnlyList<string> sourceFiles)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
+        ArgumentNullException.ThrowIfNull(sourceFiles);
+        if (sourceFiles.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "A synthetic TypeScript project requires at least one source file.");
+        }
+
+        var sourceRootFull = Path.GetFullPath(sourceRoot)
+            .TrimEnd(Path.DirectorySeparatorChar);
+        var workspace = Path.Combine(
+            Path.GetTempPath(),
+            $"localai-scip-typescript-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workspace);
+        try
+        {
+            var relativeFiles = new List<string>(sourceFiles.Count);
+            foreach (var path in sourceFiles)
+            {
+                var relative = path.Replace('/', Path.DirectorySeparatorChar);
+                if (Path.IsPathRooted(relative) || relative
+                    .Split(Path.DirectorySeparatorChar)
+                    .Any(segment => segment is "" or "." or ".."))
+                {
+                    throw new InvalidOperationException(
+                        $"Synthetic TypeScript source path is not canonical: '{path}'.");
+                }
+
+                var source = Path.GetFullPath(Path.Combine(sourceRootFull, relative));
+                var sourcePrefix = sourceRootFull + Path.DirectorySeparatorChar;
+                if (!source.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase) ||
+                    !File.Exists(source))
+                {
+                    throw new InvalidOperationException(
+                        $"Synthetic TypeScript source is unavailable: '{path}'.");
+                }
+
+                var target = Path.GetFullPath(Path.Combine(workspace, relative));
+                var workspacePrefix = workspace + Path.DirectorySeparatorChar;
+                if (!target.StartsWith(
+                        workspacePrefix,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Synthetic TypeScript target escapes its workspace: '{path}'.");
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(source, target);
+                relativeFiles.Add(path.Replace('\\', '/'));
+            }
+
+            var config = new
+            {
+                compilerOptions = new
+                {
+                    allowJs = true,
+                    checkJs = false,
+                    noEmit = true,
+                    skipLibCheck = true,
+                    target = "ES2020",
+                    rootDir = ".",
+                },
+                files = relativeFiles,
+            };
+            File.WriteAllText(
+                Path.Combine(workspace, "tsconfig.json"),
+                JsonSerializer.Serialize(config),
+                new UTF8Encoding(false));
+            return workspace;
+        }
+        catch
+        {
+            Directory.Delete(workspace, recursive: true);
+            throw;
+        }
+    }
+
+    private static bool IsTypeScriptSourceFile(string path) =>
+        path.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".mjs", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".cjs", StringComparison.OrdinalIgnoreCase);
 
     private static SemanticAdapterStatus Skipped(string name, string message) =>
         new(name, SemanticAdapterState.Skipped, message, 0);
