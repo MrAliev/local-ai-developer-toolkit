@@ -14,7 +14,7 @@ public sealed class RoslynSemanticIndexerTests : IDisposable
     [Fact]
     public async Task Resolves_overloads_and_cross_project_references_precisely()
     {
-        var (solution, appSource) = Solution();
+        var (solution, appSource, _) = Solution();
         var index = await new RoslynSemanticIndexer().BuildAsync(
             solution,
             _root,
@@ -38,9 +38,9 @@ public sealed class RoslynSemanticIndexerTests : IDisposable
     }
 
     [Fact]
-    public async Task Emits_override_and_explicit_interface_relationships()
+    public async Task Emits_override_and_interface_relationships()
     {
-        var (solution, _) = Solution();
+        var (solution, _, libSource) = Solution();
 
         var index = await new RoslynSemanticIndexer().BuildAsync(
             solution,
@@ -58,6 +58,25 @@ public sealed class RoslynSemanticIndexerTests : IDisposable
             relationship.Kind == SemanticRelationshipKind.Implementation &&
             index.Symbols.Single(symbol => symbol.Id == relationship.TargetSymbolId)
                 .Signature.Contains("IWorker.Work(int)", StringComparison.Ordinal));
+
+        Assert.Contains(index.Relationships, relationship =>
+            relationship.Kind == SemanticRelationshipKind.Implementation &&
+            index.Symbols.Single(symbol => symbol.Id == relationship.SourceSymbolId)
+                .Signature.Contains("Worker", StringComparison.Ordinal) &&
+            index.Symbols.Single(symbol => symbol.Id == relationship.TargetSymbolId)
+                .Signature.Contains("IWorker", StringComparison.Ordinal));
+
+        var interfacePosition = Position(libSource, "IWorker");
+        var implementations = new SemanticNavigationService(index).FindImplementations(
+            "Lib/Base.cs",
+            interfacePosition.Line,
+            interfacePosition.Character,
+            new SemanticSnapshotIdentity("repo", "generation", "tree", null));
+
+        Assert.Contains(implementations, implementation =>
+            implementation.DocumentPath == "App/Worker.cs" &&
+            index.Symbols.Single(symbol => symbol.Id == implementation.SymbolId)
+                .Signature.Contains("Worker", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -157,7 +176,7 @@ public sealed class RoslynSemanticIndexerTests : IDisposable
         index.NormalizeForUse();
     }
 
-    private (Microsoft.CodeAnalysis.Solution Solution, string AppSource) Solution()
+    private (Microsoft.CodeAnalysis.Solution Solution, string AppSource, string LibSource) Solution()
     {
         Directory.CreateDirectory(_root);
         var workspace = new AdhocWorkspace();
@@ -194,7 +213,7 @@ public sealed class RoslynSemanticIndexerTests : IDisposable
             "Worker.cs",
             SourceText.From(appSource),
             filePath: Path.Combine(_root, "App", "Worker.cs"));
-        return (solution, appSource);
+        return (solution, appSource, libSource);
     }
 
     private static Project AddProject(Microsoft.CodeAnalysis.Solution solution, string name)
