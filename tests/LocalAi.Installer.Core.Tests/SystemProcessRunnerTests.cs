@@ -52,6 +52,53 @@ public sealed class SystemProcessRunnerTests
     }
 
     [Fact]
+    public async Task Runs_Windows_command_scripts_without_losing_safe_arguments()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var runner = new SystemProcessRunner();
+        var scriptPath = TemporaryPath(".cmd");
+        await File.WriteAllTextAsync(
+            scriptPath,
+            "@echo off\r\necho %~1^|%~2",
+            TestContext.Current.CancellationToken);
+        try
+        {
+            var result = await runner.RunAsync(
+                scriptPath,
+                ["alpha beta", "semi;colon"],
+                TimeSpan.FromSeconds(10),
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Equal("alpha beta|semi;colon", result.StandardOutput.Trim());
+        }
+        finally
+        {
+            File.Delete(scriptPath);
+        }
+    }
+
+    [Fact]
+    public async Task Rejects_unsafe_Windows_command_script_arguments()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var runner = new SystemProcessRunner();
+        await Assert.ThrowsAsync<ArgumentException>(() => runner.RunAsync(
+            @"C:\Tools\npm.cmd",
+            ["value%PATH%"],
+            TimeSpan.FromSeconds(10),
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task Classifies_timeout_and_kills_only_the_started_process_tree()
     {
         var runner = new SystemProcessRunner();

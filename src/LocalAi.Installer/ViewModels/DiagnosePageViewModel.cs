@@ -97,6 +97,24 @@ public sealed class DiagnosePageViewModel : ObservableObject
         Checks.Add(Describe(
             diagnosis.Ollama,
             "Runs the local models."));
+        Checks.Add(Describe(
+            diagnosis.DotNetSdk,
+            "Loads C# solutions and restores project dependencies for exact navigation."));
+        Checks.Add(Describe(
+            diagnosis.NodeJs,
+            "Runs the TypeScript semantic indexer."));
+        Checks.Add(Describe(
+            diagnosis.Npm,
+            "Installs the pinned TypeScript semantic indexer."));
+        Checks.Add(Describe(
+            diagnosis.ScipTypeScript,
+            "Provides exact TypeScript and JavaScript navigation."));
+        Checks.Add(Describe(
+            diagnosis.Python,
+            "Runs the Python semantic indexer."));
+        Checks.Add(Describe(
+            diagnosis.ScipPython,
+            "Provides exact Python navigation."));
 
         var usableAdapters = diagnosis.Gpu.Adapters
             .Where(adapter => !adapter.IsSoftware)

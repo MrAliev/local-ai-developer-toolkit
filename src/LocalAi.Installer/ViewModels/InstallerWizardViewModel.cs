@@ -354,11 +354,21 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 }
 
                 AppendLog(report, $"{dependency.Title}: installing...");
-                var installed = await TryInstallDependencyWithWingetAsync(
-                    definition,
-                    dependency.Title,
-                    reinstall: dependency.IsInstalled,
-                    token);
+                var installed = definition.InstallerKind switch
+                {
+                    DependencyInstallerKind.WinGet =>
+                        await TryInstallDependencyWithWingetAsync(
+                            definition,
+                            dependency.Title,
+                            reinstall: dependency.IsInstalled,
+                            token),
+                    DependencyInstallerKind.Npm =>
+                        await TryInstallDependencyWithNpmAsync(
+                            definition,
+                            dependency.Title,
+                            token),
+                    _ => false,
+                };
                 AppendLog(report, installed
                     ? $"{dependency.Title}: done."
                     : $"{dependency.Title}: failed.");
@@ -765,6 +775,17 @@ public sealed class InstallerWizardViewModel : ObservableObject
         dependencies.SetInstalled(
             "GitHubCli",
             diagnosis.GitHubCli.State == DependencyState.Detected);
+        dependencies.SetInstalled(
+            "DotNetSdk",
+            diagnosis.DotNetSdk.State == DependencyState.Detected);
+        dependencies.SetInstalled("NodeJs", diagnosis.NodeJs.State == DependencyState.Detected);
+        dependencies.SetInstalled(
+            "ScipTypeScript",
+            diagnosis.ScipTypeScript.State == DependencyState.Detected);
+        dependencies.SetInstalled("Python", diagnosis.Python.State == DependencyState.Detected);
+        dependencies.SetInstalled(
+            "ScipPython",
+            diagnosis.ScipPython.State == DependencyState.Detected);
 
         OnPropertyChanged(nameof(Diagnose));
         OnPropertyChanged(nameof(Dependencies));
@@ -833,6 +854,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
             "Git" => DependencyCatalog.Git,
             "Ollama" => DependencyCatalog.Ollama,
             "GitHubCli" => DependencyCatalog.GitHubCli,
+            "DotNetSdk" => DependencyCatalog.DotNetSdk,
+            "NodeJs" => DependencyCatalog.NodeJs,
+            "ScipTypeScript" => DependencyCatalog.ScipTypeScript,
+            "Python" => DependencyCatalog.Python,
+            "ScipPython" => DependencyCatalog.ScipPython,
             _ => null,
         };
 
@@ -1058,6 +1084,42 @@ public sealed class InstallerWizardViewModel : ObservableObject
         var result = await processRunner.RunAsync(
             wingetPath,
             [.. arguments],
+            DependencyInstallTimeout,
+            cancellationToken);
+        if (result.ExitCode is not 0)
+        {
+            SetRollbackInfo(
+                $"{displayName} installation failed with exit code {result.ExitCode}.",
+                false);
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task<bool> TryInstallDependencyWithNpmAsync(
+        DependencyDefinition dependency,
+        string displayName,
+        CancellationToken cancellationToken)
+    {
+        if (dependency.PackageVersion is not { Length: > 0 } packageVersion)
+        {
+            SetRollbackInfo($"{displayName} has no pinned package version.", false);
+            return false;
+        }
+
+        if (environmentDiagnosis?.Npm is not
+            { State: DependencyState.Detected, ExecutablePath: { } npmPath })
+        {
+            SetRollbackInfo(
+                $"npm is unavailable; install Node.js 20 before {displayName}.",
+                false);
+            return false;
+        }
+
+        var result = await processRunner.RunAsync(
+            npmPath,
+            ["install", "--global", $"{dependency.PackageId}@{packageVersion}"],
             DependencyInstallTimeout,
             cancellationToken);
         if (result.ExitCode is not 0)

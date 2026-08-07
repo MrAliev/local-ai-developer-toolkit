@@ -569,6 +569,12 @@ public sealed class InstallerPlanBuilder
             diagnosis.Git with { },
             diagnosis.GitHubCli with { },
             diagnosis.Ollama with { },
+            diagnosis.DotNetSdk with { },
+            diagnosis.NodeJs with { },
+            diagnosis.Npm with { },
+            diagnosis.ScipTypeScript with { },
+            diagnosis.Python with { },
+            diagnosis.ScipPython with { },
             new GpuSnapshot(
                 diagnosis.Gpu.State,
                 diagnosis.Gpu.Adapters.Select(adapter => adapter with { }),

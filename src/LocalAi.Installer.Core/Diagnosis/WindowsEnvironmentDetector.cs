@@ -59,6 +59,41 @@ public sealed class WindowsEnvironmentDetector(
                 cancellationToken)
             .ConfigureAwait(false);
         var ollama = await DetectOllamaAsync(cancellationToken).ConfigureAwait(false);
+        var dotNetSdk = await DetectVersionedCommandDependencyAsync(
+                "DotNetSdk",
+                "dotnet.exe",
+                "10",
+                cancellationToken)
+            .ConfigureAwait(false);
+        var nodeJs = await DetectVersionedCommandDependencyAsync(
+                "NodeJs",
+                "node.exe",
+                "20",
+                cancellationToken)
+            .ConfigureAwait(false);
+        var npm = await DetectCommandDependencyAsync(
+                "Npm",
+                "npm.cmd",
+                cancellationToken)
+            .ConfigureAwait(false);
+        var scipTypeScript = await DetectVersionedCommandDependencyAsync(
+                "ScipTypeScript",
+                "scip-typescript",
+                "0.4.0",
+                cancellationToken)
+            .ConfigureAwait(false);
+        var python = await DetectMinimumVersionCommandDependencyAsync(
+                "Python",
+                "python.exe",
+                new Version(3, 10),
+                cancellationToken)
+            .ConfigureAwait(false);
+        var scipPython = await DetectVersionedCommandDependencyAsync(
+                "ScipPython",
+                "scip-python",
+                "0.6.6",
+                cancellationToken)
+            .ConfigureAwait(false);
         var disk = diskProbe.Observe(environment.LocalAppData);
         var network = await networkProbe.ObserveAsync(cancellationToken).ConfigureAwait(false);
         var gpu = await gpuProbe.ProbeAsync(cancellationToken).ConfigureAwait(false);
@@ -86,6 +121,12 @@ public sealed class WindowsEnvironmentDetector(
             git,
             gitHubCli,
             ollama,
+            dotNetSdk,
+            nodeJs,
+            npm,
+            scipTypeScript,
+            python,
+            scipPython,
             gpu,
             existing,
             agents,
@@ -118,11 +159,14 @@ public sealed class WindowsEnvironmentDetector(
                 .ConfigureAwait(false);
             if (result.ExitCode == 0 && !result.TimedOut && !result.Cancelled)
             {
+                var version = string.IsNullOrWhiteSpace(result.StandardOutput)
+                    ? result.StandardError.Trim()
+                    : result.StandardOutput.Trim();
                 return new DependencySnapshot(
                     name,
                     DependencyState.Detected,
                     executablePath,
-                    result.StandardOutput.Trim(),
+                    version,
                     null);
             }
 
@@ -151,6 +195,71 @@ public sealed class WindowsEnvironmentDetector(
                 null,
                 exception.Message);
         }
+    }
+
+    private async Task<DependencySnapshot> DetectVersionedCommandDependencyAsync(
+        string name,
+        string executableName,
+        string requiredVersionPrefix,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await DetectCommandDependencyAsync(
+            name,
+            executableName,
+            cancellationToken).ConfigureAwait(false);
+        if (snapshot.State != DependencyState.Detected)
+        {
+            return snapshot;
+        }
+
+        var match = Regex.Match(
+            snapshot.Version ?? string.Empty,
+            @"\b(?:v)?([0-9]+(?:\.[0-9]+){0,3})\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var detected = match.Success ? match.Groups[1].Value : null;
+        var compatible = detected is not null &&
+            (string.Equals(detected, requiredVersionPrefix, StringComparison.Ordinal) ||
+             detected.StartsWith(requiredVersionPrefix + ".", StringComparison.Ordinal));
+        return compatible
+            ? snapshot
+            : new DependencySnapshot(
+                name,
+                DependencyState.Failed,
+                snapshot.ExecutablePath,
+                snapshot.Version,
+                $"Version {requiredVersionPrefix} is required.");
+    }
+
+    private async Task<DependencySnapshot> DetectMinimumVersionCommandDependencyAsync(
+        string name,
+        string executableName,
+        Version minimumVersion,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await DetectCommandDependencyAsync(
+            name,
+            executableName,
+            cancellationToken).ConfigureAwait(false);
+        if (snapshot.State != DependencyState.Detected)
+        {
+            return snapshot;
+        }
+
+        var match = Regex.Match(
+            snapshot.Version ?? string.Empty,
+            @"\b([0-9]+(?:\.[0-9]+){1,3})\b",
+            RegexOptions.CultureInvariant);
+        var compatible = match.Success &&
+            Version.TryParse(match.Groups[1].Value, out var detected) &&
+            detected >= minimumVersion;
+        return compatible
+            ? snapshot
+            : new DependencySnapshot(
+                name,
+                DependencyState.Failed,
+                snapshot.ExecutablePath,
+                snapshot.Version,
+                $"Version {minimumVersion.Major}.{minimumVersion.Minor} or newer is required.");
     }
 
     private async Task<DependencySnapshot> DetectOllamaAsync(

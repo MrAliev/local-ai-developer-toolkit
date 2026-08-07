@@ -271,10 +271,9 @@ public sealed class ScipAdapterRunner(ScipImporter? importer = null)
             return ResolveCandidate(executable) ?? executable;
         }
 
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var directory in ExecutableSearchDirectories())
         {
-            var candidate = ResolveCandidate(Path.Combine(directory.Trim('"'), executable));
+            var candidate = ResolveCandidate(Path.Combine(directory, executable));
             if (candidate is not null)
             {
                 return candidate;
@@ -282,6 +281,68 @@ public sealed class ScipAdapterRunner(ScipImporter? importer = null)
         }
 
         return executable;
+    }
+
+    private static IEnumerable<string> ExecutableSearchDirectories()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (OperatingSystem.IsWindows())
+        {
+            var npmDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "npm");
+            if (seen.Add(npmDirectory))
+            {
+                yield return npmDirectory;
+            }
+        }
+
+        foreach (var source in ExecutablePathSources())
+        {
+            foreach (var entry in source.Split(
+                         Path.PathSeparator,
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                var directory = entry.Trim().Trim('"');
+                if (directory.Length > 0 && seen.Add(directory))
+                {
+                    yield return directory;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> ExecutablePathSources()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            yield return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            yield break;
+        }
+
+        foreach (var target in new[]
+                 {
+                     EnvironmentVariableTarget.Machine,
+                     EnvironmentVariableTarget.User,
+                 })
+        {
+            string? value;
+            try
+            {
+                value = Environment.GetEnvironmentVariable("Path", target);
+            }
+            catch (System.Security.SecurityException)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                yield return value;
+            }
+        }
+
+        yield return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
     }
 
     private static string? ResolveCandidate(string candidate)

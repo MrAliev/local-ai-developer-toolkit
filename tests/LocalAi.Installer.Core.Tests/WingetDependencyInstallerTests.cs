@@ -18,7 +18,16 @@ public sealed class WingetDependencyInstallerTests
     public void Catalog_is_an_immutable_exact_allowlist_with_official_https_fallbacks()
     {
         Assert.Equal(
-            ["Git.Git", "Ollama.Ollama", "GitHub.cli"],
+            [
+                "Git.Git",
+                "Ollama.Ollama",
+                "GitHub.cli",
+                "Microsoft.DotNet.SDK.10",
+                "OpenJS.NodeJS.20",
+                "@sourcegraph/scip-typescript",
+                "Python.Python.3.12",
+                "@sourcegraph/scip-python",
+            ],
             DependencyCatalog.Supported.Select(item => item.PackageId));
         Assert.All(
             DependencyCatalog.Supported,
@@ -38,6 +47,17 @@ public sealed class WingetDependencyInstallerTests
         Assert.Equal(
             "https://cli.github.com/",
             DependencyCatalog.GitHubCli.OfficialInstallerUri.AbsoluteUri);
+        Assert.Equal(
+            DependencyInstallerKind.WinGet,
+            DependencyCatalog.NodeJs.InstallerKind);
+        Assert.Equal("Microsoft.DotNet.SDK.10", DependencyCatalog.DotNetSdk.PackageId);
+        Assert.Equal("OpenJS.NodeJS.20", DependencyCatalog.NodeJs.PackageId);
+        Assert.Equal(
+            DependencyInstallerKind.Npm,
+            DependencyCatalog.ScipTypeScript.InstallerKind);
+        Assert.Equal("0.4.0", DependencyCatalog.ScipTypeScript.PackageVersion);
+        Assert.Equal("Python.Python.3.12", DependencyCatalog.Python.PackageId);
+        Assert.Equal("0.6.6", DependencyCatalog.ScipPython.PackageVersion);
         Assert.False(
             DependencyCatalog.TryGetByPackageId(
                 "git.git",

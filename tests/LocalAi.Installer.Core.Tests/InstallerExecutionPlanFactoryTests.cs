@@ -267,6 +267,12 @@ public sealed class InstallerExecutionPlanFactoryTests : IDisposable
                 null,
                 null,
                 null),
+            new DependencySnapshot("DotNetSdk", DependencyState.NotFound, null, null, null),
+            new DependencySnapshot("NodeJs", DependencyState.NotFound, null, null, null),
+            new DependencySnapshot("Npm", DependencyState.NotFound, null, null, null),
+            new DependencySnapshot("ScipTypeScript", DependencyState.NotFound, null, null, null),
+            new DependencySnapshot("Python", DependencyState.NotFound, null, null, null),
+            new DependencySnapshot("ScipPython", DependencyState.NotFound, null, null, null),
             new GpuSnapshot(
                 ObservationState.Available,
                 [new GpuAdapterSnapshot("gpu-1", "GPU 1", 8_000, false)],
