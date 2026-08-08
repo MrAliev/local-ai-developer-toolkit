@@ -887,6 +887,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         try
         {
             var feed = new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath);
+            package.InstalledVersionDirectory = InstalledVersionDirectory();
             // "latest" is not a tag GitHub knows; resolve it to the newest published one so
             // the field can keep its convenient default.
             resolvedTag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
@@ -906,10 +907,80 @@ public sealed class InstallerWizardViewModel : ObservableObject
         RefreshAll();
     }
 
+    /// <summary>
+    /// The version directory currently active, or null when nothing is installed or the
+    /// pointer cannot be read. Only used to tell the user a release is already installed, so a
+    /// failure here costs a warning, not the run.
+    /// </summary>
+    private static string? InstalledVersionDirectory()
+    {
+        try
+        {
+            var snapshot = new ExistingLocalAiInspector(new SystemFileSystemProbe())
+                .Inspect(Environment.GetFolderPath(
+                    Environment.SpecialFolder.LocalApplicationData));
+            return snapshot.Version;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Re-resolves a request left at "latest" immediately before installing it.
+    ///
+    /// The package page checks the release when it is opened, and a wizard can sit on the
+    /// confirmation step for a long time — long enough for a release to be published in
+    /// between. Installing what was newest when the window opened, under a field that still
+    /// says "latest", is the one outcome that word rules out. A specific tag is left alone: it
+    /// was asked for by name.
+    /// </summary>
+    private async Task RefreshLatestBeforeInstallAsync(
+        StringBuilder report,
+        CancellationToken cancellationToken)
+    {
+        if (!package.WantsLatest)
+        {
+            return;
+        }
+
+        try
+        {
+            var feed = new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath);
+            var newest = await feed.ResolveTagAsync(
+                PackagePageViewModel.LatestTag,
+                cancellationToken);
+            if (string.Equals(newest, package.ResolvedTag, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            AppendLog(
+                report,
+                $"LocalAi package: {newest} was published after this release was checked; " +
+                "resolving it instead.");
+            resolvedTag = newest;
+            package.SelectResolvedRelease(
+                await feed.ResolveAsync(newest, WorkingDirectory, cancellationToken),
+                newest);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Whatever was already verified stays selected: a feed that cannot be reached right
+            // now is a reason to install what was checked, not to abandon the run.
+            AppendLog(
+                report,
+                "LocalAi package: the newest release could not be re-checked " +
+                $"({exception.Message}); continuing with {package.ResolvedTag}.");
+        }
+    }
+
     private async Task InstallPackageAsync(
         StringBuilder report,
         CancellationToken cancellationToken)
     {
+        await RefreshLatestBeforeInstallAsync(report, cancellationToken);
         if (package.Resolved is not { } resolved)
         {
             // Not a skip: installing the package is the entire point of this wizard. Returning
