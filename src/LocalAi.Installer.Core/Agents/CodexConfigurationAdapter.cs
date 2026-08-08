@@ -50,13 +50,50 @@ public sealed class CodexConfigurationAdapter(
     ///
     /// So only the command and its arguments are rewritten, inside the section that is already
     /// there, and everything else the user put in it survives untouched.
+    ///
+    /// A tool that has no sub-table yet gets one. A tool that already has one is left exactly as
+    /// written — including a setting that refuses the tool, which is a decision to preserve rather
+    /// than an omission to correct.
     /// </summary>
     private string UpdateToml(string before)
     {
         ValidateToml(before);
         var plan = ClientCommandPlan.Plan(installationDirectory);
         var updated = UpsertServer(before, "codesearch", plan.CodeSearch);
-        return UpsertServer(updated, "locallm", plan.LocalLm);
+        updated = UpsertServer(updated, "locallm", plan.LocalLm);
+        updated = AddMissingToolSections(updated, "codesearch", plan.CodeSearch.Tools);
+        return AddMissingToolSections(updated, "locallm", plan.LocalLm.Tools);
+    }
+
+    /// <summary>
+    /// Writes a sub-table for every tool that does not have one, and touches nothing else.
+    ///
+    /// Only absence is filled. Reading an existing entry and normalising it would overwrite a
+    /// user's own choice with the installer's, and the entry most worth not overwriting is the one
+    /// that says no.
+    /// </summary>
+    private static string AddMissingToolSections(
+        string toml,
+        string server,
+        IReadOnlyList<string> tools)
+    {
+        var missing = tools
+            .Where(tool => !Regex.IsMatch(
+                toml,
+                @"(?m)^[ \t]*\[mcp_servers\." + Regex.Escape(server) +
+                @"\.tools\." + Regex.Escape(tool) + @"\][ \t]*$"))
+            .ToArray();
+        if (missing.Length == 0)
+        {
+            return toml;
+        }
+
+        var sections = string.Join(
+            "\n\n",
+            missing.Select(tool =>
+                "[mcp_servers." + server + ".tools." + tool + "]\n" +
+                "approval_mode = \"approve\""));
+        return toml.TrimEnd() + "\n\n" + sections + "\n";
     }
 
     private static string UpsertServer(

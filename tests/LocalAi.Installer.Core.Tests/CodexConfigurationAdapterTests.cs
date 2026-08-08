@@ -1,4 +1,5 @@
 using System.Text;
+using LocalAi.Contracts;
 using LocalAi.Installer.Core.Agents;
 using LocalAi.Installer.Core.Planning;
 
@@ -43,7 +44,9 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
             "args = [\"run\", \"codesearch-mcp\"]\n\n" +
             "[mcp_servers.locallm]\n" +
             "command = \"C:\\\\LocalAi\\\\bin\\\\launcher\\\\localai-launcher.exe\"\n" +
-            "args = [\"run\", \"locallm-mcp\"]\n",
+            "args = [\"run\", \"locallm-mcp\"]\n\n" +
+            ToolSections("codesearch", McpToolNames.CodeSearch) + "\n\n" +
+            ToolSections("locallm", McpToolNames.LocalLm) + "\n",
             config.AfterText);
         Assert.Equal(ManagedInstructionBlock.Block + Environment.NewLine, instructions.AfterText);
     }
@@ -118,6 +121,101 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
         Assert.Equal(
             1,
             after.Split("[mcp_servers.codesearch]\n", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void Every_tool_a_managed_server_exposes_gets_a_row()
+    {
+        var configPath = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        // The shape a long-lived machine is in: rows for the tools that were reached for at
+        // least once, and nothing for the ones that shipped later.
+        File.WriteAllText(
+            configPath,
+            "[mcp_servers.codesearch]\n" +
+            "command = \"C:\\\\Old\\\\localai-launcher.exe\"\n" +
+            "args = [\"run\", \"codesearch-mcp\"]\n\n" +
+            "[mcp_servers.codesearch.tools.search_code]\napproval_mode = \"approve\"\n\n" +
+            "[mcp_servers.locallm]\n" +
+            "command = \"C:\\\\Old\\\\localai-launcher.exe\"\n" +
+            "args = [\"run\", \"locallm-mcp\"]\n\n" +
+            "[mcp_servers.locallm.tools.ask_local]\napproval_mode = \"approve\"\n",
+            Encoding.UTF8);
+
+        var after = SinglePreview(
+            @".codex\config.toml",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterText;
+
+        foreach (var tool in McpToolNames.CodeSearch)
+        {
+            Assert.Contains(
+                $"[mcp_servers.codesearch.tools.{tool}]",
+                after,
+                StringComparison.Ordinal);
+        }
+
+        foreach (var tool in McpToolNames.LocalLm)
+        {
+            Assert.Contains(
+                $"[mcp_servers.locallm.tools.{tool}]",
+                after,
+                StringComparison.Ordinal);
+        }
+
+        // Written once each, not once per run.
+        Assert.Equal(
+            1,
+            after.Split(
+                "[mcp_servers.codesearch.tools.search_code]",
+                StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void A_tool_the_user_refused_keeps_its_refusal()
+    {
+        var configPath = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(
+            configPath,
+            "[mcp_servers.codesearch]\n" +
+            "command = \"C:\\\\Old\\\\localai-launcher.exe\"\n" +
+            "args = [\"run\", \"codesearch-mcp\"]\n\n" +
+            "[mcp_servers.codesearch.tools.lsp_open_document]\napproval_mode = \"deny\"\n",
+            Encoding.UTF8);
+
+        var after = SinglePreview(
+            @".codex\config.toml",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterText;
+
+        // Only absence is filled. An entry that says no is a decision, not an omission, and the
+        // installer has no business promoting it to yes.
+        Assert.Contains(
+            "[mcp_servers.codesearch.tools.lsp_open_document]\napproval_mode = \"deny\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            1,
+            after.Split(
+                "[mcp_servers.codesearch.tools.lsp_open_document]",
+                StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void A_configuration_that_already_lists_every_tool_is_left_alone()
+    {
+        var configPath = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllBytes(configPath, []);
+        var first = SinglePreview(
+            @".codex\config.toml",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterBytes;
+        // Written the way ApplyAsync writes it — the installer emits no BOM, and a test that
+        // added one would be measuring its own encoding rather than idempotence.
+        File.WriteAllBytes(configPath, first);
+
+        var plan = Adapter().Preview(AgentIntegrationChoice.McpOnly);
+
+        Assert.Empty(plan.Files);
     }
 
     [Fact]
@@ -235,6 +333,12 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
             Directory.Delete(home, recursive: true);
         }
     }
+
+    private static string ToolSections(string server, IReadOnlyList<string> tools) =>
+        string.Join(
+            "\n\n",
+            tools.Select(tool =>
+                $"[mcp_servers.{server}.tools.{tool}]\napproval_mode = \"approve\""));
 
     private CodexConfigurationAdapter Adapter(Func<string, byte[]>? readBackOverride = null) =>
         new(home, install, new FixedTimeProvider(now), readBackOverride);
