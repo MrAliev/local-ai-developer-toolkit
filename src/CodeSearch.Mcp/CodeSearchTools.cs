@@ -47,10 +47,13 @@ public static class CodeSearchTools
     {
         try
         {
-            var locations = gateway.GoToDefinition(path, line, utf16Column, root);
-            return locations.Count == 0
+            var outcome = gateway.ResolveDefinition(path, line, utf16Column, root);
+            return Degradation(outcome) + (outcome.Locations.Count == 0
                 ? "No definition found."
-                : FormatSemanticLocations("Definitions", "go_to_definition", locations);
+                : FormatSemanticLocations(
+                    "Definitions",
+                    "go_to_definition",
+                    outcome.Locations));
         }
         catch (SemanticNavigationNotReadyException ex)
         {
@@ -87,15 +90,18 @@ public static class CodeSearchTools
     {
         try
         {
-            var locations = gateway.FindReferences(
+            var outcome = gateway.ResolveReferences(
                 path,
                 line,
                 utf16Column,
                 includeDefinition,
                 root);
-            return locations.Count == 0
+            return Degradation(outcome) + (outcome.Locations.Count == 0
                 ? "No references found."
-                : FormatSemanticLocations("References", "find_references", locations);
+                : FormatSemanticLocations(
+                    "References",
+                    "find_references",
+                    outcome.Locations));
         }
         catch (SemanticNavigationNotReadyException ex)
         {
@@ -466,9 +472,39 @@ public static class CodeSearchTools
             Size:       {status.SizeBytes / 1024.0 / 1024.0:F1} MB
             Built:      {status.IndexedAtUtc:u} at commit {Short(status.IndexedCommit)}
             Status:     {staleness}
+            Navigation: {Navigation(status)}
             {progressText}
             """;
     }
+
+    /// <summary>
+    /// Whether this generation can answer navigation precisely.
+    ///
+    /// Retrieval and navigation are served by two files in the same generation, and a repository
+    /// last synced before semantic indexing existed has only the first. Nothing else on this
+    /// status line moves: the model is right, the commit has not drifted, the status reads
+    /// "current" — and go_to_definition still answers with text matches. The state is fixed by a
+    /// re-sync, so the line that reports it names the command.
+    /// </summary>
+    private static string Navigation(IndexStatus status) =>
+        status.SemanticIndexPresent
+            ? "precise (semantic.sidx present)"
+            : "HEURISTIC - this generation has no semantic.sidx, so go_to_definition, " +
+              "find_references, find_implementations and find_relationships fall back to " +
+              "bounded text matching. Re-sync to build it: " +
+              $"localai-launcher.exe run localai sync --root {status.RepositoryRoot}";
+
+    /// <summary>
+    /// Puts the reason a result is heuristic above the result, when there is one.
+    ///
+    /// Trusted diagnostic, so it stays outside the untrusted-content boundary — it describes the
+    /// index, never repository content. Every location already carries its own precision tag; what
+    /// was missing is the one line that turns "these look like the wrong matches" into a repair.
+    /// </summary>
+    private static string Degradation(SemanticNavigationOutcome outcome) =>
+        outcome.Degradation is null
+            ? string.Empty
+            : $"semantic_navigation_degraded: {outcome.Degradation}\n\n";
 
     /// <summary>
     /// Says that a sync got somewhere short of publishing, when the recorded phase says so.

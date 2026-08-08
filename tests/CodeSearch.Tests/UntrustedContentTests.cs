@@ -343,6 +343,19 @@ public sealed class UntrustedContentMcpTests : IDisposable
     }
 
     [Fact]
+    public void Status_reports_that_a_generation_without_a_semantic_index_navigates_by_text()
+    {
+        // The fixture publishes a base with no semantic.sidx, which is exactly the shape of a
+        // repository last synced before semantic indexing shipped: model right, commit not
+        // drifted, status "current", and navigation quietly answering from text matches.
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        Assert.Contains("Navigation: HEURISTIC", status, StringComparison.Ordinal);
+        Assert.Contains("no semantic.sidx", status, StringComparison.Ordinal);
+        Assert.Contains("localai sync --root", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_phase_that_counts_no_chunks_does_not_show_the_last_phase_tally()
     {
         // This exact shape is what a finished embedding pass left behind while the semantic

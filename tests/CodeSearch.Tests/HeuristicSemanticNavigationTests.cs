@@ -127,6 +127,60 @@ public sealed class HeuristicSemanticNavigationTests : IDisposable
         Assert.Equal(1, heuristic.DefinitionCalls);
     }
 
+    [Fact]
+    public async Task A_precise_answer_carries_no_degradation()
+    {
+        var gateway = Gateway(new FakeHeuristic([]), withOccurrence: true);
+
+        var outcome = await gateway.ResolveDefinitionAsync("Use.cs", 0, 1, _root, Ct);
+
+        Assert.Null(outcome.Degradation);
+        Assert.Equal(NavigationPrecision.Precise, Assert.Single(outcome.Locations).Precision);
+    }
+
+    [Fact]
+    public async Task A_generation_without_a_semantic_index_says_so_instead_of_only_falling_back()
+    {
+        // This is the state every repository that has not been re-synced since semantic indexing
+        // shipped is in. The gateway already built the explanation and then threw it away to
+        // reach the text fallback, so the caller saw README and docs matches and no reason.
+        var heuristic = new FakeHeuristic([HeuristicLocation]);
+        var gateway = new SemanticNavigationGateway(
+            _ => throw new SemanticNavigationNotReadyException(
+                "Generation 'ff114b066164' has no semantic.sidx. " +
+                "Rebuild it with semantic indexing enabled."),
+            heuristicNavigation: heuristic);
+
+        var outcome = await gateway.ResolveReferencesAsync("Use.cs", 0, 1, true, _root, Ct);
+
+        Assert.Equal(NavigationPrecision.Heuristic, Assert.Single(outcome.Locations).Precision);
+        Assert.NotNull(outcome.Degradation);
+        Assert.Contains("has no semantic.sidx", outcome.Degradation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_index_with_nothing_at_the_position_is_reported_as_its_own_reason()
+    {
+        var gateway = Gateway(new FakeHeuristic([HeuristicLocation]), withOccurrence: false);
+
+        var outcome = await gateway.ResolveDefinitionAsync("Use.cs", 0, 1, _root, Ct);
+
+        // Only one of the two reasons is fixed by re-syncing, so they must not read alike.
+        Assert.NotNull(outcome.Degradation);
+        Assert.Contains(
+            "no symbol at this position",
+            outcome.Degradation,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("semantic.sidx", outcome.Degradation, StringComparison.Ordinal);
+    }
+
+    private static SemanticLocation HeuristicLocation => new(
+        "README.md",
+        new SourceRange(0, 0, 0, 3),
+        "heuristic",
+        SemanticOccurrenceRoles.Reference,
+        NavigationPrecision.Heuristic);
+
     private SemanticNavigationGateway Gateway(FakeHeuristic heuristic, bool withOccurrence)
     {
         var index = new SemanticIndex
