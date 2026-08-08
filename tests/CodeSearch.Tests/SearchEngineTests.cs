@@ -118,6 +118,78 @@ public class SearchEngineTests : IDisposable
         Assert.All(byPath, h => Assert.Contains("Robot", h.RelPath));
     }
 
+    [Theory]
+    [InlineData(@"docs\releases", @"docs\releases\0.1.29.md")]
+    [InlineData("docs/releases", @"docs\releases\0.1.29.md")]
+    [InlineData(@"docs\releases", "docs/releases/0.1.29.md")]
+    [InlineData("docs/releases", "docs/releases/0.1.29.md")]
+    public void APathFilterMatchesWhicheverSeparatorEitherSideUses(
+        string filter,
+        string indexedPath)
+    {
+        // An index built on Windows stores backslashes; every other surface of this project —
+        // its own search output, its documentation, the CLI examples — writes forward slashes.
+        // A raw IndexOf made that difference silent: the filter simply returned nothing, with
+        // no hint that the slash was the reason.
+        var index = IndexWithPath(indexedPath);
+
+        var hits = SearchEngine.Search(
+            index,
+            Unit(1, 0, 0),
+            "anything",
+            new SearchOptions { TopK = 10, PathContains = filter },
+            _root);
+
+        Assert.Equal(indexedPath, Assert.Single(hits).RelPath);
+    }
+
+    [Fact]
+    public void APathFilterStillExcludesWhatItShould()
+    {
+        var index = IndexWithPath(@"docs\releases\0.1.29.md");
+
+        var hits = SearchEngine.Search(
+            index,
+            Unit(1, 0, 0),
+            "anything",
+            new SearchOptions { TopK = 10, PathContains = "src/CodeSearch" },
+            _root);
+
+        Assert.Empty(hits);
+    }
+
+    private CodeIndex IndexWithPath(string relativePath)
+    {
+        var onDisk = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(onDisk)!);
+        File.WriteAllText(
+            onDisk,
+            string.Join('\n', Enumerable.Range(1, 40).Select(i => $"// release note {i}")));
+        return new CodeIndex
+        {
+            Dim = 3,
+            Model = "test-model",
+            Root = _root,
+            GitCommit = "abc123",
+            RepositoryId = "repository",
+            GenerationId = "generation",
+            GitTree = "tree",
+            IndexedAtUtc = DateTime.UtcNow,
+            Files =
+            [
+                new IndexedFile
+                {
+                    RelPath = relativePath,
+                    Hash = new byte[32],
+                    ChunkStart = 0,
+                    ChunkCount = 1,
+                },
+            ],
+            Chunks = [Meta(0, ChunkKind.Text, "release", "release", 1, 10)],
+            Vectors = Normalized([1f, 0f, 0f]),
+        };
+    }
+
     [Fact]
     public void SnippetsComeFromDiskAtTheChunkLineRange()
     {

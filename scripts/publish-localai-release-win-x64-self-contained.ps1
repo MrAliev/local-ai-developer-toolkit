@@ -95,8 +95,15 @@ function Invoke-SafePublish {
         New-Item -ItemType Directory -Force -Path $resolvedOutput | Out-Null
 
         Write-Host "Publishing $ProjectName (attempt $attempt/$MaxAttempts)"
+        # The version is stamped from what this release is actually called, not from the
+        # fallback in Directory.Build.props. That fallback went six releases without being
+        # updated, so 0.1.29 shipped binaries reporting 0.1.22 — a number that has to be kept in
+        # step by hand is a number that goes stale unnoticed.
         dotnet publish $ProjectPath -c $Configuration -r $Runtime `
             -p:SelfContained=true -p:PublishSingleFile=true -p:BuildInParallel=false -p:UseSharedCompilation=false `
+            -p:Version=$ReleaseVersion -p:VersionPrefix=$ReleaseVersion `
+            -p:AssemblyVersion="$ReleaseVersion.0" -p:FileVersion="$ReleaseVersion.0" `
+            -p:InformationalVersion=$ReleaseVersion `
             --no-restore -o $resolvedOutput
 
         if ($LASTEXITCODE -eq 0) {
