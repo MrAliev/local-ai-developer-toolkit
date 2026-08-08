@@ -78,6 +78,14 @@ public static class PruneCommand
                 Megabytes(result.BytesReclaimed));
         }
 
+        var telemetry = PruneTelemetry(runtimeRoot, policy, now, dryRun);
+        if (telemetry.Removed > 0)
+        {
+            reclaimed += telemetry.Bytes;
+            lines.Add(
+                $"telemetry: {telemetry.Removed} record(s) removed, {Megabytes(telemetry.Bytes)}");
+        }
+
         var versions = PruneVersions(runtimeRoot, policy, dryRun);
         reclaimed += versions.Bytes;
         if (versions.Lines.Count > 0)
@@ -147,6 +155,62 @@ public static class PruneCommand
         return !published &&
                manifest.State == RepositoryIndexState.Initializing &&
                now - manifest.UpdatedAtUtc >= policy.ArchiveRetention;
+    }
+
+    /// <summary>
+    /// Drops job telemetry past its retention.
+    ///
+    /// One record is a few hundred bytes describing one job — no prompts, no answers, no paths —
+    /// and nothing ever removed them, so the directory grows for the life of the installation.
+    /// The file name starts with the record's timestamp in fixed-width ticks, so age is read from
+    /// the name and a file whose name does not parse is left alone rather than guessed at.
+    /// </summary>
+    private static (int Removed, long Bytes) PruneTelemetry(
+        string runtimeRoot,
+        RuntimeRetentionPolicy policy,
+        DateTimeOffset now,
+        bool dryRun)
+    {
+        var metrics = Path.Combine(runtimeRoot, "telemetry", "metrics");
+        if (!Directory.Exists(metrics))
+        {
+            return (0, 0);
+        }
+
+        var cutoff = (now - policy.TelemetryRetention).UtcTicks;
+        var removed = 0;
+        var bytes = 0L;
+        foreach (var path in Directory.EnumerateFiles(metrics, "*.json"))
+        {
+            var name = Path.GetFileNameWithoutExtension(path);
+            var separator = name.IndexOf('-', StringComparison.Ordinal);
+            if (separator <= 0 ||
+                !long.TryParse(name[..separator], out var ticks) ||
+                ticks >= cutoff)
+            {
+                continue;
+            }
+
+            long size;
+            try
+            {
+                size = new FileInfo(path).Length;
+                if (!dryRun)
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            bytes += size;
+            removed++;
+        }
+
+        return (removed, bytes);
     }
 
     /// <summary>

@@ -26,7 +26,8 @@ public sealed record RuntimeRetentionPolicy(
     int InstalledVersions,
     int LauncherBackups,
     int SweepIntervalSeconds,
-    int MaximumActionsPerSweep)
+    int MaximumActionsPerSweep,
+    int TelemetryRetentionDays = 30)
 {
     public const string FileName = "retention.json";
 
@@ -51,7 +52,11 @@ public sealed record RuntimeRetentionPolicy(
         InstalledVersions: 3,
         LauncherBackups: 3,
         SweepIntervalSeconds: 60,
-        MaximumActionsPerSweep: 256);
+        MaximumActionsPerSweep: 256,
+        // Longer than the archive: one telemetry record is a few hundred bytes describing one
+        // job, and the value of a month of them is that a routing or residency question can be
+        // answered from measurement rather than memory.
+        TelemetryRetentionDays: 30);
 
     /// <summary>
     /// The same policy with everything an operator can get wrong pulled back into range.
@@ -75,6 +80,7 @@ public sealed record RuntimeRetentionPolicy(
         LauncherBackups = Math.Max(LauncherBackups, 1),
         SweepIntervalSeconds = Math.Clamp(SweepIntervalSeconds, 5, 86400),
         MaximumActionsPerSweep = Math.Clamp(MaximumActionsPerSweep, 1, 100000),
+        TelemetryRetentionDays = Math.Clamp(TelemetryRetentionDays, 1, 3650),
     };
 
     [JsonIgnore]
@@ -85,6 +91,9 @@ public sealed record RuntimeRetentionPolicy(
 
     [JsonIgnore]
     public TimeSpan ArchiveRetention => TimeSpan.FromDays(ArchiveRetentionDays);
+
+    [JsonIgnore]
+    public TimeSpan TelemetryRetention => TimeSpan.FromDays(TelemetryRetentionDays);
 
     [JsonIgnore]
     public TimeSpan SweepInterval => TimeSpan.FromSeconds(SweepIntervalSeconds);

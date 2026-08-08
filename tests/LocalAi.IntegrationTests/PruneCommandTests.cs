@@ -157,6 +157,26 @@ public sealed class PruneCommandTests : IDisposable
     }
 
     [Fact]
+    public void Job_telemetry_past_its_retention_is_dropped()
+    {
+        var metrics = Path.Combine(Runtime, "telemetry", "metrics");
+        Directory.CreateDirectory(metrics);
+        var old = TelemetryRecord(metrics, Now - TimeSpan.FromDays(45));
+        var recent = TelemetryRecord(metrics, Now - TimeSpan.FromDays(3));
+        // Age is read from the name, so a name that does not carry one is left alone rather than
+        // guessed at — a foreign file in this directory is not the prune's to interpret.
+        var foreign = Path.Combine(metrics, "notes.json");
+        File.WriteAllText(foreign, "{}");
+
+        var report = PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        Assert.False(File.Exists(old));
+        Assert.True(File.Exists(recent));
+        Assert.True(File.Exists(foreign));
+        Assert.Contains(report.Lines, line => line.StartsWith("telemetry:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void A_dry_run_removes_nothing()
     {
         var repository = Repository("dead", Path.Combine(_root, "never-existed", ".git"));
@@ -195,6 +215,15 @@ public sealed class PruneCommandTests : IDisposable
             [],
             updatedAtUtc ?? Now - TimeSpan.FromDays(40)));
         return directory;
+    }
+
+    private static string TelemetryRecord(string directory, DateTimeOffset recordedAtUtc)
+    {
+        var path = Path.Combine(
+            directory,
+            $"{recordedAtUtc.UtcTicks:D19}-{Guid.NewGuid():N}-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, "{}");
+        return path;
     }
 
     private string Version(string name, DateTimeOffset installedAtUtc)
