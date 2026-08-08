@@ -587,6 +587,14 @@ LocalLm exposes these model-management and translation MCP tools:
 | `local_model_experiment_report` | Show logical-task attempts, errors, fallbacks, timing, warm/cold counts, local processing, avoided cloud generation, and net context reduction. |
 | `local_model_feedback` | Promote, continue, restrict to fallback, or disable one task/model pair. |
 
+`local_model_experiment_report` takes its `Attempts`, `Successes` and `Errors` from the
+experiment state — the same counts `local_models_status` shows and the router uses to decide
+when an experiment pauses. Timings and token figures can only be measured over the per-task
+telemetry that still exists, which is bounded to a week, so `ObservedTasks` says how many
+records they rest on. Reporting one number for both is what made a pair with six completed
+attempts answer `Attempts: 1`. Reading the report never discards telemetry; the week-long
+bound is applied by the write that records a new task.
+
 `translate_local` is the validated local translation path. The calling agent decides
 whether a translation runs locally or in the cloud; LocalAi does not impose that policy.
 

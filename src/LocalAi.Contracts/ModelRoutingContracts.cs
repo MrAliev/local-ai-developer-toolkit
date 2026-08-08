@@ -329,7 +329,12 @@ public sealed record LocalExperimentReportOutput(
     long EstimatedNetCloudTokensSaved,
     long LocalTokensProcessed = 0,
     long EstimatedCloudGenerationTokensSaved = 0,
-    long EstimatedNetCloudContextTokensSaved = 0);
+    long EstimatedNetCloudContextTokensSaved = 0,
+    // How many of Attempts still have a telemetry record behind them. Attempts, Successes and
+    // Errors come from the experiment state, which is what the ten-attempt pause rule counts and
+    // is authoritative; the durations and token figures can only be measured over the records
+    // that exist. Reporting one number for both is what made a six-attempt pair answer "1".
+    int ObservedTasks = 0);
 
 public sealed record LocalExperimentTaskMetrics(
     int InputTokens,
