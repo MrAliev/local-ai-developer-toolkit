@@ -139,6 +139,15 @@ syntax/text scan. `%LOCALAPPDATA%\LocalAi\semantic-navigation.json` controls whe
 is enabled and limits scanned files, file size, result count, identifier length, and case
 sensitivity. The file is read for every request, so edits require no rebuild. Fallback results are
 always marked `Heuristic`; they are never promoted to precise navigation.
+
+A fallback also says why it happened. `go_to_definition` and `find_references` prefix a heuristic
+answer with `semantic_navigation_degraded:` naming the cause, and the two causes are worded apart
+because only one is repaired by re-syncing: a generation published before semantic indexing
+existed carries no `semantic.sidx` at all, whereas a current index may simply have no symbol at
+that position. `index_status` reports the same state on its `Navigation:` line, because nothing
+else there moves — a repository that has not been re-synced since semantic indexing shipped still
+reports the right model, an undrifted commit and `Status: current` while every navigation query
+answers from text matching.
 The marker-based `semantic evaluate` command reports correctness, process-cold load time,
 first/warm query percentiles, observed memory deltas, and combined base/overlay SIDX size.
 The current baseline is documented in

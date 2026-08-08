@@ -40,7 +40,12 @@ public sealed record IndexStatus(
     DateTime IndexedAtUtc,
     string BaseRoot,
     bool RequiresOverlay,
-    OverlayStatus Overlay)
+    OverlayStatus Overlay,
+    // Defaulted so the record keeps its shape for callers that only care about retrieval. A
+    // generation published before semantic indexing existed carries no semantic.sidx, and that
+    // is invisible in every other field here: the vectors are current, the commit has not
+    // drifted, and navigation quietly answers from text matches instead.
+    bool SemanticIndexPresent = false)
 {
     public bool CommitDrifted =>
         Exists && IndexedCommit.Length > 0 && CurrentCommit.Length > 0 && IndexedCommit != CurrentCommit;
@@ -414,7 +419,35 @@ public sealed class SearchService
             index.IndexedAtUtc,
             index.Root,
             requiresOverlay,
-            overlay);
+            overlay,
+            SemanticIndexPresent(index, identity));
+    }
+
+    /// <summary>
+    /// Whether the current generation carries a semantic index, by one stat rather than a manifest
+    /// read — verifying a manifest rehashes a half-gigabyte corpus, which is not a price a status
+    /// line printed after every query can pay.
+    /// </summary>
+    private static bool SemanticIndexPresent(
+        CodeIndex index,
+        WorkingIndexIdentity? identity)
+    {
+        if (identity is null || string.IsNullOrWhiteSpace(index.GenerationId))
+        {
+            return false;
+        }
+
+        try
+        {
+            return File.Exists(
+                new GenerationStore(identity.RepositoryRuntimeRoot)
+                    .SemanticIndexPath(index.GenerationId));
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static string CurrentBaseCommit(

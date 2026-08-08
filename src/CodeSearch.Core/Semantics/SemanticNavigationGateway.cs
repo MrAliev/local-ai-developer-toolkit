@@ -10,6 +10,25 @@ public sealed record SemanticNavigationContext(
 public sealed class SemanticNavigationNotReadyException(string message)
     : InvalidOperationException(message);
 
+/// <summary>
+/// A navigation answer together with the reason it is not the precise one, when it is not.
+///
+/// The gateway already knew why: a generation published before semantic indexing existed has no
+/// <c>semantic.sidx</c>, and loading it raises an exception naming the generation and saying to
+/// rebuild it. That exception was then swallowed to reach the text fallback, so a repository that
+/// had simply not been re-synced answered <c>find_references</c> with README and docs matches and
+/// no indication that anything was missing. Every hit was honestly tagged Heuristic; nothing said
+/// why, or what to do about it.
+/// </summary>
+public sealed record SemanticNavigationOutcome(
+    IReadOnlyList<SemanticLocation> Locations,
+    string? Degradation)
+{
+    public static SemanticNavigationOutcome Precise(
+        IReadOnlyList<SemanticLocation> locations) =>
+        new(locations, null);
+}
+
 /// <summary>Loads the exact current semantic generation and executes snapshot-bound queries.</summary>
 public sealed class SemanticNavigationGateway
 {
@@ -42,6 +61,27 @@ public sealed class SemanticNavigationGateway
         int line,
         int utf16Column,
         string? root = null,
+        CancellationToken cancellationToken = default) =>
+        (await ResolveDefinitionAsync(
+            documentPath,
+            line,
+            utf16Column,
+            root,
+            cancellationToken)).Locations;
+
+    public SemanticNavigationOutcome ResolveDefinition(
+        string documentPath,
+        int line,
+        int utf16Column,
+        string? root = null) =>
+        ResolveDefinitionAsync(documentPath, line, utf16Column, root)
+            .GetAwaiter().GetResult();
+
+    public async Task<SemanticNavigationOutcome> ResolveDefinitionAsync(
+        string documentPath,
+        int line,
+        int utf16Column,
+        string? root = null,
         CancellationToken cancellationToken = default)
     {
         if (_liveNavigation is not null)
@@ -55,10 +95,11 @@ public sealed class SemanticNavigationGateway
                 cancellationToken);
             if (live.Handled)
             {
-                return live.Locations;
+                return SemanticNavigationOutcome.Precise(live.Locations);
             }
         }
 
+        string degradation;
         try
         {
             var context = _contextFactory(root);
@@ -69,19 +110,25 @@ public sealed class SemanticNavigationGateway
                 context.Snapshot);
             if (precise.Count > 0 || _heuristicNavigation is null)
             {
-                return precise;
+                return SemanticNavigationOutcome.Precise(precise);
             }
+
+            degradation = EmptyPreciseResult;
         }
-        catch (SemanticNavigationNotReadyException) when (_heuristicNavigation is not null)
+        catch (SemanticNavigationNotReadyException exception) when (
+            _heuristicNavigation is not null)
         {
+            degradation = exception.Message;
         }
 
-        return await _heuristicNavigation!.GoToDefinitionAsync(
-            ResolveLiveRoot(root),
-            documentPath,
-            line,
-            utf16Column,
-            cancellationToken);
+        return new SemanticNavigationOutcome(
+            await _heuristicNavigation!.GoToDefinitionAsync(
+                ResolveLiveRoot(root),
+                documentPath,
+                line,
+                utf16Column,
+                cancellationToken),
+            degradation);
     }
 
     public IReadOnlyList<SemanticLocation> FindReferences(
@@ -105,6 +152,30 @@ public sealed class SemanticNavigationGateway
         int utf16Column,
         bool includeDefinition,
         string? root = null,
+        CancellationToken cancellationToken = default) =>
+        (await ResolveReferencesAsync(
+            documentPath,
+            line,
+            utf16Column,
+            includeDefinition,
+            root,
+            cancellationToken)).Locations;
+
+    public SemanticNavigationOutcome ResolveReferences(
+        string documentPath,
+        int line,
+        int utf16Column,
+        bool includeDefinition,
+        string? root = null) =>
+        ResolveReferencesAsync(documentPath, line, utf16Column, includeDefinition, root)
+            .GetAwaiter().GetResult();
+
+    public async Task<SemanticNavigationOutcome> ResolveReferencesAsync(
+        string documentPath,
+        int line,
+        int utf16Column,
+        bool includeDefinition,
+        string? root = null,
         CancellationToken cancellationToken = default)
     {
         if (_liveNavigation is not null)
@@ -119,10 +190,11 @@ public sealed class SemanticNavigationGateway
                 cancellationToken);
             if (live.Handled)
             {
-                return live.Locations;
+                return SemanticNavigationOutcome.Precise(live.Locations);
             }
         }
 
+        string degradation;
         try
         {
             var context = _contextFactory(root);
@@ -134,20 +206,26 @@ public sealed class SemanticNavigationGateway
                 context.Snapshot);
             if (precise.Count > 0 || _heuristicNavigation is null)
             {
-                return precise;
+                return SemanticNavigationOutcome.Precise(precise);
             }
+
+            degradation = EmptyPreciseResult;
         }
-        catch (SemanticNavigationNotReadyException) when (_heuristicNavigation is not null)
+        catch (SemanticNavigationNotReadyException exception) when (
+            _heuristicNavigation is not null)
         {
+            degradation = exception.Message;
         }
 
-        return await _heuristicNavigation!.FindReferencesAsync(
-            ResolveLiveRoot(root),
-            documentPath,
-            line,
-            utf16Column,
-            includeDefinition,
-            cancellationToken);
+        return new SemanticNavigationOutcome(
+            await _heuristicNavigation!.FindReferencesAsync(
+                ResolveLiveRoot(root),
+                documentPath,
+                line,
+                utf16Column,
+                includeDefinition,
+                cancellationToken),
+            degradation);
     }
 
     public IReadOnlyList<SemanticLocation> FindImplementations(
@@ -204,6 +282,15 @@ public sealed class SemanticNavigationGateway
             kind,
             context.Snapshot);
     }
+
+    /// <summary>
+    /// The other way a caller ends up on text matches: the semantic index is present and current,
+    /// and simply has nothing at that position. Worth distinguishing from a missing index, because
+    /// only one of the two is fixed by re-syncing.
+    /// </summary>
+    private const string EmptyPreciseResult =
+        "The semantic index has no symbol at this position, so these are bounded text matches " +
+        "rather than resolved references.";
 
     private static string ResolveLiveRoot(string? root) =>
         root is null
