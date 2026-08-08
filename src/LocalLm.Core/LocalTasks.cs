@@ -13,7 +13,7 @@ public sealed record LocalResult(
 {
     /// <summary>The line the caller is expected to surface, so the saving is visible, not silent.</summary>
     public string Notice =>
-        $"🔧 Локально: {Model}. {Detail}. Сэкономлено примерно {TokenEstimator.Describe(SavedTokens)} облачных токенов.";
+        $"🔧 Локально: {Model}. {Detail}. {TokenEstimator.DescribeSaving(SavedTokens)}";
 }
 
 /// <summary>
