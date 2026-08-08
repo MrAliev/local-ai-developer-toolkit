@@ -72,6 +72,24 @@ public static class CodeSearchSyncCommand
             progressStore.Save(lastProgress);
         }
 
+        // Phases that do not count chunks still have to be announced, or the last embedding
+        // report stands as the whole story for as long as they run. The counters are cleared with
+        // the phase rather than carried into it: a stale "1415/1415" is worse than no number.
+        void ReportPhase(RepositoryIndexProgressPhase phase, string root)
+        {
+            lastProgress = lastProgress with
+            {
+                Phase = phase,
+                WorkingRoot = root,
+                ProcessedChunks = 0,
+                TotalChunks = 0,
+                ChunksPerSecond = 0,
+                EstimatedRemaining = null,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            };
+            progressStore.Save(lastProgress);
+        }
+
         try
         {
             var worktrees = ReadWorktrees(requested.WorkingRoot);
@@ -135,6 +153,7 @@ public static class CodeSearchSyncCommand
                         RepositoryIndexProgressPhase.EmbeddingBase,
                         mainline.Identity.WorkingRoot,
                         progress),
+                    phase => ReportPhase(phase, mainline.Identity.WorkingRoot),
                     cancellationToken);
             }
 
@@ -221,6 +240,9 @@ public static class CodeSearchSyncCommand
                         identity,
                         generation.Identity))
                 {
+                    ReportPhase(
+                        RepositoryIndexProgressPhase.SemanticOverlay,
+                        identity.WorkingRoot);
                     var semanticBuild = await BuildSemanticIndexAsync(
                         identity.WorkingRoot,
                         identity,
@@ -242,11 +264,7 @@ public static class CodeSearchSyncCommand
                 }
             }
 
-            progressStore.Save(lastProgress = lastProgress with
-            {
-                Phase = RepositoryIndexProgressPhase.Publishing,
-                UpdatedAtUtc = DateTimeOffset.UtcNow
-            });
+            ReportPhase(RepositoryIndexProgressPhase.Publishing, requested.WorkingRoot);
             store.SetCurrent(generation);
             var manifest = new RepositoryManifest(
                 requested.RepositoryId,
@@ -274,7 +292,7 @@ public static class CodeSearchSyncCommand
                 Phase = RepositoryIndexProgressPhase.Completed,
                 ProcessedChunks = lastProgress.TotalChunks,
                 EstimatedRemaining = TimeSpan.Zero,
-                UpdatedAtUtc = DateTimeOffset.UtcNow
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
             });
 
             return new CodeSearchSyncResult(
@@ -357,6 +375,7 @@ public static class CodeSearchSyncCommand
         GenerationIdentity generation,
         WorkingIndexIdentity dev,
         Action<IndexBuildProgress> progress,
+        Action<RepositoryIndexProgressPhase> phase,
         CancellationToken cancellationToken)
     {
         var stagingRoot = Path.Combine(
@@ -414,6 +433,10 @@ public static class CodeSearchSyncCommand
                     $"{generation.EmbeddingDimension}.");
             }
 
+            // Roslyn loads the whole solution here and the SCIP adapters shell out per language.
+            // On a large repository this is minutes, and it used to run under the last embedding
+            // report — the phase that made a finished build look like a stuck one.
+            phase(RepositoryIndexProgressPhase.SemanticBase);
             var semanticIndex = await BuildSemanticIndexAsync(
                 snapshot.Root,
                 dev,
@@ -422,6 +445,8 @@ public static class CodeSearchSyncCommand
 
             EnsureSemanticAdaptersSucceeded(semanticIndex.AdapterStatuses);
             semanticIndex.Index.Save(workSemanticIndex);
+            // Copying a half-gigabyte corpus and hashing it twice is not instant either.
+            phase(RepositoryIndexProgressPhase.PublishingGeneration);
             var published = store.PublishIndex(
                 workIndex,
                 generation,
