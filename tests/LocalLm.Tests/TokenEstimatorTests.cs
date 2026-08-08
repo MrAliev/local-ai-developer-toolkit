@@ -79,4 +79,39 @@ public class TokenEstimatorTests
         Assert.Contains(expected, text);
         Assert.DoesNotContain(saved.ToString(), text);
     }
+
+    [Fact]
+    public void A_job_too_small_to_save_anything_says_so_instead_of_reporting_zero()
+    {
+        // A 336x52 screenshot is about two dozen tokens to look at directly, and any useful
+        // answer about it is longer than that. Zero is the correct arithmetic; "Сэкономлено
+        // примерно 0 облачных токенов" reads as a broken counter rather than as a job not worth
+        // delegating.
+        var image = TokenEstimator.ForImage(new ImageInfo(336, 52, "png"));
+        var saved = TokenEstimator.Saved(image, new string('a', 4_000));
+
+        var sentence = TokenEstimator.DescribeSaving(saved);
+
+        Assert.Equal(0, saved);
+        Assert.DoesNotContain("примерно 0", sentence, StringComparison.Ordinal);
+        Assert.Contains("не сэкономило", sentence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_small_but_real_saving_is_called_negligible_rather_than_counted()
+    {
+        var sentence = TokenEstimator.DescribeSaving(100);
+
+        Assert.Contains("пренебрежимо мало", sentence, StringComparison.Ordinal);
+        Assert.DoesNotContain("100", sentence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_saving_worth_reporting_still_reports_a_range()
+    {
+        var sentence = TokenEstimator.DescribeSaving(20_000);
+
+        Assert.Contains("–", sentence, StringComparison.Ordinal);
+        Assert.DoesNotContain("20000", sentence, StringComparison.Ordinal);
+    }
 }

@@ -94,6 +94,22 @@ public static class TokenEstimator
         _ => $"~{Round(saved * 0.8)}–{Round(saved * 1.2)}K",
     };
 
+    /// <summary>
+    /// The whole sentence about the saving, rather than a number to drop into one.
+    ///
+    /// A zero here is a real and correct answer — a 336x52 image is worth about two dozen tokens
+    /// to look at, and any useful answer about it is longer than that, so delegating it saved
+    /// nothing. But "Сэкономлено примерно 0 облачных токенов" reads as a broken counter rather
+    /// than as a job too small to be worth delegating, and the difference matters: one is a bug
+    /// report, the other is advice.
+    /// </summary>
+    public static string DescribeSaving(int saved) => saved switch
+    {
+        0 => "Облачных токенов это не сэкономило: ответ не короче исходных данных.",
+        < 500 => "Сэкономлено пренебрежимо мало облачных токенов — менее ~0.5K.",
+        _ => $"Сэкономлено примерно {Describe(saved)} облачных токенов.",
+    };
+
     private static string Round(double tokens)
     {
         var thousands = tokens / 1000.0;

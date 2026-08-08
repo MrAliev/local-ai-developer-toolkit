@@ -669,6 +669,12 @@ whether a translation runs locally or in the cloud; LocalAi does not impose that
 accepts an explicit text task profile. An explicit model is an override subject to the
 same capability, installation, context, and full-VRAM checks.
 
+The notice each tool returns states the saving as a sentence, not a number to interpret. A job
+small enough to save nothing says so — a 336x52 screenshot is worth about two dozen tokens to
+look at directly, and any useful answer about it is longer than that, so delegating it is
+honest work with no saving attached. That is advice about what to delegate, not a counter that
+failed.
+
 ## Runtime and security
 
 - CodeSearch and LocalLm submit all model work through the durable LocalAi FIFO broker.
