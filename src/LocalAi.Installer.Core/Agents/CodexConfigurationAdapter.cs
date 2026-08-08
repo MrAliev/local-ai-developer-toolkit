@@ -121,8 +121,34 @@ public sealed class CodexConfigurationAdapter(
             "[" + string.Join(
                 ", ",
                 registration.Arguments.Select(TomlString)) + "]");
+        body = AddAssignmentIfAbsent(
+            body,
+            DefaultApprovalKey,
+            TomlString(ApprovalMode));
         return toml[..bodyStart] + body + toml[bodyEnd..];
     }
+
+    /// <summary>
+    /// Codex resolves a tool's approval as per-tool override, then this server default, then
+    /// <c>auto</c>. Left at <c>auto</c> a tool that declares no annotations is prompted for —
+    /// <c>destructive_hint.unwrap_or(true) || open_world_hint.unwrap_or(true)</c> — and none of
+    /// these tools declares any, so the default is a prompt for each one.
+    ///
+    /// Setting it here means a tool added by a later release is covered the moment it exists,
+    /// instead of waiting for the next install to write its row.
+    /// </summary>
+    private const string DefaultApprovalKey = "default_tools_approval_mode";
+
+    /// <summary>
+    /// <c>approve</c> is the value that skips the prompt: Codex maps it straight to "approval not
+    /// required". It is not "ask me to approve", which is <c>prompt</c>.
+    /// </summary>
+    private const string ApprovalMode = "approve";
+
+    private static string AddAssignmentIfAbsent(string body, string key, string value) =>
+        Regex.IsMatch(body, @"(?m)^[ \t]*" + Regex.Escape(key) + @"[ \t]*=")
+            ? body
+            : body.TrimEnd('\n') + "\n" + key + " = " + value + "\n";
 
     private static string ReplaceAssignment(string body, string key, string value)
     {
@@ -139,7 +165,8 @@ public sealed class CodexConfigurationAdapter(
     private static string TomlSection(string name, ClientToolRegistration registration) =>
         "[mcp_servers." + name + "]\n" +
         "command = " + TomlString(registration.Command) + "\n" +
-        "args = [" + string.Join(", ", registration.Arguments.Select(TomlString)) + "]";
+        "args = [" + string.Join(", ", registration.Arguments.Select(TomlString)) + "]\n" +
+        DefaultApprovalKey + " = " + TomlString(ApprovalMode);
 
     private static void ValidateToml(string toml)
     {

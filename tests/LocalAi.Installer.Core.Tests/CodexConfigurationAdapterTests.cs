@@ -41,10 +41,12 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
         Assert.Equal(
             "[mcp_servers.codesearch]\n" +
             "command = \"C:\\\\LocalAi\\\\bin\\\\launcher\\\\localai-launcher.exe\"\n" +
-            "args = [\"run\", \"codesearch-mcp\"]\n\n" +
+            "args = [\"run\", \"codesearch-mcp\"]\n" +
+            "default_tools_approval_mode = \"approve\"\n\n" +
             "[mcp_servers.locallm]\n" +
             "command = \"C:\\\\LocalAi\\\\bin\\\\launcher\\\\localai-launcher.exe\"\n" +
-            "args = [\"run\", \"locallm-mcp\"]\n\n" +
+            "args = [\"run\", \"locallm-mcp\"]\n" +
+            "default_tools_approval_mode = \"approve\"\n\n" +
             ToolSections("codesearch", McpToolNames.CodeSearch) + "\n\n" +
             ToolSections("locallm", McpToolNames.LocalLm) + "\n",
             config.AfterText);
@@ -168,6 +170,37 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
             after.Split(
                 "[mcp_servers.codesearch.tools.search_code]",
                 StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void A_server_level_approval_the_user_chose_is_not_overwritten()
+    {
+        var configPath = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(
+            configPath,
+            "[mcp_servers.codesearch]\n" +
+            "command = \"C:\\\\Old\\\\localai-launcher.exe\"\n" +
+            "args = [\"run\", \"codesearch-mcp\"]\n" +
+            "default_tools_approval_mode = \"prompt\"\n",
+            Encoding.UTF8);
+
+        var after = SinglePreview(
+            @".codex\config.toml",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterText;
+
+        // The same rule as a per-tool row: the installer supplies a default where there is none
+        // and does not argue with one that is already there.
+        Assert.Contains(
+            "default_tools_approval_mode = \"prompt\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "[mcp_servers.codesearch]\ncommand = \"C:\\\\LocalAi\\\\bin\\\\launcher\\\\" +
+            "localai-launcher.exe\"\nargs = [\"run\", \"codesearch-mcp\"]\n" +
+            "default_tools_approval_mode = \"approve\"",
+            after,
+            StringComparison.Ordinal);
     }
 
     [Fact]

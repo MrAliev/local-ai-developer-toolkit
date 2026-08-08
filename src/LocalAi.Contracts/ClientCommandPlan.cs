@@ -119,5 +119,6 @@ public static class ClientCommandPlan
             ", ",
             registration.Arguments.Select(
                 argument => $"\"{EscapeToml(argument)}\"")) +
-        "]";
+        "]\n" +
+        "default_tools_approval_mode = \"approve\"";
 }
