@@ -161,6 +161,14 @@ public static class SearchEngine
 
     private static List<int> Filter(ISearchableIndex index, SearchOptions options)
     {
+        // Indexed paths carry the separator of the machine that built them — backslashes on
+        // Windows. Callers write the filter the way paths appear everywhere else in this
+        // project's own output and documentation, with forward slashes, and a raw IndexOf then
+        // silently matched nothing: `docs/releases` found zero chunks while `docs\releases`
+        // found them all, with no indication that the difference was the slash.
+        var pathFilter = string.IsNullOrWhiteSpace(options.PathContains)
+            ? null
+            : NormalizeSeparators(options.PathContains);
         var candidates = new List<int>(index.ChunkCount);
         for (var i = 0; i < index.ChunkCount; i++)
         {
@@ -169,8 +177,9 @@ public static class SearchEngine
                 continue;
             }
 
-            if (!string.IsNullOrWhiteSpace(options.PathContains) &&
-                index.PathOf(i).IndexOf(options.PathContains, StringComparison.OrdinalIgnoreCase) < 0)
+            if (pathFilter is not null &&
+                NormalizeSeparators(index.PathOf(i))
+                    .IndexOf(pathFilter, StringComparison.OrdinalIgnoreCase) < 0)
             {
                 continue;
             }
@@ -180,6 +189,13 @@ public static class SearchEngine
 
         return candidates;
     }
+
+    /// <summary>
+    /// Both sides of the path filter reduced to one separator, so a filter written on any OS
+    /// matches an index built on any other.
+    /// </summary>
+    private static string NormalizeSeparators(string path) =>
+        path.Replace('\\', '/');
 
     private static Dictionary<int, float> ScoreVectors(ISearchableIndex index, float[] queryVector, List<int> candidates)
     {

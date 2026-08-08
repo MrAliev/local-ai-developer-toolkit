@@ -6,10 +6,17 @@
     <LangVersion>latest</LangVersion>
     <InvariantGlobalization>true</InvariantGlobalization>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <VersionPrefix>0.1.22</VersionPrefix>
-    <Version>0.1.22</Version>
-    <AssemblyVersion>0.1.22.0</AssemblyVersion>
-    <FileVersion>0.1.22.0</FileVersion>
-    <InformationalVersion>0.1.22</InformationalVersion>
+    <!--
+      The fallback for a local build. A release must not depend on it: this stayed at 0.1.22
+      through six releases, so 0.1.29 shipped binaries that reported 0.1.22 to anyone who asked
+      them what they were. The release script now passes the version it was told to build, which
+      is the only value that can be right by construction — a number kept here in step by hand is
+      one nobody notices going stale.
+    -->
+    <VersionPrefix>0.1.29</VersionPrefix>
+    <Version>0.1.29</Version>
+    <AssemblyVersion>0.1.29.0</AssemblyVersion>
+    <FileVersion>0.1.29.0</FileVersion>
+    <InformationalVersion>0.1.29</InformationalVersion>
   </PropertyGroup>
 </Project>
