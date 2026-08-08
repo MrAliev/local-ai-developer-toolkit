@@ -27,6 +27,14 @@ $MaxAttempts = 3
 
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Root
+# Set-Location moves the PowerShell location and nothing else. .NET keeps its own current
+# directory — where the process was started — and this script resolves paths both ways:
+# Test-Path and the relative artifact paths follow the PowerShell location, while
+# [System.IO.Path]::GetFullPath and dotnet publish follow the process one. Started from anywhere
+# but the repository root, a worktree for instance, the two disagree: every project publishes
+# into the other tree and the run then fails at "Required release artifact is missing" having
+# just reported seven successful publishes.
+[System.Environment]::CurrentDirectory = $Root
 
 if ([string]::IsNullOrWhiteSpace($VersionDirectory)) {
     $VersionDirectory = (git rev-parse --short=12 HEAD).Trim()
