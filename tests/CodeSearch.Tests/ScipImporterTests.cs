@@ -109,6 +109,46 @@ public sealed class ScipImporterTests
     }
 
     [Fact]
+    public void AcceptsTheLocalIdShapeScipPythonActuallyEmits()
+    {
+        // scip-python 0.6.6 appends the variable name in parentheses: `local 16(line)`. The SCIP
+        // grammar does not allow that, and rejecting it failed the python adapter — which blocks
+        // the whole generation, so every Python repository was left unable to publish an index.
+        var payload = Index(index => AddLocalDocument(index, "app.py", "local 16(line)"));
+
+        var imported = Import(payload);
+
+        var symbol = Assert.Single(imported.Symbols);
+        Assert.Equal("scip-local app.py 16(line)", symbol.Id);
+        Assert.Equal(symbol.Id, Assert.Single(imported.Occurrences).SymbolId);
+    }
+
+    [Theory]
+    [InlineData("local 0 1")]
+    [InlineData("local a\tb")]
+    [InlineData("local a\nb")]
+    public void RejectsLocalIdsThatWouldCollideOnceScopedToADocument(string symbol)
+    {
+        // The id is joined to its document path by a space, so whitespace is the one thing that
+        // can make two distinct symbols compose the same key.
+        var payload = Index(index => AddLocalDocument(index, "app.py", symbol));
+
+        var error = Assert.Throws<InvalidDataException>(() => Import(payload));
+
+        Assert.Contains("local symbol ID is invalid", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NamesTheOffendingLocalIdSoTheNextOneTakesMinutesNotHours()
+    {
+        var payload = Index(index => AddLocalDocument(index, "app.py", "local bad id"));
+
+        var error = Assert.Throws<InvalidDataException>(() => Import(payload));
+
+        Assert.Contains("bad?id", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RejectsTraversalPaths()
     {
         var payload = Index(index => index.Message(2, document =>
@@ -215,19 +255,22 @@ public sealed class ScipImporterTests
         Assert.Throws<InvalidDataException>(() => Import(payload));
     }
 
-    private static void AddLocalDocument(ProtoBuilder index, string path) =>
+    private static void AddLocalDocument(
+        ProtoBuilder index,
+        string path,
+        string localSymbol = "local 0") =>
         index.Message(2, document =>
         {
             document.String(1, path);
             document.Message(2, occurrence =>
             {
                 occurrence.PackedInt32(1, 0, 0, 1);
-                occurrence.String(2, "local 0");
+                occurrence.String(2, localSymbol);
                 occurrence.Int32(3, 1);
             });
             document.Message(3, symbol =>
             {
-                symbol.String(1, "local 0");
+                symbol.String(1, localSymbol);
                 symbol.Int32(5, 61);
                 symbol.String(6, "x");
             });

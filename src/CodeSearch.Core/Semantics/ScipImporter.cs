@@ -520,14 +520,22 @@ public sealed class ScipImporter
             return symbol;
         }
 
+        // The SCIP grammar says a local id is a simple-identifier — letters, digits, and
+        // `_ + - $`. scip-python 0.6.6 does not obey it: it emits ids like `local 16(line)`,
+        // appending the variable name in parentheses. Rejecting those failed the python adapter,
+        // and a failed adapter blocks the whole generation, so one indexer's liberty with the
+        // grammar left every Python repository unable to publish an index at all.
+        //
+        // What actually has to hold is narrower than the grammar. The id is joined with its
+        // document path by a space below, so a space or a control character could make two
+        // distinct symbols collide or corrupt the composed key. Anything else printable is
+        // opaque to us and safe to carry through.
         var localId = symbol[6..];
         if (localId.Length == 0 || localId.Any(character =>
-                !(character is '_' or '+' or '-' or '$' ||
-                  character is >= 'a' and <= 'z' ||
-                  character is >= 'A' and <= 'Z' ||
-                  character is >= '0' and <= '9')))
+                char.IsWhiteSpace(character) || char.IsControl(character)))
         {
-            throw new InvalidDataException("SCIP local symbol ID is invalid.");
+            throw new InvalidDataException(
+                "SCIP local symbol ID is invalid: '" + Excerpt(localId) + "'.");
         }
 
         if (documentPath is null)
@@ -536,6 +544,21 @@ public sealed class ScipImporter
         }
 
         return $"scip-local {documentPath} {localId}";
+    }
+
+    /// <summary>
+    /// A bounded, printable excerpt for an error message. The value comes from an external
+    /// indexer, so it is quoted rather than trusted, kept short, and stripped of anything that
+    /// would rearrange the line it is printed on.
+    /// </summary>
+    private static string Excerpt(string value)
+    {
+        var visible = new string(value
+            .Take(60)
+            .Select(character =>
+                char.IsControl(character) || char.IsWhiteSpace(character) ? '?' : character)
+            .ToArray());
+        return value.Length > 60 ? visible + "…" : visible;
     }
 
     private static void ValidateGlobalSymbol(string symbol)
