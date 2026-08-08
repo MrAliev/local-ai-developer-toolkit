@@ -50,13 +50,50 @@ public sealed class CodexConfigurationAdapter(
     ///
     /// So only the command and its arguments are rewritten, inside the section that is already
     /// there, and everything else the user put in it survives untouched.
+    ///
+    /// A tool that has no sub-table yet gets one. A tool that already has one is left exactly as
+    /// written — including a setting that refuses the tool, which is a decision to preserve rather
+    /// than an omission to correct.
     /// </summary>
     private string UpdateToml(string before)
     {
         ValidateToml(before);
         var plan = ClientCommandPlan.Plan(installationDirectory);
         var updated = UpsertServer(before, "codesearch", plan.CodeSearch);
-        return UpsertServer(updated, "locallm", plan.LocalLm);
+        updated = UpsertServer(updated, "locallm", plan.LocalLm);
+        updated = AddMissingToolSections(updated, "codesearch", plan.CodeSearch.Tools);
+        return AddMissingToolSections(updated, "locallm", plan.LocalLm.Tools);
+    }
+
+    /// <summary>
+    /// Writes a sub-table for every tool that does not have one, and touches nothing else.
+    ///
+    /// Only absence is filled. Reading an existing entry and normalising it would overwrite a
+    /// user's own choice with the installer's, and the entry most worth not overwriting is the one
+    /// that says no.
+    /// </summary>
+    private static string AddMissingToolSections(
+        string toml,
+        string server,
+        IReadOnlyList<string> tools)
+    {
+        var missing = tools
+            .Where(tool => !Regex.IsMatch(
+                toml,
+                @"(?m)^[ \t]*\[mcp_servers\." + Regex.Escape(server) +
+                @"\.tools\." + Regex.Escape(tool) + @"\][ \t]*$"))
+            .ToArray();
+        if (missing.Length == 0)
+        {
+            return toml;
+        }
+
+        var sections = string.Join(
+            "\n\n",
+            missing.Select(tool =>
+                "[mcp_servers." + server + ".tools." + tool + "]\n" +
+                "approval_mode = \"approve\""));
+        return toml.TrimEnd() + "\n\n" + sections + "\n";
     }
 
     private static string UpsertServer(
@@ -84,8 +121,34 @@ public sealed class CodexConfigurationAdapter(
             "[" + string.Join(
                 ", ",
                 registration.Arguments.Select(TomlString)) + "]");
+        body = AddAssignmentIfAbsent(
+            body,
+            DefaultApprovalKey,
+            TomlString(ApprovalMode));
         return toml[..bodyStart] + body + toml[bodyEnd..];
     }
+
+    /// <summary>
+    /// Codex resolves a tool's approval as per-tool override, then this server default, then
+    /// <c>auto</c>. Left at <c>auto</c> a tool that declares no annotations is prompted for —
+    /// <c>destructive_hint.unwrap_or(true) || open_world_hint.unwrap_or(true)</c> — and none of
+    /// these tools declares any, so the default is a prompt for each one.
+    ///
+    /// Setting it here means a tool added by a later release is covered the moment it exists,
+    /// instead of waiting for the next install to write its row.
+    /// </summary>
+    private const string DefaultApprovalKey = "default_tools_approval_mode";
+
+    /// <summary>
+    /// <c>approve</c> is the value that skips the prompt: Codex maps it straight to "approval not
+    /// required". It is not "ask me to approve", which is <c>prompt</c>.
+    /// </summary>
+    private const string ApprovalMode = "approve";
+
+    private static string AddAssignmentIfAbsent(string body, string key, string value) =>
+        Regex.IsMatch(body, @"(?m)^[ \t]*" + Regex.Escape(key) + @"[ \t]*=")
+            ? body
+            : body.TrimEnd('\n') + "\n" + key + " = " + value + "\n";
 
     private static string ReplaceAssignment(string body, string key, string value)
     {
@@ -102,7 +165,8 @@ public sealed class CodexConfigurationAdapter(
     private static string TomlSection(string name, ClientToolRegistration registration) =>
         "[mcp_servers." + name + "]\n" +
         "command = " + TomlString(registration.Command) + "\n" +
-        "args = [" + string.Join(", ", registration.Arguments.Select(TomlString)) + "]";
+        "args = [" + string.Join(", ", registration.Arguments.Select(TomlString)) + "]\n" +
+        DefaultApprovalKey + " = " + TomlString(ApprovalMode);
 
     private static void ValidateToml(string toml)
     {

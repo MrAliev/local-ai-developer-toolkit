@@ -225,6 +225,23 @@ block into that client's global instructions file — `~/.claude/CLAUDE.md` for 
 `~/.codex/AGENTS.md` for Codex. A detected client defaults to both; a client that was not
 found is left alone, and an explicit choice always wins.
 
+For Codex, each managed server also gets `default_tools_approval_mode = "approve"`, and every
+tool the two servers expose gets a `[mcp_servers.<server>.tools.<tool>]` row with the same
+value. `approve` is the value that skips the prompt — Codex maps it to "approval not required";
+the value that asks is `prompt`.
+
+Both are needed. Codex resolves a tool as per-tool override, then server default, then `auto`,
+and under `auto` a tool that declares no annotations is prompted for, which is every tool here.
+The server default covers tools added by a later release the moment they exist; the rows make
+the current set explicit.
+
+Only what is missing is written. An existing row or server default is left exactly as the user
+wrote it, including one that refuses the tool, because that is a decision to preserve rather
+than an omission to correct. Without this a machine accumulates rows only for the tools it
+happened to reach for — one long-lived installation carried rows for eleven of the twenty. The
+list is held to the servers by tests that reflect over their tool attributes, so a new tool
+cannot ship without its row.
+
 The block is repository-agnostic on purpose. Indexing stays opt-in per repository, so rather
 than assuming the repositories that happened to be set up on the machine it was installed on,
 it states the check (`localai repo status`) and the two commands that connect any repository
