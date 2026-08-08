@@ -187,7 +187,8 @@ public sealed class ModelControlService(
         CancellationToken cancellationToken = default)
     {
         var state = await _experiments.LoadAsync(cancellationToken);
-        var currentWorkflows = (state.Pair(profile, model).CompletedWorkflows ?? [])
+        var pair = state.Pair(profile, model);
+        var currentWorkflows = (pair.CompletedWorkflows ?? [])
             .ToHashSet();
         var records = (await _telemetry.ReadExperimentTasksAsync(cancellationToken))
             .Where(record =>
@@ -204,12 +205,16 @@ public sealed class ModelControlService(
             : TimeSpan.FromTicks((long)durations.Average(value => value.Ticks));
         var median = Percentile(durations, 0.50);
         var p90 = Percentile(durations, 0.90);
+        // Attempts, successes and errors come from the experiment state: it is what the router
+        // counts to decide when an experiment pauses, and it survives whatever happens to the
+        // telemetry files. Only the measurements below are limited to the records still present,
+        // and ObservedTasks says how many that was.
         return new LocalExperimentReportOutput(
             profile,
             model,
-            records.Length,
-            records.Count(record => record.Outcome == ModelExecutionOutcome.Success),
-            records.Count(record => record.Outcome != ModelExecutionOutcome.Success),
+            pair.CompletedAttempts,
+            pair.Successes,
+            pair.TechnicalFailures + pair.StructuralFailures + pair.ContextFailures,
             records.Count(record => record.UsedFallback),
             mean,
             median,
@@ -219,7 +224,8 @@ public sealed class ModelControlService(
             records.Sum(record => (long)record.EstimatedNetCloudContextTokensSaved),
             records.Sum(record => (long)record.LocalTokensProcessed),
             records.Sum(record => (long)record.EstimatedCloudGenerationTokensSaved),
-            records.Sum(record => (long)record.EstimatedNetCloudContextTokensSaved));
+            records.Sum(record => (long)record.EstimatedNetCloudContextTokensSaved),
+            records.Length);
     }
 
     private static TimeSpan Percentile(TimeSpan[] ordered, double percentile)

@@ -63,7 +63,7 @@ public sealed class ModelTelemetryStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Experiment_task_telemetry_is_retained_for_only_one_week()
+    public async Task Experiment_task_telemetry_is_trimmed_by_the_write_that_supersedes_it()
     {
         var store = new ModelTelemetryStore(_root);
         var old = ExperimentTask(
@@ -84,6 +84,32 @@ public sealed class ModelTelemetryStoreTests : IDisposable
 
         Assert.Equal(current.WorkflowId, Assert.Single(records).WorkflowId);
         Assert.False(
+            File.Exists(
+                Path.Combine(
+                    store.ExperimentTasksDirectory,
+                    $"{old.WorkflowId:N}.json")));
+    }
+
+    [Fact]
+    public async Task Reading_experiment_task_telemetry_does_not_discard_it()
+    {
+        var store = new ModelTelemetryStore(_root);
+        var old = ExperimentTask(
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow.AddDays(-30));
+        await store.AppendExperimentTaskAsync(
+            old,
+            TestContext.Current.CancellationToken);
+
+        // Read it twice. The report is a getter, and a getter that deletes what it reports on
+        // means the history shrinks every time anybody looks at it — which is how a pair with
+        // six completed attempts came to report one.
+        await store.ReadExperimentTasksAsync(TestContext.Current.CancellationToken);
+        var records = await store.ReadExperimentTasksAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(old.WorkflowId, Assert.Single(records).WorkflowId);
+        Assert.True(
             File.Exists(
                 Path.Combine(
                     store.ExperimentTasksDirectory,

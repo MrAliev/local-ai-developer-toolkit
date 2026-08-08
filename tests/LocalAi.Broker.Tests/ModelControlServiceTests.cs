@@ -216,6 +216,65 @@ public sealed class ModelControlServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task The_report_counts_attempts_the_way_the_status_does()
+    {
+        var experiments = new ExperimentStateStore(_root);
+        var telemetry = new ModelTelemetryStore(_root);
+        var service = new ModelControlService(
+            ModelRoutingCatalog.LoadEmbedded(),
+            new FakeTransport(),
+            experiments,
+            telemetry);
+        var metrics = new LocalExperimentTaskMetrics(
+            InputTokens: 100,
+            OutputTokens: 100,
+            LocalTokensProcessed: 200,
+            EstimatedCloudGenerationTokensSaved: 100,
+            EstimatedNetCloudContextTokensSaved: 0,
+            TotalDuration: TimeSpan.FromSeconds(1),
+            ColdExecutions: 1,
+            WarmExecutions: 0,
+            UsedFallback: false);
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            await service.CompleteExperimentAsync(
+                Guid.NewGuid(),
+                LocalTaskProfile.TechnicalTranslation,
+                "translategemma:12b",
+                ModelExecutionOutcome.Success,
+                metrics,
+                TestContext.Current.CancellationToken);
+        }
+
+        // Five of the six measurements are gone — the shape a machine is in after the week-long
+        // bound has passed over them. The counts must not go with them: they are what the router
+        // reads to decide when the experiment pauses, and a status that says six beside a report
+        // that says one is not two views of an experiment, it is one of them being wrong.
+        foreach (var path in Directory
+                     .GetFiles(telemetry.ExperimentTasksDirectory, "*.json")
+                     .Order(StringComparer.Ordinal)
+                     .Take(5))
+        {
+            File.Delete(path);
+        }
+
+        var report = await service.ReportAsync(
+            LocalTaskProfile.TechnicalTranslation,
+            "translategemma:12b",
+            TestContext.Current.CancellationToken);
+        var state = await experiments.LoadAsync(TestContext.Current.CancellationToken);
+        var pair = state.Pair(LocalTaskProfile.TechnicalTranslation, "translategemma:12b");
+
+        Assert.Equal(pair.CompletedAttempts, report.Attempts);
+        Assert.Equal(6, report.Attempts);
+        Assert.Equal(6, report.Successes);
+        Assert.Equal(0, report.Errors);
+        // And the measurements say honestly how much they rest on.
+        Assert.Equal(1, report.ObservedTasks);
+        Assert.Equal(1, report.ColdExecutions);
+    }
+
+    [Fact]
     public async Task Report_aggregates_content_free_timing_and_net_savings()
     {
         var telemetry = new ModelTelemetryStore(_root);

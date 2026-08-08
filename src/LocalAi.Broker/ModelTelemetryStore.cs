@@ -151,6 +151,11 @@ public sealed class ModelTelemetryStore
             return;
         }
 
+        // Trimming belongs to the operation that changes the history, not to the one that reads
+        // it. Doing it here keeps the week-long bound this store has always had while leaving a
+        // report free to be run as often as anyone likes.
+        PruneExperimentTasks(record.RecordedAtUtc - ExperimentTaskRetention);
+
         var temporary = destination + $".{Guid.NewGuid():N}.tmp";
         try
         {
@@ -187,6 +192,57 @@ public sealed class ModelTelemetryStore
         }
     }
 
+    /// <summary>
+    /// How long a completed experiment task keeps its measurements. The experiment state keeps
+    /// the attempt and outcome counts for as long as the experiment runs; this bounds only the
+    /// per-task timings and token figures.
+    /// </summary>
+    public static TimeSpan ExperimentTaskRetention { get; } = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// Deletes experiment task records recorded before <paramref name="cutoff"/>.
+    ///
+    /// Failures are swallowed: this is housekeeping attached to a write, and a file that cannot
+    /// be removed right now must not fail the record that triggered the attempt.
+    /// </summary>
+    public void PruneExperimentTasks(DateTimeOffset cutoff)
+    {
+        if (!Directory.Exists(ExperimentTasksDirectory))
+        {
+            return;
+        }
+
+        foreach (var path in Directory.EnumerateFiles(ExperimentTasksDirectory, "*.json"))
+        {
+            try
+            {
+                var record = JsonSerializer.Deserialize<ExperimentTaskTelemetryRecord>(
+                    File.ReadAllText(path),
+                    LocalAiJson.Strict);
+                if (record is not null && record.RecordedAtUtc < cutoff)
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (Exception exception) when (
+                exception is JsonException or IOException or UnauthorizedAccessException or
+                    InvalidDataException)
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads the experiment task records, and only reads them.
+    ///
+    /// This used to delete anything older than seven days on its way through, which made the
+    /// experiment report destructive: looking at it discarded the history it was reporting on,
+    /// and the more often it was consulted the less there was left to consult. A pair with six
+    /// completed attempts answered with one, because the other five files had been deleted by
+    /// earlier reads.
+    ///
+    /// Retention is a policy decision that belongs to a prune, not a side effect of a getter.
+    /// </summary>
     public async Task<IReadOnlyList<ExperimentTaskTelemetryRecord>>
         ReadExperimentTasksAsync(
             CancellationToken cancellationToken = default)
@@ -197,7 +253,6 @@ public sealed class ModelTelemetryStore
         }
 
         var records = new List<ExperimentTaskTelemetryRecord>();
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-7);
         foreach (var path in Directory
                      .EnumerateFiles(ExperimentTasksDirectory, "*.json")
                      .Order(StringComparer.Ordinal))
@@ -218,12 +273,6 @@ public sealed class ModelTelemetryStore
                         cancellationToken)
                 ?? throw new InvalidDataException(
                     "Experiment task telemetry record is empty.");
-            }
-
-            if (record.RecordedAtUtc < cutoff)
-            {
-                File.Delete(path);
-                continue;
             }
 
             records.Add(record);
