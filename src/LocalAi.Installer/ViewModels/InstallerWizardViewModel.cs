@@ -887,6 +887,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         try
         {
             var feed = new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath);
+            package.InstalledVersionDirectory = InstalledVersionDirectory();
             // "latest" is not a tag GitHub knows; resolve it to the newest published one so
             // the field can keep its convenient default.
             resolvedTag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
@@ -904,6 +905,26 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
 
         RefreshAll();
+    }
+
+    /// <summary>
+    /// The version directory currently active, or null when nothing is installed or the
+    /// pointer cannot be read. Only used to tell the user a release is already installed, so a
+    /// failure here costs a warning, not the run.
+    /// </summary>
+    private static string? InstalledVersionDirectory()
+    {
+        try
+        {
+            var snapshot = new ExistingLocalAiInspector(new SystemFileSystemProbe())
+                .Inspect(Environment.GetFolderPath(
+                    Environment.SpecialFolder.LocalApplicationData));
+            return snapshot.Version;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

@@ -72,8 +72,32 @@ public sealed class PackagePageViewModel : ObservableObject
     /// </summary>
     public bool CanContinue => true;
 
+    /// <summary>
+    /// The version directory already active on this machine, when there is one.
+    ///
+    /// Used only to say so before the run starts. The installer handles the case correctly —
+    /// it reports <c>AlreadyInstalled</c> and changes nothing — but it reports it afterwards,
+    /// in a line of the finish log, so a run that was never going to change anything looks
+    /// exactly like one that did until it is over.
+    /// </summary>
+    public string? InstalledVersionDirectory { get; set; }
+
+    /// <summary>
+    /// True when the resolved release is the one already installed.
+    /// </summary>
+    public bool IsAlreadyInstalled =>
+        Resolved is { } resolved &&
+        !string.IsNullOrWhiteSpace(InstalledVersionDirectory) &&
+        string.Equals(
+            resolved.Manifest.VersionDirectory,
+            InstalledVersionDirectory,
+            StringComparison.OrdinalIgnoreCase);
+
     public string ReviewText => State switch
     {
+        PackageSourceState.Selected when IsAlreadyInstalled =>
+            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed — " +
+            "nothing will change",
         PackageSourceState.Selected => $"LocalAi package: {ResolvedTag ?? ReleaseVersion}",
         PackageSourceState.Incompatible =>
             $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is not compatible — " +
@@ -117,9 +141,12 @@ public sealed class PackagePageViewModel : ObservableObject
         ResolvedTag = tag;
         OnPropertyChanged(nameof(ResolvedTag));
         OnPropertyChanged(nameof(WantsLatest));
-        StatusText =
-            $"Release {tag} verified, " +
-            $"{release.Manifest.PackageSize / (1024d * 1024):N0} MB to download.";
+        OnPropertyChanged(nameof(IsAlreadyInstalled));
+        StatusText = IsAlreadyInstalled
+            ? $"Release {tag} is already installed. Continuing will re-run the other steps " +
+              "and leave the LocalAi version untouched."
+            : $"Release {tag} verified, " +
+              $"{release.Manifest.PackageSize / (1024d * 1024):N0} MB to download.";
         State = PackageSourceState.Selected;
     }
 

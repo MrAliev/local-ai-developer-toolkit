@@ -80,6 +80,48 @@ public sealed class PackagePageViewModelTests
         Assert.Null(page.ResolvedTag);
     }
 
+    [Fact]
+    public void A_release_that_is_already_installed_says_so_before_the_run_starts()
+    {
+        var page = new PackagePageViewModel
+        {
+            InstalledVersionDirectory = "0123456789ab",
+        };
+
+        page.SelectResolvedRelease(Release("0.1.30"), "0.1.30");
+
+        // The installer handles this correctly and reports AlreadyInstalled — afterwards, in a
+        // line of the finish log. A run that was never going to change anything then looks
+        // exactly like one that did until it is over.
+        Assert.True(page.IsAlreadyInstalled);
+        Assert.Contains("already installed", page.StatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("nothing will change", page.ReviewText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_different_release_is_not_reported_as_installed()
+    {
+        var page = new PackagePageViewModel
+        {
+            InstalledVersionDirectory = "ffffffffffff",
+        };
+
+        page.SelectResolvedRelease(Release("0.1.30"), "0.1.30");
+
+        Assert.False(page.IsAlreadyInstalled);
+        Assert.Contains("MB to download", page.StatusText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_machine_with_nothing_installed_is_not_reported_as_up_to_date()
+    {
+        var page = new PackagePageViewModel();
+
+        page.SelectResolvedRelease(Release("0.1.30"), "0.1.30");
+
+        Assert.False(page.IsAlreadyInstalled);
+    }
+
     private static ResolvedRelease Release(string version) =>
         new(
             new ReleaseManifest(

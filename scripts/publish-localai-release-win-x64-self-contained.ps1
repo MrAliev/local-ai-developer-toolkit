@@ -99,24 +99,32 @@ function Invoke-SafePublish {
         # fallback in Directory.Build.props. That fallback went six releases without being
         # updated, so 0.1.29 shipped binaries reporting 0.1.22 — a number that has to be kept in
         # step by hand is a number that goes stale unnoticed.
-        dotnet publish $ProjectPath -c $Configuration -r $Runtime `
+        # Captured rather than streamed, so a failure can say what went wrong. Only the exit
+        # code used to be kept: when publishing went to the wrong tree, this reported seven
+        # successes and then failed on the missing artifacts with nothing to explain either.
+        $output = dotnet publish $ProjectPath -c $Configuration -r $Runtime `
             -p:SelfContained=true -p:PublishSingleFile=true -p:BuildInParallel=false -p:UseSharedCompilation=false `
             -p:Version=$ReleaseVersion -p:VersionPrefix=$ReleaseVersion `
             -p:AssemblyVersion="$ReleaseVersion.0" -p:FileVersion="$ReleaseVersion.0" `
             -p:InformationalVersion=$ReleaseVersion `
-            --no-restore -o $resolvedOutput
+            --no-restore -o $resolvedOutput 2>&1
+        $publishExitCode = $LASTEXITCODE
+        $output | ForEach-Object { Write-Host "  $_" }
 
-        if ($LASTEXITCODE -eq 0) {
+        if ($publishExitCode -eq 0) {
             return
         }
 
+        # The last lines are where MSBuild puts the reason; the whole log is already above.
+        $tail = ($output | Select-Object -Last 12) -join [System.Environment]::NewLine
+
         if ($attempt -lt $MaxAttempts) {
-            Write-Warning "Публикация $ProjectName завершилась ошибкой. Повторная попытка через $RetryDelaySeconds сек..."
+            Write-Warning "Публикация $ProjectName завершилась ошибкой (код $publishExitCode). Повторная попытка через $RetryDelaySeconds сек...`n$tail"
             Start-Sleep -Seconds $RetryDelaySeconds
             continue
         }
 
-        throw "Публикация $ProjectName завершилась ошибкой после $MaxAttempts попыток (код ошибки $LASTEXITCODE)."
+        throw "Публикация $ProjectName завершилась ошибкой после $MaxAttempts попыток (код ошибки $publishExitCode).`n$tail"
     }
 }
 
