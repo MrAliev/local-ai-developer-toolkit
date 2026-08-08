@@ -19,7 +19,9 @@ public enum PackageSourceState
 /// </summary>
 public sealed class PackagePageViewModel : ObservableObject
 {
-    private string releaseVersion = "latest";
+    public const string LatestTag = "latest";
+
+    private string releaseVersion = LatestTag;
     private PackageSourceState state = PackageSourceState.NotChecked;
     private string statusText =
         "No release has been checked yet.";
@@ -31,6 +33,10 @@ public sealed class PackagePageViewModel : ObservableObject
         {
             SetProperty(ref releaseVersion, value);
             // Editing the tag invalidates whatever was resolved for the previous one.
+            Resolved = null;
+            ResolvedTag = null;
+            OnPropertyChanged(nameof(ResolvedTag));
+            OnPropertyChanged(nameof(WantsLatest));
             State = PackageSourceState.NotChecked;
             StatusText = "No release has been checked yet.";
         }
@@ -68,9 +74,10 @@ public sealed class PackagePageViewModel : ObservableObject
 
     public string ReviewText => State switch
     {
-        PackageSourceState.Selected => $"LocalAi package: {ReleaseVersion}",
+        PackageSourceState.Selected => $"LocalAi package: {ResolvedTag ?? ReleaseVersion}",
         PackageSourceState.Incompatible =>
-            $"LocalAi package: {ReleaseVersion} is not compatible — it will not be installed",
+            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is not compatible — " +
+            "it will not be installed",
         _ => "LocalAi package: not resolved — it will not be installed",
     };
 
@@ -81,16 +88,35 @@ public sealed class PackagePageViewModel : ObservableObject
     public ResolvedRelease? Resolved { get; private set; }
 
     /// <summary>
-    /// Reports the tag that was actually resolved, so a field left at "latest" names the
-    /// real release instead of leaving the user to guess which one was chosen.
+    /// True while the field still asks for whatever is newest instead of naming one release.
+    /// </summary>
+    public bool WantsLatest =>
+        string.Equals(releaseVersion.Trim(), LatestTag, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The tag that was actually resolved, so a request left at "latest" can still name the
+    /// real release without the request itself being replaced by it.
+    /// </summary>
+    public string? ResolvedTag { get; private set; }
+
+    /// <summary>
+    /// Records the resolved, verified release — and leaves the request alone.
+    ///
+    /// This used to write the resolved tag back into <see cref="ReleaseVersion"/>, so "latest"
+    /// became "0.1.29" the moment it was first checked. From then on the field named one
+    /// specific release and every later check asked for that one: a wizard opened before a
+    /// release and used after it kept installing the version that had been newest when it first
+    /// looked, while still appearing to track the newest. "Latest" is a standing request, not a
+    /// value to be resolved once and overwritten.
     /// </summary>
     public void SelectResolvedRelease(ResolvedRelease release, string tag)
     {
         ArgumentNullException.ThrowIfNull(release);
         ArgumentException.ThrowIfNullOrWhiteSpace(tag);
         Resolved = release;
-        releaseVersion = tag;
-        OnPropertyChanged(nameof(ReleaseVersion));
+        ResolvedTag = tag;
+        OnPropertyChanged(nameof(ResolvedTag));
+        OnPropertyChanged(nameof(WantsLatest));
         StatusText =
             $"Release {tag} verified, " +
             $"{release.Manifest.PackageSize / (1024d * 1024):N0} MB to download.";
@@ -113,8 +139,12 @@ public sealed class PackagePageViewModel : ObservableObject
 
     public void Reset()
     {
-        releaseVersion = "latest";
+        releaseVersion = LatestTag;
+        Resolved = null;
+        ResolvedTag = null;
         OnPropertyChanged(nameof(ReleaseVersion));
+        OnPropertyChanged(nameof(ResolvedTag));
+        OnPropertyChanged(nameof(WantsLatest));
         StatusText = "No release has been checked yet.";
         State = PackageSourceState.NotChecked;
     }
