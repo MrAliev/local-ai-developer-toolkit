@@ -15,13 +15,17 @@ public sealed class DurableQueue : ISelectableBrokerQueue
     private readonly string _stagingRoot;
     private readonly string _quarantineRoot;
     private readonly string _sequencePath;
+    private readonly string _sweepMarkerPath;
     private readonly TimeProvider _timeProvider;
     private readonly string _mutexName;
+    private readonly RuntimeRetentionPolicy _retention;
+    private DateTimeOffset _nextSweepAtUtc = DateTimeOffset.MinValue;
 
     public DurableQueue(
         string runtimeRoot,
         TimeProvider? timeProvider = null,
-        TimeSpan? leaseDuration = null)
+        TimeSpan? leaseDuration = null,
+        RuntimeRetentionPolicy? retention = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
         RuntimeRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(runtimeRoot));
@@ -30,6 +34,9 @@ public sealed class DurableQueue : ISelectableBrokerQueue
         _stagingRoot = Path.Combine(RuntimeRoot, "staging");
         _quarantineRoot = Path.Combine(RuntimeRoot, "quarantine");
         _sequencePath = Path.Combine(RuntimeRoot, "sequence.json");
+        _sweepMarkerPath = Path.Combine(RuntimeRoot, "archive-sweep.json");
+        _retention = (retention ?? new RuntimeRetentionPolicyStore(RuntimeRoot).Read())
+            .Normalized();
         _timeProvider = timeProvider ?? TimeProvider.System;
         LeaseDuration = leaseDuration ?? TimeSpan.FromMinutes(2);
         if (LeaseDuration <= TimeSpan.Zero)
@@ -549,6 +556,7 @@ public sealed class DurableQueue : ISelectableBrokerQueue
 
     private void MaintainActiveRoot()
     {
+        SweepArchiveCore(force: false);
         foreach (var staging in Directory.EnumerateDirectories(_stagingRoot, "*.tmp"))
         {
             Directory.Delete(staging, recursive: true);
@@ -579,6 +587,212 @@ public sealed class DurableQueue : ISelectableBrokerQueue
                 Quarantine(directory);
                 throw new InvalidDataException("A corrupt committed job was quarantined.", exception);
             }
+        }
+    }
+
+    /// <summary>
+    /// Applies the retention bounds to the archive, at most once per sweep interval and at most
+    /// <see cref="RuntimeRetentionPolicy.MaximumActionsPerSweep"/> deletions at a time.
+    ///
+    /// Called from the same place that maintains the active root, so the broker and every client
+    /// share the work and no machine depends on one particular process being alive. Both throttles
+    /// are needed: the in-memory one keeps the broker's hundred-millisecond idle loop off the disk,
+    /// and the on-disk marker keeps a burst of short-lived CLI processes from each sweeping once.
+    ///
+    /// The archive is history. Nothing here may fail an active queue operation, so an unreadable
+    /// entry is skipped rather than quarantined and every IO failure ends the sweep quietly — the
+    /// next one picks up where this stopped.
+    /// </summary>
+    public RetentionSweepResult SweepArchive(bool force = false, bool dryRun = false)
+    {
+        using var mutex = EnterMutex(CancellationToken.None);
+        return SweepArchiveCore(force, dryRun);
+    }
+
+    private RetentionSweepResult SweepArchiveCore(bool force, bool dryRun = false)
+    {
+        var now = _timeProvider.GetUtcNow();
+        if (!force)
+        {
+            if (now < _nextSweepAtUtc)
+            {
+                return RetentionSweepResult.Empty;
+            }
+
+            _nextSweepAtUtc = now + _retention.SweepInterval;
+            if (ReadLastSweep() is { } last && now - last < _retention.SweepInterval)
+            {
+                return RetentionSweepResult.Empty;
+            }
+        }
+
+        try
+        {
+            var snapshots = new List<ArchivedJobSnapshot>();
+            foreach (var directory in Directory.EnumerateDirectories(_archiveRoot))
+            {
+                var state = new FileInfo(GetStatePath(directory));
+                if (!state.Exists)
+                {
+                    continue;
+                }
+
+                var response = new FileInfo(Path.Combine(directory, "response.json"));
+                snapshots.Add(new ArchivedJobSnapshot(
+                    directory,
+                    state.LastWriteTimeUtc,
+                    response.Exists ? response.Length : null));
+            }
+
+            var plan = ArchiveRetention.Plan(snapshots, _retention, now);
+            var deleted = 0;
+            var dropped = 0;
+            long reclaimed = 0;
+            foreach (var directory in plan.DirectoriesToDelete)
+            {
+                if (!IsExpendable(directory, now, out var bytes))
+                {
+                    continue;
+                }
+
+                if (!dryRun)
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+
+                deleted++;
+                reclaimed += bytes;
+            }
+
+            foreach (var directory in plan.ResponsesToDrop)
+            {
+                if (!IsExpendable(directory, now, out _))
+                {
+                    continue;
+                }
+
+                var response = new FileInfo(Path.Combine(directory, "response.json"));
+                if (!response.Exists)
+                {
+                    continue;
+                }
+
+                var length = response.Length;
+                if (!dryRun)
+                {
+                    response.Delete();
+                }
+
+                dropped++;
+                reclaimed += length;
+            }
+
+            if (!dryRun)
+            {
+                WriteLastSweep(now);
+            }
+            return new RetentionSweepResult(deleted, dropped, reclaimed);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                DirectoryNotFoundException)
+        {
+            return RetentionSweepResult.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Confirms, against the entry's own recorded timestamp rather than a file stat, that it is
+    /// terminal and past the response grace. The plan is built from stat data for speed; this is
+    /// what actually authorises a delete.
+    /// </summary>
+    private bool IsExpendable(string directory, DateTimeOffset now, out long bytes)
+    {
+        bytes = 0;
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                return false;
+            }
+
+            var state = ReadState(directory);
+            if (state.State is not (LocalJobState.Succeeded or LocalJobState.Failed or
+                    LocalJobState.Cancelled) ||
+                now - state.UpdatedAtUtc < _retention.ResponseGrace)
+            {
+                return false;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(directory))
+            {
+                bytes += new FileInfo(file).Length;
+            }
+
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is JsonException or InvalidDataException or ArgumentException)
+        {
+            // An archived job that no longer parses has no reader left either. Its age still
+            // comes from the file it does have, so it leaves with the rest of the expired
+            // history rather than becoming permanent.
+            return IsExpiredUnreadable(directory, now, ref bytes);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private bool IsExpiredUnreadable(string directory, DateTimeOffset now, ref long bytes)
+    {
+        var state = new FileInfo(GetStatePath(directory));
+        if (!state.Exists || now - state.LastWriteTimeUtc < _retention.ArchiveRetention)
+        {
+            return false;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(directory))
+        {
+            bytes += new FileInfo(file).Length;
+        }
+
+        return true;
+    }
+
+    private DateTimeOffset? ReadLastSweep()
+    {
+        try
+        {
+            if (!File.Exists(_sweepMarkerPath))
+            {
+                return null;
+            }
+
+            var marker = JsonSerializer.Deserialize<SweepMarkerDocument>(
+                File.ReadAllText(_sweepMarkerPath),
+                JsonOptions);
+            return marker?.SchemaVersion == 1 ? marker.SweptAtUtc : null;
+        }
+        catch (Exception exception) when (
+            exception is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private void WriteLastSweep(DateTimeOffset now)
+    {
+        try
+        {
+            AtomicWriteJson(_sweepMarkerPath, new SweepMarkerDocument(1, now));
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // The marker is a throttle, not a record. Losing it costs one extra sweep.
         }
     }
 
@@ -723,6 +937,10 @@ public sealed class DurableQueue : ISelectableBrokerQueue
         [property: JsonRequired] int SchemaVersion,
         [property: JsonRequired] long Value);
 
+    private sealed record SweepMarkerDocument(
+        [property: JsonRequired] int SchemaVersion,
+        [property: JsonRequired] DateTimeOffset SweptAtUtc);
+
     private sealed record RequestDocument(
         [property: JsonRequired] int SchemaVersion,
         [property: JsonRequired] LocalJobRequest Request);
@@ -756,6 +974,19 @@ public sealed class DurableQueue : ISelectableBrokerQueue
 }
 
 public sealed record EnqueueResult(Guid JobId, long Sequence, bool JoinedExisting);
+
+/// <summary>
+/// What one archive sweep actually removed. Reported rather than counted silently so
+/// <c>localai prune</c> can say what it did and a sweep that found nothing is distinguishable
+/// from one that never ran.
+/// </summary>
+public sealed record RetentionSweepResult(
+    int JobsDeleted,
+    int ResponsesDropped,
+    long BytesReclaimed)
+{
+    public static RetentionSweepResult Empty { get; } = new(0, 0, 0);
+}
 
 public sealed record QueuedJobCandidate(
     LocalJobRequest Request,
