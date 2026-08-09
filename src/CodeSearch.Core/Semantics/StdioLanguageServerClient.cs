@@ -74,7 +74,7 @@ public sealed class StdioLanguageServerClient : ILanguageServerClient
         ArgumentNullException.ThrowIfNull(spec);
         spec.Validate();
         var root = Path.GetFullPath(workspaceRoot);
-        var executable = ResolveExecutable(spec.Executable);
+        var executable = ExecutableResolver.Resolve(spec.Executable);
         var commandScript = OperatingSystem.IsWindows() &&
             (executable.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
              executable.EndsWith(".bat", StringComparison.OrdinalIgnoreCase));
@@ -619,46 +619,6 @@ public sealed class StdioLanguageServerClient : ILanguageServerClient
         }
 
         return Encoding.UTF8.GetString(captured.GetBuffer(), 0, checked((int)captured.Length));
-    }
-
-    private static string ResolveExecutable(string executable)
-    {
-        if (Path.IsPathRooted(executable) || executable.Contains(Path.DirectorySeparatorChar) ||
-            executable.Contains(Path.AltDirectorySeparatorChar))
-        {
-            return ResolveCandidate(executable) ?? executable;
-        }
-
-        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var candidate = ResolveCandidate(Path.Combine(directory.Trim('"'), executable));
-            if (candidate is not null)
-            {
-                return candidate;
-            }
-        }
-
-        return executable;
-    }
-
-    private static string? ResolveCandidate(string candidate)
-    {
-        if (File.Exists(candidate))
-        {
-            return Path.GetFullPath(candidate);
-        }
-
-        if (!OperatingSystem.IsWindows() || Path.HasExtension(candidate))
-        {
-            return null;
-        }
-
-        return new[] { ".exe", ".cmd", ".bat" }
-            .Select(extension => candidate + extension)
-            .FirstOrDefault(File.Exists) is { } resolved
-            ? Path.GetFullPath(resolved)
-            : null;
     }
 
     private static string CommandScriptInvocation(

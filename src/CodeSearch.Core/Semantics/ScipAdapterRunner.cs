@@ -111,7 +111,7 @@ public sealed class ScipAdapterRunner(ScipImporter? importer = null)
         var arguments = spec.Arguments
             .Select(argument => Expand(argument, root))
             .ToArray();
-        var executable = ResolveExecutable(spec.Executable);
+        var executable = ExecutableResolver.Resolve(spec.Executable);
         var isCommandScript = OperatingSystem.IsWindows() &&
             (executable.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
              executable.EndsWith(".bat", StringComparison.OrdinalIgnoreCase));
@@ -133,7 +133,7 @@ public sealed class ScipAdapterRunner(ScipImporter? importer = null)
             // order used for executable discovery, rather than its parent's stale copy.
             start.Environment["PATH"] = string.Join(
                 Path.PathSeparator,
-                ExecutableSearchDirectories());
+                ExecutableResolver.SearchDirectories());
         }
 
         if (isCommandScript)
@@ -272,115 +272,6 @@ public sealed class ScipAdapterRunner(ScipImporter? importer = null)
         return characters.Length == 0 ? "project" : new string(characters);
     }
 
-    private static string ResolveExecutable(string executable)
-    {
-        if (Path.IsPathRooted(executable) ||
-            executable.Contains(Path.DirectorySeparatorChar) ||
-            executable.Contains(Path.AltDirectorySeparatorChar))
-        {
-            return ResolveCandidate(executable) ?? executable;
-        }
-
-        foreach (var directory in ExecutableSearchDirectories())
-        {
-            var candidate = ResolveCandidate(Path.Combine(directory, executable));
-            if (candidate is not null)
-            {
-                return candidate;
-            }
-        }
-
-        return executable;
-    }
-
-    private static IEnumerable<string> ExecutableSearchDirectories()
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (OperatingSystem.IsWindows())
-        {
-            var npmDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "npm");
-            if (seen.Add(npmDirectory))
-            {
-                yield return npmDirectory;
-            }
-        }
-
-        foreach (var source in ExecutablePathSources())
-        {
-            foreach (var entry in source.Split(
-                         Path.PathSeparator,
-                         StringSplitOptions.RemoveEmptyEntries))
-            {
-                var directory = entry.Trim().Trim('"');
-                if (directory.Length > 0 && seen.Add(directory))
-                {
-                    yield return directory;
-                }
-            }
-        }
-    }
-
-    private static IEnumerable<string> ExecutablePathSources()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            yield return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-            yield break;
-        }
-
-        foreach (var target in new[]
-                 {
-                     EnvironmentVariableTarget.Machine,
-                     EnvironmentVariableTarget.User,
-                 })
-        {
-            string? value;
-            try
-            {
-                value = Environment.GetEnvironmentVariable("Path", target);
-            }
-            catch (System.Security.SecurityException)
-            {
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                yield return value;
-            }
-        }
-
-        yield return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-    }
-
-    private static string? ResolveCandidate(string candidate)
-    {
-        if (OperatingSystem.IsWindows() && !Path.HasExtension(candidate))
-        {
-            // npm installs both a POSIX shell script with no extension and a Windows
-            // .cmd shim. File.Exists(candidate) is therefore true on Windows, but that
-            // extensionless script is not a valid Win32 executable. Match PATHEXT
-            // semantics before considering the bare file.
-            foreach (var extension in new[] { ".exe", ".cmd", ".bat" })
-            {
-                if (File.Exists(candidate + extension))
-                {
-                    return Path.GetFullPath(candidate + extension);
-                }
-            }
-
-            return null;
-        }
-
-        if (File.Exists(candidate))
-        {
-            return Path.GetFullPath(candidate);
-        }
-
-        return null;
-    }
 
     private static string CommandScriptInvocation(
         string executable,

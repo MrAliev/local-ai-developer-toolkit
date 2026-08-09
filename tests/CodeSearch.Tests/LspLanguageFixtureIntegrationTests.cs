@@ -11,11 +11,16 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
     [Fact]
     public async Task TypeScriptLanguageServerProvidesExactCrossFileNavigation()
     {
+        // Discovered the way the product discovers it, so an installed server runs the fixture
+        // instead of an environment variable being the only way in.
         var executable = Environment.GetEnvironmentVariable(
-            "LOCALAI_LSP_TYPESCRIPT_EXECUTABLE");
+            "LOCALAI_LSP_TYPESCRIPT_EXECUTABLE")
+            ?? ExecutableResolver.Find("typescript-language-server");
         if (string.IsNullOrWhiteSpace(executable))
         {
-            Assert.Skip("Set LOCALAI_LSP_TYPESCRIPT_EXECUTABLE to run the real fixture.");
+            Assert.Skip(
+                "Install typescript-language-server or set " +
+                "LOCALAI_LSP_TYPESCRIPT_EXECUTABLE to run the real fixture.");
         }
 
         Write("tsconfig.json", """
@@ -61,10 +66,12 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
     [Fact]
     public async Task PyrightLanguageServerProvidesExactCrossFileNavigation()
     {
-        var executable = Environment.GetEnvironmentVariable("LOCALAI_LSP_PYRIGHT_EXECUTABLE");
+        var executable = Environment.GetEnvironmentVariable("LOCALAI_LSP_PYRIGHT_EXECUTABLE")
+            ?? ExecutableResolver.Find("pyright-langserver");
         if (string.IsNullOrWhiteSpace(executable))
         {
-            Assert.Skip("Set LOCALAI_LSP_PYRIGHT_EXECUTABLE to run the real fixture.");
+            Assert.Skip(
+                "Install pyright or set LOCALAI_LSP_PYRIGHT_EXECUTABLE to run the real fixture.");
         }
 
         var definitionText = Write("definition.py", """
