@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CodeSearch.Core.Semantics;
 
 namespace CodeSearch.Tests;
@@ -23,6 +24,22 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
                 "LOCALAI_LSP_TYPESCRIPT_EXECUTABLE to run the real fixture.");
         }
 
+        // The second prerequisite, and the one whose absence used to look like a product failure.
+        // The server does not carry a TypeScript: it looks for one in the workspace, and this
+        // fixture's workspace is a temporary directory with no node_modules. Naming a tsserver
+        // explicitly is both what makes the fixture hermetic and the feature under test.
+        var tsserver = FindTsServer(executable);
+        if (tsserver is null)
+        {
+            Assert.Skip(
+                "No usable tsserver.js was found beside typescript-language-server. Install a " +
+                "TypeScript 5.x (7.x no longer ships lib/tsserver.js) or set " +
+                "LOCALAI_LSP_TYPESCRIPT_TSSERVER_PATH to run the real fixture.");
+        }
+
+        // Past this point both prerequisites are present, so anything that goes wrong is a
+        // genuine failure and the test says so instead of skipping. Skipping on a failed
+        // initialize is what let the 0.1.31 and 0.1.32 defects ship unseen.
         Write("tsconfig.json", """
             {
               "compilerOptions": {
@@ -44,7 +61,10 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
             export const message = greet("LocalAi");
             """);
 
-        await using var manager = Manager(executable, ["--stdio"]);
+        await using var manager = Manager(
+            executable,
+            ["--stdio"],
+            JsonSerializer.SerializeToElement(new { tsserver = new { path = tsserver } }));
         await manager.OpenOrUpdateAsync(
             _root, "src/definition.ts", "typescript", 1, definitionText, Ct);
         await manager.OpenOrUpdateAsync(
@@ -105,7 +125,8 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
 
     private LanguageServerSessionManager Manager(
         string executable,
-        IReadOnlyList<string> arguments) =>
+        IReadOnlyList<string> arguments,
+        JsonElement? initializationOptions = null) =>
         new((workspaceRoot, _) => StdioLanguageServerClient.Start(
             workspaceRoot,
             new LanguageServerProcessSpec(
@@ -113,7 +134,73 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
                 arguments,
                 RequestTimeout: TimeSpan.FromSeconds(30),
                 ShutdownTimeout: TimeSpan.FromSeconds(5),
-                MaximumMessageBytes: 16 * 1024 * 1024)));
+                MaximumMessageBytes: 16 * 1024 * 1024,
+                InitializationOptions: initializationOptions)));
+
+    /// <summary>
+    /// Finds a tsserver the language server can actually run, or null when there is none.
+    ///
+    /// Presence of <c>lib/tsserver.js</c> is the whole test of usability, and it is not a
+    /// formality: TypeScript 7 stopped shipping that file, so a machine with a perfectly current
+    /// global TypeScript still has nothing typescript-language-server 5.x can drive. Searching
+    /// beside the server rather than on PATH is deliberate — a TypeScript installed as some other
+    /// package's dependency is still a working one.
+    /// </summary>
+    private static string? FindTsServer(string serverExecutable)
+    {
+        var configured = Environment.GetEnvironmentVariable(
+            "LOCALAI_LSP_TYPESCRIPT_TSSERVER_PATH");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            // An explicitly named path that does not exist is a mistake worth surfacing as a
+            // skip reason rather than silently searching somewhere else instead.
+            return File.Exists(configured) ? Path.GetFullPath(configured) : null;
+        }
+
+        var installRoot = Path.GetDirectoryName(Path.GetFullPath(serverExecutable));
+        if (installRoot is null)
+        {
+            return null;
+        }
+
+        var modules = Path.Combine(installRoot, "node_modules");
+        return Directory.Exists(modules)
+            ? TypeScriptPackages(modules)
+                .Select(package => Path.Combine(package, "lib", "tsserver.js"))
+                .FirstOrDefault(File.Exists)
+            : null;
+    }
+
+    private static IEnumerable<string> TypeScriptPackages(string modules)
+    {
+        yield return Path.Combine(modules, "typescript");
+        foreach (var entry in Directories(modules))
+        {
+            yield return Path.Combine(entry, "node_modules", "typescript");
+            if (!Path.GetFileName(entry).StartsWith('@'))
+            {
+                continue;
+            }
+
+            foreach (var scoped in Directories(entry))
+            {
+                yield return Path.Combine(scoped, "node_modules", "typescript");
+            }
+        }
+    }
+
+    private static IEnumerable<string> Directories(string path)
+    {
+        try
+        {
+            return Directory.EnumerateDirectories(path);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
 
     private string Write(string relativePath, string text)
     {
