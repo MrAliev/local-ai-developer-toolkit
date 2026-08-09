@@ -14,6 +14,11 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),
         "codesearch-fallback-" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>A runtime of this test's own, so a concurrent sync cannot compete with it.</summary>
+    private readonly string _runtimeRoot = Path.Combine(
+        Path.GetTempPath(),
+        "codesearch-fallback-runtime-" + Guid.NewGuid().ToString("N"));
     private readonly WorkingIndexIdentity _identity;
     private readonly GenerationIdentity _generation;
 
@@ -32,7 +37,7 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
         Git("add", ".");
         Git("commit", "-m", "Initial");
 
-        _identity = RuntimeIndexLayout.Inspect(_root);
+        _identity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
         _generation = Generation(CalibratedModel);
         PublishIndex(_generation, CreateIndex(_generation));
     }
@@ -155,13 +160,15 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
         var unknownGeneration = Generation("unknown-embedding-model");
         PublishIndex(unknownGeneration, CreateIndex(unknownGeneration));
         var embeddingRequested = false;
-        var service = new SearchService(model =>
-        {
-            embeddingRequested = true;
-            return new ThrowingEmbeddingClient(
-                model,
-                new InvalidOperationException("must not embed"));
-        });
+        var service = new SearchService(
+            model =>
+            {
+                embeddingRequested = true;
+                return new ThrowingEmbeddingClient(
+                    model,
+                    new InvalidOperationException("must not embed"));
+            },
+            runtimeRoot: _runtimeRoot);
 
         var error = await Assert.ThrowsAsync<SearchNotReadyException>(
             () => service.SearchAsync(
@@ -178,7 +185,9 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
     }
 
     private SearchService ServiceThrowing(Exception exception) =>
-        new(model => new ThrowingEmbeddingClient(model, exception));
+        new(
+            model => new ThrowingEmbeddingClient(model, exception),
+            runtimeRoot: _runtimeRoot);
 
     private GenerationIdentity Generation(string model) =>
         new(
@@ -287,7 +296,7 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
 
     public void Dispose()
     {
-        DeleteTree(_identity.RepositoryRuntimeRoot);
+        DeleteTree(_runtimeRoot);
         DeleteTree(_root);
     }
 

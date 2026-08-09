@@ -101,6 +101,14 @@ public sealed class SearchService
         _runtimeRoot = runtimeRoot;
     }
 
+    /// <summary>
+    /// The installation this service was pointed at, for callers that have to reach the same one
+    /// through something other than this service. The MCP status tool is the case: it reads the
+    /// sync progress file beside the index, and reading it from a different installation than the
+    /// index came from would report one repository's progress against another's index.
+    /// </summary>
+    public string? RuntimeRoot => _runtimeRoot;
+
     public IEmbeddingClient CreateEmbeddingClient(string model) =>
         _embeddingClientFactory(model);
 
@@ -131,7 +139,7 @@ public sealed class SearchService
         string query, string? root, SearchOptions options, CancellationToken ct = default)
     {
         var workingRoot = RepoLocator.ResolveWorkingRoot(root);
-        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root));
+        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root), _runtimeRoot);
         var baseIndex = Load(indexPath);
         RequireSnapshotIdentity(baseIndex);
 
@@ -193,7 +201,7 @@ public sealed class SearchService
                 requested with { RepositoryId = identity.RepositoryId });
         }
 
-        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root));
+        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root), _runtimeRoot);
         var baseIndex = Load(indexPath);
         var actualSnapshot = new SearchChunkId(
             identity.RepositoryId,
@@ -375,7 +383,7 @@ public sealed class SearchService
     {
         var workingRoot = RepoLocator.ResolveWorkingRoot(root);
         var repositoryRoot = RepoLocator.ResolveRoot(root);
-        var indexPath = RepoLocator.IndexPathFor(repositoryRoot);
+        var indexPath = RepoLocator.IndexPathFor(repositoryRoot, _runtimeRoot);
         var currentCommit = RepoLocator.GitCommit(workingRoot);
 
         if (!File.Exists(indexPath))

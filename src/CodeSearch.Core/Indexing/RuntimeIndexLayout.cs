@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using LocalAi.Contracts;
 using LocalAi.Repository;
 
 namespace CodeSearch.Core.Indexing;
@@ -16,11 +17,11 @@ public sealed record WorkingIndexIdentity(
 public static class RuntimeIndexLayout
 {
     /// <summary>
-    /// The installation directory used when a caller does not name one.
+    /// The installation directory used when a caller does not name one. Deferred to the one
+    /// definition every LocalAi component already shares rather than spelled out again here:
+    /// two answers to "which installation" is the problem this parameter exists to remove.
     /// </summary>
-    public static string DefaultRuntimeRoot => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "LocalAi");
+    public static string DefaultRuntimeRoot => ModelResidencyPolicyStore.DefaultRuntimeRoot;
 
     /// <summary>
     /// Inspects a working tree against a runtime root.
@@ -73,7 +74,7 @@ public static class RuntimeIndexLayout
         var store = new GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent();
         return current is null
-            ? RepoLocator.LegacyIndexPathFor(identity.RepositoryRoot)
+            ? RepoLocator.LegacyIndexPathFor(identity.RepositoryRoot, runtimeRoot)
             : store.IndexPath(current.GenerationId);
     }
 

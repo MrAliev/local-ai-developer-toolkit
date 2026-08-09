@@ -71,19 +71,19 @@ public static class RepoLocator
     /// Index location for a repository. The path hash keeps two checkouts of the same-named repo
     /// (say R:\IntelWash and R:\OldRepo\IntelWash_old) from colliding on one file.
     /// </summary>
-    public static string IndexPathFor(string root)
+    public static string IndexPathFor(string root, string? runtimeRoot = null)
     {
         try
         {
-            return RuntimeIndexLayout.ResolveBaseIndexPath(root);
+            return RuntimeIndexLayout.ResolveBaseIndexPath(root, runtimeRoot);
         }
         catch (InvalidOperationException)
         {
-            return LegacyIndexPathFor(root);
+            return LegacyIndexPathFor(root, runtimeRoot);
         }
     }
 
-    public static string LegacyIndexPathFor(string root)
+    public static string LegacyIndexPathFor(string root, string? runtimeRoot = null)
     {
         var full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
         var name = Path.GetFileName(full);
@@ -100,12 +100,20 @@ public static class RepoLocator
         var hash = Convert.ToHexString(
             SHA256.HashData(Encoding.UTF8.GetBytes(full.ToLowerInvariant())))[..8].ToLowerInvariant();
 
-        return Path.Combine(IndexDirectory, $"{name}-{hash}.cidx");
+        return Path.Combine(LegacyIndexDirectory(runtimeRoot), $"{name}-{hash}.cidx");
     }
 
-    public static string IndexDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "LocalAi", "repositories", "legacy");
+    /// <summary>
+    /// Where indexes built before generations existed are kept, inside the named installation.
+    /// This was the last path in the layout that reached for the machine's own runtime on its
+    /// own, which is enough to put a test's legacy index in the real one.
+    /// </summary>
+    public static string LegacyIndexDirectory(string? runtimeRoot = null) => Path.Combine(
+        string.IsNullOrWhiteSpace(runtimeRoot)
+            ? RuntimeIndexLayout.DefaultRuntimeRoot
+            : runtimeRoot,
+        "repositories",
+        "legacy");
 
     public static string GitCommit(string root) => RunGit(root, "rev-parse HEAD") ?? string.Empty;
 

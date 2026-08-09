@@ -203,13 +203,23 @@ public sealed class UntrustedContentMcpTests : IDisposable
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),
         "codesearch-untrusted-" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>
+    /// A runtime of this test's own. Declared before <c>_service</c> on purpose: field
+    /// initializers run in declaration order, and the service has to be pointed at it.
+    /// </summary>
+    private readonly string _runtimeRoot = Path.Combine(
+        Path.GetTempPath(),
+        "codesearch-untrusted-runtime-" + Guid.NewGuid().ToString("N"));
     private readonly WorkingIndexIdentity _identity;
     private readonly GenerationIdentity _generation;
-    private readonly SearchService _service =
-        new(_ => new TestEmbeddingClient());
+    private readonly SearchService _service;
 
     public UntrustedContentMcpTests()
     {
+        _service = new SearchService(
+            _ => new TestEmbeddingClient(),
+            runtimeRoot: _runtimeRoot);
         Directory.CreateDirectory(_root);
         File.WriteAllText(
             Path.Combine(_root, "Example.cs"),
@@ -221,7 +231,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
         Git("add", "Example.cs");
         Git("commit", "-m", "Initial");
 
-        _identity = RuntimeIndexLayout.Inspect(_root);
+        _identity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
         _generation = new GenerationIdentity(
             _identity.RepositoryId,
             _identity.HeadCommit,
@@ -576,7 +586,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
 
     public void Dispose()
     {
-        DeleteTree(_identity.RepositoryRuntimeRoot);
+        DeleteTree(_runtimeRoot);
         DeleteTree(_root);
     }
 

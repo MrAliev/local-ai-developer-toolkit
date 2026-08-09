@@ -36,12 +36,19 @@ public sealed class SemanticNavigationGateway
     private readonly ILiveSemanticNavigation? _liveNavigation;
     private readonly IHeuristicSemanticNavigation? _heuristicNavigation;
 
+    /// <param name="runtimeRoot">
+    /// The installation whose published generation is loaded. Null means the machine's own, which
+    /// is the only value production uses; a caller names one to read a generation that is not the
+    /// current user's. Ignored when <paramref name="contextFactory"/> is supplied, because the
+    /// factory has then already decided where the context comes from.
+    /// </param>
     public SemanticNavigationGateway(
         Func<string?, SemanticNavigationContext>? contextFactory = null,
         ILiveSemanticNavigation? liveNavigation = null,
-        IHeuristicSemanticNavigation? heuristicNavigation = null)
+        IHeuristicSemanticNavigation? heuristicNavigation = null,
+        string? runtimeRoot = null)
     {
-        _contextFactory = contextFactory ?? LoadCurrent;
+        _contextFactory = contextFactory ?? (root => LoadCurrent(root, runtimeRoot));
         _liveNavigation = liveNavigation;
         _heuristicNavigation = heuristicNavigation;
     }
@@ -297,10 +304,10 @@ public sealed class SemanticNavigationGateway
             ? RepoLocator.ResolveWorkingRoot(null)
             : Path.GetFullPath(root);
 
-    private static SemanticNavigationContext LoadCurrent(string? root)
+    private static SemanticNavigationContext LoadCurrent(string? root, string? runtimeRoot)
     {
         var workingRoot = RepoLocator.ResolveWorkingRoot(root);
-        var identity = RuntimeIndexLayout.Inspect(workingRoot);
+        var identity = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
         var store = new GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent()
             ?? throw new SemanticNavigationNotReadyException(
