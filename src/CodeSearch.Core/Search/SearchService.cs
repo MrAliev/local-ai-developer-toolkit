@@ -81,15 +81,24 @@ public sealed class SearchService
     private readonly Func<string, IEmbeddingClient> _embeddingClientFactory;
     private readonly Func<string, CancellationToken, Task<string>> _sourceTextReader;
 
+    /// <summary>
+    /// The installation this service reads indexes from. Null means the machine's own — the
+    /// only value production ever uses. A caller supplies one to work against an installation
+    /// that is not the current user's, which is what keeps tests out of the real runtime.
+    /// </summary>
+    private readonly string? _runtimeRoot;
+
     public SearchService(
         Func<string, IEmbeddingClient>? embeddingClientFactory = null,
-        Func<string, CancellationToken, Task<string>>? sourceTextReader = null)
+        Func<string, CancellationToken, Task<string>>? sourceTextReader = null,
+        string? runtimeRoot = null)
     {
         _embeddingClientFactory = embeddingClientFactory ??
             (model => new BrokerEmbeddingClient(
                 model,
                 BrokerClientFactory.CreateDefault()));
         _sourceTextReader = sourceTextReader ?? File.ReadAllTextAsync;
+        _runtimeRoot = runtimeRoot;
     }
 
     public IEmbeddingClient CreateEmbeddingClient(string model) =>
@@ -172,7 +181,7 @@ public sealed class SearchService
     {
         var requested = SearchChunkId.Parse(chunkId);
         var workingRoot = RepoLocator.ResolveWorkingRoot(root);
-        var identity = RuntimeIndexLayout.Inspect(workingRoot);
+        var identity = RuntimeIndexLayout.Inspect(workingRoot, _runtimeRoot);
 
         if (!string.Equals(
                 requested.RepositoryId,
@@ -225,7 +234,7 @@ public sealed class SearchService
                 "stale_source_content: The source file no longer matches the indexed content.");
         }
 
-        var currentIdentity = RuntimeIndexLayout.Inspect(workingRoot);
+        var currentIdentity = RuntimeIndexLayout.Inspect(workingRoot, _runtimeRoot);
         SearchChunkResolver.ValidateSnapshot(
             requested,
             new SearchChunkId(
@@ -308,7 +317,7 @@ public sealed class SearchService
     {
         if (!string.IsNullOrWhiteSpace(baseIndex.GenerationId))
         {
-            var identity = RuntimeIndexLayout.Inspect(workingRoot);
+            var identity = RuntimeIndexLayout.Inspect(workingRoot, _runtimeRoot);
             if (!string.Equals(
                     baseIndex.RepositoryId,
                     identity.RepositoryId,
@@ -392,7 +401,7 @@ public sealed class SearchService
         var index = TryGetCached(indexPath) ?? CodeIndex.Load(indexPath, withVectors: false);
         var identity = string.IsNullOrWhiteSpace(index.GenerationId)
             ? null
-            : RuntimeIndexLayout.Inspect(workingRoot);
+            : RuntimeIndexLayout.Inspect(workingRoot, _runtimeRoot);
         var requiresOverlay = identity is null
             ? !SameRoot(index.Root, workingRoot)
             : !string.Equals(index.GitTree, identity.HeadTree, StringComparison.Ordinal) ||
@@ -493,7 +502,7 @@ public sealed class SearchService
         var path = string.IsNullOrWhiteSpace(baseIndex.GenerationId)
             ? RepoLocator.OverlayPathFor(workingRoot)
             : RuntimeIndexLayout.OverlayPath(
-                identity ?? RuntimeIndexLayout.Inspect(workingRoot),
+                identity ?? RuntimeIndexLayout.Inspect(workingRoot, _runtimeRoot),
                 baseIndex.GenerationId);
         if (!File.Exists(path))
         {
@@ -632,3 +641,4 @@ public sealed class SearchService
             b.TrimEnd(Path.DirectorySeparatorChar),
             StringComparison.OrdinalIgnoreCase);
 }
+
