@@ -443,7 +443,7 @@ public static class CodeSearchTools
         string? root = null)
     {
         var status = service.Status(root);
-        var progress = ReadProgress(status.WorkingRoot);
+        var progress = ReadProgress(status.WorkingRoot, service.RuntimeRoot);
         var progressText = FormatProgress(progress);
         if (!status.Exists)
         {
@@ -523,11 +523,13 @@ public static class CodeSearchTools
             ? string.Empty
             : $"; a sync reached {progress.Phase} at {progress.UpdatedAtUtc:u}";
 
-    private static RepositoryIndexProgress? ReadProgress(string workingRoot)
+    private static RepositoryIndexProgress? ReadProgress(
+        string workingRoot,
+        string? runtimeRoot)
     {
         try
         {
-            var identity = RuntimeIndexLayout.Inspect(workingRoot);
+            var identity = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
             return new RepositoryIndexProgressStore(
                 identity.RepositoryRuntimeRoot).Read();
         }

@@ -79,9 +79,8 @@ public sealed class SemanticIndexingPolicyStore
             SemanticIndexingPolicy.FileName);
     }
 
-    public static string DefaultRuntimeRoot => System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "LocalAi");
+    public static string DefaultRuntimeRoot =>
+        LocalAi.Contracts.ModelResidencyPolicyStore.DefaultRuntimeRoot;
 
     public string Path => _path;
 

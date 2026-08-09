@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using LocalAi.Contracts;
 using LocalAi.Repository;
 
 namespace CodeSearch.Core.Indexing;
@@ -15,7 +16,25 @@ public sealed record WorkingIndexIdentity(
 
 public static class RuntimeIndexLayout
 {
-    public static WorkingIndexIdentity Inspect(string workingRoot)
+    /// <summary>
+    /// The installation directory used when a caller does not name one. Deferred to the one
+    /// definition every LocalAi component already shares rather than spelled out again here:
+    /// two answers to "which installation" is the problem this parameter exists to remove.
+    /// </summary>
+    public static string DefaultRuntimeRoot => ModelResidencyPolicyStore.DefaultRuntimeRoot;
+
+    /// <summary>
+    /// Inspects a working tree against a runtime root.
+    ///
+    /// <paramref name="runtimeRoot"/> exists so a caller can say which installation to look at
+    /// rather than always being handed the machine's own. Tests are the pressing case: they
+    /// wrote into the real %LOCALAPPDATA%\LocalAi and shared its broker, so an unrelated index
+    /// build running at the same moment could fail them — which reads as a flaky test rather
+    /// than as two things using one directory.
+    /// </summary>
+    public static WorkingIndexIdentity Inspect(
+        string workingRoot,
+        string? runtimeRoot = null)
     {
         workingRoot = RepoLocator.ResolveWorkingRoot(workingRoot);
         var repositoryRoot = RepoLocator.ResolveRoot(workingRoot);
@@ -24,9 +43,8 @@ public static class RuntimeIndexLayout
             "rev-parse --path-format=absolute --git-common-dir")
             ?? throw new InvalidOperationException("Git common directory is unavailable.");
         var identity = RepositoryIdentity.FromCommonDirectory(commonDirectory);
-        var runtimeRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalAi",
+        var repositoryRuntimeRoot = Path.Combine(
+            string.IsNullOrWhiteSpace(runtimeRoot) ? DefaultRuntimeRoot : runtimeRoot,
             "repositories",
             identity.Id);
         var head = RepoLocator.GitOutput(workingRoot, "rev-parse HEAD")
@@ -42,19 +60,21 @@ public static class RuntimeIndexLayout
             workingRoot,
             repositoryRoot,
             identity.Id,
-            runtimeRoot,
+            repositoryRuntimeRoot,
             head,
             tree,
             dirtyHash);
     }
 
-    public static string ResolveBaseIndexPath(string repositoryRoot)
+    public static string ResolveBaseIndexPath(
+        string repositoryRoot,
+        string? runtimeRoot = null)
     {
-        var identity = Inspect(repositoryRoot);
+        var identity = Inspect(repositoryRoot, runtimeRoot);
         var store = new GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent();
         return current is null
-            ? RepoLocator.LegacyIndexPathFor(identity.RepositoryRoot)
+            ? RepoLocator.LegacyIndexPathFor(identity.RepositoryRoot, runtimeRoot)
             : store.IndexPath(current.GenerationId);
     }
 

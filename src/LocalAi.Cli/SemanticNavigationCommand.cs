@@ -7,35 +7,39 @@ namespace LocalAi.Cli;
 
 internal static class SemanticNavigationCommand
 {
-    public static int Execute(string[] args)
+    /// <param name="runtimeRoot">
+    /// The installation whose policy files and published generation this command reads. Null
+    /// means the machine's own, which is the only value the CLI passes.
+    /// </param>
+    public static int Execute(string[] args, string? runtimeRoot = null)
     {
         var operation = args.FirstOrDefault() ?? "status";
         var root = Option(args, "--root");
         if (string.Equals(operation, "config", StringComparison.Ordinal))
         {
-            return Configure(args.Skip(1).ToArray());
+            return Configure(args.Skip(1).ToArray(), runtimeRoot);
         }
 
         if (string.Equals(operation, "lsp-config", StringComparison.Ordinal))
         {
-            return ConfigureLanguageServers(args.Skip(1).ToArray());
+            return ConfigureLanguageServers(args.Skip(1).ToArray(), runtimeRoot);
         }
 
         if (string.Equals(operation, "fallback-config", StringComparison.Ordinal))
         {
-            return ConfigureFallback(args.Skip(1).ToArray());
+            return ConfigureFallback(args.Skip(1).ToArray(), runtimeRoot);
         }
 
         if (string.Equals(operation, "evaluate", StringComparison.Ordinal))
         {
-            return Evaluate(args, root);
+            return Evaluate(args, root, runtimeRoot);
         }
 
         if (string.Equals(operation, "status", StringComparison.Ordinal))
         {
             try
             {
-                var index = Load(root);
+                var index = Load(root, runtimeRoot);
                 Console.WriteLine($"semantic documents: {index.Documents.Count}");
                 Console.WriteLine($"semantic symbols: {index.Symbols.Count}");
                 Console.WriteLine($"semantic occurrences: {index.Occurrences.Count}");
@@ -63,8 +67,8 @@ internal static class SemanticNavigationCommand
         {
             var gateway = new SemanticNavigationGateway(
                 heuristicNavigation: new HeuristicSemanticNavigation(
-                    new HeuristicNavigationPolicyStore(
-                        HeuristicNavigationPolicyStore.DefaultRuntimeRoot)));
+                    new HeuristicNavigationPolicyStore(Runtime(runtimeRoot))),
+                runtimeRoot: runtimeRoot);
             if (string.Equals(operation, "relationships", StringComparison.Ordinal))
             {
                 var direction = Enum.Parse<SemanticRelationshipDirection>(
@@ -123,10 +127,20 @@ internal static class SemanticNavigationCommand
         }
     }
 
-    private static SemanticIndex Load(string? root)
+    /// <summary>
+    /// The installation a command works against: the one it was given, or the machine's own.
+    /// </summary>
+    private static string Runtime(string? runtimeRoot) =>
+        string.IsNullOrWhiteSpace(runtimeRoot)
+            ? SemanticIndexingPolicyStore.DefaultRuntimeRoot
+            : runtimeRoot;
+
+    private static SemanticIndex Load(string? root, string? runtimeRoot)
     {
         var workingRoot = CodeSearch.Core.Indexing.RepoLocator.ResolveWorkingRoot(root);
-        var identity = CodeSearch.Core.Indexing.RuntimeIndexLayout.Inspect(workingRoot);
+        var identity = CodeSearch.Core.Indexing.RuntimeIndexLayout.Inspect(
+            workingRoot,
+            runtimeRoot);
         var store = new CodeSearch.Core.Indexing.GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent()
             ?? throw new SemanticNavigationNotReadyException("No current generation is published.");
@@ -157,10 +171,9 @@ internal static class SemanticNavigationCommand
         return null;
     }
 
-    private static int Configure(string[] args)
+    private static int Configure(string[] args, string? runtimeRoot)
     {
-        var store = new SemanticIndexingPolicyStore(
-            SemanticIndexingPolicyStore.DefaultRuntimeRoot);
+        var store = new SemanticIndexingPolicyStore(Runtime(runtimeRoot));
         var operation = args.FirstOrDefault() ?? "show";
         if (string.Equals(operation, "path", StringComparison.Ordinal))
         {
@@ -191,9 +204,9 @@ internal static class SemanticNavigationCommand
         return Usage();
     }
 
-    private static int ConfigureLanguageServers(string[] args)
+    private static int ConfigureLanguageServers(string[] args, string? runtimeRoot)
     {
-        var store = new LanguageServerPolicyStore(LanguageServerPolicyStore.DefaultRuntimeRoot);
+        var store = new LanguageServerPolicyStore(Runtime(runtimeRoot));
         var operation = args.FirstOrDefault() ?? "show";
         if (string.Equals(operation, "path", StringComparison.Ordinal))
         {
@@ -224,10 +237,9 @@ internal static class SemanticNavigationCommand
         return Usage();
     }
 
-    private static int ConfigureFallback(string[] args)
+    private static int ConfigureFallback(string[] args, string? runtimeRoot)
     {
-        var store = new HeuristicNavigationPolicyStore(
-            HeuristicNavigationPolicyStore.DefaultRuntimeRoot);
+        var store = new HeuristicNavigationPolicyStore(Runtime(runtimeRoot));
         var operation = args.FirstOrDefault() ?? "show";
         if (string.Equals(operation, "path", StringComparison.Ordinal))
         {
@@ -258,7 +270,7 @@ internal static class SemanticNavigationCommand
         return Usage();
     }
 
-    private static int Evaluate(string[] args, string? root)
+    private static int Evaluate(string[] args, string? root, string? runtimeRoot)
     {
         var casesPath = Option(args, "--cases");
         if (string.IsNullOrWhiteSpace(casesPath))
@@ -291,7 +303,7 @@ internal static class SemanticNavigationCommand
             var managedBefore = GC.GetTotalMemory(forceFullCollection: false);
             var workingSetBefore = process.WorkingSet64;
             var stopwatch = Stopwatch.StartNew();
-            var index = Load(workingRoot);
+            var index = Load(workingRoot, runtimeRoot);
             stopwatch.Stop();
             process.Refresh();
             var managedAfter = GC.GetTotalMemory(forceFullCollection: false);
@@ -306,7 +318,7 @@ internal static class SemanticNavigationCommand
                 Snapshot = new { index.GitTree, index.DirtyHash },
                 Index = new
                 {
-                    Bytes = SemanticIndexBytes(workingRoot),
+                    Bytes = SemanticIndexBytes(workingRoot, runtimeRoot),
                     Documents = index.Documents.Count,
                     Symbols = index.Symbols.Count,
                     Occurrences = index.Occurrences.Count,
@@ -330,9 +342,9 @@ internal static class SemanticNavigationCommand
         }
     }
 
-    private static long SemanticIndexBytes(string root)
+    private static long SemanticIndexBytes(string root, string? runtimeRoot)
     {
-        var identity = CodeSearch.Core.Indexing.RuntimeIndexLayout.Inspect(root);
+        var identity = CodeSearch.Core.Indexing.RuntimeIndexLayout.Inspect(root, runtimeRoot);
         var store = new CodeSearch.Core.Indexing.GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent()
             ?? throw new SemanticNavigationNotReadyException("No current generation is published.");

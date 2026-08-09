@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Search;
 using LocalAi.Contracts;
@@ -11,7 +11,11 @@ public sealed class SearchServiceStatusTests : IDisposable
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),
         "codesearch-status-" + Guid.NewGuid().ToString("N"));
-    private string? _runtimeRoot;
+
+    /// <summary>A runtime of this test's own, so a concurrent sync cannot compete with it.</summary>
+    private readonly string _runtimeRoot = Path.Combine(
+        Path.GetTempPath(),
+        "codesearch-status-runtime-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
     public void Generation_status_tracks_the_manifest_mainline_ref()
@@ -25,14 +29,13 @@ public sealed class SearchServiceStatusTests : IDisposable
         Git("add", "A.cs");
         Git("commit", "-m", "Initial");
         Git("branch", "dev");
-        var devIdentity = RuntimeIndexLayout.Inspect(_root);
+        var devIdentity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
 
         Git("switch", "-c", "feature");
         File.WriteAllText(sourcePath, "class A { int Feature; }\r\n");
         Git("add", "A.cs");
         Git("commit", "-m", "Feature");
-        var featureIdentity = RuntimeIndexLayout.Inspect(_root);
-        _runtimeRoot = featureIdentity.RepositoryRuntimeRoot;
+        var featureIdentity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
 
         var generation = new GenerationIdentity(
             featureIdentity.RepositoryId,
@@ -87,11 +90,11 @@ public sealed class SearchServiceStatusTests : IDisposable
                 [new RepositoryWorktree(_root, featureIdentity.HeadCommit, "refs/heads/feature")],
                 DateTimeOffset.UtcNow));
 
-        Assert.False(new SearchService().Status(_root).CommitDrifted);
+        Assert.False(new SearchService(runtimeRoot: _runtimeRoot).Status(_root).CommitDrifted);
 
         Git("branch", "-f", "dev", "feature");
 
-        Assert.True(new SearchService().Status(_root).CommitDrifted);
+        Assert.True(new SearchService(runtimeRoot: _runtimeRoot).Status(_root).CommitDrifted);
     }
 
     [Fact]
@@ -106,8 +109,7 @@ public sealed class SearchServiceStatusTests : IDisposable
         Git("add", "A.cs");
         Git("commit", "-m", "Initial");
 
-        var identity = RuntimeIndexLayout.Inspect(_root);
-        _runtimeRoot = identity.RepositoryRuntimeRoot;
+        var identity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
         var generation = new GenerationIdentity(
             identity.RepositoryId,
             identity.HeadCommit,
@@ -144,19 +146,19 @@ public sealed class SearchServiceStatusTests : IDisposable
             File.Delete(sourceIndex);
         }
 
-        var cleanStatus = new SearchService().Status(_root);
+        var cleanStatus = new SearchService(runtimeRoot: _runtimeRoot).Status(_root);
         Assert.False(cleanStatus.RequiresOverlay);
         Assert.True(cleanStatus.WorkingRootIsBase);
 
         File.WriteAllText(sourcePath, "class A { int Value; }\r\n");
 
-        var status = new SearchService().Status(_root);
+        var status = new SearchService(runtimeRoot: _runtimeRoot).Status(_root);
 
         Assert.True(status.RequiresOverlay);
         Assert.False(status.WorkingRootIsBase);
         Assert.False(status.Overlay.Exists);
 
-        var dirtyIdentity = RuntimeIndexLayout.Inspect(_root);
+        var dirtyIdentity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
         var overlayPath = RuntimeIndexLayout.OverlayPath(dirtyIdentity, generation.Id);
         Directory.CreateDirectory(Path.GetDirectoryName(overlayPath)!);
         new CodeIndex
@@ -176,7 +178,7 @@ public sealed class SearchServiceStatusTests : IDisposable
             Vectors = []
         }.Save(overlayPath);
 
-        var overlayStatus = new SearchService().Status(_root);
+        var overlayStatus = new SearchService(runtimeRoot: _runtimeRoot).Status(_root);
         Assert.True(overlayStatus.RequiresOverlay);
         Assert.True(overlayStatus.Overlay.Exists);
     }

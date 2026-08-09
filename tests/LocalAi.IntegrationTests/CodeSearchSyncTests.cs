@@ -11,7 +11,15 @@ public sealed class CodeSearchSyncTests : IDisposable
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),
         "localai-sync-" + Guid.NewGuid().ToString("N"));
-    private string? _repositoryRuntimeRoot;
+
+    /// <summary>
+    /// A runtime of this test's own. A sync writes a manifest and a progress file before it can
+    /// fail, and doing that in the real %LOCALAPPDATA%\LocalAi puts this test in contention with
+    /// whatever else is indexing at the time.
+    /// </summary>
+    private readonly string _runtimeRoot = Path.Combine(
+        Path.GetTempPath(),
+        "localai-sync-runtime-" + Guid.NewGuid().ToString("N"));
 
     [Theory]
     [InlineData(false, "refs/heads/main")]
@@ -35,18 +43,18 @@ public sealed class CodeSearchSyncTests : IDisposable
         var error = await Assert.ThrowsAsync<InvalidOperationException>(
             () => CodeSearchSyncCommand.ExecuteAsync(
                 _root,
-                cancellationToken: TestContext.Current.CancellationToken));
+                cancellationToken: TestContext.Current.CancellationToken,
+                runtimeRoot: _runtimeRoot));
         Assert.Contains("Nothing was embedded", error.Message);
 
         var commonDirectory = Git("rev-parse", "--path-format=absolute", "--git-common-dir");
         var identity = RepositoryIdentity.FromCommonDirectory(commonDirectory);
-        _repositoryRuntimeRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalAi",
+        var repositoryRuntimeRoot = Path.Combine(
+            _runtimeRoot,
             "repositories",
             identity.Id);
         var manifest = Assert.IsType<LocalAi.Contracts.RepositoryManifest>(
-            new RepositoryManifestStore(_repositoryRuntimeRoot).Read());
+            new RepositoryManifestStore(repositoryRuntimeRoot).Read());
         Assert.Equal(expectedRef, manifest.DevRef);
         Assert.Equal(
             LocalAi.Contracts.RepositoryIndexState.Initializing,
@@ -116,10 +124,9 @@ public sealed class CodeSearchSyncTests : IDisposable
 
     public void Dispose()
     {
-        if (_repositoryRuntimeRoot is not null &&
-            Directory.Exists(_repositoryRuntimeRoot))
+        if (Directory.Exists(_runtimeRoot))
         {
-            Directory.Delete(_repositoryRuntimeRoot, recursive: true);
+            Directory.Delete(_runtimeRoot, recursive: true);
         }
 
         if (Directory.Exists(_root))

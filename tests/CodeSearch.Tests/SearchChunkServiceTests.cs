@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using CodeSearch.Core.Chunking;
@@ -13,6 +13,15 @@ public sealed class SearchChunkServiceTests : IDisposable
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),
         "codesearch-chunk-" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>
+    /// A runtime of this test's own. Without it these tests publish generations into the real
+    /// %LOCALAPPDATA%\LocalAi, where a sync running at the same moment — a Git hook fires one on
+    /// checkout — competes with them, and the loser reads as a flaky test.
+    /// </summary>
+    private readonly string _runtimeRoot = Path.Combine(
+        Path.GetTempPath(),
+        "codesearch-chunk-runtime-" + Guid.NewGuid().ToString("N"));
     private readonly WorkingIndexIdentity _identity;
     private readonly GenerationIdentity _generation;
 
@@ -28,7 +37,7 @@ public sealed class SearchChunkServiceTests : IDisposable
         Git("add", "Example.cs");
         Git("commit", "-m", "Initial");
 
-        _identity = RuntimeIndexLayout.Inspect(_root);
+        _identity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
         _generation = new GenerationIdentity(
             _identity.RepositoryId,
             _identity.HeadCommit,
@@ -53,7 +62,7 @@ public sealed class SearchChunkServiceTests : IDisposable
             null,
             0).Encode();
 
-        var chunk = await new SearchService().GetChunkAsync(
+        var chunk = await Service().GetChunkAsync(
             id,
             _root,
             TestContext.Current.CancellationToken);
@@ -73,7 +82,7 @@ public sealed class SearchChunkServiceTests : IDisposable
         File.AppendAllText(Path.Combine(_root, "Example.cs"), "// changed\r\n");
 
         var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
-            () => new SearchService().GetChunkAsync(
+            () => Service().GetChunkAsync(
                 id,
                 _root,
                 TestContext.Current.CancellationToken));
@@ -98,7 +107,7 @@ public sealed class SearchChunkServiceTests : IDisposable
         };
 
         var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
-            () => new SearchService().GetChunkAsync(
+            () => Service().GetChunkAsync(
                 id.Encode(),
                 _root,
                 TestContext.Current.CancellationToken));
@@ -110,7 +119,7 @@ public sealed class SearchChunkServiceTests : IDisposable
     public async Task Refuses_a_chunk_ordinal_outside_the_exact_snapshot()
     {
         var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
-            () => new SearchService().GetChunkAsync(
+            () => Service().GetChunkAsync(
                 (CurrentId() with { Ordinal = 1 }).Encode(),
                 _root,
                 TestContext.Current.CancellationToken));
@@ -126,7 +135,7 @@ public sealed class SearchChunkServiceTests : IDisposable
             .Save(store.IndexPath(_generation.Id));
 
         var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
-            () => new SearchService().GetChunkAsync(
+            () => Service().GetChunkAsync(
                 CurrentId().Encode(),
                 _root,
                 TestContext.Current.CancellationToken));
@@ -145,7 +154,8 @@ public sealed class SearchChunkServiceTests : IDisposable
                     "changed one\r\nchanged two\r\nchanged three\r\n",
                     cancellationToken);
                 return await File.ReadAllTextAsync(path, cancellationToken);
-            });
+            },
+            runtimeRoot: _runtimeRoot);
 
         var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
             () => service.GetChunkAsync(
@@ -170,7 +180,8 @@ public sealed class SearchChunkServiceTests : IDisposable
                     "// changed after read\r\n",
                     cancellationToken);
                 return indexedText;
-            });
+            },
+            runtimeRoot: _runtimeRoot);
 
         var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
             () => service.GetChunkAsync(
@@ -194,7 +205,7 @@ public sealed class SearchChunkServiceTests : IDisposable
             .Save(store.IndexPath(_generation.Id));
 
         var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
-            () => new SearchService().GetChunkAsync(
+            () => Service().GetChunkAsync(
                 CurrentId().Encode(),
                 _root,
                 TestContext.Current.CancellationToken));
@@ -210,7 +221,7 @@ public sealed class SearchChunkServiceTests : IDisposable
             .Save(store.IndexPath(_generation.Id));
 
         var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
-            () => new SearchService().GetChunkAsync(
+            () => Service().GetChunkAsync(
                 CurrentId().Encode(),
                 _root,
                 TestContext.Current.CancellationToken));
@@ -231,7 +242,7 @@ public sealed class SearchChunkServiceTests : IDisposable
         try
         {
             CreateDirectoryLink(linkPath, outsideRoot);
-            var identity = RuntimeIndexLayout.Inspect(_root);
+            var identity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
             Assert.NotNull(identity.DirtyHash);
             var overlayPath = RuntimeIndexLayout.OverlayPath(
                 identity,
@@ -252,7 +263,7 @@ public sealed class SearchChunkServiceTests : IDisposable
                 0).Encode();
 
             var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
-                () => new SearchService().GetChunkAsync(
+                () => Service().GetChunkAsync(
                     id,
                     _root,
                     TestContext.Current.CancellationToken));
@@ -300,7 +311,7 @@ public sealed class SearchChunkServiceTests : IDisposable
             Git("config", "core.symlinks", "true");
             Git("add", "Linked.cs");
             Git("commit", "-m", "Add linked source");
-            var identity = RuntimeIndexLayout.Inspect(_root);
+            var identity = RuntimeIndexLayout.Inspect(_root, _runtimeRoot);
             var generation = new GenerationIdentity(
                 identity.RepositoryId,
                 identity.HeadCommit,
@@ -320,7 +331,7 @@ public sealed class SearchChunkServiceTests : IDisposable
                 0).Encode();
 
             var error = await Assert.ThrowsAsync<SearchChunkResolutionException>(
-                () => new SearchService().GetChunkAsync(
+                () => Service().GetChunkAsync(
                     id,
                     _root,
                     TestContext.Current.CancellationToken));
@@ -341,14 +352,16 @@ public sealed class SearchChunkServiceTests : IDisposable
     public async Task Legacy_indexes_fail_with_rebuild_guidance_before_requesting_an_embedding()
     {
         DeleteTree(_identity.RepositoryRuntimeRoot);
-        var legacyPath = RepoLocator.LegacyIndexPathFor(_root);
+        var legacyPath = RepoLocator.LegacyIndexPathFor(_root, _runtimeRoot);
         WriteLegacyIndexV2(legacyPath);
         var embeddingRequested = false;
-        var service = new SearchService(_ =>
-        {
-            embeddingRequested = true;
-            throw new InvalidOperationException("Embedding must not be requested.");
-        });
+        var service = new SearchService(
+            _ =>
+            {
+                embeddingRequested = true;
+                throw new InvalidOperationException("Embedding must not be requested.");
+            },
+            runtimeRoot: _runtimeRoot);
         try
         {
             var error = await Assert.ThrowsAsync<SearchNotReadyException>(
@@ -379,7 +392,7 @@ public sealed class SearchChunkServiceTests : IDisposable
         var id = CurrentId().Encode();
 
         var response = await CodeSearchTools.GetCodeChunk(
-            new SearchService(),
+            Service(),
             id,
             _root,
             TestContext.Current.CancellationToken);
@@ -388,6 +401,8 @@ public sealed class SearchChunkServiceTests : IDisposable
         Assert.Contains("Example.Run", response, StringComparison.Ordinal);
         Assert.Contains("line two\nline three\nline four", response, StringComparison.Ordinal);
     }
+
+    private SearchService Service() => new(runtimeRoot: _runtimeRoot);
 
     private SearchChunkId CurrentId() =>
         new(
@@ -561,7 +576,7 @@ public sealed class SearchChunkServiceTests : IDisposable
 
     public void Dispose()
     {
-        DeleteTree(_identity.RepositoryRuntimeRoot);
+        DeleteTree(_runtimeRoot);
         DeleteTree(_root);
     }
 

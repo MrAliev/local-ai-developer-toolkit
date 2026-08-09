@@ -33,13 +33,19 @@ public static class CodeSearchSyncCommand
         SemanticIndex Index,
         IReadOnlyList<SemanticAdapterStatus> AdapterStatuses);
 
+    /// <param name="runtimeRoot">
+    /// The installation this sync publishes into and reads its policy from. Null means the
+    /// machine's own, which is the only value production uses; naming one is what lets a test
+    /// run a whole sync without touching the real runtime.
+    /// </param>
     public static async Task<CodeSearchSyncResult> ExecuteAsync(
         string workingRoot,
         string model = DefaultModel,
         CancellationToken cancellationToken = default,
-        bool includeOverlays = true)
+        bool includeOverlays = true,
+        string? runtimeRoot = null)
     {
-        var requested = RuntimeIndexLayout.Inspect(workingRoot);
+        var requested = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
         var progressStore = new RepositoryIndexProgressStore(
             requested.RepositoryRuntimeRoot);
         var manifestStore = new RepositoryManifestStore(
@@ -154,6 +160,7 @@ public static class CodeSearchSyncCommand
                         mainline.Identity.WorkingRoot,
                         progress),
                     phase => ReportPhase(phase, mainline.Identity.WorkingRoot),
+                    runtimeRoot,
                     cancellationToken);
             }
 
@@ -174,7 +181,7 @@ public static class CodeSearchSyncCommand
                 WorkingIndexIdentity identity;
                 try
                 {
-                    identity = RuntimeIndexLayout.Inspect(worktree.Path);
+                    identity = RuntimeIndexLayout.Inspect(worktree.Path, runtimeRoot);
                 }
                 catch (Exception exception) when (
                     exception is InvalidOperationException or IOException or
@@ -247,6 +254,7 @@ public static class CodeSearchSyncCommand
                         identity.WorkingRoot,
                         identity,
                         generation.Identity,
+                        runtimeRoot,
                         cancellationToken);
                     var baseSemanticIndex = SemanticIndex.Load(
                         store.SemanticIndexPath(generation.Identity.Id));
@@ -376,6 +384,7 @@ public static class CodeSearchSyncCommand
         WorkingIndexIdentity dev,
         Action<IndexBuildProgress> progress,
         Action<RepositoryIndexProgressPhase> phase,
+        string? runtimeRoot,
         CancellationToken cancellationToken)
     {
         var stagingRoot = Path.Combine(
@@ -441,6 +450,7 @@ public static class CodeSearchSyncCommand
                 snapshot.Root,
                 dev,
                 generation,
+                runtimeRoot,
                 cancellationToken);
 
             EnsureSemanticAdaptersSucceeded(semanticIndex.AdapterStatuses);
@@ -509,6 +519,7 @@ public static class CodeSearchSyncCommand
         string sourceRoot,
         WorkingIndexIdentity snapshot,
         GenerationIdentity generation,
+        string? runtimeRoot,
         CancellationToken cancellationToken)
     {
         await using var loaded = await RoslynSolutionLoader.LoadAsync(
@@ -544,6 +555,7 @@ public static class CodeSearchSyncCommand
         return await RunScipAdaptersAsync(
             languageIndex,
             sourceRoot,
+            runtimeRoot,
             cancellationToken);
     }
 
@@ -576,9 +588,16 @@ public static class CodeSearchSyncCommand
     private static async Task<SemanticBuildResult> RunScipAdaptersAsync(
         SemanticIndex index,
         string sourceRoot,
+        string? runtimeRoot,
         CancellationToken cancellationToken)
     {
-        var policy = SemanticIndexingPolicyStore.ReadDefault();
+        // The adapter policy belongs to the installation, so it is read from the same one the
+        // generation is published into. Reading it from the machine's own instead would let the
+        // operator's configuration decide what an isolated sync indexes.
+        var policy = new SemanticIndexingPolicyStore(
+            string.IsNullOrWhiteSpace(runtimeRoot)
+                ? SemanticIndexingPolicyStore.DefaultRuntimeRoot
+                : runtimeRoot).Read();
         var statuses = new List<SemanticAdapterStatus>();
         var files = FileScanner.Enumerate(sourceRoot)
             .Select(path => path.Replace('\\', '/'))
