@@ -6,14 +6,38 @@ using System.Text.Json;
 
 namespace CodeSearch.Core.Semantics;
 
+/// <param name="InitializationOptions">
+/// Server-specific configuration for the <c>initialize</c> request, passed through as the
+/// LSP <c>initializationOptions</c> member. Null omits the member entirely.
+///
+/// Some servers cannot work without it. typescript-language-server locates tsserver by
+/// looking for a TypeScript package in the workspace, and reports
+/// <c>Could not find a valid TypeScript installation</c> and exits when there is none — which
+/// is every workspace that does not carry its own copy. TypeScript 7 makes that worse: it no
+/// longer ships <c>lib/tsserver.js</c> at all, so even a globally installed TypeScript is not a
+/// usable one. <c>{"tsserver":{"path":"…/lib/tsserver.js"}}</c> is the way to say where a
+/// working one lives, and there was no way to send it.
+///
+/// Deliberately opaque and never inferred. LocalAi does not go looking for a tsserver to
+/// nominate on the operator's behalf: guessing wrong here means silently navigating with a
+/// different TypeScript than the project builds with.
+/// </param>
 public sealed record LanguageServerProcessSpec(
     string Executable,
     IReadOnlyList<string> Arguments,
     TimeSpan? RequestTimeout = null,
     TimeSpan? ShutdownTimeout = null,
     int MaximumMessageBytes = 16 * 1024 * 1024,
-    int MaximumStandardErrorBytes = 1024 * 1024)
+    int MaximumStandardErrorBytes = 1024 * 1024,
+    JsonElement? InitializationOptions = null)
 {
+    /// <summary>
+    /// A server that rejects its options usually fails at <c>initialize</c> with a message about
+    /// the option rather than about size, so an unbounded blob would be diagnosed at the far end
+    /// or not at all. This is far above any real configuration and far below a runaway one.
+    /// </summary>
+    internal const int MaximumInitializationOptionsBytes = 64 * 1024;
+
     public TimeSpan EffectiveRequestTimeout => RequestTimeout ?? TimeSpan.FromSeconds(15);
     public TimeSpan EffectiveShutdownTimeout => ShutdownTimeout ?? TimeSpan.FromSeconds(3);
 
@@ -28,6 +52,23 @@ public sealed record LanguageServerProcessSpec(
             MaximumStandardErrorBytes <= 0)
         {
             throw new ArgumentException("Language server process specification is invalid.");
+        }
+
+        if (InitializationOptions is not { } options)
+        {
+            return;
+        }
+
+        // An object, because that is what the specification says the member is. A bare string or
+        // array would be accepted by the JSON reader and rejected by the server, which turns a
+        // configuration mistake into a startup failure at a distance from its cause.
+        if (options.ValueKind != JsonValueKind.Object ||
+            JsonSerializer.SerializeToUtf8Bytes(options).Length >
+                MaximumInitializationOptionsBytes)
+        {
+            throw new ArgumentException(
+                "Language server initializationOptions must be a JSON object of at most " +
+                $"{MaximumInitializationOptionsBytes} bytes.");
         }
     }
 }
@@ -152,29 +193,7 @@ public sealed class StdioLanguageServerClient : ILanguageServerClient
             var rootUri = ToUri(Path.GetFullPath(workspaceRoot)).AbsoluteUri;
             var initializeResult = await _connection.RequestAsync(
                 "initialize",
-                new
-                {
-                    processId = Environment.ProcessId,
-                    clientInfo = new
-                    {
-                        name = "LocalAi",
-                        version = typeof(StdioLanguageServerClient).Assembly
-                            .GetName().Version?.ToString(3) ?? "unknown",
-                    },
-                    rootUri,
-                    capabilities = new
-                    {
-                        general = new { positionEncodings = new[] { "utf-16" } },
-                        textDocument = new
-                        {
-                            synchronization = new { dynamicRegistration = false },
-                            definition = new { dynamicRegistration = false, linkSupport = true },
-                            references = new { dynamicRegistration = false },
-                        },
-                        workspace = new { configuration = false, workspaceFolders = false },
-                    },
-                    workspaceFolders = new[] { new { uri = rootUri, name = new DirectoryInfo(workspaceRoot).Name } },
-                },
+                BuildInitializeParameters(workspaceRoot, rootUri),
                 _spec.EffectiveRequestTimeout,
                 cancellationToken);
             ConfigureSynchronization(initializeResult);
@@ -192,6 +211,52 @@ public sealed class StdioLanguageServerClient : ILanguageServerClient
         {
             _initializeGate.Release();
         }
+    }
+
+    /// <summary>
+    /// The <c>initialize</c> parameters, as a dictionary rather than an anonymous object.
+    ///
+    /// <c>initializationOptions</c> is optional and must be absent, not null, when there is
+    /// nothing to send: a server that reads it without checking gets a null where it expects an
+    /// object. An anonymous type cannot omit a member, so the shape is built here instead.
+    /// </summary>
+    private Dictionary<string, object?> BuildInitializeParameters(
+        string workspaceRoot,
+        string rootUri)
+    {
+        var parameters = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["processId"] = Environment.ProcessId,
+            ["clientInfo"] = new
+            {
+                name = "LocalAi",
+                version = typeof(StdioLanguageServerClient).Assembly
+                    .GetName().Version?.ToString(3) ?? "unknown",
+            },
+            ["rootUri"] = rootUri,
+            ["capabilities"] = new
+            {
+                general = new { positionEncodings = new[] { "utf-16" } },
+                textDocument = new
+                {
+                    synchronization = new { dynamicRegistration = false },
+                    definition = new { dynamicRegistration = false, linkSupport = true },
+                    references = new { dynamicRegistration = false },
+                },
+                workspace = new { configuration = false, workspaceFolders = false },
+            },
+            ["workspaceFolders"] = new[]
+            {
+                new { uri = rootUri, name = new DirectoryInfo(workspaceRoot).Name },
+            },
+        };
+
+        if (_spec.InitializationOptions is { } options)
+        {
+            parameters["initializationOptions"] = options;
+        }
+
+        return parameters;
     }
 
     public Task DidOpenAsync(LspTextDocument document, CancellationToken cancellationToken)

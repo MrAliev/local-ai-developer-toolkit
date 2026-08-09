@@ -258,6 +258,78 @@ public class LspJsonRpcConnectionTests
             Assert.Single(await implementation).Range);
     }
 
+    /// <summary>
+    /// The member has to arrive on the wire, spelled the way the specification spells it and
+    /// carrying exactly what was configured. Asserting on the spec object instead would pass
+    /// while the client quietly dropped it, which is the state this fixes: typescript-language-
+    /// server needs <c>tsserver.path</c> to run at all in a workspace without its own TypeScript,
+    /// and there was no way to send it.
+    /// </summary>
+    [Fact]
+    public async Task ConfiguredInitializationOptionsReachTheServerVerbatim()
+    {
+        using var request = await CaptureInitializeRequestAsync(
+            JsonSerializer.SerializeToElement(
+                new { tsserver = new { path = "/opt/typescript/lib/tsserver.js" } }));
+
+        Assert.Equal(
+            "/opt/typescript/lib/tsserver.js",
+            request.RootElement.GetProperty("params")
+                .GetProperty("initializationOptions")
+                .GetProperty("tsserver")
+                .GetProperty("path")
+                .GetString());
+    }
+
+    /// <summary>
+    /// Absent, not null. A server that reads the member without checking gets a null where it
+    /// expects an object, so "nothing configured" has to mean the key is not there at all.
+    /// </summary>
+    [Fact]
+    public async Task NoConfiguredOptionsOmitTheMemberRatherThanSendingNull()
+    {
+        using var request = await CaptureInitializeRequestAsync(null);
+
+        Assert.False(
+            request.RootElement.GetProperty("params")
+                .TryGetProperty("initializationOptions", out _));
+    }
+
+    /// <summary>Runs the initialize handshake and returns the request the server saw.</summary>
+    private async Task<JsonDocument> CaptureInitializeRequestAsync(
+        JsonElement? initializationOptions)
+    {
+        var streams = new TestDuplex();
+        await using var connection = new LspJsonRpcConnection(
+            streams.ClientInput,
+            streams.ClientOutput,
+            maximumMessageBytes: 16 * 1024);
+        await using var client = StdioLanguageServerClient.CreateForTesting(
+            connection,
+            new LanguageServerProcessSpec(
+                "fixture",
+                [],
+                RequestTimeout: TimeSpan.FromSeconds(5),
+                MaximumMessageBytes: 16 * 1024,
+                InitializationOptions: initializationOptions));
+        var initialize = client.InitializeAsync(
+            Path.Combine(Path.GetTempPath(), "lsp-initialization-options"),
+            Ct);
+        var request = await ReadFrameAsync(streams.ServerInput, Ct);
+        await WriteFrameAsync(
+            streams.ServerOutput,
+            new
+            {
+                jsonrpc = "2.0",
+                id = request.RootElement.GetProperty("id").GetInt64(),
+                result = new { capabilities = new { textDocumentSync = 1 } },
+            },
+            Ct);
+        await initialize;
+        using var initialized = await ReadFrameAsync(streams.ServerInput, Ct);
+        return request;
+    }
+
     [Fact]
     public async Task IncrementalServersReceiveAFullDocumentReplacementRangeInUtf16()
     {
