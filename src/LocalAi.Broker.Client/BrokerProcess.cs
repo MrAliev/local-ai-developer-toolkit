@@ -45,7 +45,8 @@ public sealed class BrokerProcess : IBrokerProcess
             runtimeRoot,
             ReadState,
             IsRunning,
-            StartAttempt,
+            (executable, startArguments) =>
+                StartAttempt(executable, startArguments, runtimeRoot),
             timeProvider ?? TimeProvider.System,
             (delay, cancellationToken) => DelayAsync(
                 delay,
@@ -63,7 +64,8 @@ public sealed class BrokerProcess : IBrokerProcess
             runtimeRoot,
             ReadState,
             IsRunning,
-            StartAttempt,
+            (executable, startArguments) =>
+                StartAttempt(executable, startArguments, runtimeRoot),
             TimeProvider.System,
             static (delay, cancellationToken) => DelayAsync(
                 delay,
@@ -467,21 +469,43 @@ public sealed class BrokerProcess : IBrokerProcess
         }
     }
 
-    private static IBrokerStartAttempt StartAttempt(string executablePath, string arguments)
+    private static IBrokerStartAttempt StartAttempt(
+        string executablePath,
+        string arguments,
+        string runtimeRoot)
     {
-        var process = Process.Start(CreateStartInfo(executablePath, arguments))
+        var workingDirectory = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(runtimeRoot));
+        // The broker outlives whoever started it and writes here anyway, so creating the
+        // directory costs nothing and keeps a first-ever start from failing on a path that does
+        // not exist yet.
+        Directory.CreateDirectory(workingDirectory);
+        var process = Process.Start(
+                CreateStartInfo(executablePath, arguments, workingDirectory))
             ?? throw new InvalidOperationException("Could not start the LocalAi broker.");
         return new ProcessStartAttempt(process);
     }
 
+    /// <summary>
+    /// <paramref name="workingDirectory"/> is the runtime root, and naming it is the point.
+    ///
+    /// The broker is started on demand by whichever client needs it first and then outlives that
+    /// client by hours. With no working directory of its own it inherited the caller's, and a
+    /// process holds its working directory open: a broker first started from inside a git
+    /// worktree pinned that worktree until the broker was killed, so <c>git worktree remove</c>
+    /// left the files behind and every attempt to delete them reported that another process was
+    /// using them, naming no process.
+    /// </summary>
     internal static ProcessStartInfo CreateStartInfo(
         string executablePath,
-        string arguments) =>
+        string arguments,
+        string workingDirectory) =>
         new(executablePath, arguments)
         {
             UseShellExecute = true,
             CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
+            WindowStyle = ProcessWindowStyle.Hidden,
+            WorkingDirectory = workingDirectory
         };
 
     internal static Task DelayAsync(

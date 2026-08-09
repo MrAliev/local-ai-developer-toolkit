@@ -22,7 +22,8 @@ public sealed class BrokerProcessTests
     {
         var startInfo = BrokerProcess.CreateStartInfo(
             "dotnet",
-            "\"LocalAi.Broker.dll\" serve --runtime runtime");
+            "\"LocalAi.Broker.dll\" serve --runtime runtime",
+            @"C:\runtime");
 
         Assert.True(startInfo.UseShellExecute);
         Assert.False(startInfo.RedirectStandardInput);
@@ -30,6 +31,26 @@ public sealed class BrokerProcessTests
         Assert.False(startInfo.RedirectStandardError);
         Assert.True(startInfo.CreateNoWindow);
         Assert.Equal(ProcessWindowStyle.Hidden, startInfo.WindowStyle);
+    }
+
+    /// <summary>
+    /// The broker outlives the client that started it, and a process holds its working directory
+    /// open for as long as it lives. Inheriting the caller's meant a broker first started from
+    /// inside a git worktree pinned that worktree: <c>git worktree remove</c> deregistered it,
+    /// the files stayed, and every attempt to delete them said another process was using them
+    /// without saying which. An empty WorkingDirectory is what inheritance looks like, so the
+    /// assertion is that it is set and points at the runtime root.
+    /// </summary>
+    [Fact]
+    public void Broker_start_info_pins_the_runtime_root_rather_than_the_caller_directory()
+    {
+        var startInfo = BrokerProcess.CreateStartInfo(
+            "dotnet",
+            "\"LocalAi.Broker.dll\" serve --runtime runtime",
+            @"C:\runtime\LocalAi");
+
+        Assert.Equal(@"C:\runtime\LocalAi", startInfo.WorkingDirectory);
+        Assert.NotEqual(string.Empty, startInfo.WorkingDirectory);
     }
 
     [Fact]
