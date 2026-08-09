@@ -295,6 +295,38 @@ public class LspJsonRpcConnectionTests
                 .TryGetProperty("initializationOptions", out _));
     }
 
+    /// <summary>
+    /// Adding the optional member turned the initialize parameters from an anonymous object into
+    /// a dictionary. That is a rewrite of the request every session starts with, so the members
+    /// that were always there are asserted rather than assumed: a silently dropped rootUri or
+    /// workspaceFolders would not fail any other test, and would strand navigation in a way that
+    /// looks like the server's fault.
+    /// </summary>
+    [Fact]
+    public async Task TheStandardInitializeMembersSurviveAlongsideTheOptionalOne()
+    {
+        using var request = await CaptureInitializeRequestAsync(
+            JsonSerializer.SerializeToElement(new { tsserver = new { path = "/x/tsserver.js" } }));
+        var parameters = request.RootElement.GetProperty("params");
+        var expectedRoot = new Uri(
+            Path.GetFullPath(Path.Combine(Path.GetTempPath(), "lsp-initialization-options")),
+            UriKind.Absolute).AbsoluteUri;
+
+        Assert.Equal(Environment.ProcessId, parameters.GetProperty("processId").GetInt32());
+        Assert.Equal("LocalAi", parameters.GetProperty("clientInfo").GetProperty("name").GetString());
+        Assert.Equal(expectedRoot, parameters.GetProperty("rootUri").GetString());
+        Assert.Equal(
+            expectedRoot,
+            parameters.GetProperty("workspaceFolders")[0].GetProperty("uri").GetString());
+        Assert.Equal(
+            "utf-16",
+            parameters.GetProperty("capabilities").GetProperty("general")
+                .GetProperty("positionEncodings")[0].GetString());
+        Assert.True(
+            parameters.GetProperty("capabilities").GetProperty("textDocument")
+                .GetProperty("definition").GetProperty("linkSupport").GetBoolean());
+    }
+
     /// <summary>Runs the initialize handshake and returns the request the server saw.</summary>
     private async Task<JsonDocument> CaptureInitializeRequestAsync(
         JsonElement? initializationOptions)

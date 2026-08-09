@@ -128,6 +128,32 @@ public class LanguageServerPolicyStoreTests
     }
 
     /// <summary>
+    /// Writing the default policy puts <c>"InitializationOptions": null</c> in the file for every
+    /// language, because nothing configures the serializer to drop nulls. Reading that back has
+    /// to produce a C# null and not a JsonElement whose kind is Null — the second would be
+    /// validated as "not an object" and reject the whole file, and if it survived validation the
+    /// client would send a null options member to every server. Neither failure is visible
+    /// without asking.
+    /// </summary>
+    [Fact]
+    public void TheDefaultPolicyRoundTripsWithoutInventingAnOptionsMember()
+    {
+        var store = new LanguageServerPolicyStore(TempRoot());
+        store.Write(LanguageServerPolicy.Default with { Enabled = true });
+
+        var loaded = store.Read();
+
+        Assert.True(loaded.Enabled);
+        Assert.Contains(
+            "\"InitializationOptions\": null",
+            File.ReadAllText(store.Path),
+            StringComparison.Ordinal);
+        Assert.All(
+            loaded.Languages.Values,
+            adapter => Assert.Null(adapter.InitializationOptions));
+    }
+
+    /// <summary>
     /// An installation configured before this field existed has to keep working. The field is
     /// optional rather than a schema bump for exactly that reason: bumping the version would
     /// invalidate every existing file and silently replace it with the disabled defaults.
