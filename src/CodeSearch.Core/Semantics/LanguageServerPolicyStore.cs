@@ -3,10 +3,22 @@ using System.Text.Json.Serialization;
 
 namespace CodeSearch.Core.Semantics;
 
+/// <param name="InitializationOptions">
+/// Passed to the server verbatim as the LSP <c>initializationOptions</c> member. Optional, and
+/// absent in the default policy, so an existing <c>language-servers.json</c> keeps deserializing
+/// unchanged.
+///
+/// This is what makes typescript-language-server usable in a workspace that has no TypeScript of
+/// its own — <c>{"tsserver":{"path":"…/lib/tsserver.js"}}</c> — and it has to be configured
+/// rather than discovered. LocalAi will not pick a tsserver for the operator: navigating with a
+/// different TypeScript than the project builds with is a wrong answer that looks like a right
+/// one.
+/// </param>
 public sealed record LanguageServerAdapterPolicy(
     bool Enabled,
     string Executable,
-    string[] Arguments);
+    string[] Arguments,
+    JsonElement? InitializationOptions = null);
 
 public sealed record LanguageServerPolicy(
     int SchemaVersion,
@@ -54,7 +66,8 @@ public sealed record LanguageServerPolicy(
             TimeSpan.FromSeconds(RequestTimeoutSeconds),
             TimeSpan.FromSeconds(ShutdownTimeoutSeconds),
             MaximumMessageBytes,
-            MaximumStandardErrorBytes);
+            MaximumStandardErrorBytes,
+            adapter.InitializationOptions);
     }
 }
 
@@ -157,7 +170,8 @@ public sealed class LanguageServerPolicyStore
                     TimeSpan.FromSeconds(policy.RequestTimeoutSeconds),
                     TimeSpan.FromSeconds(policy.ShutdownTimeoutSeconds),
                     policy.MaximumMessageBytes,
-                    policy.MaximumStandardErrorBytes).Validate();
+                    policy.MaximumStandardErrorBytes,
+                    adapter.InitializationOptions).Validate();
             }
 
             return true;

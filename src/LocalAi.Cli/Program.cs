@@ -1,5 +1,6 @@
 using CodeSearch.Core.Embedding;
 using LocalAi.Cli;
+using LocalAi.Contracts;
 using System.Text.Json;
 
 // Every command runs under one guard. A broker or Git failure used to leave the runtime's own
@@ -77,10 +78,10 @@ static async Task<int> RunAsync(string[] args)
             ? args[2]
             : await new LocalAi.Repository.GitClient()
                 .GetCommonDirectoryAsync(Environment.CurrentDirectory);
-        var runtimeRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalAi");
-        Console.WriteLine(RepoCommand.Status(commonDirectory, runtimeRoot).Message);
+        Console.WriteLine(
+            RepoCommand.Status(
+                commonDirectory,
+                ModelResidencyPolicyStore.DefaultRuntimeRoot).Message);
         return 0;
     }
 
@@ -96,9 +97,7 @@ static async Task<int> RunAsync(string[] args)
 
     if (args is ["bootstrap", "--dry-run", ..])
     {
-        var runtimeRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalAi");
+        var runtimeRoot = ModelResidencyPolicyStore.DefaultRuntimeRoot;
         var plan = BootstrapCommand.Plan(
             await new LocalAi.Repository.GitClient()
                 .GetCommonDirectoryAsync(Environment.CurrentDirectory),
@@ -170,9 +169,7 @@ static async Task<int> RunAsync(string[] args)
 
     if (args is ["prune", ..])
     {
-        var runtimeRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalAi");
+        var runtimeRoot = ModelResidencyPolicyStore.DefaultRuntimeRoot;
         var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
         var report = PruneCommand.Execute(runtimeRoot, dryRun, DateTimeOffset.UtcNow);
         foreach (var line in report.Lines)
