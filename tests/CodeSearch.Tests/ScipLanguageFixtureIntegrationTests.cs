@@ -13,13 +13,19 @@ public sealed class ScipLanguageFixtureIntegrationTests : IDisposable
     {
         var node = Environment.GetEnvironmentVariable("LOCALAI_SCIP_NODE");
         var script = Environment.GetEnvironmentVariable("LOCALAI_SCIP_TYPESCRIPT_SCRIPT");
+        // Found the way the product finds it. Requiring an environment variable for a tool that
+        // is installed and on the PATH meant this skipped on every machine that could have run
+        // it — which is how the TypeScript path went unexercised while scip-typescript sat in
+        // %APPDATA%\npm.
         var installedExecutable = Environment.GetEnvironmentVariable(
-            "LOCALAI_SCIP_TYPESCRIPT_EXECUTABLE");
+            "LOCALAI_SCIP_TYPESCRIPT_EXECUTABLE")
+            ?? ExecutableResolver.Find("scip-typescript");
         if (string.IsNullOrWhiteSpace(installedExecutable) &&
             (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(script)))
         {
             Assert.Skip(
-                "Set LOCALAI_SCIP_NODE and LOCALAI_SCIP_TYPESCRIPT_SCRIPT to run the real fixture.");
+                "Install scip-typescript or set LOCALAI_SCIP_NODE and " +
+                "LOCALAI_SCIP_TYPESCRIPT_SCRIPT to run the real fixture.");
         }
 
         Write("tsconfig.json", """
@@ -71,19 +77,11 @@ public sealed class ScipLanguageFixtureIntegrationTests : IDisposable
     {
         var node = Environment.GetEnvironmentVariable("LOCALAI_SCIP_NODE");
         var script = Environment.GetEnvironmentVariable("LOCALAI_SCIP_PYTHON_SCRIPT");
+        // The same discovery the product uses, rather than one hard-coded npm path: this looked
+        // only in %APPDATA%\npm for a .cmd, so any other install location skipped silently.
         var installedExecutable = Environment.GetEnvironmentVariable(
-            "LOCALAI_SCIP_PYTHON_EXECUTABLE");
-        if (string.IsNullOrWhiteSpace(installedExecutable) && OperatingSystem.IsWindows())
-        {
-            var candidate = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "npm",
-                "scip-python.cmd");
-            if (File.Exists(candidate))
-            {
-                installedExecutable = candidate;
-            }
-        }
+            "LOCALAI_SCIP_PYTHON_EXECUTABLE")
+            ?? ExecutableResolver.Find("scip-python");
 
         if (string.IsNullOrWhiteSpace(installedExecutable) &&
             (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(script)))
