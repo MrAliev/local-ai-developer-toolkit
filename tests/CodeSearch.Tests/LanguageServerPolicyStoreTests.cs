@@ -42,15 +42,49 @@ public class LanguageServerPolicyStoreTests
         Assert.Equal(["--stdio", "--log-level=2"], spec.Arguments);
     }
 
+    /// <summary>
+    /// Built from a real file rather than hand-written, and that is the whole point.
+    ///
+    /// This store names its members the way the CLR does, because no naming policy is
+    /// configured. The hand-written camelCase document this test used to carry was rejected
+    /// because <em>every</em> member was unmapped, so it passed whether or not the unknown-member
+    /// guard existed at all — a test that could not fail is worse than no test, because the
+    /// coverage report counts it.
+    /// </summary>
     [Fact]
-    public void InvalidOrUnknownConfigurationFallsBackToDisabledDefaults()
+    public void AnUnknownMemberFallsBackToDisabledDefaults()
+    {
+        var root = TempRoot();
+        var store = new LanguageServerPolicyStore(root);
+        store.Write(LanguageServerPolicy.Default with { Enabled = true });
+        File.WriteAllText(
+            store.Path,
+            File.ReadAllText(store.Path).TrimEnd().TrimEnd('}') + ",\"Unknown\":true}");
+
+        var loaded = store.Read();
+
+        Assert.False(loaded.Enabled);
+        Assert.Throws<InvalidOperationException>(() => loaded.ProcessSpec("typescript"));
+    }
+
+    /// <summary>
+    /// The other half of what the previous single test claimed to cover: a document that binds
+    /// cleanly and carries a value the policy will not accept.
+    /// </summary>
+    [Fact]
+    public void AnOutOfRangeValueFallsBackToDisabledDefaults()
     {
         var root = TempRoot();
         Directory.CreateDirectory(root);
-        File.WriteAllText(
-            Path.Combine(root, LanguageServerPolicy.FileName),
-            "{\"schemaVersion\":1,\"enabled\":true,\"unknown\":true}");
         var store = new LanguageServerPolicyStore(root);
+        File.WriteAllBytes(
+            store.Path,
+            JsonSerializer.SerializeToUtf8Bytes(
+                LanguageServerPolicy.Default with
+                {
+                    Enabled = true,
+                    RequestTimeoutSeconds = 0,
+                }));
 
         var loaded = store.Read();
 
