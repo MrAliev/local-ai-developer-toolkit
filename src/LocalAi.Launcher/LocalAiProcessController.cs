@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using LocalAi.Contracts;
 
 namespace LocalAi.Launcher;
 
@@ -17,9 +18,8 @@ public sealed class LocalAiProcessController
 
     public LocalAiProcessController(string? runtimeRoot = null)
     {
-        var root = Path.GetFullPath(runtimeRoot ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalAi"));
+        var root = Path.GetFullPath(
+            runtimeRoot ?? ModelResidencyPolicyStore.DefaultRuntimeRoot);
         _snapshot = () => CaptureSnapshots(root);
         _stop = StopProcess;
         _pathComparison = PathComparison;

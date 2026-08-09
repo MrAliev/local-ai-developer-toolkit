@@ -1,12 +1,12 @@
+using LocalAi.Contracts;
+
 namespace LocalAi.Broker.Client;
 
 public static class BrokerClientFactory
 {
     public static BrokerClient CreateDefault(string? runtimeRoot = null)
     {
-        var root = runtimeRoot ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalAi");
+        var root = runtimeRoot ?? ModelResidencyPolicyStore.DefaultRuntimeRoot;
         new RuntimeAcl().Ensure(root);
         return new BrokerClient(
             new DurableQueue(root),
