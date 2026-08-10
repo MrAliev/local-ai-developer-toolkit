@@ -164,6 +164,9 @@ See the measured [CodeSearch retrieval evaluation](docs/codesearch-evaluation.md
 the calibrated profile, corpus provenance, A/B results, token heuristic, and
 limitations.
 
+The complete inventory of all twenty MCP tools — what exists, what it is for, and the
+constraint that matters — is in the [tool reference](docs/mcp-tools.md).
+
 ## Prerequisites
 
 - .NET 10 SDK
@@ -637,7 +640,7 @@ The broker enforces these invariants:
   preserving the candidate's failure category if the broker used a fallback. The sole
   early exception is `continue_experiment`, which may reset a circuit opened by two
   consecutive technical failures.
-- Experiment telemetry is retained for seven days and contains only workflow/task/model
+- Experiment telemetry is retained for thirty days (`TelemetryRetentionDays`) and contains only workflow/task/model
   identifiers, counts, outcomes, timings, and token estimates. It reports local input
   and output, total local processing, avoided cloud generation, and net cloud-context
   reduction separately. Prompts, answers, file contents, image bytes, paths, and

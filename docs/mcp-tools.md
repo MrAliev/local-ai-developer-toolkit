@@ -1,0 +1,83 @@
+# MCP tools: the complete inventory
+
+[Русская версия](mcp-tools.ru.md)
+
+Twenty tools across two stdio servers. This file is the inventory — what exists, what it is for,
+and the constraint that matters. Mechanisms are described in `README.md`; this is only the surface
+an agent sees.
+
+The list is held by `McpToolInventoryTests` in `tests/CodeSearch.Tests`.
+
+## CodeSearch — 11 tools
+
+The `codesearch` server. The embedding model is recorded in the index header and cannot be
+overridden per query.
+
+| Tool | Purpose | The constraint that matters |
+| --- | --- | --- |
+| `search_code` | Semantic and literal search over symbol-level chunks. The first step for "where does X live". | Every hit is wrapped in `<untrusted-content>`. |
+| `get_code_chunk` | The full body of one result, by `chunk_id`. | The id is bound to repository, generation, git tree and dirty overlay; a stale one is refused. |
+| `go_to_definition` | The definition of the symbol at a zero-based line and UTF-16 column. | Source order: live LSP, then snapshot SIDX, then text tagged `Heuristic`. |
+| `find_references` | References to that symbol. | Same source order. |
+| `find_implementations` | Implementations, overrides, derived types. | No text fallback: an approximate answer is worse than none here. |
+| `find_relationships` | The snapshot's relationship graph. | SIDX only. Direction `incoming`/`outgoing`, kind `implementation`/`override`/`type-definition`. |
+| `index_status` | Whether an index exists, its model and size, drift behind HEAD, sync phase. | Diagnostic — outside the untrusted boundary. |
+| `index_refresh` | Incremental refresh after a commit. | Refuses to run large work inline and returns the background command instead. |
+| `index_unload` | Frees a loaded index's memory immediately. | Leaves the file on disk; the next search reloads it in about a second. |
+| `lsp_open_document` | Opens a document in its language server, making it authoritative. | Versions must increase monotonically. Live servers are off by default. |
+| `lsp_close_document` | Closes it, returning authority to the snapshot. | — |
+
+### Language servers
+
+Configured in `language-servers.json`, disabled by default both globally and per language.
+
+Since 0.1.34 an adapter carries `InitializationOptions` — an arbitrary JSON object passed straight
+into the LSP `initialize` request. For `typescript-language-server` it is the only way to name a
+tsserver in a workspace that has no `node_modules/typescript` of its own:
+
+```json
+"typescript": {
+  "Enabled": true,
+  "Executable": "typescript-language-server",
+  "Arguments": ["--stdio"],
+  "InitializationOptions": { "tsserver": { "path": "…/node_modules/typescript/lib/tsserver.js" } }
+}
+```
+
+The path is configured and never inferred: navigating with a different TypeScript than the project
+builds with produces wrong answers that look like right ones. Note that TypeScript 7 no longer
+ships `lib/tsserver.js`, so a 5.x installation is what works.
+
+## LocalLm — 9 tools
+
+The `locallm` server. Every model call goes through the shared broker.
+
+| Tool | Purpose | The constraint that matters |
+| --- | --- | --- |
+| `read_image` | An image on disk turned into text: screenshot, PDF page, scan, diagram. | Saves nothing for an image already pasted into the conversation. |
+| `triage_log` | Long machine output: what failed and why. | Reads head and tail when the log exceeds the local window. |
+| `ask_local` | A mechanical task over known files: list, summarise, extract. | Not for architecture or subtle bug analysis. |
+| `translate_local` | Translation with structural validation. | Attributes the model actually used. |
+| `local_models_status` | Installed and resident models, recommended missing ones, experiment state. | — |
+| `local_model_preflight` | Loads one model and context with no task content. | Returns full-VRAM residency proof. |
+| `local_models_sync` | Queues installation of recommended missing models. | — |
+| `local_model_experiment_report` | Timings, errors, fallback, warm/cold and estimated saving per task/model pair. | — |
+| `local_model_feedback` | The owner's decision: `Promote`, `ContinueExperiment`, `FallbackOnly`, `Disable`. | — |
+
+### The notice line
+
+Every LocalLm tool returns a line naming the model it used and the estimated cloud tokens avoided.
+Surface it: the point is that it is visible when work went downstairs, not only that it got done.
+
+The estimate is computed from what was actually processed — 4.0 characters per token for Latin,
+2.2 for Cyrillic, pixel area over 750 for images — and is reported as a range, because there is no
+live token counter here. Zero is a correct answer: a job too small to save anything says so.
+
+## What these tools do not replace
+
+- **Reading a file before editing it.** Never delegated.
+- **A literal sweep for one exact token** once the target is known: that is a job for `rg`.
+- **Judgement.** A local 9–27B model is good at "list" and "summarise"; verify anything a decision
+  depends on.
+- **Answering from a partial index.** While a repository is still building, the state is
+  `INITIALIZING`, and that is said plainly rather than replaced by a quiet text search.

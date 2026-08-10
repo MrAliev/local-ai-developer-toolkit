@@ -294,6 +294,7 @@ public static class CodeSearchSyncCommand
                     .ToArray(),
                 DateTimeOffset.UtcNow);
             manifestStore.Save(manifest);
+            PruneSupersededGenerations(requested.RepositoryRuntimeRoot, runtimeRoot);
 
             progressStore.Save(lastProgress = lastProgress with
             {
@@ -330,6 +331,55 @@ public static class CodeSearchSyncCommand
             }
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Drops generations this repository has outgrown, immediately after publishing the one that
+    /// superseded them.
+    ///
+    /// Publishing a new generation is the exact moment an old one stops being reachable, and it
+    /// is the only moment the count can exceed the retention bound — so this is where the bound
+    /// belongs. Left to <c>localai prune</c> alone it was invisible: superseded generations and
+    /// their overlays reached several hundred megabytes on a repository that had simply been
+    /// committed to for a while.
+    ///
+    /// Scoped to this repository and to generations only. Installed versions and installer
+    /// backups are the larger share of a grown runtime, and they stay with the explicit command
+    /// on purpose: deleting binaries as a side effect of indexing is a worse surprise than a
+    /// large directory.
+    ///
+    /// Never fails the sync. The index is published and correct by this point; a retention sweep
+    /// that could not run is worth reporting and nothing more.
+    /// </summary>
+    internal static void PruneSupersededGenerations(
+        string repositoryRuntimeRoot,
+        string? runtimeRoot)
+    {
+        try
+        {
+            var policy = new RuntimeRetentionPolicyStore(
+                string.IsNullOrWhiteSpace(runtimeRoot)
+                    ? RuntimeRetentionPolicyStore.DefaultRuntimeRoot
+                    : runtimeRoot).Read();
+            var result = GenerationRetention.Prune(
+                repositoryRuntimeRoot,
+                policy,
+                DateTimeOffset.UtcNow);
+            if (result.ActionCount > 0)
+            {
+                Console.Error.WriteLine(
+                    $"Retention: removed {result.GenerationsRemoved.Count} superseded " +
+                    $"generation(s), {result.OverlaysRemoved.Count} overlay set(s) and " +
+                    $"{result.StagingRemoved.Count} staging file(s), " +
+                    $"{result.BytesReclaimed / (1024 * 1024)} MB.");
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            Console.Error.WriteLine(
+                $"Retention sweep skipped: {exception.Message}. The published index is unaffected.");
         }
     }
 

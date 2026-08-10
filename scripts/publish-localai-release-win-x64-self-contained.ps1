@@ -8,14 +8,21 @@ param(
     [Parameter(Mandatory = $false)]
     [string] $PublishRoot = "publish",
 
-    [Parameter(Mandatory = $false)]
-    [string] $ReleaseVersion = "0.1.27",
+    # Mandatory, and with no default on purpose. The default used to be a real past version
+    # together with a PackageUri pointing at that version's asset, so forgetting the argument
+    # produced a package that stamped itself 0.1.27 and pointed installers at 0.1.27's download.
+    # A forgotten argument now stops the script instead of shipping a plausible lie.
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
+    [string] $ReleaseVersion,
 
     [Parameter(Mandatory = $false)]
     [string] $VersionDirectory = "",
 
+    # Derived from the version unless overridden. These two could never disagree without the
+    # manifest telling installers to fetch a different release than the one being signed.
     [Parameter(Mandatory = $false)]
-    [string] $PackageUri = "https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/0.1.27/localai-package.zip",
+    [string] $PackageUri = "",
 
     [Parameter(Mandatory = $false)]
     [switch] $SignManifest
@@ -35,6 +42,14 @@ Set-Location $Root
 # into the other tree and the run then fails at "Required release artifact is missing" having
 # just reported seven successful publishes.
 [System.Environment]::CurrentDirectory = $Root
+
+if ([string]::IsNullOrWhiteSpace($PackageUri)) {
+    $PackageUri = "https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/" +
+        "$ReleaseVersion/localai-package.zip"
+}
+
+Write-Host "Release version: $ReleaseVersion"
+Write-Host "Package URI:     $PackageUri"
 
 if ([string]::IsNullOrWhiteSpace($VersionDirectory)) {
     $VersionDirectory = (git rev-parse --short=12 HEAD).Trim()
