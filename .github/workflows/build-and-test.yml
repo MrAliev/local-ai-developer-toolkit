@@ -43,6 +43,14 @@ jobs:
         with:
           global-json-file: global.json
 
+      # scip-python builds a virtual environment before it indexes anything, and without a
+      # predictable interpreter it fails inside its own environment setup rather than in
+      # anything this repository owns.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Report the toolchain
         shell: pwsh
         run: |
@@ -78,7 +86,12 @@ jobs:
           $failed = @()
           foreach ($project in $projects) {
             Write-Host "::group::$($project.BaseName)"
-            dotnet test $project.FullName --configuration Release --no-build --nologo
+            # --blame-hang turns a stuck test into a named failure with a dump. Without it a hang
+            # consumes the job timeout and the log says only that the operation was cancelled,
+            # which is what happened on the first run of this workflow: twenty-five minutes spent
+            # on an unidentified test.
+            dotnet test $project.FullName --configuration Release --no-build --nologo `
+              --blame-hang --blame-hang-timeout 5m --blame-hang-dump-type none
             if ($LASTEXITCODE -ne 0) { $failed += $project.BaseName }
             Write-Host "::endgroup::"
           }
