@@ -1,5 +1,6 @@
-using CodeSearch.Core.Semantics;
+﻿using CodeSearch.Core.Semantics;
 using LocalAi.Cli;
+using LocalAi.TestSupport;
 
 namespace LocalAi.IntegrationTests;
 
@@ -21,10 +22,10 @@ public sealed class SyntheticTypeScriptProjectIntegrationTests : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "npm",
             "scip-typescript.cmd");
-        if (!File.Exists(executable))
-        {
-            Assert.Skip("Install @sourcegraph/scip-typescript to run this acceptance test.");
-        }
+        FixturePrerequisite.Require(
+            File.Exists(executable),
+            "@sourcegraph/scip-typescript",
+            "Install it with npm so the npm shim this test exercises exists.");
 
         Directory.CreateDirectory(root);
         const string relative = "src/app.js";

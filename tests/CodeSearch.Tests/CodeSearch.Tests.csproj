@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -17,6 +17,10 @@
     <ProjectReference Include="..\..\src\CodeSearch.Mcp\CodeSearch.Mcp.csproj" />
     <ProjectReference Include="..\..\src\LocalAi.Broker.Client\LocalAi.Broker.Client.csproj" />
     <ProjectReference Include="..\..\src\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\FixturePrerequisite.cs" Link="FixturePrerequisite.cs" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
@@ -14,5 +14,9 @@
     <ProjectReference Include="..\..\src\LocalAi.Repository\LocalAi.Repository.csproj" />
   </ItemGroup>
   <Import Project="..\..\src\BrokerBinary.props" />
+
+  <ItemGroup>
+    <Compile Include="..\Shared\FixturePrerequisite.cs" Link="FixturePrerequisite.cs" />
+  </ItemGroup>
 
 </Project>
