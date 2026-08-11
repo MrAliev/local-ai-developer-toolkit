@@ -1,5 +1,6 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using CodeSearch.Core.Semantics;
+using LocalAi.TestSupport;
 
 namespace CodeSearch.Tests;
 
@@ -14,28 +15,21 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
     {
         // Discovered the way the product discovers it, so an installed server runs the fixture
         // instead of an environment variable being the only way in.
-        var executable = Environment.GetEnvironmentVariable(
-            "LOCALAI_LSP_TYPESCRIPT_EXECUTABLE")
-            ?? ExecutableResolver.Find("typescript-language-server");
-        if (string.IsNullOrWhiteSpace(executable))
-        {
-            Assert.Skip(
-                "Install typescript-language-server or set " +
-                "LOCALAI_LSP_TYPESCRIPT_EXECUTABLE to run the real fixture.");
-        }
+        var executable = FixturePrerequisite.RequireText(
+            Environment.GetEnvironmentVariable("LOCALAI_LSP_TYPESCRIPT_EXECUTABLE")
+                ?? ExecutableResolver.Find("typescript-language-server"),
+            "typescript-language-server",
+            "Install it, or set LOCALAI_LSP_TYPESCRIPT_EXECUTABLE.");
 
         // The second prerequisite, and the one whose absence used to look like a product failure.
         // The server does not carry a TypeScript: it looks for one in the workspace, and this
         // fixture's workspace is a temporary directory with no node_modules. Naming a tsserver
         // explicitly is both what makes the fixture hermetic and the feature under test.
-        var tsserver = FindTsServer(executable);
-        if (tsserver is null)
-        {
-            Assert.Skip(
-                "No usable tsserver.js was found beside typescript-language-server. Install a " +
-                "TypeScript 5.x (7.x no longer ships lib/tsserver.js) or set " +
-                "LOCALAI_LSP_TYPESCRIPT_TSSERVER_PATH to run the real fixture.");
-        }
+        var tsserver = FixturePrerequisite.RequireText(
+            FindTsServer(executable),
+            "a usable tsserver.js beside typescript-language-server",
+            "Install TypeScript 5.x (7.x no longer ships lib/tsserver.js), or set " +
+            "LOCALAI_LSP_TYPESCRIPT_TSSERVER_PATH.");
 
         // Past this point both prerequisites are present, so anything that goes wrong is a
         // genuine failure and the test says so instead of skipping. Skipping on a failed
@@ -86,13 +80,11 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
     [Fact]
     public async Task PyrightLanguageServerProvidesExactCrossFileNavigation()
     {
-        var executable = Environment.GetEnvironmentVariable("LOCALAI_LSP_PYRIGHT_EXECUTABLE")
-            ?? ExecutableResolver.Find("pyright-langserver");
-        if (string.IsNullOrWhiteSpace(executable))
-        {
-            Assert.Skip(
-                "Install pyright or set LOCALAI_LSP_PYRIGHT_EXECUTABLE to run the real fixture.");
-        }
+        var executable = FixturePrerequisite.RequireText(
+            Environment.GetEnvironmentVariable("LOCALAI_LSP_PYRIGHT_EXECUTABLE")
+                ?? ExecutableResolver.Find("pyright-langserver"),
+            "pyright-langserver",
+            "Install pyright, or set LOCALAI_LSP_PYRIGHT_EXECUTABLE.");
 
         var definitionText = Write("definition.py", """
             def greet(name: str) -> str:

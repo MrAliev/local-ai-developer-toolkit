@@ -1,4 +1,6 @@
-using CodeSearch.Core.Semantics;
+﻿using CodeSearch.Core.Semantics;
+
+using LocalAi.TestSupport;
 
 namespace CodeSearch.Tests;
 
@@ -20,13 +22,11 @@ public sealed class ScipLanguageFixtureIntegrationTests : IDisposable
         var installedExecutable = Environment.GetEnvironmentVariable(
             "LOCALAI_SCIP_TYPESCRIPT_EXECUTABLE")
             ?? ExecutableResolver.Find("scip-typescript");
-        if (string.IsNullOrWhiteSpace(installedExecutable) &&
-            (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(script)))
-        {
-            Assert.Skip(
-                "Install scip-typescript or set LOCALAI_SCIP_NODE and " +
-                "LOCALAI_SCIP_TYPESCRIPT_SCRIPT to run the real fixture.");
-        }
+        FixturePrerequisite.Require(
+            !string.IsNullOrWhiteSpace(installedExecutable) ||
+                (!string.IsNullOrWhiteSpace(node) && !string.IsNullOrWhiteSpace(script)),
+            "scip-typescript",
+            "Install it, or set LOCALAI_SCIP_NODE and LOCALAI_SCIP_TYPESCRIPT_SCRIPT.");
 
         Write("tsconfig.json", """
             {
@@ -83,13 +83,11 @@ public sealed class ScipLanguageFixtureIntegrationTests : IDisposable
             "LOCALAI_SCIP_PYTHON_EXECUTABLE")
             ?? ExecutableResolver.Find("scip-python");
 
-        if (string.IsNullOrWhiteSpace(installedExecutable) &&
-            (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(script)))
-        {
-            Assert.Skip(
-                "Install scip-python or set LOCALAI_SCIP_NODE and " +
-                "LOCALAI_SCIP_PYTHON_SCRIPT to run the real fixture.");
-        }
+        FixturePrerequisite.Require(
+            !string.IsNullOrWhiteSpace(installedExecutable) ||
+                (!string.IsNullOrWhiteSpace(node) && !string.IsNullOrWhiteSpace(script)),
+            "scip-python",
+            "Install it, or set LOCALAI_SCIP_NODE and LOCALAI_SCIP_PYTHON_SCRIPT.");
 
         Write("definition.py", """
             def greet(name: str) -> str:

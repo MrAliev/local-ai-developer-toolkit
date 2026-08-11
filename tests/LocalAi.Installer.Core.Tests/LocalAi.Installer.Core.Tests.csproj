@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
@@ -12,4 +12,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\LocalAi.Installer.Core\LocalAi.Installer.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\FixturePrerequisite.cs" Link="FixturePrerequisite.cs" />
+  </ItemGroup>
+
 </Project>

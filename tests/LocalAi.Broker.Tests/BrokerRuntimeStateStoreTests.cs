@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using LocalAi.Broker;
 using LocalAi.Contracts;
 
@@ -62,7 +62,9 @@ public sealed class BrokerRuntimeStateStoreTests
 
         try
         {
-            fixture.Store.Publish(heartbeat);
+            // A budget far larger than the release delay, so this asserts that the retry works
+            // rather than that the machine was idle enough to finish inside the default.
+            fixture.Store.Publish(heartbeat, TimeSpan.FromSeconds(30));
             await release;
         }
         finally

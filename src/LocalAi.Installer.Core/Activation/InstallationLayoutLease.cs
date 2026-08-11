@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
@@ -879,6 +879,21 @@ public sealed class InstallationLayoutLease : IDisposable
         [System.Runtime.CompilerServices.CallerMemberName] string? check = null) =>
         new($"The LocalAi installation layout is unsafe (check: {check ?? "unknown"}).");
 
+    /// <summary>
+    /// The same refusal, carrying which of the ACL conditions failed.
+    ///
+    /// <see cref="ValidateAcl"/> tests eight separate things and reported one sentence for all of
+    /// them. That is workable while the only machine involved is the one that wrote the layout;
+    /// it stops being workable the moment a different environment refuses it, because the message
+    /// names neither the condition nor the principal, and there is nothing to act on. Deliberately
+    /// a distinct name rather than an overload: <c>Failure("...")</c> would bind the reason to the
+    /// caller-name parameter and quietly lose the check it came from.
+    /// </summary>
+    private static LocalAiPackageInstallationException AclFailure(
+        string reason,
+        [System.Runtime.CompilerServices.CallerMemberName] string? check = null) =>
+        new($"The LocalAi installation layout is unsafe (check: {check ?? "unknown"}): {reason}.");
+
     private static void DisposeDirectories(
         IEnumerable<DirectoryEvidence> evidence,
         bool removeCreatedScaffold)
@@ -928,18 +943,39 @@ public sealed class InstallationLayoutLease : IDisposable
     private static void ValidateAcl(FileSystemSecurity security, bool directory)
     {
         using var identity = WindowsIdentity.GetCurrent();
-        var user = identity.User ?? throw Failure();
+        var user = identity.User ?? throw AclFailure("the process has no user SID");
         var allowed = new HashSet<string>(StringComparer.Ordinal)
         {
             user.Value,
             new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null).Value,
             new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null).Value,
         };
-        if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner ||
-            owner != user ||
-            (directory && !security.AreAccessRulesProtected))
+
+        if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner)
         {
-            throw Failure();
+            throw AclFailure("the owner could not be read");
+        }
+
+        // Any principal the access rules would accept is acceptable as owner.
+        //
+        // This demanded the current user, and Windows does not always agree: an object created
+        // by an elevated member of Administrators is owned by BUILTIN\Administrators, not by the
+        // person who created it. An installation performed with elevation therefore failed its
+        // own validation, which is how this surfaced — every installer test on an elevated CI
+        // runner refused a layout the product had just written itself.
+        //
+        // It widens nothing. These three principals are exactly the ones already permitted to
+        // hold FullControl below, so the set of identities that can change this object is the
+        // same before and after. What still has to hold is that the current user is among them,
+        // and that is checked after the rules.
+        if (!allowed.Contains(owner.Value))
+        {
+            throw AclFailure("the owner is not the user, SYSTEM or Administrators");
+        }
+
+        if (directory && !security.AreAccessRulesProtected)
+        {
+            throw AclFailure("the directory still inherits access rules");
         }
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -951,15 +987,35 @@ public sealed class InstallationLayoutLease : IDisposable
             var expectedInheritance = directory
                 ? InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit
                 : InheritanceFlags.None;
-            if ((directory && rule.IsInherited) ||
-                rule.AccessControlType != AccessControlType.Allow ||
-                rule.IdentityReference is not SecurityIdentifier sid ||
-                !allowed.Contains(sid.Value) ||
-                (rule.FileSystemRights & FileSystemRights.FullControl) != FileSystemRights.FullControl ||
-                rule.InheritanceFlags != expectedInheritance ||
+            if (directory && rule.IsInherited)
+            {
+                throw AclFailure("an inherited rule survives on a protected directory");
+            }
+
+            if (rule.AccessControlType != AccessControlType.Allow)
+            {
+                throw AclFailure("a non-allow rule is present");
+            }
+
+            if (rule.IdentityReference is not SecurityIdentifier sid ||
+                !allowed.Contains(sid.Value))
+            {
+                throw Failure(
+                    $"an unexpected principal holds rights: {rule.IdentityReference?.Value}");
+            }
+
+            if ((rule.FileSystemRights & FileSystemRights.FullControl) !=
+                FileSystemRights.FullControl)
+            {
+                throw AclFailure($"{sid.Value} holds less than FullControl");
+            }
+
+            if (rule.InheritanceFlags != expectedInheritance ||
                 rule.PropagationFlags != PropagationFlags.None)
             {
-                throw Failure();
+                throw Failure(
+                    $"{sid.Value} has inheritance {rule.InheritanceFlags}/" +
+                    $"{rule.PropagationFlags}, expected {expectedInheritance}/None");
             }
 
             seen.Add(sid.Value);
@@ -976,7 +1032,7 @@ public sealed class InstallationLayoutLease : IDisposable
         // less safe.
         if (!seen.Contains(user.Value))
         {
-            throw Failure();
+            throw AclFailure("the current user holds no rights of its own");
         }
     }
 

@@ -1,0 +1,114 @@
+name: Build and test
+
+# Windows-only on purpose: the installer targets net10.0-windows, the launcher and staging code
+# use Windows ACLs, and the npm shim behaviour several fixtures exercise only exists here. A
+# Linux runner would be cheaper per minute and would not be running the product.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # A newer push to the same branch makes the older run's answer irrelevant.
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      # The whole reason this workflow is worth having. Without it a runner missing
+      # scip-typescript or a language server reports the same green as a run that exercised
+      # them, which is how the 0.1.31, 0.1.32 and 0.1.33 defects reached releases.
+      LOCALAI_STRICT_FIXTURES: "1"
+      # Declared, not assumed. scip-python 0.6.6 crashes on load under Windows —
+      # `new RegExp(path.sep)` is an invalid pattern — and only reaches that code when it has to
+      # build a virtual environment, so it runs on a developer machine with an interpreter it
+      # already accepts and dies on a clean runner. Naming it here keeps strictness meaning
+      # something for every other tool, and this line is what to delete when the upstream bug is
+      # fixed. A silent skip would restore exactly the blindness this workflow removes.
+      LOCALAI_STRICT_FIXTURES_EXCEPT: "scip-python"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Several fixtures create their own repositories with `git init`; none need history
+          # here, and a shallow clone keeps the checkout quick.
+          fetch-depth: 1
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # scip-python builds a virtual environment before it indexes anything, and without a
+      # predictable interpreter it fails inside its own environment setup rather than in
+      # anything this repository owns.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Report the toolchain
+        shell: pwsh
+        run: |
+          dotnet --info
+          git --version
+          node --version
+          npm --version
+
+      # Installed before the build so a missing tool fails here, where the message is about
+      # provisioning, rather than inside a fixture where it reads as a product failure.
+      - name: Install fixture prerequisites
+        shell: pwsh
+        run: |
+          # scip-python is deliberately absent. Version 0.6.6 dies on load under Windows on
+          # `new RegExp(path.sep)`, an invalid pattern, and only reaches that code when it has to
+          # build a virtual environment — so it runs on a developer machine that already has an
+          # interpreter it accepts and cannot start here. Installing it would put a tool on the
+          # runner that no fixture can use, and the failure would look like ours. Absent, it is
+          # excused by name below and the skip says exactly why.
+          npm install --global `
+            @sourcegraph/scip-typescript@0.4.0 `
+            typescript-language-server@5.3.0 `
+            typescript@5.9.3 `
+            pyright@1.1.403
+          npm list --global --depth=0
+
+      - name: Restore
+        run: dotnet restore LocalAi.slnx
+
+      - name: Build
+        run: dotnet build LocalAi.slnx --configuration Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: |
+          $projects = Get-ChildItem tests -Filter *.csproj -Recurse
+          Write-Host "Test projects: $($projects.Count)"
+          $failed = @()
+          foreach ($project in $projects) {
+            Write-Host "::group::$($project.BaseName)"
+            # --blame-hang turns a stuck test into a named failure with a dump. Without it a hang
+            # consumes the job timeout and the log says only that the operation was cancelled,
+            # which is what happened on the first run of this workflow: twenty-five minutes spent
+            # on an unidentified test.
+            dotnet test $project.FullName --configuration Release --no-build --nologo `
+              --blame-hang --blame-hang-timeout 5m --blame-hang-dump-type none
+            if ($LASTEXITCODE -ne 0) { $failed += $project.BaseName }
+            Write-Host "::endgroup::"
+          }
+          if ($failed.Count -gt 0) {
+            # Every project runs even after one fails: a single red project tells you less than
+            # the whole picture, and re-running CI to discover the second failure wastes a cycle.
+            throw "Failing test projects: $($failed -join ', ')"
+          }

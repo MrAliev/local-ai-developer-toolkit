@@ -15,13 +15,24 @@ internal enum SourcePathFailure
 /// </summary>
 internal static class SafeSourcePath
 {
+    /// <summary>
+    /// How the walk learns what each path component is. Injectable for one reason: creating a
+    /// real symbolic link on Windows needs Developer Mode or administrator rights, so the tests
+    /// covering this guard skipped on every machine that had neither — which is most of them,
+    /// including any CI runner. A guard against escaping the repository is a poor thing to leave
+    /// exercised only where someone happened to have the privilege.
+    ///
+    /// The real-link tests stay: they prove the attribute actually appears on a real link, which
+    /// a fake cannot. This makes the walk itself testable everywhere.
+    /// </summary>
     public static bool TryResolveFile(
         string root,
         string relativePath,
         out string fullPath,
-        out SourcePathFailure failure)
+        out SourcePathFailure failure,
+        Func<string, FileAttributes>? getAttributes = null)
     {
-        if (!TryResolveExisting(root, relativePath, out fullPath, out failure))
+        if (!TryResolveExisting(root, relativePath, out fullPath, out failure, getAttributes))
         {
             return false;
         }
@@ -39,8 +50,10 @@ internal static class SafeSourcePath
         string root,
         string relativePath,
         out string fullPath,
-        out SourcePathFailure failure)
+        out SourcePathFailure failure,
+        Func<string, FileAttributes>? getAttributes = null)
     {
+        getAttributes ??= File.GetAttributes;
         fullPath = string.Empty;
         failure = SourcePathFailure.None;
 
@@ -73,7 +86,7 @@ internal static class SafeSourcePath
             FileAttributes attributes;
             try
             {
-                attributes = File.GetAttributes(currentPath);
+                attributes = getAttributes(currentPath);
             }
             catch (Exception ex) when (
                 ex is FileNotFoundException or DirectoryNotFoundException)
