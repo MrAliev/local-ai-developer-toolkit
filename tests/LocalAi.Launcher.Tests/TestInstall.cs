@@ -1,4 +1,4 @@
-using LocalAi.Contracts;
+﻿using LocalAi.Contracts;
 
 namespace LocalAi.Launcher.Tests;
 
@@ -61,11 +61,32 @@ internal sealed class TestInstall : IDisposable
             Path.Combine(VersionDirectory(version), toolFileName),
             overwrite: true);
 
+    /// <summary>
+    /// Teardown retries, because a handle the test no longer uses is not always closed the
+    /// instant it stops being used: the launcher holds current.lock while it activates, and on a
+    /// loaded machine the release lands just after the test body returns. Deleting a temporary
+    /// directory is housekeeping, so it also refuses to turn a passing test red - the last
+    /// attempt gives up quietly and leaves the directory to the operating system.
+    /// </summary>
     public void Dispose()
     {
-        if (Directory.Exists(Root))
+        for (var attempt = 0; attempt < 20; attempt++)
         {
-            Directory.Delete(Root, recursive: true);
+            if (!Directory.Exists(Root))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(Root, recursive: true);
+                return;
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(TimeSpan.FromMilliseconds(50));
+            }
         }
     }
 

@@ -36,6 +36,23 @@ public sealed class FixturePrerequisiteTests
         Assert.Equal(expected, FixturePrerequisite.Decide(isPresent, strict));
     }
 
+    /// <summary>
+    /// An excuse is matched by substring so a fixture can describe its prerequisite in a
+    /// sentence while the excuse names only the tool.
+    /// </summary>
+    [Theory]
+    [InlineData("scip-python", new[] { "scip-python" }, true)]
+    [InlineData("scip-python indexing a project", new[] { "scip-python" }, true)]
+    [InlineData("scip-typescript", new[] { "scip-python" }, false)]
+    [InlineData("scip-python", new string[0], false)]
+    public void An_excused_prerequisite_is_recognised_by_name(
+        string what,
+        string[] excused,
+        bool expected)
+    {
+        Assert.Equal(expected, FixturePrerequisite.IsExcused(what, excused));
+    }
+
     [Fact]
     public void A_skip_reason_names_the_tool_without_mentioning_strictness()
     {

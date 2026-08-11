@@ -28,8 +28,35 @@ internal static class FixturePrerequisite
 {
     public const string StrictVariable = "LOCALAI_STRICT_FIXTURES";
 
+    /// <summary>
+    /// Prerequisites this environment is known not to be able to supply, named one by one.
+    ///
+    /// Some tools cannot run where the suite runs and it is nobody's fault here: scip-python
+    /// 0.6.6 crashes on load under Windows on <c>new RegExp(path.sep)</c>, which is an invalid
+    /// pattern, and it only reaches that code when it has to build a virtual environment — so it
+    /// works on a developer machine with an interpreter it accepts and dies on a clean runner.
+    ///
+    /// The exception is declared rather than assumed. A named entry keeps strictness meaning
+    /// something for every other tool, appears in the run output, and can be grepped for and
+    /// removed when the upstream bug is fixed. Quietly skipping instead would restore exactly the
+    /// blindness this class exists to remove.
+    /// </summary>
+    public const string ExceptVariable = "LOCALAI_STRICT_FIXTURES_EXCEPT";
+
     public static bool IsStrict =>
         Environment.GetEnvironmentVariable(StrictVariable) is "1" or "true" or "TRUE";
+
+    public static IReadOnlyCollection<string> Excused =>
+        (Environment.GetEnvironmentVariable(ExceptVariable) ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// Whether <paramref name="what"/> was excused. Substring rather than equality so a fixture
+    /// can describe its prerequisite in a sentence — "a usable tsserver.js beside
+    /// typescript-language-server" — while the excuse names only the tool.
+    /// </summary>
+    public static bool IsExcused(string what, IReadOnlyCollection<string> excused) =>
+        excused.Any(entry => what.Contains(entry, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Continues when <paramref name="isPresent"/> holds. Otherwise fails in strict mode and
@@ -41,7 +68,9 @@ internal static class FixturePrerequisite
         string howToSupplyIt,
         bool? strict = null)
     {
-        var outcome = Decide(isPresent, strict ?? IsStrict);
+        var outcome = Decide(
+            isPresent,
+            (strict ?? IsStrict) && !IsExcused(what, Excused));
         if (outcome == PrerequisiteOutcome.Satisfied)
         {
             return;

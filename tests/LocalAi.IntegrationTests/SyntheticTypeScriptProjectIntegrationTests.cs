@@ -18,12 +18,12 @@ public sealed class SyntheticTypeScriptProjectIntegrationTests : IDisposable
             Assert.Skip("Windows npm shim behavior is Windows-specific.");
         }
 
-        var executable = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "npm",
-            "scip-typescript.cmd");
-        FixturePrerequisite.Require(
-            File.Exists(executable),
+        // Resolved rather than assembled from the npm folder under %APPDATA%. npm's global
+        // prefix is configurable and is not that path everywhere — the CI runner puts it under
+        // C:/npm/prefix — so the hardcoded form reported the tool missing on a machine that had
+        // it installed.
+        var executable = FixturePrerequisite.RequireText(
+            CodeSearch.Core.Semantics.ExecutableResolver.Find("scip-typescript"),
             "@sourcegraph/scip-typescript",
             "Install it with npm so the npm shim this test exercises exists.");
 

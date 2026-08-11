@@ -30,6 +30,13 @@ jobs:
       # scip-typescript or a language server reports the same green as a run that exercised
       # them, which is how the 0.1.31, 0.1.32 and 0.1.33 defects reached releases.
       LOCALAI_STRICT_FIXTURES: "1"
+      # Declared, not assumed. scip-python 0.6.6 crashes on load under Windows —
+      # `new RegExp(path.sep)` is an invalid pattern — and only reaches that code when it has to
+      # build a virtual environment, so it runs on a developer machine with an interpreter it
+      # already accepts and dies on a clean runner. Naming it here keeps strictness meaning
+      # something for every other tool, and this line is what to delete when the upstream bug is
+      # fixed. A silent skip would restore exactly the blindness this workflow removes.
+      LOCALAI_STRICT_FIXTURES_EXCEPT: "scip-python"
 
     steps:
       - uses: actions/checkout@v4
