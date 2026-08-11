@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Security.Cryptography;
 using LocalAi.Contracts.Activation;
 
@@ -249,10 +249,13 @@ public sealed class VersionActivatorTests
                 }),
             TimeSpan.FromMilliseconds(250),
             // The lease budget only has to outlast the choreography above (350 ms of stop work
-            // plus a 100 ms release). One second left almost no headroom, so a loaded machine
-            // exhausted it and failed a test that is about the stop timeout being separate from
-            // this budget, not about its absolute size.
-            TimeSpan.FromSeconds(5));
+            // plus a 100 ms release). This test is about the stop timeout being separate from
+            // this budget, never about its absolute size, so the budget is set far beyond any
+            // plausible scheduling delay. One second failed here, five failed on a CI runner,
+            // and each bump was chasing the same mistake: a deadline tight enough to encode an
+            // assumption about how busy the machine is. A genuine hang is caught by the
+            // suite's hang detector, not by this number being small.
+            TimeSpan.FromSeconds(120));
 
         activator.Activate("v2", stopRunning: true, ExpectCurrent(before));
         await release!;

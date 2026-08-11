@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using LocalAi.Contracts.Activation;
 
 namespace LocalAi.Launcher.Tests;
@@ -162,8 +162,11 @@ public sealed class ToolRunnerTests : IDisposable
                 stopRunning: true,
                 CurrentPointerExpectation.ExactSha256(SHA256.HashData(before))),
             TestContext.Current.CancellationToken);
+        // Waits for the activation to reach its stop callback, which is ordering rather than
+        // speed: on an idle machine it arrives in milliseconds. Two seconds was a bet on thread
+        // pool scheduling that a loaded CI runner lost.
         await stopObserved.Task.WaitAsync(
-            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(120),
             TestContext.Current.CancellationToken);
 
         var newStart = Task.Run(

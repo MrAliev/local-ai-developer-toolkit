@@ -71,9 +71,14 @@ jobs:
       - name: Install fixture prerequisites
         shell: pwsh
         run: |
+          # scip-python is deliberately absent. Version 0.6.6 dies on load under Windows on
+          # `new RegExp(path.sep)`, an invalid pattern, and only reaches that code when it has to
+          # build a virtual environment — so it runs on a developer machine that already has an
+          # interpreter it accepts and cannot start here. Installing it would put a tool on the
+          # runner that no fixture can use, and the failure would look like ours. Absent, it is
+          # excused by name below and the skip says exactly why.
           npm install --global `
             @sourcegraph/scip-typescript@0.4.0 `
-            @sourcegraph/scip-python@0.6.6 `
             typescript-language-server@5.3.0 `
             typescript@5.9.3 `
             pyright@1.1.403
