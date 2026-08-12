@@ -90,9 +90,32 @@ public static class TokenEstimator
     {
         0 => "0",
         < 500 => "менее ~0.5K",
-        < 100_000 => $"~{Round(saved * 0.85)}–{Round(saved * 1.15)}K",
-        _ => $"~{Round(saved * 0.8)}–{Round(saved * 1.2)}K",
+        _ => DescribeRange(saved),
     };
+
+    /// <summary>
+    /// The band on its own, without a sentence around it, for callers reporting in another
+    /// language or over a total rather than a single job.
+    ///
+    /// The width is the same judgement either way: a fifteen per cent band up to a hundred
+    /// thousand tokens, twenty above it, because the further the estimate is extrapolated from
+    /// characters the less the middle of it is worth. A month of broker telemetry sums past what
+    /// thousands can express, so the unit follows the number instead of being fixed at K.
+    /// </summary>
+    public static string DescribeRange(long saved)
+    {
+        if (saved <= 0)
+        {
+            return "0";
+        }
+
+        var band = saved < 100_000 ? 0.15 : 0.2;
+        var low = saved * (1 - band);
+        var high = saved * (1 + band);
+        return high >= 1_000_000
+            ? $"~{Round(low / 1000.0)}–{Round(high / 1000.0)}M"
+            : $"~{Round(low)}–{Round(high)}K";
+    }
 
     /// <summary>
     /// The whole sentence about the saving, rather than a number to drop into one.

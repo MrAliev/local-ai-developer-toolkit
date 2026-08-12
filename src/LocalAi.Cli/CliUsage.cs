@@ -14,6 +14,7 @@ internal static class CliUsage
     public const string HookEvents = "post-commit|post-checkout|post-merge|post-rewrite";
     public const string Prune = "localai prune [--dry-run]";
     public const string Doctor = "localai doctor [--root dir]";
+    public const string Telemetry = "localai telemetry";
 
     // Every command the binary actually answers to belongs here. The hook command was missing
     // from this list while every installed Git hook invoked it, so anyone debugging a hook was
@@ -24,5 +25,6 @@ internal static class CliUsage
         "localai repo status [git-common-dir] | localai policy <show|set> [options] | " +
         "localai semantic <operation> [--request file] | localai bootstrap --dry-run | " +
         "localai sync [--root dir] [--base-only] | " + Hook + " | " +
-        "localai hooks install [--root dir] | " + Prune + " | " + Doctor;
+        "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +
+        Telemetry;
 }

@@ -192,6 +192,13 @@ static async Task<int> RunAsync(string[] args)
         return 0;
     }
 
+    if (args is ["telemetry", ..])
+    {
+        return await TelemetryCommand.ExecuteAsync(
+            ModelResidencyPolicyStore.DefaultRuntimeRoot,
+            Console.Out);
+    }
+
     if (args is ["hooks", "install", ..])
     {
         var launcherPath = Environment.GetEnvironmentVariable(

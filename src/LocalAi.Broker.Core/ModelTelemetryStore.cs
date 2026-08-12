@@ -44,6 +44,10 @@ public sealed record ExperimentTaskTelemetryRecord(
     string CatalogVersion,
     DateTimeOffset RecordedAtUtc);
 
+public sealed record ModelTelemetryReadResult(
+    IReadOnlyList<ModelTelemetryRecord> Records,
+    int Unreadable);
+
 public sealed class ModelTelemetryStore
 {
     private static readonly string[] ForbiddenMemberFragments =
@@ -134,6 +138,58 @@ public sealed class ModelTelemetryStore
         }
 
         return records.AsReadOnly();
+    }
+
+    /// <summary>
+    /// Reads what is there, and says how much was not.
+    ///
+    /// <see cref="ReadAllAsync"/> refuses a directory containing one unreadable file, which is
+    /// the right answer for a caller that is about to compute something from every record. It is
+    /// the wrong answer for a report over a month of them: a machine that lost power during an
+    /// append leaves exactly one truncated file behind, and losing thirty days of measurements to
+    /// it teaches whoever hits that to stop running the report.
+    ///
+    /// The count is returned rather than swallowed. A report that quietly drops records is worse
+    /// than one that refuses to run, because nothing about its output looks wrong.
+    /// </summary>
+    public async Task<ModelTelemetryReadResult> ReadForReportAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (!Directory.Exists(MetricsDirectory))
+        {
+            return new ModelTelemetryReadResult([], 0);
+        }
+
+        var records = new List<ModelTelemetryRecord>();
+        var unreadable = 0;
+        foreach (var path in Directory.EnumerateFiles(MetricsDirectory, "*.json")
+                     .Order(StringComparer.Ordinal))
+        {
+            try
+            {
+                await using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    4096,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                records.Add(
+                    await JsonSerializer.DeserializeAsync<ModelTelemetryRecord>(
+                        stream,
+                        LocalAiJson.Strict,
+                        cancellationToken)
+                    ?? throw new InvalidDataException("Telemetry record is empty."));
+            }
+            catch (Exception exception) when (
+                exception is JsonException or IOException or UnauthorizedAccessException or
+                    InvalidDataException)
+            {
+                unreadable++;
+            }
+        }
+
+        return new ModelTelemetryReadResult(records.AsReadOnly(), unreadable);
     }
 
     public async Task AppendExperimentTaskAsync(
