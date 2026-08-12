@@ -221,7 +221,7 @@ public sealed class VersionActivatorTests
     }
 
     [Fact]
-    public async Task Stop_timeout_is_separate_from_shared_lease_acquisition_budget()
+    public void Stop_timeout_is_separate_from_shared_lease_acquisition_budget()
     {
         using var install = TestInstall.CreateComplete("v1", "v2");
         install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
@@ -233,28 +233,38 @@ public sealed class VersionActivatorTests
             null);
         using var shared = VersionLease.AcquireShared(
             Path.Combine(install.BinRoot, "current.lock"));
-        Task? release = null;
+
+        // The release runs on a thread of its own, already started and parked on this event
+        // before the stop begins. It used to be a thread pool task, and that is what failed on
+        // the runner: the sleep it was to perform starts when the pool hands it a thread, not
+        // when the task is queued, so a saturated pool moved the release past the budget rather
+        // than merely delaying its start.
+        using var stopFinished = new ManualResetEventSlim();
+        var releaser = new Thread(() =>
+        {
+            stopFinished.Wait();
+            Thread.Sleep(LeaseReleaseDelay);
+            shared.Dispose();
+        })
+        {
+            IsBackground = true,
+            Name = "shared-lease-release",
+        };
+        releaser.Start();
         var activator = new VersionActivator(
             install.BinRoot,
             new LocalAiProcessController(
                 () => [process],
                 (_, _) =>
                 {
-                    // Scheduled before the stop work rather than after it, so the thread pool
-                    // has the whole stop to hand this task a thread. What is left to vary is
-                    // one sleep instead of a queueing delay plus a sleep.
-                    release = Task.Run(() =>
-                    {
-                        Thread.Sleep(StopWork + LeaseReleaseDelay);
-                        shared.Dispose();
-                    });
                     Thread.Sleep(StopWork);
+                    stopFinished.Set();
                 }),
             leaseTimeout: LeaseBudget,
             stopTimeout: StopTimeout);
 
         activator.Activate("v2", stopRunning: true, ExpectCurrent(before));
-        await release!;
+        releaser.Join();
 
         Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
     }
@@ -269,7 +279,9 @@ public sealed class VersionActivatorTests
     // is busy.
     //
     // LeaseBudget in turn dwarfs LeaseReleaseDelay, which is the only wait the exclusive
-    // acquisition actually has to sit through, so a loaded machine has room to be late.
+    // acquisition actually has to sit through. The release is measured from the moment the stop
+    // finished, by a thread that is already running and parked, so what has to fit inside the
+    // budget is one sleep on a live thread rather than anything the scheduler decides.
     //
     // The two timeouts used to be passed positionally and the wrong way round: 250 ms landed
     // in the lease slot and the seconds in the stop slot, where this fake controller ignores
