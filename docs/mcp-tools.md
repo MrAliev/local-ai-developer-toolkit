@@ -1,4 +1,4 @@
-# MCP tools: the complete inventory
+﻿# MCP tools: the complete inventory
 
 [Русская версия](mcp-tools.ru.md)
 
@@ -81,3 +81,12 @@ live token counter here. Zero is a correct answer: a job too small to save anyth
   depends on.
 - **Answering from a partial index.** While a repository is still building, the state is
   `INITIALIZING`, and that is said plainly rather than replaced by a quiet text search.
+
+## Checking an installation
+
+`localai doctor [--root <repo>]` replaces the sequence people run by hand: which version the
+pointer names and whether its binaries are all there, the stable entry point, whether the broker
+is alive, the queue and quarantine, the policies actually in effect, and the repository index.
+
+Read-only, and it starts nothing — including the broker. The exit code is non-zero only for a
+real fault: a stopped broker is a note, because it starts on demand.

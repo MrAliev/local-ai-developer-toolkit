@@ -1,4 +1,4 @@
-using CodeSearch.Core.Embedding;
+﻿using CodeSearch.Core.Embedding;
 using LocalAi.Cli;
 using LocalAi.Contracts;
 using System.Text.Json;
@@ -83,6 +83,15 @@ static async Task<int> RunAsync(string[] args)
                 commonDirectory,
                 ModelResidencyPolicyStore.DefaultRuntimeRoot).Message);
         return 0;
+    }
+
+    if (args is ["doctor", ..])
+    {
+        var rootIndex = Array.IndexOf(args, "--root");
+        return DoctorCommand.Execute(
+            ModelResidencyPolicyStore.DefaultRuntimeRoot,
+            rootIndex >= 0 && rootIndex + 1 < args.Length ? args[rootIndex + 1] : null,
+            Console.Out);
     }
 
     if (args is ["policy", ..])
