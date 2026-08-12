@@ -90,3 +90,19 @@ is alive, the queue and quarantine, the policies actually in effect, and the rep
 
 Read-only, and it starts nothing — including the broker. The exit code is non-zero only for a
 real fault: a stopped broker is a note, because it starts on demand.
+
+## Reading what the local models actually did
+
+`localai telemetry` summarises the per-job records the broker has been writing all along. Every
+delegated job leaves one under the runtime root and they are kept for thirty days; until this
+command existed the only thing that read any of them was the experiment report, which covers the
+handful of jobs belonging to a running model experiment.
+
+It answers the questions a routing or residency decision turns on: how jobs ended, how often a
+model had to be loaded rather than found warm, how often the fallback was taken, what the queue
+and the execution actually cost at the median and the p90, and how much cloud spend was avoided —
+broken down by model and by task profile.
+
+Latencies are nearest-rank percentiles, so every duration printed is one a job really took.
+Savings are bands, never totals: the estimator counts characters, there is no live token counter
+anywhere in this system, and summing a hundred thousand estimates does not make them exact.
