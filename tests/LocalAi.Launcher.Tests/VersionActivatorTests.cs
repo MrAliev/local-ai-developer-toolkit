@@ -240,28 +240,45 @@ public sealed class VersionActivatorTests
                 () => [process],
                 (_, _) =>
                 {
-                    Thread.Sleep(TimeSpan.FromMilliseconds(350));
+                    // Scheduled before the stop work rather than after it, so the thread pool
+                    // has the whole stop to hand this task a thread. What is left to vary is
+                    // one sleep instead of a queueing delay plus a sleep.
                     release = Task.Run(() =>
                     {
-                        Thread.Sleep(TimeSpan.FromMilliseconds(100));
+                        Thread.Sleep(StopWork + LeaseReleaseDelay);
                         shared.Dispose();
                     });
+                    Thread.Sleep(StopWork);
                 }),
-            TimeSpan.FromMilliseconds(250),
-            // The lease budget only has to outlast the choreography above (350 ms of stop work
-            // plus a 100 ms release). This test is about the stop timeout being separate from
-            // this budget, never about its absolute size, so the budget is set far beyond any
-            // plausible scheduling delay. One second failed here, five failed on a CI runner,
-            // and each bump was chasing the same mistake: a deadline tight enough to encode an
-            // assumption about how busy the machine is. A genuine hang is caught by the
-            // suite's hang detector, not by this number being small.
-            TimeSpan.FromSeconds(120));
+            leaseTimeout: LeaseBudget,
+            stopTimeout: StopTimeout);
 
         activator.Activate("v2", stopRunning: true, ExpectCurrent(before));
         await release!;
 
         Assert.Equal("v2", new VersionResolver(install.BinRoot).ReadCurrent().Version);
     }
+
+    // These four are one relationship, not four independent deadlines, and the test only
+    // means anything while the relationship holds.
+    //
+    // StopWork outlasts LeaseBudget deliberately: were the stop charged to the lease budget,
+    // nothing would be left for the exclusive acquisition and the activation would fail with
+    // version_in_use. That is the regression this test exists to catch, and it is why the
+    // budget must stay well under the stop work rather than being raised whenever the runner
+    // is busy.
+    //
+    // LeaseBudget in turn dwarfs LeaseReleaseDelay, which is the only wait the exclusive
+    // acquisition actually has to sit through, so a loaded machine has room to be late.
+    //
+    // The two timeouts used to be passed positionally and the wrong way round: 250 ms landed
+    // in the lease slot and the seconds in the stop slot, where this fake controller ignores
+    // them. Three commits raised the number in the stop slot to fix a flake that was always
+    // the lease budget being 250 ms. Hence the named arguments above.
+    private static readonly TimeSpan LeaseReleaseDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan LeaseBudget = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan StopWork = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromMilliseconds(250);
 
     [Fact]
     public void Missing_expectation_activates_only_when_pointer_is_still_missing()
