@@ -101,36 +101,32 @@ public sealed class SystemProcessRunnerTests
     [Fact]
     public async Task Classifies_timeout_and_kills_only_the_started_process_tree()
     {
-        var runner = new SystemProcessRunner();
-        var pidPath = TemporaryPath(".pid");
+        var started = new StartedProcessRecorder();
+        var runner = new SystemProcessRunner(started, TimeSpan.FromSeconds(5));
         var scriptPath = TemporaryPath(".ps1");
         await File.WriteAllTextAsync(
             scriptPath,
-            "Set-Content -LiteralPath $args[0] -Value $PID; Start-Sleep -Seconds 30",
+            "Start-Sleep -Seconds 30",
             TestContext.Current.CancellationToken);
         try
         {
-            // The script sleeps for 30 seconds, so any budget below that still times out. Two
-            // seconds also had to cover PowerShell's startup before the script recorded its pid;
-            // under a full parallel test run it did not, and the test failed on a missing pid
-            // file instead of on the classification it exists to check.
+            // The script sleeps for half a minute, so a ten-second budget times out however
+            // slowly PowerShell gets going: a late start only makes the process more certainly
+            // alive when the budget expires, never less.
             var result = await runner.RunAsync(
                 ResolvePowerShell(),
-                PowerShellFileArguments(scriptPath, pidPath),
+                PowerShellFileArguments(scriptPath),
                 TimeSpan.FromSeconds(10),
                 TestContext.Current.CancellationToken);
 
             Assert.True(result.TimedOut);
             Assert.False(result.Cancelled);
             Assert.Null(result.ExitCode);
-            AssertProcessExited(int.Parse(await File.ReadAllTextAsync(
-                pidPath,
-                TestContext.Current.CancellationToken)));
+            AssertProcessExited(started.ProcessId);
         }
         finally
         {
             File.Delete(scriptPath);
-            File.Delete(pidPath);
         }
     }
 
@@ -267,6 +263,31 @@ public sealed class SystemProcessRunnerTests
         }
         catch (ArgumentException)
         {
+        }
+    }
+
+    /// <summary>
+    /// Remembers which process the runner started, at the moment it started it.
+    ///
+    /// The timeout test used to learn that from a pid the child wrote to a file, which quietly
+    /// turned its budget into a bet on how long PowerShell takes to reach its first statement.
+    /// The bet was lost on a loaded CI runner — the ten seconds expired while PowerShell was
+    /// still starting, the file never appeared, and the test failed on a missing pid rather than
+    /// on the classification it exists to check. Raising the budget was the wrong lever twice
+    /// over: it cannot be raised past the child's own sleep, and the pid was available from the
+    /// process handle all along.
+    /// </summary>
+    private sealed class StartedProcessRecorder : IProcessFactory
+    {
+        private readonly SystemProcessFactory _inner = new();
+
+        public int ProcessId { get; private set; }
+
+        public IRunningProcess Start(ProcessStartInfo startInfo)
+        {
+            var process = _inner.Start(startInfo);
+            ProcessId = process.Id;
+            return process;
         }
     }
 
