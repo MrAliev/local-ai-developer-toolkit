@@ -309,7 +309,14 @@ public sealed class ReleaseCommand
         ReleaseVersion? version,
         CancellationToken cancellationToken)
     {
-        var status = await GitAsync(["status", "--porcelain"], cancellationToken);
+        // --untracked-files=all, because the default collapses an untracked directory into one
+        // entry: a repository where docs/releases does not exist yet reports `?? docs/` and the
+        // notes this release is about to commit never appear under their own paths. Asking for
+        // the form this can parse is the fix; parsing whichever form git felt like emitting is
+        // how the exclusion below silently stops applying.
+        var status = await GitAsync(
+            ["status", "--porcelain", "--untracked-files=all"],
+            cancellationToken);
         var unexpected = UnexpectedChanges(status, version);
         if (unexpected.Count == 0)
         {
