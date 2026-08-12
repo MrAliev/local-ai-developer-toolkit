@@ -91,4 +91,6 @@ is equally true — mixing them produces a release nobody can install.
 
 CI builds and tests; signing and publishing stay on the machine that holds the key. Copying it
 into a secrets store adds a second place it can leak from and undoes the point of keeping a
-controlled copy. The release script is deliberately runnable locally for this reason.
+controlled copy. The release script is deliberately runnable locally for this reason, and so is
+`localai-release-signer release --publish`, which drives it: the whole release runs on the machine
+that holds the key, and CI is asked only whether the commit is green.

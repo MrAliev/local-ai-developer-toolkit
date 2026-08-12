@@ -330,6 +330,38 @@ dotnet publish src/LocalAi.Installer/LocalAi.Installer.csproj --configuration Re
 The `publish/` directory is ignored. Publishing does not register executables with an
 AI client or install Git hooks.
 
+### Cutting a release
+
+```powershell
+dotnet run --project src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj -c Release -- `
+    release --version 0.1.36 --root .
+```
+
+The first run scaffolds `docs/releases/0.1.36.md` and `.ru.md` and stops. Write them — the notes
+are connected prose about what changed and why, and a list of commit subjects is a different and
+much less useful thing. Run it again and it opens the pull request that carries them.
+
+Once that pull request is merged, from `main`:
+
+```powershell
+dotnet run --project src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj -c Release -- `
+    release --version 0.1.36 --root . --publish
+```
+
+That builds, signs locally, checks the manifest against the release being published, and only
+then tags and uploads. It refuses a dirty tree, a branch other than `main`, a commit `origin`
+does not have, a commit without a green `build-and-test` run, a version already tagged, and notes
+still carrying the scaffold's TODO.
+
+The split is deliberate. Building and signing are repeatable; tagging and publishing are what
+other people's installers resolve, so they are a separate, explicit invocation rather than a
+later stage of the same one. Merging the pull request stays a human decision throughout.
+
+The two halves exist because the same version used to be typed into four places — both note
+filenames, the publish script, the tag — and the commit into two, the manifest's version
+directory and whatever the tag ended up pointing at. Nothing compared them, and a disagreement
+produced a package that verifies, installs, and is not what the tag names.
+
 ### Signing a release manifest
 
 An installed machine never needs a system-wide .NET runtime. Every component — the broker

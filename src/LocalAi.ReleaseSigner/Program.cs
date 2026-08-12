@@ -33,6 +33,7 @@ internal static class Program
                 "sign" => Sign(Args.Parse(args.Skip(1))),
                 "verify" => Verify(Args.Parse(args.Skip(1))),
                 "verify-package" => VerifyPackage(Args.Parse(args.Skip(1))).GetAwaiter().GetResult(),
+                "release" => Release(Args.Parse(args.Skip(1))).GetAwaiter().GetResult(),
                 _ => Usage(),
             };
         }
@@ -60,6 +61,14 @@ internal static class Program
 
               localai-release-signer verify --manifest <file> --signature <file>
                                             [--public-key <file>]
+
+              localai-release-signer release --version <1.2.3> [--publish] [--root <directory>]
+
+            Without --publish this scaffolds the release notes, checks them, and opens the pull
+            request that carries them. With it, and only from the merged commit on main, it
+            builds, signs, verifies that the manifest describes this release, and then tags and
+            publishes. The two halves are separate invocations because the second one is not
+            reversible.
 
             The private key defaults to
             %LOCALAPPDATA%\LocalAi\release-signing\release-signing-private.pkcs8.der.
@@ -298,6 +307,16 @@ internal static class Program
             "LocalAi",
             "release-signing",
             "release-signing-private.pkcs8.der");
+
+    private static async Task<int> Release(Args args)
+    {
+        var version = ReleaseVersion.Parse(args.Require("version"));
+        var root = args.Optional("root") ?? Directory.GetCurrentDirectory();
+        var command = new ReleaseCommand(new SystemProcessRunner(), root, Console.Out);
+        return args.Flag("publish")
+            ? await command.PublishAsync(version)
+            : await command.PrepareAsync(version);
+    }
 
     private sealed class Args
     {
