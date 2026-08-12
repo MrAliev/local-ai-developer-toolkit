@@ -2,14 +2,6 @@ using LocalAi.Contracts;
 
 namespace LocalAi.Broker;
 
-public enum LocalSizeBucket
-{
-    Empty,
-    Small,
-    Medium,
-    Large
-}
-
 public enum LocalCountBucket
 {
     None,
