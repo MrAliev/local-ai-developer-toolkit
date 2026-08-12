@@ -152,6 +152,58 @@ public sealed class ReleaseCommandTests : IDisposable
         AssertNothingPublished(runner);
     }
 
+    /// <summary>
+    /// Preparing writes the notes and then commits them, so it cannot also demand that nothing
+    /// be written. The first version of this command scaffolded the files on one run and then
+    /// refused the next run because of the scaffold it had just produced.
+    /// </summary>
+    [Fact]
+    public void The_notes_this_release_is_about_to_commit_do_not_count_as_a_dirty_tree()
+    {
+        var unexpected = ReleaseCommand.UnexpectedChanges(
+            "?? docs/releases/0.1.36.md\n?? docs/releases/0.1.36.ru.md\n",
+            ReleaseVersion.Parse("0.1.36"));
+
+        Assert.Empty(unexpected);
+    }
+
+    [Fact]
+    public void Anything_else_uncommitted_still_counts()
+    {
+        var unexpected = ReleaseCommand.UnexpectedChanges(
+            "?? docs/releases/0.1.36.md\n M src/LocalAi.Cli/Program.cs\n",
+            ReleaseVersion.Parse("0.1.36"));
+
+        Assert.Equal([" M src/LocalAi.Cli/Program.cs"], unexpected);
+    }
+
+    /// <summary>
+    /// Someone else's half-written release notes are exactly the surprise this check is for.
+    /// </summary>
+    [Fact]
+    public void Notes_for_a_different_version_are_not_excused()
+    {
+        var unexpected = ReleaseCommand.UnexpectedChanges(
+            "?? docs/releases/0.1.35.md\n",
+            ReleaseVersion.Parse("0.1.36"));
+
+        Assert.Single(unexpected);
+    }
+
+    /// <summary>
+    /// Publishing excuses nothing: by then the notes are committed, and anything left in the tree
+    /// is a real difference from the commit the tag will name.
+    /// </summary>
+    [Fact]
+    public void Publishing_excuses_no_uncommitted_file_at_all()
+    {
+        var unexpected = ReleaseCommand.UnexpectedChanges(
+            "?? docs/releases/0.1.36.md\n",
+            version: null);
+
+        Assert.Single(unexpected);
+    }
+
     private static void AssertNothingPublished(ScriptedRunner runner)
     {
         Assert.DoesNotContain(runner.Invocations, line => line.Contains("release create"));

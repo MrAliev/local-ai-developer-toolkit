@@ -59,7 +59,7 @@ public sealed class ReleaseCommand
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(version);
-        if (!await RequireCleanTreeAsync(cancellationToken))
+        if (!await RequireCleanTreeAsync(version, cancellationToken))
         {
             return 1;
         }
@@ -144,7 +144,7 @@ public sealed class ReleaseCommand
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(version);
-        if (!await RequireCleanTreeAsync(cancellationToken))
+        if (!await RequireCleanTreeAsync(version: null, cancellationToken))
         {
             return 1;
         }
@@ -305,20 +305,71 @@ public sealed class ReleaseCommand
         return green;
     }
 
-    private async Task<bool> RequireCleanTreeAsync(CancellationToken cancellationToken)
+    private async Task<bool> RequireCleanTreeAsync(
+        ReleaseVersion? version,
+        CancellationToken cancellationToken)
     {
         var status = await GitAsync(["status", "--porcelain"], cancellationToken);
-        if (string.IsNullOrWhiteSpace(status))
+        var unexpected = UnexpectedChanges(status, version);
+        if (unexpected.Count == 0)
         {
             return true;
         }
 
         _output.WriteLine(
-            "The working tree has uncommitted changes. A release has to be reproducible from " +
-            "the commit it names:");
-        _output.WriteLine(status.TrimEnd());
+            "The working tree has changes that are not part of this release. A release has to " +
+            "be reproducible from the commit it names:");
+        foreach (var line in unexpected)
+        {
+            _output.WriteLine(line);
+        }
+
         return false;
     }
+
+    /// <summary>
+    /// The working tree changes that are not this release's own notes.
+    ///
+    /// Preparing a release writes two files and then wants to commit them, so it cannot also
+    /// demand that nothing be written. The first run scaffolded the notes and the second refused
+    /// to continue because of the scaffold it had just produced — a command blocked by its own
+    /// output, and by a check that was right in spirit.
+    ///
+    /// Only these two paths, and only for the version being prepared. Notes for some other
+    /// version sitting uncommitted are exactly the surprise this check exists to surface.
+    /// Publishing passes no version, so nothing is excused there: by then the notes are
+    /// committed, and anything left over is a real difference between the tree and the commit
+    /// the tag will name.
+    /// </summary>
+    public static IReadOnlyList<string> UnexpectedChanges(
+        string porcelain,
+        ReleaseVersion? version)
+    {
+        ArgumentNullException.ThrowIfNull(porcelain);
+        HashSet<string> excused = version is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(
+                [
+                    $"docs/releases/{version}.md",
+                    $"docs/releases/{version}.ru.md",
+                ],
+                StringComparer.OrdinalIgnoreCase);
+        return porcelain
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Where(line => !excused.Contains(PorcelainPath(line)))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// The path out of a porcelain line. The first two columns are the status and the third is a
+    /// space, and a path containing a space or a quote is quoted — which none of the release note
+    /// paths ever are, so an unquoted comparison is enough and a quoted path simply fails to
+    /// match and is reported, which is the safe direction.
+    /// </summary>
+    private static string PorcelainPath(string line) =>
+        line.Length > 3 ? line[3..].Trim() : line;
 
     private async Task<string> GitAsync(
         IReadOnlyList<string> arguments,
