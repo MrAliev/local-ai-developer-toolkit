@@ -1,5 +1,6 @@
 using LocalAi.Installer.Core.Releases;
 using LocalAi.ReleaseSigner;
+using System.Text.Json;
 
 namespace LocalAi.ReleaseSigner.Tests;
 
@@ -73,6 +74,44 @@ public sealed class ReleaseConsistencyTests
             problems,
             problem => problem.Contains("0.1.30/localai-package.zip", StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// The manifest published for 0.1.35, byte for byte as the signer wrote it.
+    ///
+    /// The document is produced by a canonical writer rather than by the serializer that reads it
+    /// back here, so nothing but this proves the two agree. A reader that quietly defaulted a
+    /// field it could not match would make every comparison above pass for the wrong reason.
+    /// </summary>
+    [Fact]
+    public void A_manifest_this_project_published_reads_back_field_for_field()
+    {
+        var manifest = ReleaseConsistency.ParseManifest(Published);
+
+        Assert.Equal("0.1.35", manifest.ReleaseVersion);
+        Assert.Equal("cfa6449df663", manifest.VersionDirectory);
+        Assert.Equal(235178344, manifest.PackageSize);
+        Assert.Equal(
+            ReleaseConsistency.ExpectedPackageUri(ReleaseVersion.Parse("0.1.35")),
+            manifest.PackageUri);
+        Assert.Empty(ReleaseConsistency.Check(manifest, ReleaseVersion.Parse("0.1.35"), Commit));
+    }
+
+    /// <summary>
+    /// The installer's verifier requires exactly the documented properties. A reader here that
+    /// tolerated an extra one would call the release consistent right up to the moment nobody
+    /// could install it.
+    /// </summary>
+    [Fact]
+    public void A_manifest_carrying_an_undefined_field_is_refused()
+    {
+        Assert.ThrowsAny<JsonException>(() => ReleaseConsistency.ParseManifest(
+            Published.Replace("\"Models\":[]", "\"Models\":[],\"Signed\":true", StringComparison.Ordinal)));
+    }
+
+    private const string Published =
+        """
+        {"SchemaVersion":1,"ReleaseVersion":"0.1.35","VersionDirectory":"cfa6449df663","ModelCatalogVersion":"1","ProtocolVersion":1,"BuildCompatibilityId":"localai-broker-v1","PackageUri":"https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/0.1.35/localai-package.zip","PackageSize":235178344,"PackageSha256":"CD8909A6DD901D1E6ABF7008BF464D37A32ADB8B90B1C2E12F668E1F12B68A0E","RequiresAuthenticode":false,"Models":[]}
+        """;
 
     private static ReleaseManifest Manifest(
         string releaseVersion,

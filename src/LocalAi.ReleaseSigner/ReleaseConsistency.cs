@@ -1,4 +1,6 @@
 using LocalAi.Installer.Core.Releases;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace LocalAi.ReleaseSigner;
 
@@ -40,6 +42,37 @@ public static class ReleaseConsistency
         var trimmed = commitSha.Trim();
         return trimmed.Length <= 12 ? trimmed : trimmed[..12];
     }
+
+    /// <summary>
+    /// Reads a signed manifest back.
+    ///
+    /// Deliberately strict, and deliberately covered by a test that feeds it a manifest this
+    /// project actually published: the document is written by a canonical writer rather than by
+    /// this serializer, so nothing but a test proves the two agree, and a reader that silently
+    /// filled a field with its default would make every comparison below pass by accident.
+    /// </summary>
+    public static ReleaseManifest ParseManifest(string json)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+        return JsonSerializer.Deserialize<ReleaseManifest>(json, ManifestOptions)
+            ?? throw new InvalidDataException("The release manifest is empty.");
+    }
+
+    /// <summary>
+    /// Rejects a document carrying anything the manifest does not define, because the verifier
+    /// the installer runs requires exactly the documented properties. A reader that shrugged at
+    /// an extra field would report a release as consistent right up to the moment nobody could
+    /// install it.
+    ///
+    /// Case-insensitive matching is deliberately absent: constructor parameters bind to
+    /// properties rather than to the JSON names, so it changed nothing here, and an option no
+    /// behaviour depends on reads to the next person as a requirement.
+    /// </summary>
+    private static readonly JsonSerializerOptions ManifestOptions = new()
+    {
+        AllowDuplicateProperties = false,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+    };
 
     public static IReadOnlyList<string> Check(
         ReleaseManifest manifest,

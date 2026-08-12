@@ -1,6 +1,4 @@
-using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
-using LocalAi.Installer.Core.Releases;
 using System.Text.Json;
 
 namespace LocalAi.ReleaseSigner;
@@ -227,10 +225,8 @@ public sealed class ReleaseCommand
 
         var releaseDirectory = Path.Combine(_repositoryRoot, "publish", "release");
         var manifestPath = Path.Combine(releaseDirectory, "release-manifest.json");
-        var manifest = JsonSerializer.Deserialize<ReleaseManifest>(
-            await File.ReadAllTextAsync(manifestPath, cancellationToken),
-            LocalAiJson.Strict)
-            ?? throw new InvalidDataException($"{manifestPath} is empty.");
+        var manifest = ReleaseConsistency.ParseManifest(
+            await File.ReadAllTextAsync(manifestPath, cancellationToken));
         var problems = ReleaseConsistency.Check(manifest, version, head);
         if (problems.Count > 0)
         {
