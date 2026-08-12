@@ -13,6 +13,15 @@ public sealed class BrokerModelInstallerTests : IDisposable
 {
     private static readonly DateTimeOffset VerifiedUtc =
         new(2026, 7, 31, 8, 9, 10, TimeSpan.Zero);
+
+    /// <summary>
+    /// How long the activation gate is given while a test blocks it. The cancellation test
+    /// asserts against a fraction of this rather than against an absolute number of seconds, so
+    /// the two are one relationship: finishing well inside the budget means the cancellation was
+    /// observed, and finishing at the budget means it was not. A minute apart, no plausible
+    /// scheduling delay makes one look like the other.
+    /// </summary>
+    private static readonly TimeSpan GateBudget = TimeSpan.FromSeconds(60);
     private readonly InstallationLayout layout =
         InstallationLayout.FromLocalAppData(@"C:\LocalAppData");
     private readonly List<string> activationRoots = [];
@@ -669,10 +678,15 @@ public sealed class BrokerModelInstallerTests : IDisposable
         cancellation.CancelAfter(TimeSpan.FromMilliseconds(75));
         var runner = new RecordingProcessRunner();
         var trust = Trust();
+        // The budget is a minute so that "noticed the cancellation" and "sat here until the
+        // budget ran out" are a long way apart. It used to be five seconds against an assertion
+        // that the whole thing finished within one, which measured how busy the machine was
+        // rather than which of the two happened: a loaded runner took 1.7 seconds to do the right
+        // thing and failed.
         trust.Acquire = token => ActiveVersionBatchLease.Acquire(
             root,
             "v1",
-            TimeSpan.FromSeconds(5),
+            GateBudget,
             token);
         var installer = Installer(runner, Launcher(), trust);
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -694,7 +708,7 @@ public sealed class BrokerModelInstallerTests : IDisposable
         Assert.Equal(BrokerModelBatchStopReason.Cancelled, result.StopReason);
         Assert.Equal("cancelled", result.Code);
         Assert.Empty(runner.Calls);
-        Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+        Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, GateBudget / 3);
         using var reacquired = ActivationCoordinator.AcquireStartupGate(
             root,
             TimeSpan.Zero,
