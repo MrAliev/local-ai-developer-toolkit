@@ -218,8 +218,15 @@ public sealed class ReleaseCommand
             throwOnFailure: false);
         if (build.ExitCode != 0)
         {
-            _output.WriteLine(build.StandardError);
-            _output.WriteLine($"The release build failed with code {build.ExitCode?.ToString() ?? "none"}.");
+            // Both streams, because the reason is usually in neither the one you expect nor both.
+            // MSBuild reports a failed build on stdout and PowerShell reports the throw on stderr,
+            // and printing only the latter produced a report that said the build failed and not a
+            // word about why - a locked file, in the first real run of this command.
+            _output.WriteLine(build.StandardOutput.TrimEnd());
+            _output.WriteLine(build.StandardError.TrimEnd());
+            _output.WriteLine(
+                $"The release build failed with code {build.ExitCode?.ToString() ?? "none"}. " +
+                "Nothing was published.");
             return 1;
         }
 

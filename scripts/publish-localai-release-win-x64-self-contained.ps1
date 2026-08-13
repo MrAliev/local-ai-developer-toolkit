@@ -60,6 +60,20 @@ if ([string]::IsNullOrWhiteSpace($VersionDirectory)) {
 
 dotnet restore LocalAi.slnx -r $Runtime
 
+# The signer is built once, here, and every later invocation of it runs with --no-build.
+#
+# This script packs and signs by re-entering LocalAi.ReleaseSigner, and since `localai-release-signer
+# release --publish` is what now drives this script, that re-entry can happen while an instance of
+# that very assembly is running. A rebuild then tries to overwrite the binary of the process that
+# started it, and MSBuild fails with a locked-file error whose message never reaches the caller.
+# Building up front and running the built output afterwards removes the overlap entirely, and keeps
+# the script usable on its own, where nothing has built the signer yet.
+$SignerProject = "src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj"
+dotnet build $SignerProject -c $Configuration --no-restore
+if ($LASTEXITCODE -ne 0) {
+    throw "Building the release signer failed with code $LASTEXITCODE."
+}
+
 $projects = @(
     "src/CodeSearch.Cli/CodeSearch.Cli.csproj",
     "src/CodeSearch.Mcp/CodeSearch.Mcp.csproj",
@@ -170,8 +184,8 @@ foreach ($entry in $artifactMap.GetEnumerator()) {
 }
 
 $package = Join-Path $release "localai-package.zip"
-dotnet run --project src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj `
-    -c $Configuration --no-restore -- pack `
+dotnet run --project $SignerProject `
+    -c $Configuration --no-restore --no-build -- pack `
     --input $artifacts --release-version $ReleaseVersion `
     --version-directory $VersionDirectory --out $package
 if ($LASTEXITCODE -ne 0) {
@@ -179,16 +193,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($SignManifest) {
-    dotnet run --project src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj `
-        -c $Configuration --no-restore -- sign `
+    dotnet run --project $SignerProject `
+        -c $Configuration --no-restore --no-build -- sign `
         --package $package --package-uri $PackageUri `
         --release-version $ReleaseVersion --version-directory $VersionDirectory --out $release
     if ($LASTEXITCODE -ne 0) {
         throw "Release manifest signing failed with code $LASTEXITCODE."
     }
 
-    dotnet run --project src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj `
-        -c $Configuration --no-restore -- verify-package `
+    dotnet run --project $SignerProject `
+        -c $Configuration --no-restore --no-build -- verify-package `
         --package $package `
         --manifest (Join-Path $release "release-manifest.json") `
         --signature (Join-Path $release "release-manifest.sig")
