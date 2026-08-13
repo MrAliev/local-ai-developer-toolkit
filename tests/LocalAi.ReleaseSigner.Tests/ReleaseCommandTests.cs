@@ -153,6 +153,28 @@ public sealed class ReleaseCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A failed build must not reach the tag, and it must say why. The first real run of this
+    /// command failed here and reported only that the build had failed: the locked file that
+    /// caused it was on the build's stdout, which was being discarded.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_build_publishes_nothing_and_reports_the_reason()
+    {
+        WriteNotes("0.1.36");
+        var runner = Runner().Respond(
+            "publish-localai-release",
+            "MSB3027: Could not copy localai-release-signer.exe",
+            exitCode: 1);
+
+        var exitCode = await new ReleaseCommand(runner, _root, _output)
+            .PublishAsync(ReleaseVersion.Parse("0.1.36"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("MSB3027", _output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Invocations, line => line.Contains("release create"));
+    }
+
+    /// <summary>
     /// Preparing writes the notes and then commits them, so it cannot also demand that nothing
     /// be written. The first version of this command scaffolded the files on one run and then
     /// refused the next run because of the scaffold it had just produced.
