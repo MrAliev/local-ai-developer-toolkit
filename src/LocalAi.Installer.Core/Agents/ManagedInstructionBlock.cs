@@ -118,7 +118,7 @@ public static class ManagedInstructionBlock
         | Tool | What it is for |
         | --- | --- |
         | `read_image` | any image on disk: screenshot, scanned page, diagram, photographed table |
-        | `triage_log` | any long machine output: build and test logs, dependency dumps, query plans, stack traces |
+        | `triage_log` | machine output of any length, supplied as a file or direct text; it probes real VRAM capacity and processes bounded fragments sequentially |
         | `ask_local` | mechanical work over known files: list, summarise, extract TODOs, translate, check a convention |
 
         The saving only exists for data that has not entered the conversation yet: an image
