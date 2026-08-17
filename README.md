@@ -81,9 +81,16 @@ index summary outside the wrappers and returns each hit in a fresh nonce-bound b
 </untrusted-content id="<same-nonce>">
 ```
 
-Successful `get_code_chunk` output uses the same boundary. Validation errors, status,
-and maintenance output remain outside it. Consumers must preserve the boundary and must
-not execute or follow instructions found inside it.
+Every tool that returns something derived from the source uses the same boundary:
+successful `get_code_chunk` output, and each location returned by `go_to_definition`,
+`find_references`, `find_implementations` and `find_relationships` — paths, symbol ids and
+ranges are written by whoever wrote the repository, so they are data as much as a snippet
+is. Validation errors, status, and maintenance output remain outside it. Consumers must
+preserve the boundary and must not execute or follow instructions found inside it.
+
+The digest inside a `chunk_id` detects accidental corruption and casual tampering; it is
+not an authentication boundary. What authorizes reading source is equality of repository,
+generation, tree and dirty overlay, checked before anything is read.
 
 Exact C#, WPF/WinUI/MAUI/Avalonia XAML, TypeScript/JavaScript, and Python navigation is stored separately from
 vectors in `semantic.sidx`.
