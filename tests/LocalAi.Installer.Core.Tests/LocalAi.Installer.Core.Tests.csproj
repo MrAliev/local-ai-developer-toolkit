@@ -3,6 +3,14 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!--
+      These tests exercise the Windows-only half of the installer: the layout lease, ACLs,
+      Authenticode, the registry. The call sites are unreachable anywhere else, and building
+      them as portable produced 94 CA1416 warnings saying exactly that, one per call. Naming
+      the platform states what was already true instead of suppressing the analyser that
+      noticed it.
+    -->
+    <TargetFramework>net10.0-windows</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
