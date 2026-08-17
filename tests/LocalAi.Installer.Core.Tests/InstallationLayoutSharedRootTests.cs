@@ -1,5 +1,7 @@
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using Microsoft.Win32.SafeHandles;
 using LocalAi.Installer.Core.Activation;
 
 namespace LocalAi.Installer.Core.Tests;
@@ -100,5 +102,92 @@ public sealed class InstallationLayoutSharedRootTests : IDisposable
 
         Assert.Throws<LocalAiPackageInstallationException>(
             () => InstallationLayoutLease.Acquire(layout, requireFreshInstallerTree: true));
+
+        // The refusal must also take its own scaffold back out, which it can only do while it
+        // still asks for DELETE on the directories it creates.
+        Assert.False(Directory.Exists(layout.BinRoot));
     }
+
+    [Fact]
+    public void A_root_held_by_the_running_broker_does_not_refuse_the_layout()
+    {
+        // Exactly how Windows holds the working directory of a running process: readable and
+        // writable to others, deletable by nobody. The broker runs with the installation root
+        // as its working directory, so every upgrade on a machine in use met this. Asking for
+        // DELETE on a directory the installer never deletes turned it into a refusal at the
+        // first gate, before the step that stops the broker could run.
+        var layout = ProtectedRoot();
+        using var heldByBroker = OpenDirectory(layout.Root, FileShare.Read | FileShare.Write);
+        Assert.False(heldByBroker.IsInvalid);
+
+        using var lease = InstallationLayoutLease.Acquire(
+            layout,
+            requireFreshInstallerTree: true);
+
+        Assert.Equal(layout.Root, lease.Layout.Root);
+    }
+
+    [Fact]
+    public void A_directory_nobody_may_open_is_refused_by_path_and_status()
+    {
+        // What is left when DELETE is no longer demanded: a directory genuinely unavailable.
+        // The message has to name which one and why, because the only way to diagnose the
+        // previous "check: OpenRelative" and nothing else was to reproduce the native call.
+        var layout = ProtectedRoot();
+        Directory.CreateDirectory(layout.BinRoot);
+        using var exclusive = OpenDirectory(layout.BinRoot, FileShare.None);
+        Assert.False(exclusive.IsInvalid);
+
+        var error = Assert.Throws<LocalAiPackageInstallationException>(
+            () => InstallationLayoutLease.Acquire(layout, requireFreshInstallerTree: false));
+
+        Assert.Contains(layout.BinRoot, error.Message, StringComparison.OrdinalIgnoreCase);
+        // STATUS_SHARING_VIOLATION.
+        Assert.Contains("0xC0000043", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A root carrying the ACL the installer itself writes, so the lease gets past its ACL
+    /// validation and the test asserts on the directory opens rather than on permissions.
+    /// </summary>
+    private InstallationLayout ProtectedRoot()
+    {
+        var layout = Layout();
+        Directory.CreateDirectory(layout.Root);
+        var security = new DirectorySecurity();
+        var user = WindowsIdentity.GetCurrent().User!;
+        security.SetOwner(user);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        const InheritanceFlags inheritance =
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+        security.AddAccessRule(new FileSystemAccessRule(
+            user, FileSystemRights.FullControl, inheritance, PropagationFlags.None,
+            AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            FileSystemRights.FullControl, inheritance, PropagationFlags.None,
+            AccessControlType.Allow));
+        new DirectoryInfo(layout.Root).SetAccessControl(security);
+        return layout;
+    }
+
+    private static SafeFileHandle OpenDirectory(string path, FileShare share) =>
+        CreateFileW(
+            path,
+            0x00000001 | 0x00000080,
+            share,
+            IntPtr.Zero,
+            3,
+            0x02000000,
+            IntPtr.Zero);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(
+        string fileName,
+        uint desiredAccess,
+        FileShare shareMode,
+        IntPtr securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
 }
