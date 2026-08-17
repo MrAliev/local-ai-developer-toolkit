@@ -200,6 +200,73 @@ public sealed class SystemProcessRunnerTests
         }
     }
 
+    [Fact]
+    public async Task Streams_binary_standard_output_to_a_file_without_text_decoding()
+    {
+        var runner = new SystemProcessRunner();
+        var scriptPath = TemporaryPath(".ps1");
+        var outputPath = TemporaryPath(".bin");
+        await File.WriteAllTextAsync(
+            scriptPath,
+            "$bytes = [byte[]](0,255,1,254,2); " +
+            "$stream = [Console]::OpenStandardOutput(); " +
+            "$stream.Write($bytes, 0, $bytes.Length); $stream.Flush()",
+            TestContext.Current.CancellationToken);
+        try
+        {
+            var result = await runner.RunToFileAsync(
+                ResolvePowerShell(),
+                PowerShellFileArguments(scriptPath),
+                outputPath,
+                TimeSpan.FromSeconds(10),
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Equal(
+                new byte[] { 0, 255, 1, 254, 2 },
+                await File.ReadAllBytesAsync(
+                    outputPath,
+                    TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            File.Delete(scriptPath);
+            File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
+    public async Task Classifies_a_binary_output_timeout_and_kills_the_started_process_tree()
+    {
+        var started = new StartedProcessRecorder();
+        var runner = new SystemProcessRunner(started, TimeSpan.FromSeconds(5));
+        var scriptPath = TemporaryPath(".ps1");
+        var outputPath = TemporaryPath(".bin");
+        await File.WriteAllTextAsync(
+            scriptPath,
+            "Start-Sleep -Seconds 30",
+            TestContext.Current.CancellationToken);
+        try
+        {
+            var result = await runner.RunToFileAsync(
+                ResolvePowerShell(),
+                PowerShellFileArguments(scriptPath),
+                outputPath,
+                TimeSpan.FromMilliseconds(500),
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.TimedOut);
+            Assert.False(result.Cancelled);
+            Assert.Null(result.ExitCode);
+            AssertProcessExited(started.ProcessId);
+        }
+        finally
+        {
+            File.Delete(scriptPath);
+            File.Delete(outputPath);
+        }
+    }
+
     private static string[] PowerShellFileArguments(
         string scriptPath,
         params string[] arguments) =>

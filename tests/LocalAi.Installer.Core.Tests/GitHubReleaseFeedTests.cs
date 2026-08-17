@@ -38,9 +38,14 @@ public sealed class GitHubReleaseFeedTests : IDisposable
         int exitCode,
         string standardError = "",
         Action<string, string>? onDownload = null,
-        string standardOutput = "") : IProcessRunner
+        string standardOutput = "",
+        Func<IReadOnlyList<string>, ProcessResult>? onRun = null,
+        Func<IReadOnlyList<string>, string, ProcessResult>? onFileRun = null)
+        : IProcessRunner, IProcessFileRunner
     {
         public List<IReadOnlyList<string>> Invocations { get; } = [];
+        public List<(IReadOnlyList<string> Arguments, string OutputPath)> FileInvocations
+        { get; } = [];
 
         public Task<ProcessResult> RunAsync(
             string executable,
@@ -49,15 +54,29 @@ public sealed class GitHubReleaseFeedTests : IDisposable
             CancellationToken cancellationToken)
         {
             Invocations.Add(arguments);
-            if (exitCode == 0 && arguments.Contains("download"))
+            var result = onRun?.Invoke(arguments) ??
+                new ProcessResult(exitCode, standardOutput, standardError, false, false);
+            if (result.ExitCode == 0 && arguments.Contains("download"))
             {
                 onDownload?.Invoke(
                     ValueAfter(arguments, "--dir"),
                     ValueAfter(arguments, "--pattern"));
             }
 
+            return Task.FromResult(result);
+        }
+
+        public Task<ProcessResult> RunToFileAsync(
+            string executable,
+            IReadOnlyList<string> arguments,
+            string outputPath,
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
+        {
+            FileInvocations.Add((arguments, outputPath));
             return Task.FromResult(
-                new ProcessResult(exitCode, standardOutput, standardError, false, false));
+                onFileRun?.Invoke(arguments, outputPath) ??
+                new ProcessResult(exitCode, string.Empty, standardError, false, false));
         }
     }
 
@@ -160,6 +179,157 @@ public sealed class GitHubReleaseFeedTests : IDisposable
     }
 
     [Fact]
+    public async Task A_failed_tag_download_falls_back_to_the_exact_asset_database_id()
+    {
+        byte[] package = [0, 255, 1, 254, 2];
+        var cli = new FakeCli(
+            0,
+            onRun: arguments => arguments.Contains("download")
+                ? new ProcessResult(1, string.Empty, "release not found", false, false)
+                : arguments.Contains("graphql")
+                    ? new ProcessResult(
+                        0,
+                        "{\"data\":{\"repository\":{\"release\":{\"databaseId\":371801682}}}}",
+                        string.Empty,
+                        false,
+                        false)
+                    : new ProcessResult(
+                    0,
+                    "[{\"id\":518217710,\"name\":\"" +
+                    GitHubReleaseFeed.PackageAsset + "\",\"size\":" + package.Length +
+                    "}]",
+                    string.Empty,
+                    false,
+                    false),
+            onFileRun: (_, outputPath) =>
+            {
+                File.WriteAllBytes(outputPath, package);
+                return new ProcessResult(0, string.Empty, string.Empty, false, false);
+            });
+        var feed = new GitHubReleaseFeed(cli);
+
+        var path = await feed.DownloadPackageAsync(
+            "0.1.37",
+            root,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(package, await File.ReadAllBytesAsync(
+            path,
+            TestContext.Current.CancellationToken));
+        var invocation = Assert.Single(cli.FileInvocations);
+        Assert.Contains(
+            "repos/MrAliev/local-ai-developer-toolkit/releases/assets/518217710",
+            invocation.Arguments);
+        Assert.Equal(path, invocation.OutputPath);
+    }
+
+    [Fact]
+    public async Task The_fallback_refuses_a_different_asset_name_without_downloading_it()
+    {
+        var cli = new FakeCli(
+            0,
+            onRun: arguments => arguments.Contains("download")
+                ? new ProcessResult(1, string.Empty, "release not found", false, false)
+                : arguments.Contains("graphql")
+                    ? new ProcessResult(
+                        0,
+                        "{\"data\":{\"repository\":{\"release\":{\"databaseId\":7}}}}",
+                        string.Empty,
+                        false,
+                        false)
+                    : new ProcessResult(
+                        0,
+                        "[{\"id\":42,\"name\":\"different.zip\",\"size\":10}]",
+                        string.Empty,
+                        false,
+                        false));
+        var feed = new GitHubReleaseFeed(cli);
+
+        var error = await Assert.ThrowsAsync<ReleaseResolutionException>(
+            () => feed.DownloadPackageAsync(
+                "0.1.37",
+                root,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("does not publish", error.Message, StringComparison.Ordinal);
+        Assert.Empty(cli.FileInvocations);
+    }
+
+    [Fact]
+    public async Task The_fallback_deletes_a_download_whose_size_differs_from_GitHub_metadata()
+    {
+        var cli = new FakeCli(
+            0,
+            onRun: arguments => arguments.Contains("download")
+                ? new ProcessResult(1, string.Empty, "release not found", false, false)
+                : arguments.Contains("graphql")
+                    ? new ProcessResult(
+                        0,
+                        "{\"data\":{\"repository\":{\"release\":{\"databaseId\":7}}}}",
+                        string.Empty,
+                        false,
+                        false)
+                    : new ProcessResult(
+                        0,
+                        "[{\"id\":42,\"name\":\"" +
+                        GitHubReleaseFeed.PackageAsset + "\",\"size\":100}]",
+                        string.Empty,
+                        false,
+                        false),
+            onFileRun: (_, outputPath) =>
+            {
+                File.WriteAllBytes(outputPath, [1, 2, 3]);
+                return new ProcessResult(0, string.Empty, string.Empty, false, false);
+            });
+        var feed = new GitHubReleaseFeed(cli);
+
+        var error = await Assert.ThrowsAsync<ReleaseResolutionException>(
+            () => feed.DownloadPackageAsync(
+                "0.1.37",
+                root,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("GitHub reports 100", error.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, GitHubReleaseFeed.PackageAsset)));
+    }
+
+    [Fact]
+    public async Task Cancelling_the_fallback_deletes_its_partial_download()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var cli = new FakeCli(
+            0,
+            onRun: arguments => arguments.Contains("download")
+                ? new ProcessResult(1, string.Empty, "release not found", false, false)
+                : arguments.Contains("graphql")
+                    ? new ProcessResult(
+                        0,
+                        "{\"data\":{\"repository\":{\"release\":{\"databaseId\":7}}}}",
+                        string.Empty,
+                        false,
+                        false)
+                    : new ProcessResult(
+                        0,
+                        "[{\"id\":42,\"name\":\"" +
+                        GitHubReleaseFeed.PackageAsset + "\",\"size\":100}]",
+                        string.Empty,
+                        false,
+                        false),
+            onFileRun: (_, outputPath) =>
+            {
+                File.WriteAllBytes(outputPath, [1, 2, 3]);
+                cancellation.Cancel();
+                return new ProcessResult(null, string.Empty, string.Empty, false, true);
+            });
+        var feed = new GitHubReleaseFeed(cli);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => feed.DownloadPackageAsync("0.1.37", root, cancellationToken: cancellation.Token));
+
+        Assert.False(File.Exists(Path.Combine(root, GitHubReleaseFeed.PackageAsset)));
+    }
+
+    [Fact]
     public async Task An_explicit_tag_is_used_as_given()
     {
         var cli = new FakeCli(0);
@@ -186,6 +356,23 @@ public sealed class GitHubReleaseFeedTests : IDisposable
             "0.1.7",
             await feed.ResolveTagAsync(requested, TestContext.Current.CancellationToken));
         Assert.Contains("view", cli.Invocations.Single());
+    }
+
+    [Fact]
+    public async Task Latest_falls_back_to_the_GraphQL_backed_release_list()
+    {
+        var cli = new FakeCli(
+            0,
+            onRun: arguments => arguments.Contains("view")
+                ? new ProcessResult(1, string.Empty, "release not found", false, false)
+                : new ProcessResult(0, "0.1.37\n", string.Empty, false, false));
+        var feed = new GitHubReleaseFeed(cli);
+
+        Assert.Equal(
+            "0.1.37",
+            await feed.ResolveTagAsync("latest", TestContext.Current.CancellationToken));
+        Assert.Equal(2, cli.Invocations.Count);
+        Assert.Contains("list", cli.Invocations[1]);
     }
 
     [Fact]

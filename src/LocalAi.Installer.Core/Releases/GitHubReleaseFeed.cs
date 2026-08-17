@@ -1,4 +1,5 @@
 using LocalAi.Installer.Core.Abstractions;
+using System.Text.Json;
 
 namespace LocalAi.Installer.Core.Releases;
 
@@ -37,6 +38,9 @@ public sealed class GitHubReleaseFeed(
 
     private readonly IProcessRunner processRunner =
         processRunner ?? throw new ArgumentNullException(nameof(processRunner));
+
+    private readonly IProcessFileRunner? fileProcessRunner =
+        processRunner as IProcessFileRunner;
 
     private readonly string repository =
         string.IsNullOrWhiteSpace(repository) ? DefaultRepository : repository;
@@ -82,14 +86,50 @@ public sealed class GitHubReleaseFeed(
         }
 
         var tag = result.StandardOutput?.Trim();
-        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(tag))
+        if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(tag))
         {
-            throw new ReleaseResolutionException(
-                "Could not determine the newest release. Check that this computer is signed " +
-                $"in with 'gh auth login'. {result.StandardError}".Trim());
+            return tag;
         }
 
-        return tag;
+        cancellationToken.ThrowIfCancellationRequested();
+        var primaryDetail = ProcessDetail(result);
+        ProcessResult fallback;
+        try
+        {
+            fallback = await processRunner.RunAsync(
+                    cliPath,
+                    [
+                        "release", "list",
+                        "--repo", repository,
+                        "--limit", "1",
+                        "--exclude-drafts",
+                        "--exclude-pre-releases",
+                        "--json", "tagName",
+                        "--jq", ".[0].tagName",
+                    ],
+                    DocumentTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new ReleaseResolutionException(
+                "The GitHub CLI could not be started. Install it and sign in with " +
+                "'gh auth login' so the installer can read this private repository.",
+                exception);
+        }
+
+        var fallbackTag = fallback.StandardOutput?.Trim();
+        if (fallback.ExitCode == 0 && !string.IsNullOrWhiteSpace(fallbackTag))
+        {
+            return fallbackTag;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new ReleaseResolutionException(
+            "Could not determine the newest release. Check that this computer is signed " +
+            $"in with 'gh auth login'. Primary: {primaryDetail} " +
+            $"Fallback: {ProcessDetail(fallback)}".Trim());
     }
 
     /// <summary>
@@ -232,17 +272,316 @@ public sealed class GitHubReleaseFeed(
                 exception);
         }
 
-        if (result.ExitCode != 0)
+        if (result.ExitCode == 0)
         {
-            var detail = string.IsNullOrWhiteSpace(result.StandardError)
-                ? result.StandardOutput
-                : result.StandardError;
+            return;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var primaryDetail = ProcessDetail(result);
+        if (fileProcessRunner is null)
+        {
             throw new ReleaseResolutionException(
                 $"Could not download '{assetName}' from release '{tag}'. Check that this " +
                 "computer is signed in with 'gh auth login' and that the release exists. " +
-                detail.Trim());
+                primaryDetail);
+        }
+
+        await DownloadAssetByIdAsync(
+                tag,
+                assetName,
+                workingDirectory,
+                timeout,
+                primaryDetail,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task DownloadAssetByIdAsync(
+        string tag,
+        string assetName,
+        string workingDirectory,
+        TimeSpan timeout,
+        string primaryDetail,
+        CancellationToken cancellationToken)
+    {
+        var (owner, name) = RepositoryParts();
+        ProcessResult lookup;
+        try
+        {
+            lookup = await processRunner.RunAsync(
+                    cliPath,
+                    [
+                        "api", "graphql",
+                        "--method", "POST",
+                        "--raw-field", $"query={ReleaseQuery}",
+                        "--raw-field", $"owner={owner}",
+                        "--raw-field", $"name={name}",
+                        "--raw-field", $"tag={tag}",
+                    ],
+                    DocumentTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                "the GraphQL fallback could not be started",
+                exception);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (lookup.ExitCode != 0)
+        {
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                $"GraphQL lookup: {ProcessDetail(lookup)}");
+        }
+
+        long releaseId;
+        try
+        {
+            releaseId = ReadReleaseId(lookup.StandardOutput, tag);
+        }
+        catch (Exception exception) when (
+            exception is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                $"GraphQL lookup returned invalid release metadata: {exception.Message}",
+                exception);
+        }
+
+        ProcessResult assetsLookup;
+        try
+        {
+            assetsLookup = await processRunner.RunAsync(
+                    cliPath,
+                    [
+                        "api",
+                        $"repos/{owner}/{name}/releases/{releaseId}/assets?per_page=100",
+                        "--method", "GET",
+                    ],
+                    DocumentTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                "the asset-list fallback could not be started",
+                exception);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (assetsLookup.ExitCode != 0)
+        {
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                $"asset list: {ProcessDetail(assetsLookup)}");
+        }
+
+        ReleaseAsset asset;
+        try
+        {
+            asset = ReadAsset(assetsLookup.StandardOutput, tag, assetName);
+        }
+        catch (Exception exception) when (
+            exception is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                $"asset list returned invalid release metadata: {exception.Message}",
+                exception);
+        }
+
+        var target = Path.Combine(workingDirectory, assetName);
+        DeleteIfExists(target);
+        ProcessResult download;
+        try
+        {
+            download = await fileProcessRunner!.RunToFileAsync(
+                    cliPath,
+                    [
+                        "api",
+                        $"repos/{owner}/{name}/releases/assets/{asset.DatabaseId}",
+                        "--method", "GET",
+                        "--header", "Accept: application/octet-stream",
+                    ],
+                    target,
+                    timeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            DeleteIfExists(target);
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                "the asset-ID fallback could not be started",
+                exception);
+        }
+
+        if (download.Cancelled && cancellationToken.IsCancellationRequested)
+        {
+            DeleteIfExists(target);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        if (download.ExitCode != 0)
+        {
+            DeleteIfExists(target);
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                $"asset-ID download: {ProcessDetail(download)}");
+        }
+
+        var actualSize = File.Exists(target) ? new FileInfo(target).Length : -1;
+        if (actualSize != asset.Size)
+        {
+            DeleteIfExists(target);
+            throw DownloadFailure(
+                tag,
+                assetName,
+                primaryDetail,
+                $"asset-ID download produced {actualSize} bytes; GitHub reports {asset.Size}");
         }
     }
+
+    private (string Owner, string Name) RepositoryParts()
+    {
+        var parts = repository.Split(
+            '/',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+        {
+            throw new ReleaseResolutionException(
+                $"GitHub repository '{repository}' must have the form 'owner/name'.");
+        }
+
+        return (parts[0], parts[1]);
+    }
+
+    private static long ReadReleaseId(string json, string tag)
+    {
+        using var document = JsonDocument.Parse(json);
+        var repository = document.RootElement
+            .GetProperty("data")
+            .GetProperty("repository");
+        if (!repository.TryGetProperty("release", out var release) ||
+            release.ValueKind == JsonValueKind.Null)
+        {
+            throw new InvalidOperationException($"Release '{tag}' was not found.");
+        }
+
+        var releaseId = release.GetProperty("databaseId").GetInt64();
+        if (releaseId <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Release '{tag}' has invalid GitHub metadata.");
+        }
+
+        return releaseId;
+    }
+
+    private static ReleaseAsset ReadAsset(string json, string tag, string assetName)
+    {
+        using var document = JsonDocument.Parse(json);
+        foreach (var candidate in document.RootElement.EnumerateArray())
+        {
+            if (!string.Equals(
+                    candidate.GetProperty("name").GetString(),
+                    assetName,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var databaseId = candidate.GetProperty("id").GetInt64();
+            var size = candidate.GetProperty("size").GetInt64();
+            if (databaseId <= 0 || size < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Asset '{assetName}' has invalid GitHub metadata.");
+            }
+
+            return new ReleaseAsset(databaseId, size);
+        }
+
+        throw new InvalidOperationException(
+            $"Release '{tag}' does not publish '{assetName}'.");
+    }
+
+    private static string ProcessDetail(ProcessResult result)
+    {
+        var detail = string.IsNullOrWhiteSpace(result.StandardError)
+            ? result.StandardOutput
+            : result.StandardError;
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+            return detail.Trim();
+        }
+
+        if (result.TimedOut)
+        {
+            return "the command timed out";
+        }
+
+        if (result.Cancelled)
+        {
+            return "the command was cancelled";
+        }
+
+        return $"the command exited with code {result.ExitCode?.ToString() ?? "unknown"}";
+    }
+
+    private static ReleaseResolutionException DownloadFailure(
+        string tag,
+        string assetName,
+        string primaryDetail,
+        string fallbackDetail,
+        Exception? inner = null) =>
+        new(
+            $"Could not download '{assetName}' from release '{tag}'. Check that this " +
+            "computer is signed in with 'gh auth login' and that the release exists. " +
+            $"Primary: {primaryDetail} Fallback: {fallbackDetail}",
+            inner);
+
+    private static void DeleteIfExists(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (DirectoryNotFoundException)
+        {
+        }
+    }
+
+    private const string ReleaseQuery =
+        "query($owner:String!,$name:String!,$tag:String!){" +
+        "repository(owner:$owner,name:$name){release(tagName:$tag){" +
+        "databaseId}}}";
+
+    private sealed record ReleaseAsset(long DatabaseId, long Size);
 
     private static async Task<byte[]> ReadAsync(
         string workingDirectory,
