@@ -20,8 +20,24 @@ public sealed record LocalResult(
 /// The delegated jobs themselves. Each one reports what it consumed locally so the caller can
 /// state a measured saving rather than a guessed one.
 /// </summary>
-public sealed class LocalTasks(ILocalModelClient client)
+public sealed class LocalTasks
 {
+    private readonly ILocalModelClient client;
+    private readonly LogTriagePolicyStore logTriagePolicies;
+
+    public LocalTasks(ILocalModelClient client)
+        : this(client, new LogTriagePolicyStore(LogTriagePolicyStore.DefaultRuntimeRoot))
+    {
+    }
+
+    internal LocalTasks(
+        ILocalModelClient client,
+        LogTriagePolicyStore logTriagePolicies)
+    {
+        this.client = client;
+        this.logTriagePolicies = logTriagePolicies;
+    }
+
     private const long MaxImageBytes = 30 * 1024 * 1024;
 
     /// <summary>
@@ -174,52 +190,18 @@ public sealed class LocalTasks(ILocalModelClient client)
             result.Receipt);
     }
 
-    public async Task<LocalResult> TriageLogAsync(
-        string path, string? question, string? model, CancellationToken ct)
-    {
-        var full = Resolve(path);
-        var content = await File.ReadAllTextAsync(full, ct);
-        var originalLength = content.Length;
-        var wouldHaveCost = TokenEstimator.ForText(content);
+    public Task<LocalResult> TriageLogAsync(
+        string path, string? question, string? model, CancellationToken ct) =>
+        TriageLogAsync(path, text: null, question, model, ct);
 
-        content = Clamp(content);
-
-        var result = await client.RoutedChatAsync(
-            LocalTaskProfile.LogTriage,
-            $"""
-             {question ?? "What failed, and why? Give the exact file and line if the log names one."}
-
-             --- BEGIN LOG ({Path.GetFileName(full)}) ---
-             {content}
-             --- END LOG ---
-             """,
-            "You are triaging a build or test log for an engineer who will not read it themselves. " +
-            "Report only failures the log actually contains - never invent a failure that is not there, " +
-            "and say plainly if nothing failed. Quote exact file paths, line numbers and error codes. " +
-            "Preserve the original language of any quoted message.",
-            null,
-            new LocalWorkloadMetadata(
-                content.Length,
-                4_000,
-                1,
-                0,
-                0,
-                LocalDurationClass.Short),
-            workflow: null,
-            modelOverride: model,
-            requestedContextTokens: SelectContext(content.Length),
-            LocalJobPriority.Foreground,
-            ct);
-        var chosen = result.Receipt.Routing?.SelectedModel ?? result.Receipt.Model;
-
-        var sizeKb = originalLength / 1024;
-        return new LocalResult(
-            result.Value,
-            TokenEstimator.Saved(wouldHaveCost, result.Value),
-            chosen,
-            $"разобран лог {Path.GetFileName(full)} ({sizeKb} КБ)",
-            result.Receipt);
-    }
+    public Task<LocalResult> TriageLogAsync(
+        string? path,
+        string? text,
+        string? question,
+        string? model,
+        CancellationToken ct) =>
+        new LogTriagePipeline(client, logTriagePolicies.Read())
+            .RunAsync(path, text, question, model, ct);
 
     public async Task<LocalResult> AskAsync(
         string prompt, IReadOnlyList<string> files, string? model, CancellationToken ct)

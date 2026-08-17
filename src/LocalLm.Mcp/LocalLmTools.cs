@@ -40,22 +40,30 @@ public static class LocalLmTools
 
     [McpServerTool(Name = "triage_log")]
     [Description("""
-        Feeds a large log file to a local model and returns what failed and why. Built for build
-        and test output, but works for any long machine-generated text: dependency dumps, SQL
-        plans, verbose traces. A 600KB build log costs ~150K tokens to read directly and a few
-        hundred through this tool. Reads the head and tail when a log exceeds the local window.
+        Feeds a log file or direct log text to a local model and returns what failed and why. Built
+        for build and test output, but works for machine-generated text of any length: dependency
+        dumps, SQL plans, verbose traces. Provide exactly one of path or text. The tool probes the
+        largest context that actually fits in VRAM, streams bounded fragments sequentially, and
+        hierarchically reduces their findings without loading an entire file into memory.
         Always surface the returned notice line so the delegation is visible.
         """)]
     public static async Task<string> TriageLog(
         LocalTasks tasks,
-        [Description("Absolute path to the log file.")]
-        string path,
+        [Description("Absolute path to the log file. Mutually exclusive with text.")]
+        string? path = null,
+        [Description("Log text supplied directly. Mutually exclusive with path.")]
+        string? text = null,
         [Description("Optional focus. Defaults to 'what failed and why, with exact file and line'.")]
         string? question = null,
         [Description("Optional model override. Normally leave blank so the router chooses.")]
         string? model = null,
         CancellationToken cancellationToken = default)
-        => await Run(() => tasks.TriageLogAsync(path, question, model, cancellationToken));
+        => await Run(() => tasks.TriageLogAsync(
+            path,
+            text,
+            question,
+            model,
+            cancellationToken));
 
     [McpServerTool(Name = "ask_local")]
     [Description("""

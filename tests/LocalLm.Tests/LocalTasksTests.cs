@@ -8,7 +8,7 @@ namespace LocalLm.Tests;
 public sealed class LocalTasksTests
 {
     [Fact]
-    public async Task Log_triage_uses_fixed_profile_and_never_the_stale_27b_default()
+    public async Task Log_triage_uses_fixed_profile_and_the_largest_full_vram_context()
     {
         var path = Path.GetTempFileName();
         try
@@ -28,13 +28,144 @@ public sealed class LocalTasksTests
 
             var call = Assert.Single(client.Calls);
             Assert.Equal(LocalTaskProfile.LogTriage, call.Profile);
-            Assert.Null(call.ModelOverride);
+            Assert.Equal("qwen2.5-coder:14b", call.ModelOverride);
             Assert.DoesNotContain("qwen3.6:27b", call.Prompt, StringComparison.Ordinal);
-            Assert.InRange(call.RequestedContextTokens!.Value, 2048, 262144);
+            Assert.Equal(32768, call.RequestedContextTokens);
+            Assert.Equal(
+                [new ModelContextRef("qwen2.5-coder:14b", 32768)],
+                client.Preflights);
         }
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Log_triage_accepts_direct_text_and_requires_exactly_one_source()
+    {
+        var client = new FakeLocalModelClient();
+        var tasks = new LocalTasks(client);
+
+        var result = await tasks.TriageLogAsync(
+            path: null,
+            text: "fatal DIRECT_TEXT_42",
+            question: "Find the fatal marker.",
+            model: null,
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("DIRECT_TEXT_42", Assert.Single(client.Calls).Prompt);
+        Assert.Contains("текстовый лог", result.Detail, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<ArgumentException>(() => tasks.TriageLogAsync(
+            path: null,
+            text: null,
+            question: null,
+            model: null,
+            TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => tasks.TriageLogAsync(
+            path: "some.log",
+            text: "also text",
+            question: null,
+            model: null,
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Log_triage_streams_large_file_and_reduces_fragments_sequentially()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            $"localai-large-log-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(
+                path,
+                "FIRST_BOUNDARY\n" + new string('x', 50_000) + "\nLAST_BOUNDARY",
+                TestContext.Current.CancellationToken);
+            var client = new FakeLocalModelClient
+            {
+                MaximumPreflightContextTokens = 2048,
+                RoutedAnswerFactory = (call, index) =>
+                    call.Prompt.Contains(
+                        "BEGIN LOG FRAGMENT",
+                        StringComparison.Ordinal)
+                        ? $"partial finding {index}"
+                        : $"combined finding {index}"
+            };
+            var tasks = new LocalTasks(client);
+
+            var result = await tasks.TriageLogAsync(
+                path,
+                "Preserve boundary markers.",
+                model: null,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(
+                [32768, 16384, 8192, 4096, 2048],
+                client.Preflights.Select(preflight => preflight.ContextTokens));
+            var mapCalls = client.Calls.Where(call => call.Prompt.Contains(
+                "BEGIN LOG FRAGMENT",
+                StringComparison.Ordinal)).ToArray();
+            var reduceCalls = client.Calls.Except(mapCalls).ToArray();
+            Assert.True(mapCalls.Length > 1);
+            Assert.NotEmpty(reduceCalls);
+            Assert.Contains("FIRST_BOUNDARY", mapCalls.First().Prompt);
+            Assert.Contains("LAST_BOUNDARY", mapCalls.Last().Prompt);
+            Assert.All(client.Calls, call =>
+            {
+                Assert.Equal("qwen2.5-coder:14b", call.ModelOverride);
+                Assert.Equal(2048, call.RequestedContextTokens);
+            });
+            Assert.Equal(1, client.MaximumConcurrentCalls);
+            Assert.Contains("фрагментов:", result.Detail, StringComparison.Ordinal);
+            Assert.StartsWith("combined finding", result.Answer, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Log_triage_reloads_policy_for_every_invocation()
+    {
+        var runtimeRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"localai-log-policy-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new LogTriagePolicyStore(runtimeRoot);
+            store.Write(LogTriagePolicy.Default with { MaximumContextTokens = 8192 });
+            var client = new FakeLocalModelClient();
+            var tasks = new LocalTasks(client, store);
+
+            await tasks.TriageLogAsync(
+                path: null,
+                text: "first invocation",
+                question: null,
+                model: null,
+                TestContext.Current.CancellationToken);
+            store.Write(LogTriagePolicy.Default with { MaximumContextTokens = 4096 });
+            await tasks.TriageLogAsync(
+                path: null,
+                text: "second invocation",
+                question: null,
+                model: null,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(
+                [8192, 4096],
+                client.Preflights.Select(preflight => preflight.ContextTokens));
+            Assert.Equal(
+                [8192, 4096],
+                client.Calls.Select(call => call.RequestedContextTokens!.Value));
+        }
+        finally
+        {
+            if (Directory.Exists(runtimeRoot))
+            {
+                Directory.Delete(runtimeRoot, recursive: true);
+            }
         }
     }
 
@@ -315,6 +446,16 @@ public sealed class LocalTasksTests
 
         public Queue<string> Answers { get; } = [];
 
+        public int MaximumPreflightContextTokens { get; init; } = 32768;
+
+        public Func<RoutedCall, int, string>? RoutedAnswerFactory { get; init; }
+
+        public List<ModelContextRef> Preflights { get; } = [];
+
+        public int MaximumConcurrentCalls { get; private set; }
+
+        private int concurrentCalls;
+
         public HashSet<string> UnavailableOverrides { get; } =
             new(StringComparer.Ordinal);
 
@@ -331,7 +472,7 @@ public sealed class LocalTasksTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<LocalJobResult<string>> RoutedChatAsync(
+        public async Task<LocalJobResult<string>> RoutedChatAsync(
             LocalTaskProfile profile,
             string prompt,
             string? system,
@@ -343,60 +484,71 @@ public sealed class LocalTasksTests
             LocalJobPriority priority,
             CancellationToken cancellationToken = default)
         {
-            Calls.Add(
-                new RoutedCall(
+            var active = Interlocked.Increment(ref concurrentCalls);
+            MaximumConcurrentCalls = Math.Max(MaximumConcurrentCalls, active);
+            try
+            {
+                await Task.Yield();
+                var call = new RoutedCall(
                     profile,
                     prompt,
                     system,
                     modelOverride,
                     requestedContextTokens,
-                    workflow?.WorkflowId));
-            if (modelOverride is not null &&
-                UnavailableOverrides.Contains(modelOverride))
-            {
-                throw new BrokerJobFailedException(
-                    Guid.NewGuid(),
-                    nameof(InvalidOperationException));
-            }
+                    workflow?.WorkflowId);
+                Calls.Add(call);
+                if (modelOverride is not null &&
+                    UnavailableOverrides.Contains(modelOverride))
+                {
+                    throw new BrokerJobFailedException(
+                        Guid.NewGuid(),
+                        nameof(InvalidOperationException));
+                }
 
-            var answer = Answers.Count == 0 ? Answer : Answers.Dequeue();
-            var brokerFallback =
-                modelOverride is null &&
-                BrokerFailureOutcome is not null;
-            var selectedModel = modelOverride ??
-                                (brokerFallback
-                                    ? "qwen3.5:9b"
-                                    : "translategemma:12b");
-            return Task.FromResult(new LocalJobResult<string>(
-                answer,
-                new LocalUsageReceipt(
-                    Guid.NewGuid(),
-                    "local-lm",
-                    "chat",
-                    modelOverride ?? "translategemma:12b",
-                    TimeSpan.Zero,
-                    TimeSpan.Zero,
-                    prompt.Length,
-                    prompt.Length / 4,
-                    null,
-                    null,
-                    null,
-                    new LocalRoutingReceipt(
-                        profile,
-                        selectedModel,
-                        requestedContextTokens,
-                        WasCold: Calls.Count == 1,
-                        UsedFallback: modelOverride is not null || brokerFallback,
-                        ValidatorResult: "none:pass",
-                        EstimatedGrossCloudTokensSaved: prompt.Length / 4,
-                        EstimatedVerificationTokens: 0,
-                        EstimatedNetCloudTokensSaved: prompt.Length / 4,
-                        IsExperimentalAttempt:
-                            modelOverride is null && !brokerFallback,
-                        ExperimentalModel:
-                            brokerFallback ? "translategemma:12b" : null,
-                        ExperimentalOutcome:
-                            brokerFallback ? BrokerFailureOutcome : null))));
+                var answer = RoutedAnswerFactory?.Invoke(call, Calls.Count) ??
+                             (Answers.Count == 0 ? Answer : Answers.Dequeue());
+                var brokerFallback =
+                    modelOverride is null &&
+                    BrokerFailureOutcome is not null;
+                var selectedModel = modelOverride ??
+                                    (brokerFallback
+                                        ? "qwen3.5:9b"
+                                        : "translategemma:12b");
+                return new LocalJobResult<string>(
+                    answer,
+                    new LocalUsageReceipt(
+                        Guid.NewGuid(),
+                        "local-lm",
+                        "chat",
+                        modelOverride ?? "translategemma:12b",
+                        TimeSpan.Zero,
+                        TimeSpan.Zero,
+                        prompt.Length,
+                        prompt.Length / 4,
+                        null,
+                        null,
+                        null,
+                        new LocalRoutingReceipt(
+                            profile,
+                            selectedModel,
+                            requestedContextTokens,
+                            WasCold: Calls.Count == 1,
+                            UsedFallback: modelOverride is not null || brokerFallback,
+                            ValidatorResult: "none:pass",
+                            EstimatedGrossCloudTokensSaved: prompt.Length / 4,
+                            EstimatedVerificationTokens: 0,
+                            EstimatedNetCloudTokensSaved: prompt.Length / 4,
+                            IsExperimentalAttempt:
+                                modelOverride is null && !brokerFallback,
+                            ExperimentalModel:
+                                brokerFallback ? "translategemma:12b" : null,
+                            ExperimentalOutcome:
+                                brokerFallback ? BrokerFailureOutcome : null)));
+            }
+            finally
+            {
+                Interlocked.Decrement(ref concurrentCalls);
+            }
         }
 
         public Task<LocalJobResult<IReadOnlyList<string>>> ListModelsAsync(
@@ -405,14 +557,47 @@ public sealed class LocalTasksTests
 
         public Task<LocalJobResult<LocalModelsStatusOutput>> GetModelsStatusAsync(
             CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult(new LocalJobResult<LocalModelsStatusOutput>(
+                new LocalModelsStatusOutput(
+                    [
+                        "qwen2.5-coder:14b",
+                        "qwen3.5:9b",
+                        "translategemma:12b"
+                    ],
+                    [],
+                    [],
+                    [],
+                    "1",
+                    [],
+                    [],
+                    []),
+                Receipt("status", "none")));
 
         public Task<LocalJobResult<LocalModelPreflightOutput>> PreflightModelAsync(
             string model,
             int contextTokens,
             string catalogVersion,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken = default)
+        {
+            Preflights.Add(new ModelContextRef(model, contextTokens));
+            if (contextTokens > MaximumPreflightContextTokens)
+            {
+                throw new BrokerJobFailedException(
+                    Guid.NewGuid(),
+                    "ModelPreflightException");
+            }
+
+            return Task.FromResult(new LocalJobResult<LocalModelPreflightOutput>(
+                new LocalModelPreflightOutput(
+                    model,
+                    contextTokens,
+                    catalogVersion,
+                    1,
+                    1,
+                    FullyResident: true,
+                    DateTimeOffset.UtcNow),
+                Receipt("preflight", model)));
+        }
 
         public Task<LocalJobResult<ModelMaintenanceJobOutput>> PullModelAsync(
             string model,
@@ -470,6 +655,20 @@ public sealed class LocalTasksTests
                         null,
                         null)));
         }
+
+        private static LocalUsageReceipt Receipt(string operation, string model) =>
+            new(
+                Guid.NewGuid(),
+                "local-lm",
+                operation,
+                model,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                0,
+                0,
+                null,
+                null,
+                null);
     }
 
     private sealed record RoutedCall(

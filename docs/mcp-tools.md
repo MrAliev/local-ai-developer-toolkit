@@ -55,7 +55,7 @@ The `locallm` server. Every model call goes through the shared broker.
 | Tool | Purpose | The constraint that matters |
 | --- | --- | --- |
 | `read_image` | An image on disk turned into text: screenshot, PDF page, scan, diagram. | Saves nothing for an image already pasted into the conversation. |
-| `triage_log` | Long machine output: what failed and why. | Reads head and tail when the log exceeds the local window. |
+| `triage_log` | Machine output of any length, supplied as a file or direct text: what failed and why. | Probes the largest full-VRAM context, then streams and reduces bounded fragments sequentially. |
 | `ask_local` | A mechanical task over known files: list, summarise, extract. | Not for architecture or subtle bug analysis. |
 | `translate_local` | Translation with structural validation. | Attributes the model actually used. |
 | `local_models_status` | Installed and resident models, recommended missing ones, experiment state. | — |
@@ -63,6 +63,17 @@ The `locallm` server. Every model call goes through the shared broker.
 | `local_models_sync` | Queues installation of recommended missing models. | — |
 | `local_model_experiment_report` | Timings, errors, fallback, warm/cold and estimated saving per task/model pair. | — |
 | `local_model_feedback` | The owner's decision: `Promote`, `ContinueExperiment`, `FallbackOnly`, `Disable`. | — |
+
+`triage_log` reads its tuning profile before every invocation from
+`%LOCALAPPDATA%\LocalAi\log-triage.json` on Windows or
+`$XDG_DATA_HOME/LocalAi/log-triage.json` (normally `~/.local/share/LocalAi/log-triage.json`) on
+Linux/macOS. The optional JSON fields are `maximumContextTokens`, `reservedContextTokens`,
+`charactersPerToken`, `maximumFragmentCharacters`, `maximumOverlapCharacters`,
+`maximumPartialSummaryCharacters`, and `promptOverheadCharacters`, plus `schemaVersion: 1`.
+Missing, malformed, and unsupported-version files use safe defaults. Changes apply to the next
+call; no rebuild or process restart is required. The context cap does not claim that the requested
+size fits: every invocation still proves full-VRAM residency and falls through smaller catalogued
+contexts when necessary.
 
 ### The notice line
 
