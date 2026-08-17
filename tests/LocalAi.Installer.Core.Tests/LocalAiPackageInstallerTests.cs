@@ -222,7 +222,8 @@ public sealed class LocalAiPackageInstallerTests : IDisposable
         var layout = InstallationLayout.FromLocalAppData(localAppData);
         using var connectedClient = ActivationCoordinator.AcquireShared(
             layout.BinRoot,
-            TimeSpan.FromSeconds(5));
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
         var runner = new RecordingRunner((_, arguments, _, _) =>
         {
             WritePointer(arguments[1]);
