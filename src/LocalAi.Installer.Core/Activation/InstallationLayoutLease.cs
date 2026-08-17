@@ -894,6 +894,22 @@ public sealed class InstallationLayoutLease : IDisposable
         [System.Runtime.CompilerServices.CallerMemberName] string? check = null) =>
         new($"The LocalAi installation layout is unsafe (check: {check ?? "unknown"}): {reason}.");
 
+    /// <summary>
+    /// The refusal a directory open produces, naming the directory and the NTSTATUS.
+    ///
+    /// Without those two facts the message was a dead end: three consecutive installations
+    /// reported <c>check: OpenRelative</c> and nothing else, and the actual cause — one
+    /// directory, held by a running process — could only be found by reproducing the native
+    /// call by hand. The status is what separates "not there" from "held by someone else"
+    /// from "no access", and the path says which of the eight directories it was.
+    /// </summary>
+    private static LocalAiPackageInstallationException OpenFailure(
+        string path,
+        int status,
+        string check) =>
+        new($"The LocalAi installation layout is unsafe (check: {check}): " +
+            $"{path} could not be opened (NTSTATUS 0x{status:X8}).");
+
     private static void DisposeDirectories(
         IEnumerable<DirectoryEvidence> evidence,
         bool removeCreatedScaffold)
@@ -1345,7 +1361,14 @@ public sealed class InstallationLayoutLease : IDisposable
         private const uint FileShareWrite = 0x00000002;
         private const uint FileOpen = 1;
         private const uint FileCreate = 2;
-        private const uint FileOpenIf = 3;
+        private const uint OpenAccess =
+            FileListDirectory | FileReadAttributes | ReadControl | Synchronize;
+        private const uint CreateAccess = OpenAccess | Delete;
+        private const int OpenOrCreateAttempts = 3;
+        private const int StatusUnsuccessful = unchecked((int)0xC0000001);
+        private const int StatusObjectNameNotFound = unchecked((int)0xC0000034);
+        private const int StatusObjectNameCollision = unchecked((int)0xC0000035);
+        private const int StatusObjectPathNotFound = unchecked((int)0xC000003A);
         private const uint FileDirectoryFile = 0x00000001;
         private const uint FileSynchronousIoNonalert = 0x00000020;
         private const uint FileOpenReparsePoint = 0x00200000;
@@ -1373,40 +1396,84 @@ public sealed class InstallationLayoutLease : IDisposable
             return handle;
         }
 
+        /// <summary>
+        /// Opens a directory of the layout, creating it only when it is absent.
+        ///
+        /// The two cases deliberately ask for different rights. A directory this call creates
+        /// is scaffold: if the installation fails before it commits, the lease deletes it
+        /// again, and deleting by handle needs <c>DELETE</c>. A directory that was already
+        /// there is never deleted by the installer, so asking for <c>DELETE</c> on it buys
+        /// nothing — and costs everything, because Windows refuses <c>DELETE</c> on a
+        /// directory another process holds without <c>FILE_SHARE_DELETE</c>. The runtime root
+        /// is exactly such a directory whenever the broker is running: it is that process's
+        /// working directory. One <c>FILE_OPEN_IF</c> for both cases therefore refused every
+        /// upgrade on a machine where LocalAi was in use, at the first gate of the install,
+        /// before the step that stops those processes could ever run.
+        ///
+        /// The retry covers the gap between the two calls: another installer or the runtime
+        /// itself may create the directory after the open failed, or remove it after the
+        /// create collided. Both resolve by trying the other operation once more.
+        /// </summary>
         public static OpenedDirectory OpenOrCreate(
             SafeFileHandle parent,
             string name,
-            string expectedPath) =>
-            OpenRelative(
-                parent,
-                name,
-                expectedPath,
-                FileOpenIf,
-                FileListDirectory | FileReadAttributes | Delete | ReadControl | Synchronize);
+            string expectedPath)
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                var opened = TryOpenRelative(parent, name, expectedPath, FileOpen, OpenAccess);
+                if (opened.Directory is { } existing)
+                {
+                    return existing;
+                }
+
+                if (!IsMissing(opened.Status) || attempt >= OpenOrCreateAttempts)
+                {
+                    throw OpenFailure(expectedPath, opened.Status, nameof(OpenOrCreate));
+                }
+
+                var created = TryOpenRelative(parent, name, expectedPath, FileCreate, CreateAccess);
+                if (created.Directory is { } fresh)
+                {
+                    return fresh;
+                }
+
+                if (created.Status != StatusObjectNameCollision || attempt >= OpenOrCreateAttempts)
+                {
+                    throw OpenFailure(expectedPath, created.Status, nameof(OpenOrCreate));
+                }
+            }
+        }
 
         public static SafeFileHandle OpenExisting(
             SafeFileHandle parent,
             string name,
-            string expectedPath) =>
-            OpenRelative(parent, name, expectedPath, FileOpen).Handle;
+            string expectedPath)
+        {
+            var opened = TryOpenRelative(parent, name, expectedPath, FileOpen, OpenAccess);
+            return opened.Directory?.Handle
+                ?? throw OpenFailure(expectedPath, opened.Status, nameof(OpenExisting));
+        }
 
         public static SafeFileHandle CreateExclusive(
             SafeFileHandle parent,
             string name,
-            string expectedPath) =>
-            OpenRelative(
-                parent,
-                name,
-                expectedPath,
-                FileCreate,
-                FileListDirectory | FileReadAttributes | Delete | ReadControl | Synchronize).Handle;
+            string expectedPath)
+        {
+            var created = TryOpenRelative(parent, name, expectedPath, FileCreate, CreateAccess);
+            return created.Directory?.Handle
+                ?? throw OpenFailure(expectedPath, created.Status, nameof(CreateExclusive));
+        }
 
-        private static OpenedDirectory OpenRelative(
+        private static bool IsMissing(int status) =>
+            status is StatusObjectNameNotFound or StatusObjectPathNotFound;
+
+        private static OpenAttempt TryOpenRelative(
             SafeFileHandle parent,
             string name,
             string expectedPath,
             uint disposition,
-            uint desiredAccess = FileListDirectory | FileReadAttributes | ReadControl | Synchronize)
+            uint desiredAccess)
         {
             if (string.IsNullOrWhiteSpace(name) || name is "." or ".." ||
                 name.IndexOfAny(['\\', '/', ':']) >= 0)
@@ -1456,13 +1523,13 @@ public sealed class InstallationLayoutLease : IDisposable
                     0);
                 if (status < 0 || nativeHandle is 0 or -1)
                 {
-                    throw Failure();
+                    return new(status is 0 ? StatusUnsuccessful : status, null);
                 }
 
                 var handle = new SafeFileHandle(nativeHandle, ownsHandle: true);
                 nativeHandle = IntPtr.Zero;
                 WindowsStagingRootLease.ValidateDirectoryHandle(handle, expectedPath);
-                return new(handle, io.Information.ToUInt64() == 2);
+                return new(0, new(handle, io.Information.ToUInt64() == 2));
             }
             finally
             {
@@ -1697,6 +1764,13 @@ public sealed class InstallationLayoutLease : IDisposable
         }
 
         internal sealed record OpenedDirectory(SafeFileHandle Handle, bool Created);
+
+        /// <summary>
+        /// One attempt at opening a directory: the handle, or the NTSTATUS that refused it.
+        /// The status is carried rather than thrown so the caller can tell "it is not there"
+        /// from "someone else holds it", which are opposite situations with opposite answers.
+        /// </summary>
+        internal sealed record OpenAttempt(int Status, OpenedDirectory? Directory);
     }
 }
 

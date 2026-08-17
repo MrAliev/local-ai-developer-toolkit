@@ -13,6 +13,7 @@ public interface IRunningProcess : IDisposable
     bool HasExited { get; }
     int ExitCode { get; }
     TextReader StandardOutput { get; }
+    Stream StandardOutputStream { get; }
     TextReader StandardError { get; }
     Task WaitForExitAsync(CancellationToken cancellationToken);
     void KillTree();
@@ -41,6 +42,7 @@ public sealed class SystemProcessFactory : IProcessFactory
         public bool HasExited => process.HasExited;
         public int ExitCode => process.ExitCode;
         public TextReader StandardOutput => process.StandardOutput;
+        public Stream StandardOutputStream => process.StandardOutput.BaseStream;
         public TextReader StandardError => process.StandardError;
 
         public Task WaitForExitAsync(CancellationToken cancellationToken) =>

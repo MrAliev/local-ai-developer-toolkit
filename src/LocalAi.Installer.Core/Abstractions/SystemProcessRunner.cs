@@ -3,7 +3,7 @@ using System.Text;
 
 namespace LocalAi.Installer.Core.Abstractions;
 
-public sealed class SystemProcessRunner : IProcessRunner
+public sealed class SystemProcessRunner : IProcessRunner, IProcessFileRunner
 {
     private const int DefaultMaximumCapturedCharacters = 65_536;
     private static readonly TimeSpan DefaultTerminationGrace = TimeSpan.FromSeconds(5);
@@ -162,6 +162,150 @@ public sealed class SystemProcessRunner : IProcessRunner
             error.Truncated);
     }
 
+    public async Task<ProcessResult> RunToFileAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string outputPath,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executable);
+        ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return new ProcessResult(null, string.Empty, string.Empty, false, true);
+        }
+
+        await using var output = new FileStream(
+            outputPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.Read,
+            bufferSize: 81_920,
+            useAsync: true);
+        var startInfo = CreateStartInfo(executable, arguments);
+        using var process = _processFactory.Start(startInfo);
+        using var drainCancellation = new CancellationTokenSource();
+        var standardOutput = process.StandardOutputStream.CopyToAsync(
+            output,
+            drainCancellation.Token);
+        var standardError = DrainBoundedAsync(
+            process.StandardError,
+            drainCancellation.Token);
+        var processExit = process.WaitForExitAsync(CancellationToken.None);
+        var timeoutElapsed = Task.Delay(timeout, CancellationToken.None);
+        var callerCancelled = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        await Task.WhenAny(processExit, callerCancelled, timeoutElapsed)
+            .ConfigureAwait(false);
+
+        if (process.HasExited)
+        {
+            await processExit.ConfigureAwait(false);
+            await standardOutput.ConfigureAwait(false);
+            await output.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+            var error = await standardError.ConfigureAwait(false);
+            return new ProcessResult(
+                process.ExitCode,
+                string.Empty,
+                error.Text,
+                false,
+                false,
+                false,
+                error.Truncated);
+        }
+
+        var cause = cancellationToken.IsCancellationRequested
+            ? ProcessTerminationCause.Cancellation
+            : ProcessTerminationCause.Timeout;
+        try
+        {
+            process.KillTree();
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or
+            System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            if (process.HasExited)
+            {
+                await processExit.ConfigureAwait(false);
+                await standardOutput.ConfigureAwait(false);
+                await output.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+                var error = await standardError.ConfigureAwait(false);
+                return new ProcessResult(
+                    process.ExitCode,
+                    string.Empty,
+                    error.Text,
+                    false,
+                    false,
+                    false,
+                    error.Truncated);
+            }
+
+            await CancelFileDrainsAsync(
+                    drainCancellation,
+                    standardOutput,
+                    standardError)
+                .ConfigureAwait(false);
+            throw new ProcessTerminationException(
+                process.Id,
+                cause,
+                $"Failed to terminate process tree {process.Id}.",
+                exception);
+        }
+
+        using var terminationCancellation =
+            new CancellationTokenSource(_terminationGrace);
+        try
+        {
+            await process.WaitForExitAsync(terminationCancellation.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+            when (terminationCancellation.IsCancellationRequested)
+        {
+            await CancelFileDrainsAsync(
+                    drainCancellation,
+                    standardOutput,
+                    standardError)
+                .ConfigureAwait(false);
+            throw new ProcessTerminationException(
+                process.Id,
+                cause,
+                $"Process tree {process.Id} did not exit within {_terminationGrace}.");
+        }
+
+        if (!process.HasExited)
+        {
+            await CancelFileDrainsAsync(
+                    drainCancellation,
+                    standardOutput,
+                    standardError)
+                .ConfigureAwait(false);
+            throw new ProcessTerminationException(
+                process.Id,
+                cause,
+                $"Process tree {process.Id} did not confirm exit.");
+        }
+
+        await standardOutput.ConfigureAwait(false);
+        await output.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+        var capturedError = await standardError.ConfigureAwait(false);
+        return new ProcessResult(
+            null,
+            string.Empty,
+            capturedError.Text,
+            cause == ProcessTerminationCause.Timeout,
+            cause == ProcessTerminationCause.Cancellation,
+            false,
+            capturedError.Truncated);
+    }
+
     private static ProcessStartInfo CreateStartInfo(
         string executable,
         IReadOnlyList<string> arguments)
@@ -263,6 +407,30 @@ public sealed class SystemProcessRunner : IProcessRunner
     private static async Task CancelDrainsAsync(
         CancellationTokenSource drainCancellation,
         Task<CapturedText> standardOutput,
+        Task<CapturedText> standardError)
+    {
+        drainCancellation.Cancel();
+        try
+        {
+            await Task.WhenAll(standardOutput, standardError)
+                .WaitAsync(TimeSpan.FromSeconds(1))
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            ObserveFault(standardOutput);
+            ObserveFault(standardError);
+        }
+        catch (Exception exception) when (
+            exception is OperationCanceledException or IOException or
+            ObjectDisposedException)
+        {
+        }
+    }
+
+    private static async Task CancelFileDrainsAsync(
+        CancellationTokenSource drainCancellation,
+        Task standardOutput,
         Task<CapturedText> standardError)
     {
         drainCancellation.Cancel();

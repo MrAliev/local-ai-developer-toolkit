@@ -89,6 +89,7 @@ public sealed class SystemProcessRunnerTerminationTests
         public int ExitCode => ExitCodeValue;
         public int ExitCodeValue { get; set; }
         public TextReader StandardOutput { get; } = new StringReader(string.Empty);
+        public Stream StandardOutputStream { get; } = new MemoryStream();
         public TextReader StandardError { get; } = new StringReader(string.Empty);
         public bool KillTreeCalled { get; private set; }
         public Exception? KillException { get; init; }

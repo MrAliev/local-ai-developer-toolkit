@@ -9,6 +9,21 @@ public interface IProcessRunner
         CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Runs a process while preserving its standard output as raw bytes in a file.
+/// Use this for authenticated CLI downloads: routing an archive through a text reader
+/// corrupts arbitrary byte sequences.
+/// </summary>
+public interface IProcessFileRunner
+{
+    Task<ProcessResult> RunToFileAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string outputPath,
+        TimeSpan timeout,
+        CancellationToken cancellationToken);
+}
+
 public sealed record ProcessResult(
     int? ExitCode,
     string StandardOutput,
