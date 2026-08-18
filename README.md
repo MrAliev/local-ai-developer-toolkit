@@ -66,6 +66,21 @@ a measured relevance floor for that exact model and fails closed with
 `threshold not calibrated` when no profile exists; it never borrows a threshold from
 another model.
 
+What a hit *is* depends on the language, and the difference is worth knowing before
+reading results. C# is chunked by syntax: one chunk per type — carrying its fields and a
+table of contents of its members — and one per executable member, which means a method, a
+constructor, a destructor, an operator, a conversion operator, an indexer, or a property
+with a real body. Fields and auto-properties ride inside the type chunk rather than
+becoming vectors of their own, because a DTO with twenty properties must not become
+twenty-one of them. Generated C# is not indexed at all.
+
+Every other indexed format is chunked by a sliding window over lines — 60 lines with 12
+lines of overlap — so a hit names the file and its line range instead of a symbol. The
+window has no syntax awareness; what it does keep is exact line numbers, which is what
+makes a hit actionable. Precise navigation is a separate layer and is not limited this
+way: it parses C# and XAML directly and imports TypeScript and Python from external
+indexers. Extending symbol-level chunking to those languages is tracked separately.
+
 Every search hit includes an opaque `chunk_id`. Pass that value to `get_code_chunk` to
 retrieve the complete indexed source chunk. The ID is bound to the repository, immutable
 generation, current Git tree, dirty-content hash, and composite chunk ordinal. A

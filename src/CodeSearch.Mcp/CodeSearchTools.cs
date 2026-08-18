@@ -280,8 +280,10 @@ public static class CodeSearchTools
 
     [McpServerTool(Name = "search_code")]
     [Description("""
-        Semantic + literal search over a repository's code, chunked by symbol (class, method,
-        property) rather than by file. Use this INSTEAD of grep/glob as the first step for any
+        Semantic + literal search over a repository's code. C# is chunked by symbol - a hit is
+        a type or an executable member, not a file; every other language is chunked by a
+        sliding window over lines, so a hit there names the file and its line range.
+        Use this INSTEAD of grep/glob as the first step for any
         "where does X live", "which code handles Y", "what already does something like Z"
         question - it answers by meaning, so it finds the right code without knowing its name,
         and it costs a fraction of the tokens that reading candidate files would.
