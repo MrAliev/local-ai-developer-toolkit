@@ -189,6 +189,10 @@ limitations.
 The complete inventory of all twenty MCP tools — what exists, what it is for, and the
 constraint that matters — is in the [tool reference](docs/mcp-tools.md).
 
+A connected walkthrough for the people who use this daily — what it does, how it works,
+what protects it, and what it saves — is in the developer overview
+([Russian only for now](docs/overview.ru.md)).
+
 ## Prerequisites
 
 - .NET 10 SDK
