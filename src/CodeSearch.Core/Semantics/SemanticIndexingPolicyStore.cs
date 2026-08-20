@@ -10,6 +10,22 @@ public sealed record ScipLanguageAdapterPolicy(
     string OutputFile = "index.scip",
     ScipPositionEncoding? UnspecifiedPositionEncoding = null);
 
+/// <summary>
+/// What the external indexers are allowed to do, and which of them there are.
+/// </summary>
+/// <remarks>
+/// Two languages, named rather than listed, because adding one is not configuration. A third
+/// would need a field here, its own file detection and workspace preparation in the runner — the
+/// TypeScript adapter needs a synthetic tsconfig built for it — a strict CI fixture that fails
+/// rather than skips, and a bump of the semantic generation version, which rebuilds every
+/// repository's base generation whether or not it contains that language.
+///
+/// The SCIP ecosystem does have scip-go and scip-java, so the question is demand rather than
+/// availability, and demand is measurable: across the five repositories connected to this
+/// installation — two C# solutions, a React front end and two plugin repositories — there is not
+/// one Go, Java, Kotlin, Rust, PHP or Scala file. Until one of them acquires some, a third
+/// adapter would cost every repository a rebuild to index nothing.
+/// </remarks>
 public sealed record SemanticIndexingPolicy(
     int SchemaVersion,
     bool Enabled,
