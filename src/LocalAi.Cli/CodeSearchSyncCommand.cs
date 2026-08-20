@@ -44,7 +44,7 @@ public static class CodeSearchSyncCommand
     // would keep serving the previous semantic graph for an already indexed commit.
     public const int CurrentSemanticGenerationVersion = 10;
 
-    private sealed record SemanticBuildResult(
+    internal sealed record SemanticBuildResult(
         SemanticIndex Index,
         IReadOnlyList<SemanticAdapterStatus> AdapterStatuses);
 
@@ -478,9 +478,13 @@ public static class CodeSearchSyncCommand
         var workIndex = Path.Combine(
             stagingRoot,
             generation.Id + "." + Guid.NewGuid().ToString("N") + ".cidx");
+        // Named for the generation and nothing else, because it has to be findable by the run
+        // that resumes this one. The corpus file keeps its per-run suffix: it is rebuilt from the
+        // embedding checkpoint, not reused as a file.
         var workSemanticIndex = Path.Combine(
             stagingRoot,
-            generation.Id + "." + Guid.NewGuid().ToString("N") + ".sidx");
+            generation.Id + ".sidx");
+        var semanticAdapterStatusPath = workSemanticIndex + ".adapters.json";
         var embeddingCheckpointPath = Path.Combine(
             stagingRoot,
             generation.Id + ".embedding-checkpoint");
@@ -505,18 +509,27 @@ public static class CodeSearchSyncCommand
             // Running this second meant paying for the entire corpus before finding out the build
             // could not be published, which is the wrong order to learn that in.
             //
-            // The cost of the swap is that an interrupted build re-runs this phase, because the
-            // embedding checkpoint has no counterpart here and the work file is cleaned up on the
-            // way out. That trades minutes on a resume against tens of minutes on every failure.
+            // An interrupted build resumes both phases: the embedding checkpoint for the corpus,
+            // and the staged semantic index for this one.
             phase(RepositoryIndexProgressPhase.SemanticBase);
-            var semanticIndex = await BuildSemanticIndexAsync(
-                snapshot.Root,
-                dev,
+            var semanticIndex = ResumeSemanticPhase(
+                workSemanticIndex,
+                semanticAdapterStatusPath,
                 generation,
-                runtimeRoot,
-                cancellationToken);
-            EnsureSemanticAdaptersSucceeded(semanticIndex.AdapterStatuses);
-            semanticIndex.Index.Save(workSemanticIndex);
+                dev);
+            if (semanticIndex is null)
+            {
+                var built = await BuildSemanticIndexAsync(
+                    snapshot.Root,
+                    dev,
+                    generation,
+                    runtimeRoot,
+                    cancellationToken);
+                EnsureSemanticAdaptersSucceeded(built.AdapterStatuses);
+                built.Index.Save(workSemanticIndex);
+                WriteSemanticAdapterStatuses(semanticAdapterStatusPath, built.AdapterStatuses);
+                semanticIndex = built;
+            }
 
             phase(RepositoryIndexProgressPhase.EmbeddingBase);
             var embedder = new BrokerEmbeddingClient(
@@ -559,6 +572,7 @@ public static class CodeSearchSyncCommand
                 workSemanticIndex,
                 semanticAdapterStatuses: semanticIndex.AdapterStatuses);
             DeleteEmbeddingCheckpoint(embeddingCheckpointPath);
+            DeleteSemanticCheckpoint(workSemanticIndex, semanticAdapterStatusPath);
             return published;
         }
         finally
@@ -568,9 +582,115 @@ public static class CodeSearchSyncCommand
                 File.Delete(workIndex);
             }
 
-            if (File.Exists(workSemanticIndex))
+            // The semantic checkpoint deliberately survives here. It is what an interrupted build
+            // resumes from; the published generation deletes it, and retention collects one no
+            // build came back for.
+        }
+    }
+
+    /// <summary>
+    /// The staged semantic index of an interrupted build, when it is the one this build needs.
+    /// </summary>
+    /// <remarks>
+    /// On a repository the size of IntelWash the semantic phase is minutes, and it ran before
+    /// embedding precisely so a failure is cheap. Without this, every resume paid those minutes
+    /// again to produce a file identical to the one it had just deleted.
+    ///
+    /// Matching the generation id is the whole test, and it is sufficient rather than convenient:
+    /// the id is derived from the repository, the git tree, the embedding model and dimension,
+    /// and the chunk, normalization and semantic format versions. Two builds that agree on it
+    /// are indexing the same tree with the same rules, so their semantic indexes are the same
+    /// index. The repository and tree are compared anyway, because a file whose name says one
+    /// generation and whose content says another is a corrupt file, not a stale one.
+    ///
+    /// Anything unreadable is treated as absent: the phase runs again and overwrites it. A
+    /// checkpoint is an optimisation, and no optimisation is allowed to fail a build.
+    /// </remarks>
+    internal static SemanticBuildResult? ResumeSemanticPhase(
+        string path,
+        string statusPath,
+        GenerationIdentity generation,
+        WorkingIndexIdentity dev)
+    {
+        if (!File.Exists(path) || !File.Exists(statusPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var index = SemanticIndex.Load(path);
+            if (index.GenerationId != generation.Id ||
+                index.RepositoryId != dev.RepositoryId ||
+                index.GitTree != dev.HeadTree)
             {
-                File.Delete(workSemanticIndex);
+                return null;
+            }
+
+            var statuses = JsonSerializer.Deserialize<SemanticAdapterStatus[]>(
+                File.ReadAllText(statusPath),
+                LocalAiJson.Strict);
+            if (statuses is null)
+            {
+                return null;
+            }
+
+            // A checkpoint is only written after the adapters were checked, so this holds unless
+            // the file was edited. Checked anyway: publishing a generation whose adapters failed
+            // is the one thing the semantic phase exists to prevent.
+            EnsureSemanticAdaptersSucceeded(statuses);
+            Console.Error.WriteLine(
+                $"Semantic phase resumed from '{Path.GetFileName(path)}'.");
+            return new SemanticBuildResult(index, statuses);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                InvalidDataException or JsonException)
+        {
+            Console.Error.WriteLine(
+                $"Semantic checkpoint '{path}' was not reusable and will be rebuilt: " +
+                exception.Message);
+            return null;
+        }
+    }
+
+    internal static void WriteSemanticAdapterStatuses(
+        string path,
+        IReadOnlyList<SemanticAdapterStatus> statuses)
+    {
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(
+                temporary,
+                JsonSerializer.Serialize(statuses, LocalAiJson.Strict));
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
+    }
+
+    private static void DeleteSemanticCheckpoint(string path, string statusPath)
+    {
+        foreach (var file in new[] { path, statusPath })
+        {
+            try
+            {
+                if (File.Exists(file))
+                {
+                    File.Delete(file);
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine(
+                    $"Semantic checkpoint '{file}' could not be removed: {exception.Message}");
             }
         }
     }
