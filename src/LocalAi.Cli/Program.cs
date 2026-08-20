@@ -74,10 +74,48 @@ static async Task<int> RunAsync(string[] args)
 
     if (args is ["repo", "status", ..])
     {
-        var commonDirectory = args.Length > 2
-            ? args[2]
-            : await new LocalAi.Repository.GitClient()
-                .GetCommonDirectoryAsync(Environment.CurrentDirectory);
+        if (!RepoCommand.TryParseStatusArguments(
+                args.AsSpan(2).ToArray(),
+                out var target,
+                out var parseError))
+        {
+            Console.Error.WriteLine(parseError);
+            return 2;
+        }
+
+        string commonDirectory;
+        if (target.ResolveThroughGit)
+        {
+            var directory = target.Path ?? Environment.CurrentDirectory;
+            try
+            {
+                commonDirectory = await new LocalAi.Repository.GitClient()
+                    .GetCommonDirectoryAsync(directory);
+            }
+            catch (Exception exception)
+                when (exception is InvalidOperationException or DirectoryNotFoundException)
+            {
+                // Saying which directory was asked about matters more than it sounds: the
+                // failure this replaces reported a configured repository as unconfigured, so
+                // "there is no repository here" has to be distinguishable from "this one is
+                // not set up yet".
+                Console.Error.WriteLine(
+                    $"'{directory}' is not inside a Git repository.");
+                return 2;
+            }
+        }
+        else
+        {
+            commonDirectory = target.Path!;
+            if (!Directory.Exists(commonDirectory))
+            {
+                Console.Error.WriteLine(
+                    $"'{commonDirectory}' is not a directory. Pass a Git common directory, " +
+                    "or use --root with a directory inside the repository.");
+                return 2;
+            }
+        }
+
         Console.WriteLine(
             RepoCommand.Status(
                 commonDirectory,

@@ -22,7 +22,8 @@ internal static class CliUsage
     public const string Text =
         "Usage: localai native <operation> [--request file] | " +
         ModelStatus + " | " + ModelPull + " | " + ModelPreflight + " | " +
-        "localai repo status [git-common-dir] | localai policy <show|set> [options] | " +
+        "localai repo status [--root dir | git-common-dir] | " +
+        "localai policy <show|set> [options] | " +
         "localai semantic <operation> [--request file] | localai bootstrap --dry-run | " +
         "localai sync [--root dir] [--base-only] | " + Hook + " | " +
         "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +

@@ -57,7 +57,9 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("current ETA")]
     // Indexing is opt-in per repository, so an assistant that does not know how to connect
     // one is limited to whatever was set up before it arrived.
-    [InlineData("localai repo status")]
+    // With --root, because the block is read by agents that are not standing in the repository
+    // they are asking about, and the bare form answers about wherever the process happens to be.
+    [InlineData("localai repo status --root")]
     [InlineData("localai sync --root")]
     [InlineData("localai hooks install --root")]
     [InlineData("INITIALIZING")]
