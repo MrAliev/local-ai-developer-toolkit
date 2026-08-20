@@ -28,6 +28,7 @@ public static class CodeSearchSyncCommand
 
     /// <summary>
     /// Version 2 cuts adapter-covered files on their definitions instead of on a line window.
+    /// Version 3 also cuts on the declarations an adapter names without reporting a body span.
     /// </summary>
     /// <remarks>
     /// Chunk boundaries are part of the generation identity, so this is not a migration: the
@@ -36,7 +37,7 @@ public static class CodeSearchSyncCommand
     /// at the rate this machine embeds — a deliberate rebuild, announced in the release notes,
     /// and it must read as one in `index_status` rather than as drift.
     /// </remarks>
-    public const int CurrentChunkFormatVersion = 2;
+    public const int CurrentChunkFormatVersion = 3;
 
     // Bump whenever semantic extraction changes even if the SIDX binary format does not.
     // Generations are immutable, so changing relationships without changing this value

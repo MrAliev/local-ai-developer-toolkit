@@ -9,8 +9,10 @@ namespace CodeSearch.Core.Chunking;
 /// </summary>
 /// <remarks>
 /// This is what a TypeScript or Python hit stops being a line range and starts being a symbol.
-/// The boundaries are not guessed: they come from `enclosing_range`, which the external indexers
-/// report and which issue #87 measured before any of this was written.
+/// The boundaries come from `enclosing_range`, which the external indexers report and which issue
+/// #87 measured before any of this was written. Where an indexer names a declaration but reports
+/// no range for it — `export const X = memo(() => …)` — the boundary is read off the next thing
+/// the indexer named rather than the declaration being dropped; see <see cref="Inferred"/>.
 ///
 /// Two rules keep the corpus honest. Every line of the file lands in exactly one chunk, so
 /// nothing goes unindexed and nothing is embedded twice — a definition that contains others
@@ -200,11 +202,51 @@ public sealed class SymbolAwareChunker : IChunker
         IReadOnlyList<SymbolDefinition> definitions,
         string[] lines)
     {
+        var reported = Reported(definitions, lines);
+        var distinct = reported
+            .Concat(Inferred(definitions, lines, reported))
+            .OrderBy(span => span.Start)
+            .ThenByDescending(span => span.End)
+            .ToList();
+
+        foreach (var span in distinct)
+        {
+            span.Parent = distinct
+                .Where(candidate =>
+                    candidate != span &&
+                    candidate.Start <= span.Start &&
+                    candidate.End >= span.End)
+                .OrderByDescending(candidate => candidate.Start)
+                .FirstOrDefault();
+        }
+
+        foreach (var span in distinct)
+        {
+            span.Symbol = span.Parent is null
+                ? span.Name
+                : $"{span.Parent.Symbol}.{span.Name}";
+        }
+
+        return distinct;
+    }
+
+    /// <summary>
+    /// The spans the indexer reported a body for, deduplicated and ordered.
+    /// </summary>
+    private static List<Span> Reported(
+        IReadOnlyList<SymbolDefinition> definitions,
+        string[] lines)
+    {
         var spans = new List<Span>();
         foreach (var definition in definitions)
         {
-            var start = definition.Body.StartLine + 1;
-            var end = definition.Body.EndLine + 1;
+            if (definition.Body is not { } reported)
+            {
+                continue;
+            }
+
+            var start = reported.StartLine + 1;
+            var end = reported.EndLine + 1;
             if (start < 1 || end < start || end > lines.Length)
             {
                 continue;
@@ -229,32 +271,107 @@ public sealed class SymbolAwareChunker : IChunker
 
         // Deduplicate by span: two occurrences reporting the same body are the same definition
         // seen twice, and emitting both would embed those lines twice.
-        var distinct = spans
+        return spans
             .GroupBy(span => (span.Start, span.End))
             .Select(group => group.First())
             .OrderBy(span => span.Start)
             .ThenByDescending(span => span.End)
             .ToList();
+    }
 
-        foreach (var span in distinct)
+    /// <summary>
+    /// Spans for the declarations the indexer named but reported no body for.
+    /// </summary>
+    /// <remarks>
+    /// <c>export const Sidebar = memo(() =&gt; …)</c> is a definition by every measure that
+    /// matters and scip-typescript reports no <c>enclosing_range</c> for it, because its
+    /// initialiser is a call. Left out, the component that gives the file its name is the one
+    /// thing in the file with no chunk of its own; on the 2 653-file React repository #82 was
+    /// measured against, 1 222 declarations were in that position.
+    ///
+    /// The extent is not guessed at, it is read off the file: a declaration runs to the line
+    /// before the next thing the indexer named, and trailing blank lines go back to the window
+    /// rather than padding the chunk. Two rules keep that honest.
+    ///
+    /// A declaration inside a reported body is skipped. Its extent cannot be read off the next
+    /// top-level declaration, and it is already inside the chunk of the definition that holds it.
+    /// (What such a declaration would need instead is its own boundary and a name composed from
+    /// its parent — the nested-definition case, deliberately still open.)
+    ///
+    /// A declaration that ends on the line it starts on is skipped too. One line is not a body,
+    /// and the trade was measured rather than assumed: on the same repository 487 of the 1 222
+    /// are one-liners of the shape <c>const access = 'authenticated' as const;</c>, and admitting
+    /// them adds 438 chunks to a 6 894-chunk corpus to put 495 more source lines under a symbol.
+    /// A vector per line is the same bad bargain as a vector per DTO property.
+    /// </remarks>
+    private static List<Span> Inferred(
+        IReadOnlyList<SymbolDefinition> definitions,
+        string[] lines,
+        List<Span> reported)
+    {
+        var candidates = new List<(int Line, int Column, string Name)>();
+        foreach (var definition in definitions)
         {
-            span.Parent = distinct
-                .Where(candidate =>
-                    candidate != span &&
-                    candidate.Start <= span.Start &&
-                    candidate.End >= span.End)
-                .OrderByDescending(candidate => candidate.Start)
-                .FirstOrDefault();
+            if (definition.Body is not null)
+            {
+                continue;
+            }
+
+            var line = definition.Name.StartLine + 1;
+            if (line < 1 || line > lines.Length)
+            {
+                continue;
+            }
+
+            var name = Spelling(lines, definition.Name);
+            if (name.Length == 0 ||
+                reported.Any(span => line >= span.Start && line <= span.End))
+            {
+                continue;
+            }
+
+            candidates.Add((line, definition.Name.StartCharacter, name));
         }
 
-        foreach (var span in distinct)
+        // Two declarations on one line — `export const a = f(), b = g()` — are one region, and
+        // the leftmost name is the one that region is about.
+        var distinct = candidates
+            .GroupBy(candidate => candidate.Line)
+            .Select(group => group.OrderBy(candidate => candidate.Column).First())
+            .OrderBy(candidate => candidate.Line)
+            .ToList();
+
+        var boundaries = reported
+            .Select(span => span.Start)
+            .Concat(distinct.Select(candidate => candidate.Line))
+            .Distinct()
+            .Order()
+            .ToArray();
+
+        var spans = new List<Span>();
+        foreach (var candidate in distinct)
         {
-            span.Symbol = span.Parent is null
-                ? span.Name
-                : $"{span.Parent.Symbol}.{span.Name}";
+            var found = Array.BinarySearch(boundaries, candidate.Line);
+            var next = found < 0 ? ~found : found + 1;
+            var end = next < boundaries.Length ? boundaries[next] - 1 : lines.Length;
+            while (end > candidate.Line && string.IsNullOrWhiteSpace(lines[end - 1]))
+            {
+                end--;
+            }
+
+            if (end == candidate.Line)
+            {
+                continue;
+            }
+
+            spans.Add(new Span(
+                candidate.Line,
+                end,
+                candidate.Name,
+                Signature(lines, candidate.Line)));
         }
 
-        return distinct;
+        return spans;
     }
 
     private static string Signature(string[] lines, int start)
