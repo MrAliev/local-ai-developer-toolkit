@@ -1,0 +1,561 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "token-not-in-localstorage",
+      "query": "where the access token is kept and why it is not in local storage",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/auth/tokenStorage.ts",
+          "symbol": "storeAccessToken"
+        }
+      ]
+    },
+    {
+      "id": "token-read-back",
+      "query": "reading the current session token back out of the browser",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/auth/tokenStorage.ts",
+          "symbol": "readAccessToken"
+        }
+      ]
+    },
+    {
+      "id": "sign-out-clears",
+      "query": "how signing out stops the browser from sending the old credential",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/auth/tokenStorage.ts",
+          "symbol": "clearAccessToken"
+        }
+      ]
+    },
+    {
+      "id": "cookie-expiry-format",
+      "query": "formatting an expiry date the browser will accept on a cookie",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/auth/cookies.ts",
+          "symbol": "writeCookie"
+        }
+      ]
+    },
+    {
+      "id": "retry-only-when-safe",
+      "query": "deciding whether repeating a failed request could change the outcome",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/api/retryPolicy.ts",
+          "symbol": "shouldRetryRequest"
+        }
+      ]
+    },
+    {
+      "id": "retry-backoff",
+      "query": "how long to wait before trying the same request again",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/api/retryPolicy.ts",
+          "symbol": "backoffDelayMilliseconds"
+        }
+      ]
+    },
+    {
+      "id": "menu-hides-forbidden",
+      "query": "hiding navigation entries the current user is not allowed to open",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/access/menuVisibility.ts",
+          "symbol": "visibleMenu"
+        }
+      ]
+    },
+    {
+      "id": "section-visible-if-child",
+      "query": "a grouping stays on screen only while something under it does",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/access/menuVisibility.ts",
+          "symbol": "visibleMenu"
+        }
+      ]
+    },
+    {
+      "id": "permission-shape",
+      "query": "the shape a navigation entry has and what marks it as restricted",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/access/types.ts",
+          "symbol": "MenuNode"
+        }
+      ]
+    },
+    {
+      "id": "placeholder-for-no-rows",
+      "query": "what a table shows when the filter matches nothing at all",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/ui/EmptyState.tsx",
+          "symbol": "EmptyState"
+        }
+      ]
+    },
+    {
+      "id": "request-envelope",
+      "query": "the single place that decides the method and serialises the body",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/api/request.ts",
+          "symbol": "request"
+        }
+      ]
+    },
+    {
+      "id": "rounding-half-up",
+      "query": "rounding an amount the way an invoice does instead of the way a float does",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/lib/money.py",
+          "symbol": "to_minor_units"
+        }
+      ]
+    },
+    {
+      "id": "exact-sum",
+      "query": "adding amounts together without ever leaving exact arithmetic",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/lib/money.py",
+          "symbol": "MoneyLedger"
+        }
+      ]
+    },
+    {
+      "id": "cents-conversion",
+      "query": "turning a decimal amount into whole minor units",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/shared/lib/money.py",
+          "symbol": "to_minor_units"
+        }
+      ]
+    },
+    {
+      "id": "feature-invoice-card",
+      "query": "the small tile that shows one invoice and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/invoice/ui/InvoiceCard.tsx",
+          "symbol": "InvoiceCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-invoice-hook",
+      "query": "loading a page of invoices and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/invoice/model/useInvoice.ts",
+          "symbol": "useInvoiceList"
+        }
+      ]
+    },
+    {
+      "id": "feature-invoice-api",
+      "query": "the endpoints for creating, updating and deleting a invoice",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/invoice/api/invoice.api.ts",
+          "symbol": "invoiceApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-shipment-card",
+      "query": "the small tile that shows one shipment and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/shipment/ui/ShipmentCard.tsx",
+          "symbol": "ShipmentCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-shipment-hook",
+      "query": "loading a page of shipments and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/shipment/model/useShipment.ts",
+          "symbol": "useShipmentList"
+        }
+      ]
+    },
+    {
+      "id": "feature-shipment-api",
+      "query": "the endpoints for creating, updating and deleting a shipment",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/shipment/api/shipment.api.ts",
+          "symbol": "shipmentApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-customer-card",
+      "query": "the small tile that shows one customer and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/customer/ui/CustomerCard.tsx",
+          "symbol": "CustomerCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-customer-hook",
+      "query": "loading a page of customers and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/customer/model/useCustomer.ts",
+          "symbol": "useCustomerList"
+        }
+      ]
+    },
+    {
+      "id": "feature-customer-api",
+      "query": "the endpoints for creating, updating and deleting a customer",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/customer/api/customer.api.ts",
+          "symbol": "customerApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-warehouse-card",
+      "query": "the small tile that shows one warehouse and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/warehouse/ui/WarehouseCard.tsx",
+          "symbol": "WarehouseCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-warehouse-hook",
+      "query": "loading a page of warehouses and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/warehouse/model/useWarehouse.ts",
+          "symbol": "useWarehouseList"
+        }
+      ]
+    },
+    {
+      "id": "feature-warehouse-api",
+      "query": "the endpoints for creating, updating and deleting a warehouse",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/warehouse/api/warehouse.api.ts",
+          "symbol": "warehouseApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-payment-card",
+      "query": "the small tile that shows one payment and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/payment/ui/PaymentCard.tsx",
+          "symbol": "PaymentCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-payment-hook",
+      "query": "loading a page of payments and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/payment/model/usePayment.ts",
+          "symbol": "usePaymentList"
+        }
+      ]
+    },
+    {
+      "id": "feature-payment-api",
+      "query": "the endpoints for creating, updating and deleting a payment",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/payment/api/payment.api.ts",
+          "symbol": "paymentApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-refund-card",
+      "query": "the small tile that shows one refund and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/refund/ui/RefundCard.tsx",
+          "symbol": "RefundCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-refund-hook",
+      "query": "loading a page of refunds and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/refund/model/useRefund.ts",
+          "symbol": "useRefundList"
+        }
+      ]
+    },
+    {
+      "id": "feature-refund-api",
+      "query": "the endpoints for creating, updating and deleting a refund",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/refund/api/refund.api.ts",
+          "symbol": "refundApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-catalog-card",
+      "query": "the small tile that shows one catalog and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/catalog/ui/CatalogCard.tsx",
+          "symbol": "CatalogCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-catalog-hook",
+      "query": "loading a page of catalogs and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/catalog/model/useCatalog.ts",
+          "symbol": "useCatalogList"
+        }
+      ]
+    },
+    {
+      "id": "feature-catalog-api",
+      "query": "the endpoints for creating, updating and deleting a catalog",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/catalog/api/catalog.api.ts",
+          "symbol": "catalogApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-pricing-card",
+      "query": "the small tile that shows one pricing and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/pricing/ui/PricingCard.tsx",
+          "symbol": "PricingCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-pricing-hook",
+      "query": "loading a page of pricings and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/pricing/model/usePricing.ts",
+          "symbol": "usePricingList"
+        }
+      ]
+    },
+    {
+      "id": "feature-pricing-api",
+      "query": "the endpoints for creating, updating and deleting a pricing",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/pricing/api/pricing.api.ts",
+          "symbol": "pricingApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-discount-card",
+      "query": "the small tile that shows one discount and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/discount/ui/DiscountCard.tsx",
+          "symbol": "DiscountCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-discount-hook",
+      "query": "loading a page of discounts and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/discount/model/useDiscount.ts",
+          "symbol": "useDiscountList"
+        }
+      ]
+    },
+    {
+      "id": "feature-discount-api",
+      "query": "the endpoints for creating, updating and deleting a discount",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/discount/api/discount.api.ts",
+          "symbol": "discountApi"
+        }
+      ]
+    },
+    {
+      "id": "feature-inventory-card",
+      "query": "the small tile that shows one inventory and opens it when clicked",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/inventory/ui/InventoryCard.tsx",
+          "symbol": "InventoryCard"
+        }
+      ]
+    },
+    {
+      "id": "feature-inventory-hook",
+      "query": "loading a page of inventorys and keeping them sorted by name",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/inventory/model/useInventory.ts",
+          "symbol": "useInventoryList"
+        }
+      ]
+    },
+    {
+      "id": "feature-inventory-api",
+      "query": "the endpoints for creating, updating and deleting a inventory",
+      "category": "natural-language",
+      "noAnswer": false,
+      "relevant": [
+        {
+          "path": "src/features/inventory/api/inventory.api.ts",
+          "symbol": "inventoryApi"
+        }
+      ]
+    },
+    {
+      "id": "none-websocket",
+      "query": "how the live websocket reconnects after the server drops it",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    },
+    {
+      "id": "none-pdf-export",
+      "query": "rendering the monthly statement as a printable pdf",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    },
+    {
+      "id": "none-feature-flag",
+      "query": "reading a feature flag from the remote configuration service",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    },
+    {
+      "id": "none-drag-reorder",
+      "query": "reordering rows by dragging them with the mouse",
+      "category": "no-answer",
+      "noAnswer": true,
+      "relevant": []
+    }
+  ]
+}

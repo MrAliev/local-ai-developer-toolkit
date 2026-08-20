@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\FixturePrerequisite.cs" Link="FixturePrerequisite.cs" />
+    <Compile Include="..\Shared\SyntheticFrontendRepository.cs" Link="SyntheticFrontendRepository.cs" />
   </ItemGroup>
 
 </Project>
