@@ -27,10 +27,68 @@ public sealed class GitClient
             cancellationToken)).Trim();
     }
 
+    /// <summary>The top of the working tree, or null when there is none (a bare repository).</summary>
+    public async Task<string?> GetWorkingTreeRootAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var output = await TryRunAsync(
+            workingDirectory,
+            ["rev-parse", "--path-format=absolute", "--show-toplevel"],
+            cancellationToken);
+        return string.IsNullOrWhiteSpace(output) ? null : Path.GetFullPath(output.Trim());
+    }
+
+    /// <summary>One configuration value, or null when it is not set.</summary>
+    public async Task<string?> GetConfigurationAsync(
+        string workingDirectory,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var output = await TryRunAsync(
+            workingDirectory,
+            ["config", "--get", name],
+            cancellationToken);
+        return string.IsNullOrWhiteSpace(output) ? null : output.Trim();
+    }
+
+    /// <summary>
+    /// Runs git where a non-zero exit is an answer rather than a failure: `config --get` exits 1
+    /// for an unset key, and `--show-toplevel` fails in a bare repository.
+    /// </summary>
+    private static async Task<string?> TryRunAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        var (exitCode, stdout, _) = await ExecuteAsync(
+            workingDirectory,
+            arguments,
+            cancellationToken);
+        return exitCode == 0 ? stdout : null;
+    }
+
     private static async Task<string> RunAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
+    {
+        var (exitCode, stdout, stderr) = await ExecuteAsync(
+            workingDirectory,
+            arguments,
+            cancellationToken);
+        return exitCode == 0
+            ? stdout
+            : throw new InvalidOperationException(
+                $"git exited with {exitCode}: {stderr.Trim()}");
+    }
+
+    private static async Task<(int ExitCode, string StandardOutput, string StandardError)>
+        ExecuteAsync(
+            string workingDirectory,
+            IReadOnlyList<string> arguments,
+            CancellationToken cancellationToken)
     {
         var start = new ProcessStartInfo("git")
         {
@@ -50,12 +108,6 @@ public sealed class GitClient
         var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"git exited with {process.ExitCode}: {(await stderr).Trim()}");
-        }
-
-        return await stdout;
+        return (process.ExitCode, await stdout, await stderr);
     }
 }

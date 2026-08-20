@@ -231,6 +231,13 @@ local_models_sync
 C:\path\to\LocalAi\bin\launcher\localai-launcher.exe run localai hooks install --root C:\path\to\repository
 ```
 
+Хуки ставятся туда, куда Git на самом деле смотрит. Если в репозитории задан `core.hooksPath`
+— а его задают husky, lefthook и simple-git-hooks, — они пойдут туда, а не в `$GIT_DIR/hooks`,
+откуда Git их читать не будет. Для husky это каталог `.husky`, а не `.husky/_`, который husky
+переписывает заново при каждом `npm install`. Хуки, попавшие в рабочее дерево, дописываются в
+`.git/info/exclude`: так они не появляются в `git status`, и при этом мы не трогаем
+`.gitignore`, который принадлежит репозиторию, а не нам.
+
 ## Что настраивает установщик
 
 Законченная установка должна оставлять машину, которой действительно можно пользоваться,
