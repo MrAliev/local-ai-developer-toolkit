@@ -208,13 +208,57 @@ public sealed class SemanticNavigationService
             return null;
         }
 
-        return occurrences
+        var exact = occurrences
             .Where(occurrence => Contains(occurrence.Range, line, utf16Column))
             .OrderByDescending(occurrence => occurrence.Range.StartLine)
             .ThenByDescending(occurrence => occurrence.Range.StartCharacter)
             .ThenBy(occurrence => occurrence.Range.EndLine)
             .ThenBy(occurrence => occurrence.Range.EndCharacter)
             .FirstOrDefault();
+
+        return exact ?? SoleDeclarationOn(occurrences, line);
+    }
+
+    /// <summary>
+    /// The one thing a line declares, for a position on that line that names nothing itself.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes a search result navigable. A hit reports a path and a line range; the
+    /// column of the identifier inside that line is nowhere in it, so the obvious call is column
+    /// zero — which lands on <c>export</c>, or on an indent, resolves to no symbol, and falls
+    /// through to the bounded text heuristic. Asking for references to a component then returns
+    /// matches for the word <c>export</c> in a swagger file, correctly labelled as degraded and
+    /// completely useless.
+    ///
+    /// A line that declares exactly one thing has exactly one answer, and giving it is not a
+    /// guess. A line that declares two — <c>const a = f(), b = g()</c> — has no single answer, so
+    /// nothing is returned and the caller gets the same degradation notice as before rather than
+    /// a coin flip. Only declarations count: resolving a position to a reference that merely
+    /// happens to share the line would answer about a different symbol entirely.
+    /// </remarks>
+    private static SemanticOccurrence? SoleDeclarationOn(
+        List<SemanticOccurrence> occurrences,
+        int line)
+    {
+        SemanticOccurrence? sole = null;
+        foreach (var occurrence in occurrences)
+        {
+            if (!occurrence.Roles.HasFlag(SemanticOccurrenceRoles.Definition) ||
+                occurrence.Range.StartLine != line)
+            {
+                continue;
+            }
+
+            if (sole is not null &&
+                !string.Equals(sole.SymbolId, occurrence.SymbolId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            sole ??= occurrence;
+        }
+
+        return sole;
     }
 
     private void RequireSnapshot(SemanticSnapshotIdentity snapshot)

@@ -81,6 +81,53 @@ public class SemanticNavigationServiceTests
     }
 
     [Fact]
+    public void ResolvesTheDeclarationOnTheLineWhenThePositionNamesNothing()
+    {
+        // What a search result gives a caller: a path and a line. The column of the identifier
+        // inside that line is not in the hit, so the natural call is column zero — and before
+        // this, that landed on the indent, resolved to nothing, and fell through to the text
+        // heuristic.
+        var service = new SemanticNavigationService(Index());
+
+        var occurrence = service.ResolveOccurrence("Src/A.cs", 2, 0, Snapshot());
+
+        Assert.NotNull(occurrence);
+        Assert.Equal(MethodId, occurrence.SymbolId);
+        Assert.Equal(new SourceRange(2, 16, 2, 18), occurrence.Range);
+    }
+
+    [Fact]
+    public void Navigates_from_the_first_line_of_a_declaration()
+    {
+        var service = new SemanticNavigationService(Index());
+
+        var references = service.FindReferences(
+            "Src/A.cs", 2, 0, includeDefinition: false, Snapshot());
+
+        Assert.Equal(["Src/Use.cs", "Src/Б.cs"], references.Select(location => location.DocumentPath));
+    }
+
+    [Fact]
+    public void Declines_a_line_that_declares_more_than_one_thing()
+    {
+        // `const a = f(), b = g()`. There is no single answer, so the caller gets the same
+        // nothing it got before rather than whichever declaration happened to be listed first.
+        var service = new SemanticNavigationService(IndexWithTwoDeclarationsOnOneLine());
+
+        Assert.Null(service.ResolveOccurrence("Src/Pair.cs", 7, 0, Snapshot()));
+    }
+
+    [Fact]
+    public void Does_not_resolve_a_line_that_only_references_something()
+    {
+        // Line 4 of Use.cs holds references and no declaration. Resolving column zero there to
+        // one of them would answer about a symbol the caller never pointed at.
+        var service = new SemanticNavigationService(Index());
+
+        Assert.Null(service.ResolveOccurrence("Src/Use.cs", 4, 0, Snapshot()));
+    }
+
+    [Fact]
     public void RejectsAQueryForAnotherSnapshot()
     {
         var service = new SemanticNavigationService(Index());
@@ -175,6 +222,23 @@ public class SemanticNavigationServiceTests
                     TargetSymbolId = MethodId,
                     Kind = SemanticRelationshipKind.Implementation,
                 },
+            ],
+        };
+
+    /// <summary>
+    /// One line, two declarations: <c>const a = f(), b = g()</c> as the indexer reports it.
+    /// </summary>
+    private static SemanticIndex IndexWithTwoDeclarationsOnOneLine() =>
+        Index() with
+        {
+            Documents = [.. Index().Documents, Document("Src/Pair.cs", 6)],
+            Occurrences =
+            [
+                .. Index().Occurrences,
+                Occurrence("Src/Pair.cs", new SourceRange(7, 6, 7, 7), TypeId,
+                    SemanticOccurrenceRoles.Definition),
+                Occurrence("Src/Pair.cs", new SourceRange(7, 15, 7, 16), MethodId,
+                    SemanticOccurrenceRoles.Definition),
             ],
         };
 
