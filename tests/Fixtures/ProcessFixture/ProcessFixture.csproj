@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!--
+      Not a test project, and it says so because CI decides what to run by reading this property
+      out of every csproj under tests/. Without it the child process would be handed to
+      `dotnet test`, which would fail for having no tests in it.
+    -->
+    <IsTestProject>false</IsTestProject>
+    <AssemblyName>ProcessFixture</AssemblyName>
+    <RootNamespace>ProcessFixture</RootNamespace>
+  </PropertyGroup>
+</Project>
