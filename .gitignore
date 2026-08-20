@@ -29,3 +29,7 @@ coverage/
 # Operating-system files
 .DS_Store
 Thumbs.db
+
+# SCIP indexer output
+index.scip
+__pycache__/
