@@ -76,6 +76,23 @@ public sealed record SemanticOccurrence
     public required string SymbolId { get; init; }
     public required SemanticOccurrenceRoles Roles { get; init; }
     public required NavigationPrecision Precision { get; init; }
+
+    /// <summary>
+    /// The span of the whole definition this occurrence names, when the source of the occurrence
+    /// reports one. Null everywhere else, including on every reference.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Range"/> is the name. Navigation only ever needed that, which is why this was
+    /// not read until now: chunking by symbol needs the body, and the body is a different span.
+    ///
+    /// Measured before relying on it (issue #87): `scip-python` reports it for every definition
+    /// that has a body, nested functions and decorated definitions included, and starts a
+    /// decorated definition at its decorator. `scip-typescript` reports it for every definition
+    /// it gives a global symbol, and for neither of two kinds it does not — a definition declared
+    /// inside a function body, and one whose initialiser is a call, which is what
+    /// `export const X = memo(() =&gt; …)` is. Consumers have to survive its absence.
+    /// </remarks>
+    public SourceRange? EnclosingRange { get; init; }
 }
 
 public sealed record SemanticRelationship

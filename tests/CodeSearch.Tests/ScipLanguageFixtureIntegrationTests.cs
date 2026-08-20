@@ -1,4 +1,4 @@
-﻿using CodeSearch.Core.Semantics;
+using CodeSearch.Core.Semantics;
 
 using LocalAi.TestSupport;
 
@@ -121,6 +121,163 @@ public sealed class ScipLanguageFixtureIntegrationTests : IDisposable
         Assert.Contains(references, location =>
             location.DocumentPath == "usage.py" &&
             location.Range == new SourceRange(2, 10, 2, 15));
+    }
+
+    [Fact]
+    public async Task ScipPythonReportsTheBodyOfEveryDefinition()
+    {
+        var node = Environment.GetEnvironmentVariable("LOCALAI_SCIP_NODE");
+        var script = Environment.GetEnvironmentVariable("LOCALAI_SCIP_PYTHON_SCRIPT");
+        var installedExecutable = Environment.GetEnvironmentVariable(
+            "LOCALAI_SCIP_PYTHON_EXECUTABLE")
+            ?? ExecutableResolver.Find("scip-python");
+        FixturePrerequisite.Require(
+            !string.IsNullOrWhiteSpace(installedExecutable) ||
+                (!string.IsNullOrWhiteSpace(node) && !string.IsNullOrWhiteSpace(script)),
+            "scip-python",
+            "Install it, or set LOCALAI_SCIP_NODE and LOCALAI_SCIP_PYTHON_SCRIPT.");
+
+        Write("shapes.py", """
+            def apply_tax(amount: float) -> float:
+                return amount * 1.2
+
+
+            class Invoice:
+                def total(self) -> float:
+                    return 0.0
+            """);
+
+        var result = await RunAsync(
+            "python",
+            installedExecutable ?? node!,
+            installedExecutable is null
+                ? [script!, "index", ".", "--project-name", "fixture", "--project-version", "1.0"]
+                : ["index", ".", "--project-name", "fixture", "--project-version", "1.0"],
+            ScipPositionEncoding.Utf32,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(
+            result.Status.State == SemanticAdapterState.Succeeded,
+            result.Status.Message);
+
+        // The body of `apply_tax` is its two lines, not the eleven characters of its name.
+        var function = DefinitionNamed(result.Index, "shapes.py", "apply_tax");
+        Assert.Equal(new SourceRange(0, 0, 1, 23), function.EnclosingRange);
+
+        // A method inside a class gets one too, and it ends where the method ends rather than
+        // where the class does.
+        var method = DefinitionNamed(result.Index, "shapes.py", "total");
+        Assert.NotNull(method.EnclosingRange);
+        Assert.Equal(5, method.EnclosingRange!.Value.StartLine);
+        Assert.Equal(6, method.EnclosingRange!.Value.EndLine);
+    }
+
+    [Fact]
+    public async Task ScipTypeScriptReportsBodiesForNamedDefinitionsAndNotForNestedOnes()
+    {
+        var node = Environment.GetEnvironmentVariable("LOCALAI_SCIP_NODE");
+        var script = Environment.GetEnvironmentVariable("LOCALAI_SCIP_TYPESCRIPT_SCRIPT");
+        var installedExecutable = Environment.GetEnvironmentVariable(
+            "LOCALAI_SCIP_TYPESCRIPT_EXECUTABLE")
+            ?? ExecutableResolver.Find("scip-typescript");
+        FixturePrerequisite.Require(
+            !string.IsNullOrWhiteSpace(installedExecutable) ||
+                (!string.IsNullOrWhiteSpace(node) && !string.IsNullOrWhiteSpace(script)),
+            "scip-typescript",
+            "Install it, or set LOCALAI_SCIP_NODE and LOCALAI_SCIP_TYPESCRIPT_SCRIPT.");
+
+        Write("tsconfig.json", """
+            {
+              "compilerOptions": {
+                "target": "ES2022",
+                "module": "CommonJS",
+                "strict": true,
+                "skipLibCheck": true
+              },
+              "include": ["src/**/*.ts"]
+            }
+            """);
+        Write("src/shapes.ts", """
+            export function outer(value: number): number {
+              function inner(x: number): number {
+                return x + 1;
+              }
+
+              return inner(value);
+            }
+            """);
+
+        var result = await RunAsync(
+            "typescript",
+            installedExecutable ?? node!,
+            installedExecutable is null ? [script!, "index"] : ["index"],
+            ScipPositionEncoding.Utf16,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(
+            result.Status.State == SemanticAdapterState.Succeeded,
+            result.Status.Message);
+
+        // A definition with a global symbol carries its body: the whole function, brace to brace.
+        var outer = DefinitionNamed(result.Index, "src/shapes.ts", "outer");
+        Assert.Equal(new SourceRange(0, 0, 6, 1), outer.EnclosingRange);
+
+        // One declared inside a function body does not, because scip-typescript makes it a
+        // `local` and never reports a body span for those. Measured in issue #87 and encoded
+        // here so that a future adapter upgrade changing it shows up as a failing test rather
+        // than as silently different chunk boundaries.
+        var inner = DefinitionNamed(result.Index, "src/shapes.ts", "inner");
+        Assert.StartsWith("scip-local", inner.SymbolId, StringComparison.Ordinal);
+        Assert.Null(inner.EnclosingRange);
+    }
+
+    /// <summary>
+    /// The definition whose name range spells <paramref name="name"/> in the source.
+    /// </summary>
+    /// <remarks>
+    /// Looked up through the text rather than through the symbol id or a display name, because
+    /// neither is dependable across the two indexers: scip-python composes ids like
+    /// `shapes/Invoice#total().` and leaves the display name empty, and a definition nested in a
+    /// function body has no name in its id at all — it is `local 3`. The name range always spells
+    /// the identifier, whatever the indexer called the symbol.
+    /// </remarks>
+    private SemanticOccurrence DefinitionNamed(
+        SemanticIndex index,
+        string documentPath,
+        string name)
+    {
+        var lines = File.ReadAllText(Path.Combine(_root, documentPath))
+            .Replace("\r\n", "\n")
+            .Split('\n');
+        var candidates = index.Occurrences
+            .Where(occurrence =>
+                occurrence.DocumentPath == documentPath &&
+                occurrence.Roles.HasFlag(SemanticOccurrenceRoles.Definition))
+            .ToArray();
+        var matches = candidates
+            .Where(occurrence => Spelling(lines, occurrence.Range) == name)
+            .ToArray();
+        Assert.True(
+            matches.Length == 1,
+            $"Expected one definition spelled '{name}' in '{documentPath}', found " +
+            $"{matches.Length}. Definitions: " +
+            string.Join(", ", candidates.Select(occurrence =>
+                $"{Spelling(lines, occurrence.Range)}={occurrence.SymbolId}")));
+        return matches[0];
+    }
+
+    private static string Spelling(string[] lines, SourceRange range)
+    {
+        if (range.StartLine != range.EndLine || range.StartLine >= lines.Length)
+        {
+            return string.Empty;
+        }
+
+        var line = lines[range.StartLine];
+        var end = Math.Min(range.EndCharacter, line.Length);
+        return range.StartCharacter >= end
+            ? string.Empty
+            : line[range.StartCharacter..end];
     }
 
     private async Task<ScipAdapterRunResult> RunAsync(

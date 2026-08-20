@@ -8,7 +8,16 @@ namespace CodeSearch.Core.Semantics;
 /// </summary>
 public sealed record SemanticIndex
 {
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// Version 2 adds the optional enclosing range to every occurrence.
+    /// </summary>
+    /// <remarks>
+    /// The version is part of <c>GenerationIdentity</c>, so raising it does not migrate anything:
+    /// the next sync builds a new generation and the old one is never read by this build. That is
+    /// the intended cost — a semantic index that silently lacked body spans would look identical
+    /// to one that has them and produce different chunk boundaries.
+    /// </remarks>
+    public const int CurrentVersion = 2;
 
     private const string Magic = "SIDX";
     private const int MaximumEntries = 10_000_000;
@@ -130,6 +139,13 @@ public sealed record SemanticIndex
                     reader.ReadInt32()),
                 Roles = (SemanticOccurrenceRoles)reader.ReadUInt16(),
                 Precision = (NavigationPrecision)reader.ReadByte(),
+                EnclosingRange = reader.ReadBoolean()
+                    ? new SourceRange(
+                        reader.ReadInt32(),
+                        reader.ReadInt32(),
+                        reader.ReadInt32(),
+                        reader.ReadInt32())
+                    : null,
             });
         }
 
@@ -228,6 +244,16 @@ public sealed record SemanticIndex
             writer.Write(occurrence.Range.EndCharacter);
             writer.Write((ushort)occurrence.Roles);
             writer.Write((byte)occurrence.Precision);
+            // A flag rather than a sentinel range: absent and empty are different answers, and
+            // only definitions from an indexer that reports bodies carry one at all.
+            writer.Write(occurrence.EnclosingRange is not null);
+            if (occurrence.EnclosingRange is { } enclosing)
+            {
+                writer.Write(enclosing.StartLine);
+                writer.Write(enclosing.StartCharacter);
+                writer.Write(enclosing.EndLine);
+                writer.Write(enclosing.EndCharacter);
+            }
         }
 
         writer.Write(Relationships.Count);

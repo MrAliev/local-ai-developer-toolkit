@@ -41,6 +41,52 @@ public class SemanticIndexTests
     }
 
     [Fact]
+    public void Keeps_the_body_span_of_a_definition_and_the_absence_of_one()
+    {
+        // Both answers have to survive the round trip. A definition whose indexer reports no body
+        // is not the same as one whose body starts at line zero, and chunking reads the
+        // difference: the first keeps the sliding window, the second becomes a chunk.
+        var original = SampleIndex() with
+        {
+            Occurrences =
+            [
+                new SemanticOccurrence
+                {
+                    DocumentPath = "Src/A.cs",
+                    Range = new SourceRange(4, 10, 4, 18),
+                    SymbolId = "scip-dotnet pkg MyApp 1.0.0 A#",
+                    Roles = SemanticOccurrenceRoles.Definition,
+                    Precision = NavigationPrecision.Precise,
+                    EnclosingRange = new SourceRange(4, 0, 31, 1),
+                },
+                new SemanticOccurrence
+                {
+                    DocumentPath = "Src/A.cs",
+                    Range = new SourceRange(7, 2, 7, 6),
+                    SymbolId = "scip-dotnet pkg MyApp 1.0.0 A#Go().",
+                    Roles = SemanticOccurrenceRoles.Definition,
+                    Precision = NavigationPrecision.Precise,
+                },
+            ],
+        };
+        var path = TempPath();
+        try
+        {
+            original.Save(path);
+
+            var loaded = SemanticIndex.Load(path);
+
+            Assert.Equal(new SourceRange(4, 0, 31, 1), loaded.Occurrences[0].EnclosingRange);
+            Assert.Null(loaded.Occurrences[1].EnclosingRange);
+            Assert.Equal(new SourceRange(7, 2, 7, 6), loaded.Occurrences[1].Range);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void RejectsPathsOutsideTheRepository()
     {
         var index = SampleIndex() with
