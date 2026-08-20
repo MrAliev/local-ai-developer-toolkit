@@ -220,6 +220,8 @@ against 3 966 of 6 894 under format 3, and the `.ts`/`.tsx`/`.js`/`.jsx`/`.py` s
 sitting inside a symbol chunk rose from 53 668 to 67 527. That harness is not a product execution
 path and is not committed.
 
+**A correction found after this run.** Building a corpus that could reproduce this measurement surfaced a defect in the boundary the previous paragraph describes: an inferred extent absorbed the comment documenting the declaration *below* it, which filed that prose under the wrong name and let a one-line declaration grow long enough to earn a chunk it should not have had. Re-chunking the same tree with the fix gives 6 868 chunks rather than 6 894 and 3 936 symbol-named rather than 3 966 — thirty declarations across the repository. The retrieval run was not repeated for a difference of twenty-six chunks in seven thousand: the table above is what the measured index produced, and saying so is better than a number nobody re-measured.
+
 ## Ranking by the shape of a chunk: measured, not adopted
 
 Symbol-aware chunking did not move precision, which raised an obvious question: the ranking
