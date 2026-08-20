@@ -134,6 +134,11 @@ localai semantic fallback-config show
 localai semantic evaluate --cases tests/CodeSearch.Tests/Fixtures/SemanticNavigation/cases.json --root C:\path\to\repository
 ```
 
+`--line` and `--column` are **zero-based**, and the column is a UTF-16 offset, matching what
+the MCP tools take. An editor showing line 10 means `--line 9`. Positions that land on no
+symbol return nothing rather than an error, so an off-by-one reads as "there is nothing here"
+rather than as a mistake.
+
 The installation-wide `%LOCALAPPDATA%\LocalAi\semantic-indexing.json` file configures adapter
 enablement, executable paths and arguments, output paths, timeout, captured process output, and
 all SCIP parser limits. The trusted adapter policy also makes legacy position fallback explicit:

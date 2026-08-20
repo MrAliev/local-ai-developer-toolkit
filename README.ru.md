@@ -126,6 +126,11 @@ localai semantic fallback-config show
 localai semantic evaluate --cases tests/CodeSearch.Tests/Fixtures/SemanticNavigation/cases.json --root C:\path\to\repository
 ```
 
+`--line` и `--column` считаются **с нуля**, а колонка — это смещение в UTF-16: так же, как у
+MCP-инструментов. Строка 10 в редакторе — это `--line 9`. Позиция, на которой нет символа,
+возвращает пустой результат, а не ошибку, поэтому промах на единицу выглядит как «здесь ничего
+нет», а не как опечатка.
+
 Глобальный файл `%LOCALAPPDATA%\LocalAi\semantic-indexing.json` настраивает включение
 адаптеров, пути и аргументы executables, выходные файлы, timeout, лимит вывода процессов и все
 лимиты SCIP parser. Policy доверенного адаптера также явно задаёт legacy fallback позиций:
