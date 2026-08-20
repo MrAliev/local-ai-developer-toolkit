@@ -222,6 +222,48 @@ path and is not committed.
 
 **A correction found after this run.** Building a corpus that could reproduce this measurement surfaced a defect in the boundary the previous paragraph describes: an inferred extent absorbed the comment documenting the declaration *below* it, which filed that prose under the wrong name and let a one-line declaration grow long enough to earn a chunk it should not have had. Re-chunking the same tree with the fix gives 6 868 chunks rather than 6 894 and 3 936 symbol-named rather than 3 966 — thirty declarations across the repository. The retrieval run was not repeated for a difference of twenty-six chunks in seven thousand: the table above is what the measured index produced, and saying so is better than a number nobody re-measured.
 
+## A corpus this repository owns, and what it can measure
+
+The front-end measurement above cannot be repeated by anyone reading it: its twelve cases name
+paths in a repository this project does not own. `tests/Shared/SyntheticFrontendRepository.cs`
+generates one it does own — deterministically, from committed code — and
+`tests/CodeSearch.Tests/Fixtures/SearchEvaluation/synthetic-frontend-cases.json` asks 48
+questions of it. The repository is a small front end: shared modules with distinct jobs, and any
+number of feature folders written from one set of templates.
+
+**What it measures in CI, on every pull request.** Chunk shape, which needs no model. The
+generated tree is indexed with the real `scip-typescript` and cut with the real chunker, and the
+invariants that were prose in `SymbolAwareChunker` are assertions: a call-initialised declaration
+gets a chunk, an object literal's properties do not, a one-line declaration stays in the window,
+every source line lands in exactly one chunk, and every symbol the corpus names exists. That is
+the "before and after" that matters for a change to chunking, and it earned its place immediately
+— the first run of it found an inferred extent absorbing the comment that documented the next
+declaration, which is fixed above.
+
+**What it cannot measure, and this was measured rather than assumed.** Retrieval. Indexing the
+generated repository at 200 features — 1 010 files, 2 434 chunks — and running all 48 cases
+against it gives precision@5 0.077 and recall@10 0.591, which looks like a hard corpus until the
+cases are separated by how they were written:
+
+| Case group | Cases | Precision@5 | Recall@10 | Mean first relevant rank |
+|---|---:|---:|---:|---:|
+| Prose, hand-written, distinct subject matter | 14 | 0.457 | 1.000 | 1.00 |
+| Templated, competing with 199 near-identical siblings | 30 | 0.027 | 0.433 | 7.15 |
+
+A generated corpus lands in one of two useless regimes. Where the content is unique, every answer
+arrives at rank one and no change to retrieval could move the number. Where it is templated, the
+answer differs from 199 wrong ones by a single domain word, and what is being graded is lexical
+luck rather than retrieval. Real code sits between those — similar but not identical — and that is
+the property a generator does not fake cheaply.
+
+**So how much code would make retrieval numbers mean something?** Not a number of files. The
+resolution of precision@5 is one hit in five per case, so around a hundred cases are needed before
+a five-point difference is distinguishable from noise — and each informative case needs an answer
+that competes with plausible alternatives, which means every one of them is hand-written source
+with subject matter of its own. The cost is per case, not per file, and it is measured in days
+rather than in generated lines. The retrieval numbers in this report therefore stay what they are:
+a real repository, measured locally, with its cases not committed and its provenance written down.
+
 ## Ranking by the shape of a chunk: measured, not adopted
 
 Symbol-aware chunking did not move precision, which raised an obvious question: the ranking
