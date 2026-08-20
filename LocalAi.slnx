@@ -27,5 +27,6 @@
     <Project Path="tests/LocalAi.Installer.Tests/LocalAi.Installer.Tests.csproj" />
     <Project Path="tests/LocalAi.Launcher.Tests/LocalAi.Launcher.Tests.csproj" />
     <Project Path="tests/LocalAi.ReleaseSigner.Tests/LocalAi.ReleaseSigner.Tests.csproj" />
+    <Project Path="tests/Fixtures/ProcessFixture/ProcessFixture.csproj" />
   </Folder>
 </Solution>

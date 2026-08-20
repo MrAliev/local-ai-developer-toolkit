@@ -93,7 +93,12 @@ jobs:
       - name: Test
         shell: pwsh
         run: |
-          $projects = Get-ChildItem tests -Filter *.csproj -Recurse
+          # Not every project under tests/ is a test project: a fixture the tests start as a
+          # child process lives there too, and handing it to `dotnet test` fails for having no
+          # tests in it. Each project says which it is, so read that rather than guess from the
+          # path or the name.
+          $projects = Get-ChildItem tests -Filter *.csproj -Recurse |
+            Where-Object { (Get-Content $_.FullName -Raw) -match '<IsTestProject>\s*true\s*</IsTestProject>' }
           Write-Host "Test projects: $($projects.Count)"
           $failed = @()
           foreach ($project in $projects) {

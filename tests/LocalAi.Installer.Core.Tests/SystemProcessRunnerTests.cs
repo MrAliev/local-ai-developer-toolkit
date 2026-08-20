@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Diagnostics;
+using System.Reflection;
 using LocalAi.Installer.Core.Abstractions;
 
 namespace LocalAi.Installer.Core.Tests;
@@ -10,57 +11,31 @@ public sealed class SystemProcessRunnerTests
     /// The budget a test passes when it expects the child to finish.
     /// </summary>
     /// <remarks>
-    /// It is there to stop a hung process, not to time how fast PowerShell starts. Ten seconds
-    /// looked generous until a loaded CI runner spent all of them before the script ran its first
-    /// line: the run came back with no exit code, and the failure read as a broken argument list
-    /// rather than as a slow machine. Nothing here measures speed, so the budget can be far larger
-    /// than any honest run needs — a genuinely stuck child still fails the test, just later.
+    /// Thirty seconds is a bound on a child that starts in milliseconds and does one thing, so it
+    /// is an assertion that the run finished rather than a bet on how quick the machine is. That
+    /// distinction is the whole reason these tests no longer launch PowerShell: an interpreter
+    /// that can take ten seconds to reach its first line on a loaded runner turned every budget
+    /// here into a coin flip, and one of them came up tails — the run returned no exit code and
+    /// the failure read as a broken argument list.
+    ///
+    /// A hung child is caught here, and by `--blame-hang` in CI if it ever escapes this.
     /// </remarks>
-    private static readonly TimeSpan Completion = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan Completion = TimeSpan.FromSeconds(30);
 
     [Fact]
     public async Task Preserves_arguments_without_building_a_shell_command()
     {
         var runner = new SystemProcessRunner();
-        var executable = ResolvePowerShell();
-        var scriptPath = Path.Combine(
-            Path.GetTempPath(),
-            $"localai-process-arguments-{Guid.NewGuid():N}.ps1");
-        await File.WriteAllTextAsync(
-            scriptPath,
-            "$args | ConvertTo-Json -Compress",
+
+        var result = await runner.RunAsync(
+            Fixture,
+            ["echo-args", "alpha beta", "semi;colon", "\"quoted\""],
+            Completion,
             TestContext.Current.CancellationToken);
-        try
-        {
-            var arguments = new[]
-            {
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                scriptPath,
-                "alpha beta",
-                "semi;colon",
-                "\"quoted\"",
-            };
 
-            var result = await runner.RunAsync(
-                executable,
-                arguments,
-                Completion,
-                TestContext.Current.CancellationToken);
-
-            Assert.Equal(0, result.ExitCode);
-            Assert.False(result.TimedOut);
-            Assert.False(result.Cancelled);
-            var values = JsonSerializer.Deserialize<string[]>(result.StandardOutput.Trim());
-            Assert.Equal(new[] { "alpha beta", "semi;colon", "\"quoted\"" }, values);
-        }
-        finally
-        {
-            File.Delete(scriptPath);
-        }
+        AssertCompleted(result);
+        var values = JsonSerializer.Deserialize<string[]>(result.StandardOutput.Trim());
+        Assert.Equal(new[] { "alpha beta", "semi;colon", "\"quoted\"" }, values);
     }
 
     [Fact]
@@ -71,6 +46,8 @@ public sealed class SystemProcessRunnerTests
             return;
         }
 
+        // The one case that cannot use the fixture: what it exercises is the branch that hands a
+        // `.cmd` to the command interpreter, so the child has to be a command script.
         var runner = new SystemProcessRunner();
         var scriptPath = TemporaryPath(".cmd");
         await File.WriteAllTextAsync(
@@ -85,7 +62,7 @@ public sealed class SystemProcessRunnerTests
                 Completion,
                 TestContext.Current.CancellationToken);
 
-            Assert.Equal(0, result.ExitCode);
+            AssertCompleted(result);
             Assert.Equal("alpha beta|semi;colon", result.StandardOutput.Trim());
         }
         finally
@@ -102,11 +79,12 @@ public sealed class SystemProcessRunnerTests
             return;
         }
 
+        // No process is started, so the budget passed here is never consulted.
         var runner = new SystemProcessRunner();
         await Assert.ThrowsAsync<ArgumentException>(() => runner.RunAsync(
             @"C:\Tools\npm.cmd",
             ["value%PATH%"],
-            TimeSpan.FromSeconds(10),
+            Completion,
             TestContext.Current.CancellationToken));
     }
 
@@ -115,31 +93,20 @@ public sealed class SystemProcessRunnerTests
     {
         var started = new StartedProcessRecorder();
         var runner = new SystemProcessRunner(started, TimeSpan.FromSeconds(5));
-        var scriptPath = TemporaryPath(".ps1");
-        await File.WriteAllTextAsync(
-            scriptPath,
-            "Start-Sleep -Seconds 30",
-            TestContext.Current.CancellationToken);
-        try
-        {
-            // The script sleeps for half a minute, so a ten-second budget times out however
-            // slowly PowerShell gets going: a late start only makes the process more certainly
-            // alive when the budget expires, never less.
-            var result = await runner.RunAsync(
-                ResolvePowerShell(),
-                PowerShellFileArguments(scriptPath),
-                TimeSpan.FromSeconds(10),
-                TestContext.Current.CancellationToken);
 
-            Assert.True(result.TimedOut);
-            Assert.False(result.Cancelled);
-            Assert.Null(result.ExitCode);
-            AssertProcessExited(started.ProcessId);
-        }
-        finally
-        {
-            File.Delete(scriptPath);
-        }
+        // The child sleeps for half a minute against a two-second budget. Unlike the cases above,
+        // a slow start cannot break this one: it only makes the process more certainly alive when
+        // the budget expires, never less.
+        var result = await runner.RunAsync(
+            Fixture,
+            ["sleep", "30"],
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.TimedOut);
+        Assert.False(result.Cancelled);
+        Assert.Null(result.ExitCode);
+        AssertProcessExited(started.ProcessId);
     }
 
     [Fact]
@@ -147,24 +114,17 @@ public sealed class SystemProcessRunnerTests
     {
         var runner = new SystemProcessRunner();
         var pidPath = TemporaryPath(".pid");
-        var scriptPath = TemporaryPath(".ps1");
-        await File.WriteAllTextAsync(
-            scriptPath,
-            "Set-Content -LiteralPath $args[0] -Value $PID; Start-Sleep -Seconds 30",
-            TestContext.Current.CancellationToken);
         using var cancellation = new CancellationTokenSource();
         try
         {
             var run = runner.RunAsync(
-                ResolvePowerShell(),
-                PowerShellFileArguments(scriptPath, pidPath),
-                TimeSpan.FromSeconds(30),
+                Fixture,
+                ["write-pid-then-sleep", pidPath, "30"],
+                Completion,
                 cancellation.Token);
 
-            // Cancel once the child has actually recorded its pid, not after a fixed delay. Two
-            // seconds raced PowerShell's startup: on a loaded machine the run was cancelled
-            // before the script wrote anything, and the test then failed on a missing pid file
-            // rather than on the classification it exists to check.
+            // Cancel once the child has actually recorded its pid, not after a fixed delay: a
+            // fixed delay is a guess about startup, and this test is about classification.
             var pid = await ReadPidWhenWrittenAsync(
                 pidPath,
                 TestContext.Current.CancellationToken);
@@ -178,7 +138,6 @@ public sealed class SystemProcessRunnerTests
         }
         finally
         {
-            File.Delete(scriptPath);
             File.Delete(pidPath);
         }
     }
@@ -187,53 +146,35 @@ public sealed class SystemProcessRunnerTests
     public async Task Bounds_output_while_draining_both_redirected_pipes()
     {
         var runner = new SystemProcessRunner();
-        var scriptPath = TemporaryPath(".ps1");
-        await File.WriteAllTextAsync(
-            scriptPath,
-            "[Console]::Out.Write('o' * 70000); [Console]::Error.Write('e' * 70000)",
-            TestContext.Current.CancellationToken);
-        try
-        {
-            var result = await runner.RunAsync(
-                ResolvePowerShell(),
-                PowerShellFileArguments(scriptPath),
-                Completion,
-                TestContext.Current.CancellationToken);
 
-            Assert.Equal(0, result.ExitCode);
-            Assert.Equal(65_536, result.StandardOutput.Length);
-            Assert.Equal(65_536, result.StandardError.Length);
-            Assert.True(result.StandardOutputTruncated);
-            Assert.True(result.StandardErrorTruncated);
-        }
-        finally
-        {
-            File.Delete(scriptPath);
-        }
+        var result = await runner.RunAsync(
+            Fixture,
+            ["write", "70000", "70000"],
+            Completion,
+            TestContext.Current.CancellationToken);
+
+        AssertCompleted(result);
+        Assert.Equal(65_536, result.StandardOutput.Length);
+        Assert.Equal(65_536, result.StandardError.Length);
+        Assert.True(result.StandardOutputTruncated);
+        Assert.True(result.StandardErrorTruncated);
     }
 
     [Fact]
     public async Task Streams_binary_standard_output_to_a_file_without_text_decoding()
     {
         var runner = new SystemProcessRunner();
-        var scriptPath = TemporaryPath(".ps1");
         var outputPath = TemporaryPath(".bin");
-        await File.WriteAllTextAsync(
-            scriptPath,
-            "$bytes = [byte[]](0,255,1,254,2); " +
-            "$stream = [Console]::OpenStandardOutput(); " +
-            "$stream.Write($bytes, 0, $bytes.Length); $stream.Flush()",
-            TestContext.Current.CancellationToken);
         try
         {
             var result = await runner.RunToFileAsync(
-                ResolvePowerShell(),
-                PowerShellFileArguments(scriptPath),
+                Fixture,
+                ["write-binary", "0", "255", "1", "254", "2"],
                 outputPath,
                 Completion,
                 TestContext.Current.CancellationToken);
 
-            Assert.Equal(0, result.ExitCode);
+            AssertCompleted(result);
             Assert.Equal(
                 new byte[] { 0, 255, 1, 254, 2 },
                 await File.ReadAllBytesAsync(
@@ -242,7 +183,6 @@ public sealed class SystemProcessRunnerTests
         }
         finally
         {
-            File.Delete(scriptPath);
             File.Delete(outputPath);
         }
     }
@@ -252,17 +192,12 @@ public sealed class SystemProcessRunnerTests
     {
         var started = new StartedProcessRecorder();
         var runner = new SystemProcessRunner(started, TimeSpan.FromSeconds(5));
-        var scriptPath = TemporaryPath(".ps1");
         var outputPath = TemporaryPath(".bin");
-        await File.WriteAllTextAsync(
-            scriptPath,
-            "Start-Sleep -Seconds 30",
-            TestContext.Current.CancellationToken);
         try
         {
             var result = await runner.RunToFileAsync(
-                ResolvePowerShell(),
-                PowerShellFileArguments(scriptPath),
+                Fixture,
+                ["sleep", "30"],
                 outputPath,
                 TimeSpan.FromMilliseconds(500),
                 TestContext.Current.CancellationToken);
@@ -274,34 +209,65 @@ public sealed class SystemProcessRunnerTests
         }
         finally
         {
-            File.Delete(scriptPath);
             File.Delete(outputPath);
         }
     }
 
-    private static string[] PowerShellFileArguments(
-        string scriptPath,
-        params string[] arguments) =>
-        [
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            scriptPath,
-            .. arguments,
-        ];
+    /// <summary>
+    /// Asserts that the child ran to completion, and says which of the two ways it failed to.
+    /// </summary>
+    /// <remarks>
+    /// Written because the difference matters to whoever reads the failure. Asserting the exit
+    /// code directly reports "expected 0, got null", which reads as a fault in what was being
+    /// tested; the run having been killed on its budget or cancelled is a fact about the machine
+    /// or the test, and it should not cost anyone an investigation into argument quoting to
+    /// discover that.
+    /// </remarks>
+    private static void AssertCompleted(ProcessResult result)
+    {
+        Assert.False(
+            result.TimedOut,
+            "The child did not finish within its budget. Nothing here measures speed, so this " +
+            "is a stuck or starved process rather than a failure of the behaviour under test.");
+        Assert.False(
+            result.Cancelled,
+            "The run was cancelled by its caller, which no test in this file asks for except " +
+            "the cancellation case.");
+        Assert.Equal(0, result.ExitCode);
+    }
 
     /// <summary>
-    /// Waits until the child has written a complete pid. Set-Content creates the file before it
-    /// has content, so existence alone is not enough - reading too early yields an empty string
-    /// and a parse failure that looks nothing like the race that caused it.
+    /// The child process these tests start, run out of its own output directory.
+    /// </summary>
+    /// <remarks>
+    /// Its path is baked in at build time by the test project, which also carries the project
+    /// reference that guarantees it exists by the time anything here runs.
+    /// </remarks>
+    private static string Fixture
+    {
+        get
+        {
+            var path = typeof(SystemProcessRunnerTests).Assembly
+                .GetCustomAttributes<AssemblyMetadataAttribute>()
+                .Single(attribute => attribute.Key == "ProcessFixtureExecutable")
+                .Value!;
+            Assert.True(
+                File.Exists(path),
+                $"The process fixture was not built at '{path}'.");
+            return path;
+        }
+    }
+
+    /// <summary>
+    /// Waits until the child has written a complete pid, rather than assuming a file that exists
+    /// already has content in it: reading too early yields an empty string and a parse failure
+    /// that looks nothing like the race that caused it.
     /// </summary>
     private static async Task<int> ReadPidWhenWrittenAsync(
         string pidPath,
         CancellationToken cancellationToken)
     {
-        var deadline = TimeSpan.FromSeconds(30);
+        var deadline = TimeSpan.FromSeconds(20);
         var stopwatch = Stopwatch.StartNew();
         while (stopwatch.Elapsed < deadline)
         {
@@ -349,12 +315,10 @@ public sealed class SystemProcessRunnerTests
     /// Remembers which process the runner started, at the moment it started it.
     ///
     /// The timeout test used to learn that from a pid the child wrote to a file, which quietly
-    /// turned its budget into a bet on how long PowerShell takes to reach its first statement.
-    /// The bet was lost on a loaded CI runner — the ten seconds expired while PowerShell was
-    /// still starting, the file never appeared, and the test failed on a missing pid rather than
-    /// on the classification it exists to check. Raising the budget was the wrong lever twice
-    /// over: it cannot be raised past the child's own sleep, and the pid was available from the
-    /// process handle all along.
+    /// turned its budget into a bet on how long the child takes to reach its first statement.
+    /// The bet was lost on a loaded CI runner — the budget expired while PowerShell was still
+    /// starting, the file never appeared, and the test failed on a missing pid rather than on the
+    /// classification it exists to check. The pid was available from the process handle all along.
     /// </summary>
     private sealed class StartedProcessRecorder : IProcessFactory
     {
@@ -368,16 +332,5 @@ public sealed class SystemProcessRunnerTests
             ProcessId = process.Id;
             return process;
         }
-    }
-
-    private static string ResolvePowerShell()
-    {
-        var systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        return Path.Combine(
-            Directory.GetParent(systemDirectory)!.FullName,
-            "System32",
-            "WindowsPowerShell",
-            "v1.0",
-            "powershell.exe");
     }
 }

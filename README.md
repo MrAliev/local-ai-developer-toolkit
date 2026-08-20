@@ -790,5 +790,10 @@ failed.
 - Route Ollama work only through the shared broker.
 - Add focused tests alongside behavior changes and run the full solution baseline
   before publishing.
+- Never let a test assert how fast the machine is. Wait for the condition rather than for
+  a duration, prefer a purpose-built child process over an interpreter whose startup cost
+  is unbounded, and leave hang detection to `--blame-hang`, which CI already applies to
+  every test project. A deadline a correct run can miss proves nothing and reports itself
+  as a fault in the code under test.
 - Keep this English README and `README.ru.md` synchronized.
 - Preserve UTF-8 without BOM and Windows CRLF line endings for repository documentation.
