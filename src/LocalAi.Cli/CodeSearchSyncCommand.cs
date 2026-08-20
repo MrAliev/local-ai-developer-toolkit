@@ -464,6 +464,27 @@ public static class CodeSearchSyncCommand
             }
 
             using var snapshot = CommitSnapshot.Create(dev.WorkingRoot, dev.HeadCommit);
+
+            // Semantics first, deliberately. Roslyn loads the whole solution here and the SCIP
+            // adapters shell out per language, which is minutes on a large repository — but
+            // embedding is tens of minutes, and a failed adapter aborts the generation outright.
+            // Running this second meant paying for the entire corpus before finding out the build
+            // could not be published, which is the wrong order to learn that in.
+            //
+            // The cost of the swap is that an interrupted build re-runs this phase, because the
+            // embedding checkpoint has no counterpart here and the work file is cleaned up on the
+            // way out. That trades minutes on a resume against tens of minutes on every failure.
+            phase(RepositoryIndexProgressPhase.SemanticBase);
+            var semanticIndex = await BuildSemanticIndexAsync(
+                snapshot.Root,
+                dev,
+                generation,
+                runtimeRoot,
+                cancellationToken);
+            EnsureSemanticAdaptersSucceeded(semanticIndex.AdapterStatuses);
+            semanticIndex.Index.Save(workSemanticIndex);
+
+            phase(RepositoryIndexProgressPhase.EmbeddingBase);
             var embedder = new BrokerEmbeddingClient(
                 generation.EmbeddingModel,
                 BrokerClientFactory.CreateDefault());
@@ -492,19 +513,6 @@ public static class CodeSearchSyncCommand
                     $"{generation.EmbeddingDimension}.");
             }
 
-            // Roslyn loads the whole solution here and the SCIP adapters shell out per language.
-            // On a large repository this is minutes, and it used to run under the last embedding
-            // report — the phase that made a finished build look like a stuck one.
-            phase(RepositoryIndexProgressPhase.SemanticBase);
-            var semanticIndex = await BuildSemanticIndexAsync(
-                snapshot.Root,
-                dev,
-                generation,
-                runtimeRoot,
-                cancellationToken);
-
-            EnsureSemanticAdaptersSucceeded(semanticIndex.AdapterStatuses);
-            semanticIndex.Index.Save(workSemanticIndex);
             // Copying a half-gigabyte corpus and hashing it twice is not instant either.
             phase(RepositoryIndexProgressPhase.PublishingGeneration);
             var published = store.PublishIndex(
