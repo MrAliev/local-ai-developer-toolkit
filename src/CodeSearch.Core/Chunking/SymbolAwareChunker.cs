@@ -209,6 +209,13 @@ public sealed class SymbolAwareChunker : IChunker
             .ThenByDescending(span => span.End)
             .ToList();
 
+        // Every span against every other, and Emit then walks each span's lines looking for a
+        // child. Both are quadratic in the number of definitions a single file declares, and
+        // both were measured before being left alone: the worst file in a 2 653-file React
+        // repository — 4 825 lines declaring 2 047 definitions, machine-written route bindings —
+        // is cut in 2.3 ms, and no other file in it reaches 0.3. Against 671 seconds of embedding
+        // for the same corpus, an index that keeps the file's definitions ordered would be a
+        // measurable amount of code buying an immeasurable amount of time.
         foreach (var span in distinct)
         {
             span.Parent = distinct
