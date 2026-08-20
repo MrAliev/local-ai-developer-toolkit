@@ -209,11 +209,35 @@ public sealed class LspLanguageFixtureIntegrationTests : IDisposable
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    /// <summary>
+    /// Removes the workspace once the language server has finished letting go of it.
+    /// </summary>
+    /// <remarks>
+    /// The client shuts the server down, then kills the whole process tree and waits — for the
+    /// process it started. A stdio TypeScript server runs its tsserver as a child of its own, and
+    /// on Windows that grandchild's handle to the workspace outlives its parent by however long
+    /// the machine takes. Deleting immediately therefore worked on every developer machine and
+    /// failed on a loaded CI runner with "the process cannot access the file", which reads as a
+    /// product defect in the test report and is nothing of the kind.
+    ///
+    /// So this waits for the condition instead of assuming it: retry until the directory is
+    /// actually gone. What it will not do is fail a passing test over housekeeping — a temporary
+    /// directory that outlives the run is the operating system's problem, not the suite's.
+    /// </remarks>
     public void Dispose()
     {
-        if (Directory.Exists(_root))
+        for (var attempt = 0; attempt < 50 && Directory.Exists(_root); attempt++)
         {
-            Directory.Delete(_root, recursive: true);
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+                return;
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(100);
+            }
         }
     }
 }
