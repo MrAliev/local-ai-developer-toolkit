@@ -77,10 +77,13 @@ twenty-one of them. Generated C# is not indexed at all.
 TypeScript and Python are chunked by symbol too, on the definition boundaries the external
 indexers report: one chunk per definition, carrying its real symbol and line span, with a
 definition that contains others listing its children rather than repeating their bodies.
-This depends on the indexer being installed and on it reporting a body for the definition.
-`scip-typescript` reports none for anything declared inside a function body, or for a
-declaration whose initialiser is a call — `export const X = memo(() => …)` — and those
-regions keep the window rather than being guessed at.
+This depends on the indexer being installed. It does not depend on the indexer reporting a
+body: `scip-typescript` reports none for a declaration whose initialiser is a call —
+`export const X = memo(() => …)` — and that declaration still gets a chunk, its boundary
+read off the file as far as the line before the next thing the indexer named. What keeps
+the window is what has no boundary to read: a declaration inside a function body, which
+the indexer names `local N` and gives neither a name nor a span, and a declaration that
+ends on the line it starts on, where one line is not a body worth a vector of its own.
 
 Every other indexed format, and every region no definition covers — imports, module-level
 statements, the gap between two functions — is chunked by a sliding window over lines: 60
