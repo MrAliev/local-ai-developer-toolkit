@@ -209,10 +209,15 @@ public sealed record TokenEstimate(
     int UpperBound);
 
 public sealed record SearchEvaluationMetrics(
-    double PrecisionAt5,
-    double RecallAt10,
-    double MeanFirstRelevantRank,
-    double NoAnswerFalsePositiveRate,
+    // Null rather than a number when the corpus has no case of that kind. A ratio over an empty
+    // set is not zero and not a rate: it is an answer nobody asked for, and reporting it as 0.0
+    // reads as "nothing went wrong" for a measurement that was never taken. It also cannot be
+    // serialised — NaN is not JSON — which is how a corpus without a single no-answer case used
+    // to fail the whole run at the last step, after every query had already been embedded.
+    double? PrecisionAt5,
+    double? RecallAt10,
+    double? MeanFirstRelevantRank,
+    double? NoAnswerFalsePositiveRate,
     int ResponseCharacters,
     int EstimatedResponseTokens,
     int EstimatedResponseTokensLowerBound,
@@ -312,11 +317,13 @@ public static class SearchEvaluation
             .ToArray();
 
         return new SearchEvaluationMetrics(
-            precisionAt5 / answerable.Length,
-            recallAt10 / answerable.Length,
-            firstRelevantRank / answerable.Length,
-            noAnswer.Count(item => byCase[item.Id].Hits.Count > 0) /
-            (double)noAnswer.Length,
+            answerable.Length == 0 ? null : precisionAt5 / answerable.Length,
+            answerable.Length == 0 ? null : recallAt10 / answerable.Length,
+            answerable.Length == 0 ? null : firstRelevantRank / answerable.Length,
+            noAnswer.Length == 0
+                ? null
+                : noAnswer.Count(item => byCase[item.Id].Hits.Count > 0) /
+                  (double)noAnswer.Length,
             characters,
             estimate.Point,
             estimate.LowerBound,
