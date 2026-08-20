@@ -522,9 +522,14 @@ public sealed class IndexBuilder(
             done += batch.Count;
             embeddedThisRun += batch.Count;
             var rate = embeddedThisRun / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
-            var remaining = TimeSpan.FromSeconds((queue.Count - done) / Math.Max(0.001, rate));
-            _log($"Embedded {done}/{queue.Count} chunks ({rate:F1}/s, ~{remaining.TotalMinutes:F1} min left)");
-            _progress(new IndexBuildProgress(done, queue.Count, rate, remaining));
+            // Against everything this build has to produce, not against what is left to embed.
+            // `done` starts at the number the checkpoint restored, so counting it against the
+            // queue reports 21 075 of 20 980 on a resumed build, with a negative estimate to
+            // match — and the progress store rejects both, which killed the build after every
+            // chunk of it had already been embedded.
+            var remaining = TimeSpan.FromSeconds((total - done) / Math.Max(0.001, rate));
+            _log($"Embedded {done}/{total} chunks ({rate:F1}/s, ~{remaining.TotalMinutes:F1} min left)");
+            _progress(new IndexBuildProgress(done, total, rate, remaining));
         }
 
         return vectors;
