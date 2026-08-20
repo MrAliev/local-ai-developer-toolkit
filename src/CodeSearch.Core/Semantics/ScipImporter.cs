@@ -141,19 +141,31 @@ public sealed class ScipImporter
 
                 var symbolId = SymbolId(occurrence.Symbol, relativePath);
                 EnsureUnknownSymbol(symbols, symbolId);
+                var encoding =
+                    document.PositionEncoding == 0 && unspecifiedPositionEncoding is not null
+                        ? (int)unspecifiedPositionEncoding.Value
+                        : document.PositionEncoding;
                 occurrences.Add(new SemanticOccurrence
                 {
                     DocumentPath = relativePath,
                     Range = ConvertRange(
                         occurrence.Range,
-                        document.PositionEncoding == 0 && unspecifiedPositionEncoding is not null
-                            ? (int)unspecifiedPositionEncoding.Value
-                            : document.PositionEncoding,
+                        encoding,
                         sourceText,
                         relativePath),
                     SymbolId = symbolId,
                     Roles = ConvertRoles(occurrence.SymbolRoles),
                     Precision = NavigationPrecision.Precise,
+                    // Converted through the same encoding as the name range: the columns come from
+                    // the same document and mean the same thing, and a body span measured in one
+                    // encoding beside a name measured in another is worse than no span at all.
+                    EnclosingRange = occurrence.EnclosingRange is null
+                        ? null
+                        : ConvertRange(
+                            occurrence.EnclosingRange,
+                            encoding,
+                            sourceText,
+                            relativePath),
                 });
             }
         }
@@ -233,12 +245,28 @@ public sealed class ScipImporter
     private ScipOccurrence ParseOccurrence(ProtoReader reader)
     {
         var range = new List<int>(4);
+        var enclosing = new List<int>(4);
         var symbol = string.Empty;
         var roles = 0;
         while (reader.TryReadField(out var field, out var wire))
         {
             switch (field)
             {
+                // enclosing_range. Same shape as range, and the reason this parser exists at all
+                // now: the name span answers "go to definition", the body span is what a chunk is.
+                case 7 when wire == 2:
+                {
+                    var packedEnclosing = reader.ReadMessage();
+                    while (!packedEnclosing.End)
+                    {
+                        enclosing.Add(packedEnclosing.ReadInt32());
+                    }
+
+                    break;
+                }
+                case 7 when wire == 0:
+                    enclosing.Add(reader.ReadInt32());
+                    break;
                 case 1 when wire == 2:
                 {
                     var packed = reader.ReadMessage();
@@ -269,7 +297,11 @@ public sealed class ScipImporter
             throw new InvalidDataException("SCIP occurrence range must contain three or four integers.");
         }
 
-        return new ScipOccurrence(range.ToArray(), symbol, roles);
+        // An indexer that reports no enclosing range is normal, not malformed. One that reports a
+        // malformed range is a different matter, and it is dropped rather than carried: a body
+        // span nobody can interpret would become a chunk boundary nobody can explain.
+        var enclosingRange = enclosing.Count is 3 or 4 ? enclosing.ToArray() : null;
+        return new ScipOccurrence(range.ToArray(), symbol, roles, enclosingRange);
     }
 
     private ScipSymbolInformation ParseSymbolInformation(ProtoReader reader)
@@ -686,7 +718,11 @@ public sealed class ScipImporter
         int PositionEncoding,
         List<ScipOccurrence> Occurrences,
         List<ScipSymbolInformation> Symbols);
-    private sealed record ScipOccurrence(int[] Range, string Symbol, int SymbolRoles);
+    private sealed record ScipOccurrence(
+        int[] Range,
+        string Symbol,
+        int SymbolRoles,
+        int[]? EnclosingRange);
     private sealed record ScipSymbolInformation(
         string Symbol,
         string DisplayName,

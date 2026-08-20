@@ -278,6 +278,105 @@ public sealed class ScipImporterTests
             document.Int32(6, 2);
         });
 
+    [Fact]
+    public void ImportsTheEnclosingRangeAsTheBodyOfADefinition()
+    {
+        // The name is on line 8; the body runs to the end of line 9. Both come from the same
+        // occurrence, and until now only the first of them was read.
+        var payload = Index(index => index.Message(2, document =>
+        {
+            document.String(1, "src/demo.py");
+            document.Message(2, occurrence =>
+            {
+                occurrence.PackedInt32(1, 0, 4, 15);
+                occurrence.String(2, FunctionSymbol);
+                occurrence.Int32(3, 1);
+                occurrence.PackedInt32(7, 0, 0, 1, 16);
+            });
+            document.String(5, "def round_money(value):\n    return value");
+            document.Int32(6, 3);
+        }));
+
+        var occurrence = Assert.Single(Import(payload).Occurrences);
+
+        Assert.Equal(new SourceRange(0, 4, 0, 15), occurrence.Range);
+        Assert.Equal(new SourceRange(0, 0, 1, 16), occurrence.EnclosingRange);
+    }
+
+    [Fact]
+    public void An_occurrence_the_indexer_reports_no_body_for_carries_none()
+    {
+        // scip-typescript does this for anything declared inside a function body, so "absent" is
+        // an ordinary answer rather than a broken index.
+        var payload = Index(index => index.Message(2, document =>
+        {
+            document.String(1, "src/demo.py");
+            document.Message(2, occurrence =>
+            {
+                occurrence.PackedInt32(1, 0, 4, 7);
+                occurrence.String(2, FunctionSymbol);
+                occurrence.Int32(3, 1);
+            });
+            document.String(5, "def foo():\n    pass");
+            document.Int32(6, 3);
+        }));
+
+        Assert.Null(Assert.Single(Import(payload).Occurrences).EnclosingRange);
+    }
+
+    [Fact]
+    public void A_malformed_enclosing_range_is_dropped_rather_than_carried()
+    {
+        // Two integers are not a range in any encoding. Importing it as one would put a chunk
+        // boundary somewhere nobody could explain; refusing the whole document over it would
+        // lose navigation that is perfectly good.
+        var payload = Index(index => index.Message(2, document =>
+        {
+            document.String(1, "src/demo.py");
+            document.Message(2, occurrence =>
+            {
+                occurrence.PackedInt32(1, 0, 4, 7);
+                occurrence.String(2, FunctionSymbol);
+                occurrence.Int32(3, 1);
+                occurrence.PackedInt32(7, 0, 4);
+            });
+            document.String(5, "def foo():\n    pass");
+            document.Int32(6, 3);
+        }));
+
+        var occurrence = Assert.Single(Import(payload).Occurrences);
+
+        Assert.Null(occurrence.EnclosingRange);
+        Assert.Equal(new SourceRange(0, 4, 0, 7), occurrence.Range);
+    }
+
+    [Fact]
+    public void The_body_span_is_converted_through_the_same_encoding_as_the_name()
+    {
+        // UTF-32 columns over a line whose first character is outside the BMP. A body span
+        // measured in one encoding beside a name measured in another would be worse than none.
+        var payload = Index(index => index.Message(2, document =>
+        {
+            document.String(1, "src/demo.py");
+            document.Message(2, occurrence =>
+            {
+                occurrence.PackedInt32(1, 0, 2, 5);
+                occurrence.String(2, FunctionSymbol);
+                occurrence.Int32(3, 1);
+                occurrence.PackedInt32(7, 0, 0, 1, 5);
+            });
+            document.String(5, "🚀 foo\nfoo()");
+            document.Int32(6, 3);
+        }));
+
+        var occurrence = Assert.Single(Import(payload).Occurrences);
+
+        // The emoji is one UTF-32 character and two UTF-16 ones, so every column after it shifts
+        // by one — in the body span exactly as in the name.
+        Assert.Equal(new SourceRange(0, 3, 0, 6), occurrence.Range);
+        Assert.Equal(new SourceRange(0, 0, 1, 5), occurrence.EnclosingRange);
+    }
+
     private static SemanticIndex Import(byte[] payload) =>
         new ScipImporter().Supplement(
             EmptyIndex(), new MemoryStream(payload), Path.GetTempPath());
