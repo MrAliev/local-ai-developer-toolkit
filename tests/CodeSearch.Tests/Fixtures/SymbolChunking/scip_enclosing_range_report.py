@@ -135,23 +135,39 @@ def read_index(path):
     return documents
 
 
+def declaration(hover):
+    """The declaration line out of a hover: its first fenced code block holds the
+    declaration, anything after it is prose that must not be matched against."""
+    if not hover:
+        return ""
+    for line in hover[0].replace("`", " ").split("\n"):
+        line = line.strip()
+        # scip-python puts the decorators above the `def` line, inside the same
+        # block, so the declaration is not always the first line of it.
+        if line and not line.startswith("@") and line not in (
+                "ts", "tsx", "python", "py"):
+            return " %s " % line
+    return ""
+
+
 def classify(symbol, hover):
     # Both adapters leave SymbolInformation.kind unset, so the hover markdown is
-    # the only thing that says what a definition is. It is fenced code, one
-    # declaration per line, so flattening the whitespace makes it greppable.
-    text = " %s " % " ".join(hover).replace("`", " ").replace("\n", " ")
-    if symbol.endswith(":") or " module " in text or "(module)" in text:
-        return "module"
+    # the only thing that says what a definition is.
+    text = declaration(hover)
     if "(method)" in text:
         return "method"
     if "(parameter)" in text or "().(" in symbol:
         return "parameter"
     if "(property)" in text or "(variable)" in text:
         return "field"
+    if text.startswith(" module ") or "(module)" in text:
+        return "module"
     if " def " in text or " function " in text:
         return "function"
     if " class " in text or " interface " in text:
         return "class"
+    if " type " in text or " enum " in text:
+        return "type"
     if " var " in text or " const " in text or " let " in text:
         return "arrow const" if "=>" in text else "variable"
     return "other"

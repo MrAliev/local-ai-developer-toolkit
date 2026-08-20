@@ -22,7 +22,8 @@ boundary gets wrong:
 | `shapes.ts` | imports and a re-export at the top; exported function; class with two methods; arrow function in a `const`; a stray statement after the last definition |
 | `Panel.tsx` | React component with a `useMemo` and a helper function declared inside it; exported arrow component; a second component containing a nested component, a nested function and a nested class with a method |
 | `internal.ts` | the same constructs *without* `export`, to separate "not exported" from "nested" |
-| `types/react.d.ts` | a three-declaration stand-in for `react`, so the JSX compiles with no `node_modules` |
+| `Wrapped.tsx` | a plain arrow component next to `memo(...)`, `forwardRef(...)` and `memo(function Named(...))` — the idiom a real front-end repository is full of |
+| `types/react.d.ts` | a stand-in for `react`, so the JSX compiles with no `node_modules` |
 
 `python/shapes.py` covers a module-level function, a class with two methods, a
 function nested inside a function, a decorated definition, and module-level code
@@ -53,19 +54,23 @@ Measured with `@sourcegraph/scip-typescript` 0.4.0 and
 `@sourcegraph/scip-python` 0.6.6 on Node v20.20.2.
 
 Both adapters emit `enclosing_range`. The raw share over all definition
-occurrences — 38% for TypeScript, 36% for Python — says nothing, because most
+occurrences — 33% for TypeScript, 36% for Python — says nothing, because most
 definition occurrences are parameters, fields and local variables, which have no
 body to describe. The share that matters is over definitions that have one:
 
 - **Python: 8 of 8.** Every `def` and `class`, the nested function included. A
   decorated definition starts its body at the decorator, one line above the
   name. The module symbol carries no range.
-- **TypeScript: 13 of 18.** Every definition that gets a global symbol has a
-  body span, whether exported or not. The five without one are exactly the five
-  declared inside a function body: `scip-typescript` gives those `local N`
-  symbols, and a `local` never carries `enclosing_range`.
+- **TypeScript: 14 of 22**, with two systematic exceptions and nothing else:
+  - **Declared inside a function body.** `scip-typescript` gives those `local N`
+    symbols, and a `local` never carries `enclosing_range`. Export has nothing
+    to do with it — a non-exported top-level function has a body span.
+  - **Initialised by a call.** `export const X = memo(() => …)` and
+    `forwardRef(…)` carry no body span, while the same component written as a
+    plain arrow does. In `memo(function Named() {…})` the inner named function
+    produces no definition occurrence at all.
 
-Two shapes need care from anything that consumes these ranges:
+Two more shapes need care from anything that consumes these ranges:
 
 - For an arrow function in a `const`, the body span covers the arrow function
   expression only. It starts after `export const name = `, so it does **not**
@@ -73,3 +78,14 @@ Two shapes need care from anything that consumes these ranges:
 - The module symbol of a TypeScript document carries a body span covering the
   whole file. Treating it as a definition would give every file a whole-file
   chunk on top of its symbol chunks.
+
+## Checked against a real repository
+
+The same measurement was run over a 2 653-file React/TypeScript front-end
+(`scip-typescript` took 5.7 s for the whole tree). It behaves exactly as the
+fixture predicts: of 15 276 definitions the adapter emitted as `local N`, not
+one carries a body span, while every global definition with a body does, apart
+from the 414 initialised by a call. In practice that gave 2 991 symbol spans
+over 2 653 files, covering 67% of the non-blank lines; 955 files — constants,
+API and query modules, barrel files — contain no definition body at all and
+would stay on the sliding window.

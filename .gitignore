@@ -32,3 +32,4 @@ Thumbs.db
 
 # SCIP indexer output
 index.scip
+__pycache__/
