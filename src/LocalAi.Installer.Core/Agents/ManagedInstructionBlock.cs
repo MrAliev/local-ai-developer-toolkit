@@ -80,10 +80,12 @@ public static class ManagedInstructionBlock
         Begin every "where does X live", "what handles Y", "is there already something like
         Z" with `search_code` from the `codesearch` MCP server rather than a text search. It
         matches by meaning and by exact symbol name, and costs a fraction of reading the
-        candidate files. C# is chunked by symbol, so a hit there names the type or member it
-        came from; every other language is chunked by a sliding window over lines, so a hit
-        names the file and its line range instead. `index_status` says whether the index is
-        behind HEAD; `index_refresh` is for repair, not for routine use.
+        candidate files. C#, TypeScript and Python are chunked by symbol, so a hit there names
+        the type, member or definition it came from. Every other language is chunked by a
+        sliding window over lines, and so is any region no definition covers — imports,
+        module-level statements, the gap between two functions — where a hit names the file and
+        its line range instead. `index_status` says whether the index is behind HEAD;
+        `index_refresh` is for repair, not for routine use.
 
         A literal sweep for one exact token, once the target is already known, is still a job
         for grep. Reading a file before editing it is never delegated to anything.

@@ -15,7 +15,7 @@ overridden per query.
 
 | Tool | Purpose | The constraint that matters |
 | --- | --- | --- |
-| `search_code` | Semantic and literal search over indexed chunks. The first step for "where does X live". | C# is chunked by symbol; every other language by a 60-line window with 12 lines of overlap. Every hit is wrapped in `<untrusted-content>`. |
+| `search_code` | Semantic and literal search over indexed chunks. The first step for "where does X live". | C#, TypeScript and Python are chunked by symbol; every other language, and every region no definition covers, by a 60-line window with 12 lines of overlap. Every hit is wrapped in `<untrusted-content>`. |
 | `get_code_chunk` | The full body of one result, by `chunk_id`. | The id is bound to repository, generation, git tree and dirty overlay; a stale one is refused. |
 | `go_to_definition` | The definition of the symbol at a zero-based line and UTF-16 column. | Source order: live LSP, then snapshot SIDX, then text tagged `Heuristic`. |
 | `find_references` | References to that symbol. | Same source order. |
