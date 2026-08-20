@@ -215,13 +215,24 @@ static async Task<int> RunAsync(string[] args)
         var root = rootIndex >= 0 && rootIndex + 1 < args.Length
             ? args[rootIndex + 1]
             : Environment.CurrentDirectory;
-        var commonDirectory = await new LocalAi.Repository.GitClient()
-            .GetCommonDirectoryAsync(root);
+        var git = new LocalAi.Repository.GitClient();
+        var commonDirectory = await git.GetCommonDirectoryAsync(root);
         var result = HookInstaller.Install(
             commonDirectory,
             launcherPath,
-            ["run", "localai"]);
-        Console.WriteLine($"Installed {result.Installed.Count} shared Git hooks.");
+            ["run", "localai"],
+            await git.GetConfigurationAsync(root, "core.hooksPath"),
+            await git.GetWorkingTreeRootAsync(root));
+        Console.WriteLine(
+            $"Installed {result.Installed.Count} shared Git hooks in " +
+            $"{result.HooksDirectory}.");
+        if (result.InsideWorkingTree)
+        {
+            Console.WriteLine(
+                "The repository points core.hooksPath into its working tree, so the " +
+                "dispatchers were also added to .git/info/exclude.");
+        }
+
         return 0;
     }
 

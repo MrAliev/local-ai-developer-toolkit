@@ -242,6 +242,13 @@ Install the shared chained Git hooks only after approving that external mutation
 C:\path\to\LocalAi\bin\launcher\localai-launcher.exe run localai hooks install --root C:\path\to\repository
 ```
 
+The dispatchers go wherever Git actually looks for hooks. A repository that sets
+`core.hooksPath` — husky, lefthook and simple-git-hooks all do — gets them there instead of
+in `$GIT_DIR/hooks`, where Git would never read them. For husky that means `.husky`, not the
+`.husky/_` it rewrites on every `npm install`. Dispatchers that land in the working tree are
+added to `.git/info/exclude`, so they stay out of `git status` without touching a `.gitignore`
+that belongs to the repository rather than to us.
+
 ## What the installer sets up
 
 A finished installation is expected to leave a machine that can actually be used, so the

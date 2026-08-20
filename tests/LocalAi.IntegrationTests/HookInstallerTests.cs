@@ -50,6 +50,108 @@ public sealed class HookInstallerTests : IDisposable
     }
 
     [Fact]
+    public void Installs_where_core_hooksPath_points_rather_than_into_the_git_directory()
+    {
+        var common = Path.Combine(_root, ".git");
+        Directory.CreateDirectory(common);
+
+        var result = HookInstaller.Install(
+            common,
+            Path.Combine(_root, "launcher", "localai-launcher.exe"),
+            ["run", "localai"],
+            ".githooks",
+            _root);
+
+        Assert.Equal(Path.Combine(_root, ".githooks"), result.HooksDirectory);
+        Assert.True(File.Exists(Path.Combine(_root, ".githooks", "post-commit")));
+        Assert.False(Directory.Exists(Path.Combine(common, "hooks")));
+    }
+
+    [Fact]
+    public void Installs_beside_the_husky_runner_because_husky_rewrites_it()
+    {
+        var common = Path.Combine(_root, ".git");
+        var runner = Path.Combine(_root, ".husky", "_");
+        Directory.CreateDirectory(common);
+        Directory.CreateDirectory(runner);
+        // `_/h` is what husky's own shims source, and the marker that this directory is the one
+        // husky deletes and recreates on every install.
+        File.WriteAllText(Path.Combine(runner, "h"), "#!/usr/bin/env sh\n");
+
+        var result = HookInstaller.Install(
+            common,
+            Path.Combine(_root, "launcher", "localai-launcher.exe"),
+            ["run", "localai"],
+            ".husky/_",
+            _root);
+
+        Assert.Equal(Path.Combine(_root, ".husky"), result.HooksDirectory);
+        Assert.True(File.Exists(Path.Combine(_root, ".husky", "post-commit")));
+        Assert.False(File.Exists(Path.Combine(runner, "post-commit")));
+    }
+
+    [Fact]
+    public void A_plain_underscore_directory_is_not_mistaken_for_husky()
+    {
+        var common = Path.Combine(_root, ".git");
+        Directory.CreateDirectory(common);
+
+        var result = HookInstaller.Install(
+            common,
+            Path.Combine(_root, "launcher", "localai-launcher.exe"),
+            ["run", "localai"],
+            "hooks/_",
+            _root);
+
+        Assert.Equal(Path.Combine(_root, "hooks", "_"), result.HooksDirectory);
+    }
+
+    [Fact]
+    public void Dispatchers_written_into_the_working_tree_are_excluded_locally()
+    {
+        var common = Path.Combine(_root, ".git");
+        Directory.CreateDirectory(common);
+
+        var first = HookInstaller.Install(
+            common,
+            Path.Combine(_root, "launcher", "localai-launcher.exe"),
+            ["run", "localai"],
+            ".husky",
+            _root);
+        HookInstaller.Install(
+            common,
+            Path.Combine(_root, "launcher", "localai-launcher.exe"),
+            ["run", "localai"],
+            ".husky",
+            _root);
+
+        Assert.True(first.InsideWorkingTree);
+        var exclude = File.ReadAllLines(Path.Combine(common, "info", "exclude"));
+        Assert.Contains("/.husky/post-commit", exclude);
+        Assert.Contains("/.husky/post-commit.pre-localai", exclude);
+        Assert.Equal(
+            1,
+            exclude.Count(line => line == "/.husky/post-commit"));
+    }
+
+    [Fact]
+    public void Hooks_in_the_git_directory_need_no_exclusion()
+    {
+        var common = Path.Combine(_root, ".git");
+        Directory.CreateDirectory(common);
+
+        var result = HookInstaller.Install(
+            common,
+            Path.Combine(_root, "launcher", "localai-launcher.exe"),
+            ["run", "localai"],
+            configuredHooksPath: null,
+            workingTreeRoot: _root);
+
+        Assert.False(result.InsideWorkingTree);
+        Assert.False(File.Exists(Path.Combine(common, "info", "exclude")));
+    }
+
+    [Fact]
     public void Missing_launcher_path_is_rejected_before_hooks_are_created()
     {
         var error = Assert.Throws<ArgumentException>(
