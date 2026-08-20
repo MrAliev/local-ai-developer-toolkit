@@ -91,7 +91,7 @@ public sealed class RoslynChunker : IChunker
         }
 
         var header = $"File: {relPath}\n";
-        foreach (var chunk in SplitByLines(
+        foreach (var chunk in ChunkSplitter.Split(
                      relPath, ChunkKind.File, Path.GetFileName(relPath), relPath,
                      NamespaceOf(tree.GetRoot()), header, lines, 1, lines.Length))
         {
@@ -137,7 +137,7 @@ public sealed class RoslynChunker : IChunker
             }
         }
 
-        var text = Truncate(body.ToString(), ChunkLimits.MaxChars);
+        var text = ChunkSplitter.Truncate(body.ToString(), ChunkLimits.MaxChars);
 
         return new Chunk
         {
@@ -177,71 +177,9 @@ public sealed class RoslynChunker : IChunker
 
         var memberLines = SourceLines.Split(member.ToString());
 
-        return SplitByLines(
+        return ChunkSplitter.Split(
             relPath, ChunkKind.Method, symbol, signature, ns, header.ToString(),
             memberLines, startLine, endLine);
-    }
-
-    /// <summary>
-    /// Emits one chunk, or several overlapping ones when the source runs past the char budget.
-    /// Every part repeats the header (namespace/type/signature) so a part read on its own still
-    /// says what it belongs to, and line numbers stay exact rather than estimated.
-    /// </summary>
-    private static IEnumerable<Chunk> SplitByLines(
-        string relPath, ChunkKind kind, string symbol, string signature, string ns,
-        string header, string[] lines, int firstLine, int lastLine)
-    {
-        var whole = header + string.Join("\n", lines);
-        if (whole.Length <= ChunkLimits.MaxChars)
-        {
-            yield return new Chunk
-            {
-                RelPath = relPath,
-                Kind = kind,
-                Symbol = symbol,
-                Signature = signature,
-                Namespace = ns,
-                StartLine = firstLine,
-                EndLine = lastLine,
-                EmbedText = whole,
-            };
-
-            yield break;
-        }
-
-        // Size the window from the file's own average line length rather than a fixed line count:
-        // a 300-char-per-line generated-ish file and a terse one should both land near the budget.
-        var budget = ChunkLimits.MaxChars - header.Length;
-        var avgLineLength = Math.Max(1, whole.Length / Math.Max(1, lines.Length));
-        var windowLines = Math.Max(20, budget / avgLineLength);
-        var step = Math.Max(1, windowLines - ChunkLimits.SplitOverlapLines);
-        var totalParts = (int)Math.Ceiling((double)lines.Length / step);
-
-        var part = 0;
-        for (var offset = 0; offset < lines.Length; offset += step)
-        {
-            var end = Math.Min(offset + windowLines, lines.Length);
-            part++;
-
-            var text = Truncate(header + string.Join("\n", lines[offset..end]), ChunkLimits.MaxChars);
-
-            yield return new Chunk
-            {
-                RelPath = relPath,
-                Kind = kind,
-                Symbol = $"{symbol} [{part}/{totalParts}]",
-                Signature = signature,
-                Namespace = ns,
-                StartLine = firstLine + offset,
-                EndLine = Math.Min(lastLine, firstLine + end - 1),
-                EmbedText = text,
-            };
-
-            if (end == lines.Length)
-            {
-                break;
-            }
-        }
     }
 
     /// <summary>
@@ -394,9 +332,7 @@ public sealed class RoslynChunker : IChunker
             .Select(l => l.Trim())
             .Where(l => l.Length > 0));
 
-        return Truncate(flattened, max);
+        return ChunkSplitter.Truncate(flattened, max);
     }
 
-    private static string Truncate(string text, int max) =>
-        text.Length <= max ? text : text[..max];
 }
