@@ -247,6 +247,22 @@ public static class CodeSearchSyncCommand
                         generation.Identity,
                         runtimeRoot,
                         cancellationToken);
+
+                    // A failed adapter aborts the base generation and deliberately does not abort
+                    // this. The base is immutable: boundaries cut by the window because an
+                    // indexer was broken would be frozen into a generation that is never rebuilt
+                    // while the tree stands still. An overlay is not — it is rebuilt whenever the
+                    // branch moves or a file changes, so the degradation lasts as long as the
+                    // breakage does. And the alternative is worse in both directions: refusing
+                    // the overlay fails the post-commit hook on every commit until someone
+                    // repairs a Node package, and answering from the base alone would answer
+                    // about code the branch has already changed.
+                    //
+                    // It is a degradation, not a non-event, so it is said out loud rather than
+                    // left to be inferred from the adapter line above.
+                    WarnDegradedSemanticOverlay(
+                        semanticBuild.AdapterStatuses,
+                        identity.WorkingRoot);
                     var baseSemanticIndex = SemanticIndex.Load(
                         store.SemanticIndexPath(generation.Identity.Id));
                     var semanticOverlay = SemanticIndexOverlay.Create(
@@ -693,6 +709,31 @@ public static class CodeSearchSyncCommand
                     $"Semantic checkpoint '{file}' could not be removed: {exception.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Says which worktree is about to be cut by line window, and why, when an adapter failed
+    /// during an overlay build. The base generation refuses to publish in that situation; a
+    /// branch carries on, and the difference has to be visible to whoever reads the sync output.
+    /// </summary>
+    internal static void WarnDegradedSemanticOverlay(
+        IReadOnlyList<SemanticAdapterStatus> statuses,
+        string workingRoot)
+    {
+        ArgumentNullException.ThrowIfNull(statuses);
+        var failures = statuses
+            .Where(status => status.State == SemanticAdapterState.Failed)
+            .ToArray();
+        if (failures.Length == 0)
+        {
+            return;
+        }
+
+        Console.Error.WriteLine(
+            $"Semantic overlay for '{workingRoot}' is degraded: " +
+            string.Join("; ", failures.Select(failure => $"{failure.Name}: {failure.Message}")) +
+            ". Files this worktree changed are cut by line window until the adapter works " +
+            "again; the base generation is unaffected.");
     }
 
     internal static void EnsureSemanticAdaptersSucceeded(

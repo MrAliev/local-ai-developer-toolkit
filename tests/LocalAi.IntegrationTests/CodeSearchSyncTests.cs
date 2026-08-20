@@ -87,6 +87,59 @@ public sealed class CodeSearchSyncTests : IDisposable
     }
 
     [Fact]
+    public void A_branch_is_not_blocked_by_a_failed_adapter_but_is_told_about_it()
+    {
+        // The decision, not an oversight: the base generation refuses to publish when an adapter
+        // fails, because its boundaries are immutable, and a branch carries on, because refusing
+        // would fail the post-commit hook on every commit until someone repairs a Node package.
+        // What a branch owes in exchange is saying which worktree it just degraded.
+        var written = CaptureError(() =>
+            CodeSearchSyncCommand.WarnDegradedSemanticOverlay(
+                [
+                    Status("typescript", SemanticAdapterState.Failed, "bad shim"),
+                    Status("python", SemanticAdapterState.Skipped, "no files"),
+                ],
+                @"D:\repo\worktree"));
+
+        Assert.Contains(@"D:\repo\worktree", written);
+        Assert.Contains("typescript: bad shim", written);
+        Assert.Contains("line window", written);
+        // Skipped is not failed: a repository with no Python is not a degraded repository.
+        Assert.DoesNotContain("python", written);
+    }
+
+    [Fact]
+    public void A_branch_whose_adapters_worked_says_nothing()
+    {
+        var written = CaptureError(() =>
+            CodeSearchSyncCommand.WarnDegradedSemanticOverlay(
+                [
+                    Status("typescript", SemanticAdapterState.Succeeded, "indexed"),
+                    Status("python", SemanticAdapterState.Skipped, "no files"),
+                ],
+                @"D:\repo\worktree"));
+
+        Assert.Empty(written);
+    }
+
+    private static string CaptureError(Action action)
+    {
+        var original = Console.Error;
+        var writer = new StringWriter();
+        Console.SetError(writer);
+        try
+        {
+            action();
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+
+        return writer.ToString();
+    }
+
+    [Fact]
     public void Synthetic_typescript_project_includes_javascript_without_touching_repository()
     {
         Directory.CreateDirectory(_root);
