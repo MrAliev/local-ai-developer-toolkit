@@ -220,6 +220,44 @@ against 3 966 of 6 894 under format 3, and the `.ts`/`.tsx`/`.js`/`.jsx`/`.py` s
 sitting inside a symbol chunk rose from 53 668 to 67 527. That harness is not a product execution
 path and is not committed.
 
+## Ranking by the shape of a chunk: measured, not adopted
+
+Symbol-aware chunking did not move precision, which raised an obvious question: the ranking
+treats a chunk cut on a definition and a chunk cut on a line window as interchangeable, and
+perhaps it should not. At equal similarity a definition is the better answer — its bounds are the
+author's rather than the window's, so the reader gets the whole declaration and nothing else.
+
+**The hypothesis survives its own test.** Across the twelve cases of the format-3 run, a symbol
+hit is relevant 7 times in 50 and a windowed hit 6 times in 70 — 14% against 9%. Taking every
+pair inside one result list where a windowed hit outranks a symbol hit and swapping them would
+promote a relevant hit 16 times and demote one 12 times, which is noise. Restricting the same
+count to pairs that scored within about two rank positions of each other gives 6 promotions
+against 1 demotion. The claim holds exactly where it was stated — at comparable score — and
+dissolves when stretched past that.
+
+**The intervention does not pay for itself.** Two magnitudes were implemented and measured
+end-to-end against the same format-3 index, so only the query side differed: an RRF bonus of one
+rank position for any chunk that names a symbol, and one of two rank positions.
+
+| Metric | No bonus | One rank | Two ranks |
+|---|---:|---:|---:|
+| Precision@5 | 0.133333 | 0.133333 | 0.133333 |
+| Recall@10 | 0.750000 | 0.750000 | 0.750000 |
+| Mean first relevant rank | 4.750000 | 4.750000 | 4.750000 |
+| Response characters | 63 281 | 63 835 | 63 917 |
+| Source lines returned | 1 204 | 1 204 | 1 208 |
+| Symbol hits of 120 | 50 | 53 | 55 |
+| Relevant hits of 120 | 13 | 13 | 13 |
+
+The bonus does what it was built to do — three to five windowed hits give way to symbol hits —
+and not one of the hits it promotes is relevant. No quality metric moves in either direction,
+and the response grows by about 1%.
+
+So the change was reverted rather than kept at a magnitude that happened to look harmless. A
+ranking rule that no measurement supports is a knob that will be tuned by whoever next has a
+theory, and this corpus cannot tell the difference between having it and not. What would settle
+it is a larger corpus, not a smaller bonus.
+
 ## Heuristic token estimates
 
 Raw character counts above are authoritative. The token point proxy is
