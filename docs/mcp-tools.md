@@ -17,7 +17,7 @@ overridden per query.
 | --- | --- | --- |
 | `search_code` | Semantic and literal search over indexed chunks. The first step for "where does X live". | C#, TypeScript and Python are chunked by symbol; every other language, and every region no definition covers, by a 60-line window with 12 lines of overlap. Every hit is wrapped in `<untrusted-content>`. |
 | `get_code_chunk` | The full body of one result, by `chunk_id`. | The id is bound to repository, generation, git tree and dirty overlay; a stale one is refused. |
-| `go_to_definition` | The definition of the symbol at a zero-based line and UTF-16 column. | Source order: live LSP, then snapshot SIDX, then text tagged `Heuristic`. |
+| `go_to_definition` | The definition of the symbol at a zero-based line and UTF-16 column. | Source order: live LSP, then snapshot SIDX, then text tagged `Heuristic`. A position that names nothing, on a line that declares exactly one thing, resolves to that declaration, so the start line of a `search_code` hit navigates as it stands with column 0. |
 | `find_references` | References to that symbol. | Same source order. |
 | `find_implementations` | Implementations, overrides, derived types. | No text fallback: an approximate answer is worse than none here. |
 | `find_relationships` | The snapshot's relationship graph. | SIDX only. Direction `incoming`/`outgoing`, kind `implementation`/`override`/`type-definition`. |

@@ -32,6 +32,9 @@ public static class CodeSearchTools
     [Description("""
         Resolves the symbol at a zero-based line and UTF-16 column. Prefers precise live LSP and
         snapshot SIDX locations, then uses an explicitly Heuristic bounded text fallback.
+        A position that names nothing, on a line that declares exactly one thing, resolves to
+        that declaration — so the start line of a search_code hit navigates as it stands, with
+        column 0, and the identifier's column does not have to be worked out first.
         Source-derived output is wrapped in nonce-bound <untrusted-content> markers.
         """)]
     public static string GoToDefinition(
@@ -73,6 +76,9 @@ public static class CodeSearchTools
     [Description("""
         Resolves the symbol at a zero-based line and UTF-16 column. Prefers precise live LSP and
         snapshot SIDX references, then uses an explicitly Heuristic bounded text fallback.
+        A position that names nothing, on a line that declares exactly one thing, resolves to
+        that declaration — so the start line of a search_code hit navigates as it stands, with
+        column 0, and the identifier's column does not have to be worked out first.
         Source-derived output is wrapped in nonce-bound <untrusted-content> markers.
         """)]
     public static string FindReferences(
