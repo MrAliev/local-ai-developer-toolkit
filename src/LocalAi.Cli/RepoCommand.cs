@@ -90,10 +90,16 @@ public static class RepoCommand
             "repositories",
             identity.Id);
         var configured = new RepositoryManifestStore(repositoryRoot).Read() is not null;
+
+        // The verdict names the repository it is about. A caller reaches this command with a
+        // path, a worktree or nothing at all, and every one of those resolves to a common
+        // directory that may not be the one they had in mind — which is how #94 was found. The
+        // token stays first so anything matching on it keeps working.
         var message = configured
-            ? "CONFIGURED"
-            : "NOT_CONFIGURED: offer CodeSearch, LocalLm, shared broker, " +
-              "mainline generations, branch overlays, hooks, Claude MCP and Codex MCP.";
+            ? $"CONFIGURED: {identity.CommonDirectory}"
+            : $"NOT_CONFIGURED: {identity.CommonDirectory} — offer CodeSearch, LocalLm, " +
+              "shared broker, mainline generations, branch overlays, hooks, Claude MCP " +
+              "and Codex MCP.";
         return new RepositoryStatus(identity, configured, message);
     }
 }

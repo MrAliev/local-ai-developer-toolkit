@@ -20,12 +20,25 @@ public sealed class BootstrapTests : IDisposable
             runtime);
 
         Assert.False(status.Configured);
-        Assert.Contains("NOT_CONFIGURED", status.Message);
+        Assert.StartsWith("NOT_CONFIGURED", status.Message, StringComparison.Ordinal);
         Assert.Contains("CodeSearch", status.Message);
         Assert.Contains("LocalLm", status.Message);
         Assert.Contains("Claude MCP", status.Message);
         Assert.Contains("Codex MCP", status.Message);
         Assert.False(Directory.Exists(runtime));
+    }
+
+    [Fact]
+    public void Status_names_the_repository_it_is_answering_about()
+    {
+        // The caller passes a path, a worktree or nothing at all, and every one of those resolves
+        // to a common directory that may not be the one they meant — which is how #94 was found.
+        // A verdict that does not say which repository it is about cannot be checked.
+        var status = RepoCommand.Status(
+            Path.Combine(_root, "repo.git"),
+            Path.Combine(_root, "runtime"));
+
+        Assert.Contains(status.Identity.CommonDirectory, status.Message, StringComparison.Ordinal);
     }
 
     [Fact]
