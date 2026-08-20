@@ -376,7 +376,7 @@ public sealed class SymbolAwareChunker : IChunker
             var found = Array.BinarySearch(boundaries, candidate.Line);
             var next = found < 0 ? ~found : found + 1;
             var end = next < boundaries.Length ? boundaries[next] - 1 : lines.Length;
-            while (end > candidate.Line && string.IsNullOrWhiteSpace(lines[end - 1]))
+            while (end > candidate.Line && BelongsToWhatFollows(lines[end - 1]))
             {
                 end--;
             }
@@ -394,6 +394,43 @@ public sealed class SymbolAwareChunker : IChunker
         }
 
         return spans;
+    }
+
+    /// <summary>
+    /// Whether a line at the end of an inferred extent is really the start of the next thing.
+    /// </summary>
+    /// <remarks>
+    /// An inferred extent runs to the line before the next declaration the indexer named, and what
+    /// sits immediately above a declaration is usually the comment explaining it. Trimming only
+    /// blank lines left that comment attached to whatever was declared above it, which produced
+    /// two wrong outcomes at once on a file as ordinary as this:
+    ///
+    /// <code>
+    /// const STORAGE_KEY = 'session-token';
+    ///
+    /// /**
+    ///  * Keeps the access token out of localStorage on purpose: …
+    ///  */
+    /// export function storeAccessToken(…)
+    /// </code>
+    ///
+    /// The constant is one line and should have stayed in the window; instead it absorbed the
+    /// comment, became seven lines, and earned a chunk. And the prose that answers "why is the
+    /// token not in localStorage" ended up in a chunk named <c>STORAGE_KEY</c> rather than in the
+    /// function it describes.
+    ///
+    /// A comment above a declaration documents that declaration. Trimming it here returns it to
+    /// the window; putting it inside the chunk of the definition it documents is a larger change
+    /// that would have to move a boundary the indexer reported, and it is not this one.
+    /// </remarks>
+    private static bool BelongsToWhatFollows(string line)
+    {
+        var trimmed = line.AsSpan().Trim();
+        return trimmed.IsEmpty ||
+            trimmed.StartsWith("//", StringComparison.Ordinal) ||
+            trimmed.StartsWith("/*", StringComparison.Ordinal) ||
+            trimmed.StartsWith("*", StringComparison.Ordinal) ||
+            trimmed.StartsWith("#", StringComparison.Ordinal);
     }
 
     private static string Signature(string[] lines, int start)

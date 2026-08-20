@@ -195,6 +195,40 @@ public sealed class SymbolAwareChunkerTests
     }
 
     [Fact]
+    public void Does_not_let_the_next_declarations_comment_lengthen_the_one_above_it()
+    {
+        // The shape this was found on, and it is an ordinary one: a constant, a blank line, the
+        // comment explaining the function below, then the function. Trimming only blank lines gave
+        // the constant a seven-line extent — long enough to earn a chunk it should never have had,
+        // and the comment answering "why not localStorage" ended up filed under the constant's
+        // name rather than the function's.
+        const string source = """
+            const STORAGE_KEY = 'session-token';
+
+            /**
+             * Keeps the token out of localStorage on purpose.
+             */
+            export function store(token: string): void {
+              write(STORAGE_KEY, token);
+            }
+            """;
+        var definitions = new List<SymbolDefinition>
+        {
+            // const STORAGE_KEY  → line 1, no body reported
+            new(new SourceRange(0, 6, 0, 17), null),
+            // export function store(…) → lines 6-8
+            new(new SourceRange(5, 16, 5, 21), new SourceRange(5, 0, 7, 1)),
+        };
+
+        var chunks = Split("tokenStorage.ts", source, definitions);
+
+        Assert.DoesNotContain(chunks, chunk => chunk.Symbol == "STORAGE_KEY");
+        var comment = chunks.Single(chunk =>
+            chunk.EmbedText.Contains("on purpose", StringComparison.Ordinal));
+        Assert.Equal(ChunkKind.Text, comment.Kind);
+    }
+
+    [Fact]
     public void Keeps_a_declaration_inside_a_reported_body_with_the_body_that_holds_it()
     {
         // A name the indexer reports no body for, written inside one that has a body, cannot have
