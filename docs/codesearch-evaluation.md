@@ -144,6 +144,56 @@ The four answerable misses were unchanged:
 a false positive because positive lexical candidates are intentionally eligible even
 when their vector scores are below the floor.
 
+## Symbol-aware chunking, measured on a front-end corpus
+
+The measurement above is this repository: C#, chunked by symbol since long before symbol-aware
+chunking existed for anything else. It cannot show what that change did. This section is the
+before-and-after that can, run on a corpus the change actually touches.
+
+**Corpus.** A private React/TypeScript repository: 2 653 indexed files, 1 713 `.ts` and 942
+`.tsx`. Twelve answerable natural-language cases in Russian, each naming one file and no symbol.
+Path-only targets are deliberate: a target that named a symbol would score the new chunk shape
+against a corpus that could not produce one, and the comparison would flatter itself.
+
+The cases are not committed here because their paths belong to a repository that is not this
+one. The numbers are, which is what the acceptance criterion asked for.
+
+**The two indexes.** Before: generation `ac83250b`, chunk format 1, 3 471 chunks. After:
+generation `44cd3fb5`, chunk format 2, 6 079 chunks. Same repository, same commit, same
+embedding model.
+
+| Metric | Before | After | Change |
+|---|---:|---:|---:|
+| Precision@5 | 0.116667 | 0.116667 | 0 |
+| Recall@10 | 0.750000 | 0.750000 | 0 |
+| Mean first relevant rank | 5.500000 | 4.916667 | −0.583333 |
+| Response characters | 70 245 | 66 087 | −4 158 (−5.9%) |
+| Source lines returned | 1 426 | 1 282 | −144 (−10.1%) |
+| Chunk reads | 120 | 120 | 0 |
+| Distinct file reads per case, summed | 99 | 102 | +3 |
+
+| Shape of the returned hits | Before | After |
+|---|---:|---:|
+| Hits naming a symbol, all files | 0 of 120 (0%) | 33 of 120 (28%) |
+| Hits naming a symbol, `.ts`/`.tsx`/`.py` only | 0 of 86 (0%) | 33 of 85 (39%) |
+| Source lines spanned by those hits | 3 819 | 2 232 (−42%) |
+
+**Reading this honestly.** Precision and recall did not move. On this corpus the right file was
+already being found; what changed is what comes back with it. The relevant hit arrives about
+half a rank earlier, the response is 5.9% smaller in characters, and the hits in the languages
+the change touches span 42% fewer source lines — a hit is a definition instead of a
+sixty-line window that happened to contain one.
+
+Thirty-nine percent rather than all of them, because a window is still correct for everything no
+definition covers: imports, module-level statements, the gap between two functions, and the two
+shapes `scip-typescript` reports no body for.
+
+**What it costs.** The corpus grew 75%, from 3 471 chunks to 6 079, because a definition that
+used to share a window now has its own vector. The rebuild embedded 6 079 chunks in 445.7 s
+against 427.8 s for the 3 471 of the previous format — comparable wall clock at a warmer rate,
+not a comparable amount of work. On a repository the size of IntelWash this is the hour named in
+the release notes, and it happens once per format change.
+
 ## Heuristic token estimates
 
 Raw character counts above are authoritative. The token point proxy is

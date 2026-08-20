@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CodeSearch.Core.Search;
 
 namespace CodeSearch.Tests;
@@ -22,6 +23,36 @@ public sealed class SearchEvaluationTests
             corpus.Cases.Count,
             corpus.Cases.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count());
         SearchEvaluationCorpus.ValidateAgainstSource(corpus, root);
+    }
+
+    [Fact]
+    public void A_corpus_without_no_answer_cases_measures_and_serialises()
+    {
+        // Every case in a corpus can legitimately have an answer — that is what a corpus written
+        // for one language looks like. The rate over an empty set used to come out NaN, which is
+        // not JSON, so `codesearch evaluate` failed at the last step after embedding every query.
+        var corpus = new SearchEvaluationCorpus(
+            1,
+            [Case("only", "a query", "src/First.cs", "First")]);
+        var observations = new List<SearchEvaluationObservation>
+        {
+            new("only", [Hit("src/First.cs", "First", 1, 10, 42)], TimeSpan.FromMilliseconds(5), null),
+        };
+
+        var metrics = SearchEvaluation.Measure(corpus, observations);
+
+        Assert.Null(metrics.NoAnswerFalsePositiveRate);
+        Assert.NotNull(metrics.PrecisionAt5);
+        Assert.Contains(
+            "\"noAnswerFalsePositiveRate\": null",
+            JsonSerializer.Serialize(
+                metrics,
+                new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                }),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -128,10 +159,10 @@ public sealed class SearchEvaluationTests
 
         var metrics = SearchEvaluation.Measure(corpus, observations);
 
-        Assert.Equal(0.3, metrics.PrecisionAt5, 6);
-        Assert.Equal(1.0, metrics.RecallAt10, 6);
-        Assert.Equal(1.5, metrics.MeanFirstRelevantRank, 6);
-        Assert.Equal(1.0, metrics.NoAnswerFalsePositiveRate, 6);
+        Assert.Equal(0.3, metrics.PrecisionAt5!.Value, 6);
+        Assert.Equal(1.0, metrics.RecallAt10!.Value, 6);
+        Assert.Equal(1.5, metrics.MeanFirstRelevantRank!.Value, 6);
+        Assert.Equal(1.0, metrics.NoAnswerFalsePositiveRate!.Value, 6);
         Assert.Equal(84, metrics.ResponseCharacters);
         Assert.Equal(21, metrics.EstimatedResponseTokens);
         Assert.Equal(14, metrics.EstimatedResponseTokensLowerBound);
@@ -186,8 +217,8 @@ public sealed class SearchEvaluationTests
 
         var metrics = SearchEvaluation.Measure(corpus, observations);
 
-        Assert.Equal(0.2, metrics.PrecisionAt5, 6);
-        Assert.Equal(1.0, metrics.RecallAt10, 6);
+        Assert.Equal(0.2, metrics.PrecisionAt5!.Value, 6);
+        Assert.Equal(1.0, metrics.RecallAt10!.Value, 6);
     }
 
     [Fact]
