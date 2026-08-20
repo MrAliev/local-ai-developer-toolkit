@@ -280,9 +280,11 @@ public static class CodeSearchTools
 
     [McpServerTool(Name = "search_code")]
     [Description("""
-        Semantic + literal search over a repository's code. C# is chunked by symbol - a hit is
-        a type or an executable member, not a file; every other language is chunked by a
-        sliding window over lines, so a hit there names the file and its line range.
+        Semantic + literal search over a repository's code. C#, TypeScript and Python are
+        chunked by symbol - a hit is a type, a member or a definition, not a file. Every other
+        language, and any region no definition covers - imports, module-level statements, the
+        gap between two functions - is chunked by a sliding window over lines, and a hit there
+        names the file and its line range instead.
         Use this INSTEAD of grep/glob as the first step for any
         "where does X live", "which code handles Y", "what already does something like Z"
         question - it answers by meaning, so it finds the right code without knowing its name,

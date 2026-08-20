@@ -225,37 +225,13 @@ public static class CodeSearchSyncCommand
                     identity,
                     generation.Identity.Id);
                 var builtOverlay = false;
-                if (!File.Exists(overlayPath))
-                {
-                    var embeddingCheckpointPath = overlayPath + ".embedding-checkpoint";
-                    var embedder = new BrokerEmbeddingClient(
-                        generation.Identity.EmbeddingModel,
-                        BrokerClientFactory.CreateDefault());
-                    var builder = new IndexBuilder(
-                        embedder,
-                        Console.Error.WriteLine,
-                        progress => ReportProgress(
-                            RepositoryIndexProgressPhase.EmbeddingOverlay,
-                            identity.WorkingRoot,
-                            progress));
-                    await builder.BuildOverlayAsync(
-                        identity.WorkingRoot,
-                        store.IndexPath(generation.Identity.Id),
-                        overlayPath,
-                        cancellationToken,
-                        new IndexBuildContext(
-                            identity.WorkingRoot,
-                            identity.HeadCommit,
-                            identity.HeadTree,
-                            identity.RepositoryId,
-                            generation.Identity.Id,
-                            identity.DirtyHash),
-                        embeddingCheckpointPath,
-                        generation.Identity.EmbeddingDimension);
-                    DeleteEmbeddingCheckpoint(embeddingCheckpointPath);
-                    builtOverlay = true;
-                }
 
+                // Semantics first here too, and for the second of the two reasons the base
+                // generation does it: a file changed on a branch has to be cut on the same
+                // boundaries as the same file in the base generation. Built the other way round,
+                // a branch would re-chunk by line window everything it touched, and the shape of
+                // a hit would depend on whether the file happened to be in an overlay.
+                SemanticIndex? worktreeSemantics = null;
                 if (!IsCurrentSemanticOverlay(
                         semanticOverlayPath,
                         identity,
@@ -277,6 +253,49 @@ public static class CodeSearchSyncCommand
                         semanticBuild.Index,
                         RuntimeIndexLayout.GetDirtyPaths(identity.WorkingRoot));
                     semanticOverlay.Save(semanticOverlayPath);
+                    worktreeSemantics = semanticBuild.Index;
+                    builtOverlay = true;
+                }
+
+                if (!File.Exists(overlayPath))
+                {
+                    // Only now, and only if the corpus overlay is actually being built: an
+                    // up-to-date semantic overlay still has to be materialised against the base
+                    // index to answer "what are this worktree's definitions", and that reads the
+                    // whole base SIDX. Doing it unconditionally would put that cost on every
+                    // sync that has nothing to do.
+                    var definitions = SymbolDefinitionCatalog.FromSemanticIndex(
+                        worktreeSemantics ?? SemanticIndexOverlay
+                            .Load(semanticOverlayPath)
+                            .Materialize(SemanticIndex.Load(
+                                store.SemanticIndexPath(generation.Identity.Id))));
+                    var embeddingCheckpointPath = overlayPath + ".embedding-checkpoint";
+                    var embedder = new BrokerEmbeddingClient(
+                        generation.Identity.EmbeddingModel,
+                        BrokerClientFactory.CreateDefault());
+                    var builder = new IndexBuilder(
+                        embedder,
+                        Console.Error.WriteLine,
+                        progress => ReportProgress(
+                            RepositoryIndexProgressPhase.EmbeddingOverlay,
+                            identity.WorkingRoot,
+                            progress),
+                        definitions);
+                    await builder.BuildOverlayAsync(
+                        identity.WorkingRoot,
+                        store.IndexPath(generation.Identity.Id),
+                        overlayPath,
+                        cancellationToken,
+                        new IndexBuildContext(
+                            identity.WorkingRoot,
+                            identity.HeadCommit,
+                            identity.HeadTree,
+                            identity.RepositoryId,
+                            generation.Identity.Id,
+                            identity.DirtyHash),
+                        embeddingCheckpointPath,
+                        generation.Identity.EmbeddingDimension);
+                    DeleteEmbeddingCheckpoint(embeddingCheckpointPath);
                     builtOverlay = true;
                 }
 

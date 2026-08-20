@@ -52,6 +52,26 @@ public sealed class GenerationPhaseOrderTests
             "Aborting on a failed adapter is the point of running semantics first.");
     }
 
+    [Fact]
+    public void The_semantic_overlay_is_built_before_the_corpus_overlay()
+    {
+        // Same invariant one level down. A file changed on a branch has to be cut on the same
+        // boundaries as the same file in the base generation, and the chunker can only do that
+        // if the worktree's definitions exist before its corpus is embedded. Built the other way
+        // round, the shape of a hit would depend on whether the file was in an overlay.
+        var source = ReadSyncCommandSource();
+        var semantic = source.IndexOf(
+            "RepositoryIndexProgressPhase.SemanticOverlay",
+            StringComparison.Ordinal);
+        var embedding = source.IndexOf("builder.BuildOverlayAsync(", StringComparison.Ordinal);
+
+        Assert.True(semantic >= 0 && embedding >= 0, "Both overlay phases must still be here.");
+        Assert.True(
+            semantic < embedding,
+            "The semantic overlay must be built before the corpus overlay, or a branch " +
+            "re-chunks by line window everything it touched.");
+    }
+
     private static string ReadSyncCommandSource()
     {
         // The test assembly's own location walks up to the repository, which is where the source

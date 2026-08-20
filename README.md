@@ -74,12 +74,22 @@ with a real body. Fields and auto-properties ride inside the type chunk rather t
 becoming vectors of their own, because a DTO with twenty properties must not become
 twenty-one of them. Generated C# is not indexed at all.
 
-Every other indexed format is chunked by a sliding window over lines — 60 lines with 12
-lines of overlap — so a hit names the file and its line range instead of a symbol. The
-window has no syntax awareness; what it does keep is exact line numbers, which is what
-makes a hit actionable. Precise navigation is a separate layer and is not limited this
-way: it parses C# and XAML directly and imports TypeScript and Python from external
-indexers. Extending symbol-level chunking to those languages is tracked separately.
+TypeScript and Python are chunked by symbol too, on the definition boundaries the external
+indexers report: one chunk per definition, carrying its real symbol and line span, with a
+definition that contains others listing its children rather than repeating their bodies.
+This depends on the indexer being installed and on it reporting a body for the definition.
+`scip-typescript` reports none for anything declared inside a function body, or for a
+declaration whose initialiser is a call — `export const X = memo(() => …)` — and those
+regions keep the window rather than being guessed at.
+
+Every other indexed format, and every region no definition covers — imports, module-level
+statements, the gap between two functions — is chunked by a sliding window over lines: 60
+lines with 12 lines of overlap. A hit there names the file and its line range instead of a
+symbol. The window has no syntax awareness; what it does keep is exact line numbers, which
+is what makes a hit actionable.
+
+Precise navigation is a separate layer: it parses C# and XAML directly and imports
+TypeScript and Python from the same external indexers.
 
 Every search hit includes an opaque `chunk_id`. Pass that value to `get_code_chunk` to
 retrieve the complete indexed source chunk. The ID is bound to the repository, immutable
