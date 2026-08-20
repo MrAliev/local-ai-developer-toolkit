@@ -41,8 +41,17 @@ public sealed record IndexBuildContext(
 public sealed class IndexBuilder(
     IEmbeddingClient embedder,
     Action<string>? log = null,
-    Action<IndexBuildProgress>? progress = null)
+    Action<IndexBuildProgress>? progress = null,
+    SymbolDefinitionCatalog? definitions = null)
 {
+    /// <summary>
+    /// Definition bodies for the tree being indexed, from the semantic phase that ran before
+    /// this one. Empty for a build with no semantic data — an overlay, a repository whose
+    /// adapters are disabled, a machine without the external indexers — and every file then
+    /// chunks the way it did before symbol-aware chunking existed.
+    /// </summary>
+    private readonly SymbolDefinitionCatalog _definitions = definitions ?? SymbolDefinitionCatalog.Empty;
+
     /// <summary>
     /// Batches are capped by total characters, not item count. Chunk sizes vary by an order of
     /// magnitude, so a fixed count either starves the GPU on small chunks or sends an oversized
@@ -403,14 +412,14 @@ public sealed class IndexBuilder(
         }
     }
 
-    private static Dictionary<string, List<Chunk>> ChunkFiles(
+    private Dictionary<string, List<Chunk>> ChunkFiles(
         string root, List<string> relPaths, CancellationToken ct)
     {
         var result = new ConcurrentDictionary<string, List<Chunk>>(StringComparer.OrdinalIgnoreCase);
 
         Parallel.ForEach(relPaths, new ParallelOptions { CancellationToken = ct }, relPath =>
         {
-            var chunker = ChunkerFactory.Resolve(relPath);
+            var chunker = ChunkerFactory.Resolve(relPath, _definitions);
             if (chunker is null)
             {
                 return;

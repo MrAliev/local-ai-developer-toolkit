@@ -1,4 +1,5 @@
 using CodeSearch.Core.Chunking;
+using CodeSearch.Core.Semantics;
 using CodeSearch.Core.Indexing;
 using System.Diagnostics;
 
@@ -61,6 +62,55 @@ public class ChunkerFactoryTests
         Assert.IsType<GenericTextChunker>(ChunkerFactory.Resolve("a.py"));
         Assert.Null(ChunkerFactory.Resolve("a.dll"));
     }
+
+    [Fact]
+    public void A_file_the_adapters_reported_definitions_for_is_cut_on_them()
+    {
+        var catalog = SymbolDefinitionCatalog.FromSemanticIndex(IndexWithDefinition("app.ts"));
+
+        Assert.IsType<SymbolAwareChunker>(ChunkerFactory.Resolve("app.ts", catalog));
+        // No definitions for this one, so it keeps the window it had before.
+        Assert.IsType<GenericTextChunker>(ChunkerFactory.Resolve("other.ts", catalog));
+        // C# is chunked by Roslyn whatever the semantic index says: it has had symbol-level
+        // chunks since long before this, and they carry more than a body span can.
+        Assert.IsType<RoslynChunker>(ChunkerFactory.Resolve("A.cs", catalog));
+        Assert.Null(ChunkerFactory.Resolve("a.dll", catalog));
+    }
+
+    [Fact]
+    public void Without_a_semantic_index_every_file_resolves_the_way_it_did_before()
+    {
+        Assert.IsType<GenericTextChunker>(
+            ChunkerFactory.Resolve("app.ts", SymbolDefinitionCatalog.Empty));
+        Assert.IsType<RoslynChunker>(
+            ChunkerFactory.Resolve("A.cs", SymbolDefinitionCatalog.Empty));
+    }
+
+    private static SemanticIndex IndexWithDefinition(string relPath) =>
+        new()
+        {
+            RepositoryId = "repository",
+            GenerationId = "generation",
+            GitTree = "tree",
+            DirtyHash = null,
+            BaseCommit = "commit",
+            IndexedAtUtc = DateTime.UnixEpoch,
+            Documents = [new SemanticDocument { RelPath = relPath, Hash = new byte[32] }],
+            Symbols = [],
+            Occurrences =
+            [
+                new SemanticOccurrence
+                {
+                    DocumentPath = relPath,
+                    Range = new SourceRange(0, 16, 0, 24),
+                    SymbolId = "symbol",
+                    Roles = SemanticOccurrenceRoles.Definition,
+                    Precision = NavigationPrecision.Precise,
+                    EnclosingRange = new SourceRange(0, 0, 3, 1),
+                },
+            ],
+            Relationships = [],
+        };
 }
 
 public class FileScannerTests : IDisposable

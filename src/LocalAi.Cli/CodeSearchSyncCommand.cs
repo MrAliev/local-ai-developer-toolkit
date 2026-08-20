@@ -1,3 +1,4 @@
+using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Semantics;
@@ -24,6 +25,19 @@ public static class CodeSearchSyncCommand
     public const string DefaultModel = "qwen3-embedding:8b-q8_0";
     public const int DefaultDimension = 4096;
     public const int CurrentNormalizationVersion = 4;
+
+    /// <summary>
+    /// Version 2 cuts adapter-covered files on their definitions instead of on a line window.
+    /// </summary>
+    /// <remarks>
+    /// Chunk boundaries are part of the generation identity, so this is not a migration: the
+    /// first sync after the upgrade rebuilds every repository's base generation from scratch.
+    /// For a corpus the size of IntelWash that is roughly 26 000 chunks, on the order of an hour
+    /// at the rate this machine embeds — a deliberate rebuild, announced in the release notes,
+    /// and it must read as one in `index_status` rather than as drift.
+    /// </remarks>
+    public const int CurrentChunkFormatVersion = 2;
+
     // Bump whenever semantic extraction changes even if the SIDX binary format does not.
     // Generations are immutable, so changing relationships without changing this value
     // would keep serving the previous semantic graph for an already indexed commit.
@@ -108,7 +122,7 @@ public static class CodeSearchSyncCommand
                 mainline.Identity.HeadTree,
                 model,
                 DefaultDimension,
-                1,
+                CurrentChunkFormatVersion,
                 CodeIndex.CurrentVersion,
                 CurrentNormalizationVersion,
                 1,
@@ -127,7 +141,7 @@ public static class CodeSearchSyncCommand
                 null,
                 model,
                 DefaultDimension,
-                1,
+                CurrentChunkFormatVersion,
                 CodeIndex.CurrentVersion,
                 RepositoryIndexState.Initializing,
                 worktrees
@@ -491,7 +505,11 @@ public static class CodeSearchSyncCommand
             var builder = new IndexBuilder(
                 embedder,
                 Console.Error.WriteLine,
-                progress);
+                progress,
+                // The definition bodies the phase above just produced. This is the whole reason
+                // it runs first: a file the adapters covered is cut on its definitions instead
+                // of on a line window, and a file they did not is cut exactly as before.
+                SymbolDefinitionCatalog.FromSemanticIndex(semanticIndex.Index));
             await builder.BuildAsync(
                 snapshot.Root,
                 workIndex,

@@ -36,6 +36,30 @@ public static class ChunkerFactory
 
     public static bool IsIndexable(string path) => Resolve(path) is not null;
 
+    /// <summary>
+    /// The chunker for a file, given what the semantic index knows about it.
+    /// </summary>
+    /// <remarks>
+    /// A file the adapters covered and reported definitions for is cut on those definitions.
+    /// Everything else resolves exactly as it did before: C# through Roslyn, the rest through the
+    /// window. A missing indexer, a disabled adapter or a language nothing parses therefore
+    /// degrades to the previous behaviour rather than failing the build — which is the rule the
+    /// whole feature is allowed to exist under.
+    /// </remarks>
+    public static IChunker? Resolve(string path, SymbolDefinitionCatalog catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        var chunker = Resolve(path);
+        if (chunker is not GenericTextChunker)
+        {
+            return chunker;
+        }
+
+        var definitions = catalog.For(path);
+        return definitions.Count > 0 ? new SymbolAwareChunker(definitions) : chunker;
+    }
+
     public static IChunker? Resolve(string path)
     {
         var fileName = Path.GetFileName(path);
