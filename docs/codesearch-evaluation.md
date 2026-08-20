@@ -158,41 +158,67 @@ against a corpus that could not produce one, and the comparison would flatter it
 The cases are not committed here because their paths belong to a repository that is not this
 one. The numbers are, which is what the acceptance criterion asked for.
 
-**The two indexes.** Before: generation `ac83250b`, chunk format 1, 3 471 chunks. After:
-generation `44cd3fb5`, chunk format 2, 6 079 chunks. Same repository, same commit, same
-embedding model.
+**The three indexes.** Chunk format 1: generation `ac83250b`, 3 471 chunks — the line window,
+everywhere. Chunk format 2: generation `44cd3fb5`, 6 079 chunks — cut on the bodies the adapters
+report. Chunk format 3: generation `84776c92`, 6 894 chunks — also cut on the declarations they
+name without reporting a body. Same repository, same commit, same embedding model, same twelve
+cases, one profile run each.
 
-| Metric | Before | After | Change |
+| Metric | Format 1 | Format 2 | Format 3 |
 |---|---:|---:|---:|
-| Precision@5 | 0.116667 | 0.116667 | 0 |
-| Recall@10 | 0.750000 | 0.750000 | 0 |
-| Mean first relevant rank | 5.500000 | 4.916667 | −0.583333 |
-| Response characters | 70 245 | 66 087 | −4 158 (−5.9%) |
-| Source lines returned | 1 426 | 1 282 | −144 (−10.1%) |
-| Chunk reads | 120 | 120 | 0 |
-| Distinct file reads per case, summed | 99 | 102 | +3 |
+| Precision@5 | 0.116667 | 0.116667 | 0.133333 |
+| Recall@10 | 0.750000 | 0.750000 | 0.750000 |
+| Mean first relevant rank | 5.500000 | 4.916667 | 4.750000 |
+| Response characters | 70 245 | 66 087 | 63 281 |
+| Source lines returned | 1 426 | 1 282 | 1 204 |
+| Chunk reads | 120 | 120 | 120 |
+| Distinct file reads per case, summed | 99 | 102 | 101 |
 
-| Shape of the returned hits | Before | After |
-|---|---:|---:|
-| Hits naming a symbol, all files | 0 of 120 (0%) | 33 of 120 (28%) |
-| Hits naming a symbol, `.ts`/`.tsx`/`.py` only | 0 of 86 (0%) | 33 of 85 (39%) |
-| Source lines spanned by those hits | 3 819 | 2 232 (−42%) |
+| Shape of the returned hits | Format 1 | Format 2 | Format 3 |
+|---|---:|---:|---:|
+| Hits naming a symbol, all files | 0 of 120 (0%) | 33 of 120 (28%) | 50 of 120 (42%) |
+| Hits naming a symbol, `.ts`/`.tsx`/`.py` only | 0 of 86 (0%) | 33 of 85 (39%) | 50 of 89 (56%) |
+| Source lines spanned by those hits | 3 819 | 2 232 | 2 186 |
 
-**Reading this honestly.** Precision and recall did not move. On this corpus the right file was
-already being found; what changed is what comes back with it. The relevant hit arrives about
-half a rank earlier, the response is 5.9% smaller in characters, and the hits in the languages
-the change touches span 42% fewer source lines — a hit is a definition instead of a
+**Reading this honestly.** Format 2 moved neither precision nor recall. On this corpus the right
+file was already being found; what changed is what comes back with it — the relevant hit arrives
+about half a rank earlier, the response is 5.9% smaller in characters, and the hits in the
+languages the change touches span 42% fewer source lines. A hit is a definition instead of a
 sixty-line window that happened to contain one.
 
-Thirty-nine percent rather than all of them, because a window is still correct for everything no
-definition covers: imports, module-level statements, the gap between two functions, and the two
-shapes `scip-typescript` reports no body for.
+Format 3 is the first of these changes to move precision at all: 0.117 to 0.133, one more
+relevant hit inside the top five across the twelve cases. That is a single hit on a twelve-case
+corpus, so it is a direction, not a measured effect size. What it does measure is coverage —
+56% of the hits in those languages now name a symbol rather than 39%, because a component
+declared as `export const X = memo(() => …)` finally has a chunk of its own — and the response
+is another 4.2% smaller in characters for it.
 
-**What it costs.** The corpus grew 75%, from 3 471 chunks to 6 079, because a definition that
-used to share a window now has its own vector. The rebuild embedded 6 079 chunks in 445.7 s
-against 427.8 s for the 3 471 of the previous format — comparable wall clock at a warmer rate,
-not a comparable amount of work. On a repository the size of IntelWash this is the hour named in
-the release notes, and it happens once per format change.
+Fifty-six percent rather than all of them, because a window is still correct for everything no
+definition covers: imports, module-level statements, the gap between two functions, and the
+declarations too small or too deeply nested to cut on.
+
+**What it costs.** The corpus grew 75% for format 2, from 3 471 chunks to 6 079, because a
+definition that used to share a window now has its own vector, and a further 13.4% for format 3,
+to 6 894. On a repository the size of IntelWash this is the hour named in the release notes, and
+it happens once per format change.
+
+Wall clock is not comparable across these three runs and is deliberately not tabulated. The
+format-1 and format-2 rebuilds embedded at about 13.6 chunks/s; the format-3 rebuild ran at 10.3
+(6 894 chunks in 671.1 s) because it shared the broker queue with another repository's base
+build, and its query pass shows the same contention (129.1 s against 101.0 s for the same twelve
+queries). That is the machine being busy, not the format being slower.
+
+**Provenance of the format-3 run.** Measured on 2026-08-20 from the feature branch, before this
+report was committed. The index was built into a throwaway runtime root rather than the machine's
+own installation, so the installed client kept its format-2 index while a build it could not read
+was measured beside it; embeddings still went `SearchService` → `BrokerEmbeddingClient` → the
+shared LocalAi FIFO broker, and no direct Ollama request was used. The corpus counts come from
+the builds themselves. The split of those chunks into symbol-named and windowed, and the source
+lines each kind covers, come from an ignored local harness that runs the committed chunker over
+the working tree without embedding anything: 2 985 of 6 079 chunks named a symbol under format 2
+against 3 966 of 6 894 under format 3, and the `.ts`/`.tsx`/`.js`/`.jsx`/`.py` source lines
+sitting inside a symbol chunk rose from 53 668 to 67 527. That harness is not a product execution
+path and is not committed.
 
 ## Heuristic token estimates
 

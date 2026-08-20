@@ -161,8 +161,112 @@ public sealed class SymbolAwareChunkerTests
         Assert.Contains(chunks, chunk => chunk.Symbol.Contains("[1/", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Infers_the_extent_of_a_declaration_that_reported_no_body()
+    {
+        // What scip-typescript hands over for Component.tsx: a body for the function declaration,
+        // and a bare name for the two whose initialiser is a call.
+        var chunks = Split("Component.tsx", Component, ComponentDefinitions());
+
+        var sidebar = chunks.Single(chunk => chunk.Symbol == "Sidebar");
+        Assert.Equal("export const Sidebar = memo(() => {", sidebar.Signature);
+        // Runs to the line before the next thing the indexer named, with the blank line after it
+        // left to the window rather than padding the chunk.
+        Assert.Equal(5, sidebar.StartLine);
+        Assert.Equal(8, sidebar.EndLine);
+        Assert.Contains("useState", sidebar.EmbedText, StringComparison.Ordinal);
+
+        // The declaration that did report a body is unaffected by any of this.
+        var helper = chunks.Single(chunk => chunk.Symbol == "helper");
+        Assert.Equal(10, helper.StartLine);
+        Assert.Equal(12, helper.EndLine);
+    }
+
+    [Fact]
+    public void Leaves_a_one_line_declaration_to_the_window()
+    {
+        // `const access = 'public' as const;` is a declaration by the indexer's reckoning and not
+        // a body by anyone's. It stays in the region it is written in.
+        var chunks = Split("Component.tsx", Component, ComponentDefinitions());
+
+        Assert.DoesNotContain(chunks, chunk => chunk.Symbol == "access");
+        Assert.Contains(chunks, chunk =>
+            chunk.Kind == ChunkKind.Text && chunk.StartLine <= 3 && chunk.EndLine >= 3);
+    }
+
+    [Fact]
+    public void Keeps_a_declaration_inside_a_reported_body_with_the_body_that_holds_it()
+    {
+        // A name the indexer reports no body for, written inside one that has a body, cannot have
+        // its extent read off the next top-level declaration. It stays in its parent's chunk.
+        var definitions = ComponentDefinitions()
+            .Append(new SymbolDefinition(new SourceRange(10, 9, 10, 14), null))
+            .ToList();
+
+        var chunks = Split("Component.tsx", Component, definitions);
+
+        Assert.DoesNotContain(chunks, chunk => chunk.Symbol.StartsWith("value", StringComparison.Ordinal));
+        var helper = chunks.Single(chunk => chunk.Symbol == "helper");
+        Assert.Equal(10, helper.StartLine);
+        Assert.Equal(12, helper.EndLine);
+    }
+
+    [Fact]
+    public void Falls_back_to_the_window_when_every_inferred_extent_is_one_line()
+    {
+        // One-line declarations and nothing else: there is no boundary worth cutting on, and the
+        // file has to chunk exactly as it did before any of this existed.
+        var content = "const a = f();\nconst b = g();\n";
+        var definitions = new List<SymbolDefinition>
+        {
+            new(new SourceRange(0, 6, 0, 7), null),
+            new(new SourceRange(1, 6, 1, 7), null),
+        };
+
+        var chunks = new SymbolAwareChunker(definitions).Split("consts.ts", content).ToList();
+        var expected = new GenericTextChunker().Split("consts.ts", content).ToList();
+
+        Assert.Equal(
+            expected.Select(chunk => (chunk.Symbol, chunk.StartLine, chunk.EndLine)),
+            chunks.Select(chunk => (chunk.Symbol, chunk.StartLine, chunk.EndLine)));
+    }
+
     private static List<Chunk> Split(string content, IReadOnlyList<SymbolDefinition> definitions) =>
-        new SymbolAwareChunker(definitions).Split("module.py", content).ToList();
+        Split("module.py", content, definitions);
+
+    private static List<Chunk> Split(
+        string relPath,
+        string content,
+        IReadOnlyList<SymbolDefinition> definitions) =>
+        new SymbolAwareChunker(definitions).Split(relPath, content).ToList();
+
+    private const string Component = """
+        import { memo, useState } from 'react';
+
+        const access = 'public' as const;
+
+        export const Sidebar = memo(() => {
+          const [open, setOpen] = useState(false);
+          return <div onClick={() => setOpen(!open)}>{access}</div>;
+        });
+
+        export function helper(value: number) {
+          return value * 2;
+        }
+        """;
+
+    /// <summary>
+    /// The two shapes scip-typescript reports no <c>enclosing_range</c> for, beside one it does.
+    /// </summary>
+    private static List<SymbolDefinition> ComponentDefinitions() =>
+    [
+        // const access = …      → line 3, no body reported
+        new(new SourceRange(2, 6, 2, 12), null),
+        // export const Sidebar = memo(…)  → line 5, no body reported
+        new(new SourceRange(4, 13, 4, 20), null),
+        // export function helper(…)       → lines 10-12
+        new(new SourceRange(9, 16, 9, 22), new SourceRange(9, 0, 11, 1)),
+    ];
 
     /// <summary>
     /// What the importer would produce for <see cref="Module"/>: a body span per definition, and
