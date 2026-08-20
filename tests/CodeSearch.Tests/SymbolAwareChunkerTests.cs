@@ -231,6 +231,48 @@ public sealed class SymbolAwareChunkerTests
             chunks.Select(chunk => (chunk.Symbol, chunk.StartLine, chunk.EndLine)));
     }
 
+    [Fact]
+    public void Cuts_the_same_file_the_same_way_every_time()
+    {
+        // An acceptance criterion of #82, and the one criterion reading the code cannot settle.
+        // A boundary that moved between two runs of the same build would change the chunk ids
+        // downstream of it, and an overlay would stop lining up with the base generation it was
+        // cut against.
+        var first = Split("Component.tsx", Component, ComponentDefinitions());
+        var second = Split("Component.tsx", Component, ComponentDefinitions());
+
+        Assert.Equal(Shape(first), Shape(second));
+    }
+
+    [Fact]
+    public void Does_not_depend_on_the_order_the_definitions_arrive_in()
+    {
+        // Occurrence order is the indexer's business, not a contract. Two runs that report the
+        // same definitions in a different order have to produce the same corpus, or a rebuild
+        // that changed nothing still invalidates every chunk id in the repository.
+        Assert.Equal(
+            Shape(Split(Module, Definitions())),
+            Shape(Split(Module, [.. Enumerable.Reverse(Definitions())])));
+
+        // The same, for the file whose boundaries are inferred rather than reported: the extent
+        // of a declaration is read off the next one, so the order they arrive in is exactly what
+        // could have leaked into the answer.
+        Assert.Equal(
+            Shape(Split("Component.tsx", Component, ComponentDefinitions())),
+            Shape(Split("Component.tsx", Component, [.. Enumerable.Reverse(ComponentDefinitions())])));
+    }
+
+    /// <summary>
+    /// Everything about a chunk that a consumer can observe, in the order the chunks came out.
+    /// Comparing symbol and lines alone would let the body of a chunk change unnoticed.
+    /// </summary>
+    private static List<(string Symbol, ChunkKind Kind, int StartLine, int EndLine, string EmbedText)>
+        Shape(IEnumerable<Chunk> chunks) =>
+        chunks
+            .Select(chunk =>
+                (chunk.Symbol, chunk.Kind, chunk.StartLine, chunk.EndLine, chunk.EmbedText))
+            .ToList();
+
     private static List<Chunk> Split(string content, IReadOnlyList<SymbolDefinition> definitions) =>
         Split("module.py", content, definitions);
 
