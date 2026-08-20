@@ -814,5 +814,10 @@ failed.
   is unbounded, and leave hang detection to `--blame-hang`, which CI already applies to
   every test project. A deadline a correct run can miss proves nothing and reports itself
   as a fault in the code under test.
+- Branch a pull request from `main`, and give it one subject. Two subjects in one branch cannot
+  be reviewed apart or reverted apart. Stacking a pull request on another one is worse than the
+  rebase it saves: GitHub closes it when its base branch is deleted on merge rather than moving
+  it to `main` — which is what happened to #91 and cost a recreated pull request. When two
+  changes touch the same file, land the first and rebase the second.
 - Keep this English README and `README.ru.md` synchronized.
 - Preserve UTF-8 without BOM and Windows CRLF line endings for repository documentation.

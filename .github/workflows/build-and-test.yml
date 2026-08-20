@@ -6,8 +6,11 @@ name: Build and test
 on:
   push:
     branches: [main]
+  # Every pull request, whatever it is based on. Filtering to main meant a pull request based on
+  # another branch was merged on a green tick it had never earned — nothing had run on it. Pull
+  # requests here are cut from main (see "Development rules"), so this costs nothing in the normal
+  # case and covers the exception instead of silently skipping it.
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
