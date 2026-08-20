@@ -6,6 +6,18 @@ namespace LocalAi.Installer.Core.Tests;
 
 public sealed class SystemProcessRunnerTests
 {
+    /// <summary>
+    /// The budget a test passes when it expects the child to finish.
+    /// </summary>
+    /// <remarks>
+    /// It is there to stop a hung process, not to time how fast PowerShell starts. Ten seconds
+    /// looked generous until a loaded CI runner spent all of them before the script ran its first
+    /// line: the run came back with no exit code, and the failure read as a broken argument list
+    /// rather than as a slow machine. Nothing here measures speed, so the budget can be far larger
+    /// than any honest run needs — a genuinely stuck child still fails the test, just later.
+    /// </remarks>
+    private static readonly TimeSpan Completion = TimeSpan.FromMinutes(2);
+
     [Fact]
     public async Task Preserves_arguments_without_building_a_shell_command()
     {
@@ -36,7 +48,7 @@ public sealed class SystemProcessRunnerTests
             var result = await runner.RunAsync(
                 executable,
                 arguments,
-                TimeSpan.FromSeconds(10),
+                Completion,
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(0, result.ExitCode);
@@ -70,7 +82,7 @@ public sealed class SystemProcessRunnerTests
             var result = await runner.RunAsync(
                 scriptPath,
                 ["alpha beta", "semi;colon"],
-                TimeSpan.FromSeconds(10),
+                Completion,
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(0, result.ExitCode);
@@ -185,7 +197,7 @@ public sealed class SystemProcessRunnerTests
             var result = await runner.RunAsync(
                 ResolvePowerShell(),
                 PowerShellFileArguments(scriptPath),
-                TimeSpan.FromSeconds(10),
+                Completion,
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(0, result.ExitCode);
@@ -218,7 +230,7 @@ public sealed class SystemProcessRunnerTests
                 ResolvePowerShell(),
                 PowerShellFileArguments(scriptPath),
                 outputPath,
-                TimeSpan.FromSeconds(10),
+                Completion,
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(0, result.ExitCode);
