@@ -53,6 +53,22 @@ public sealed class EmbeddingCheckpointTests : IDisposable
             progress,
             item => item.ProcessedChunks == interrupted.CompletedInputs.Count &&
                     item.TotalChunks == result.ChunksEmbedded);
+
+        // Every record, not just the one the restore emits. `RepositoryIndexProgressStore`
+        // rejects a count above its own total or a negative estimate, and a resumed build used
+        // to report both: the counter starts at what the checkpoint restored and was compared
+        // against what was left to embed, so it read 21 075 of 20 980 with minus a minute to go.
+        // The store threw, and the build died after every chunk of it had already been embedded —
+        // on a repository where that is half an hour of GPU time thrown away at the finish line.
+        Assert.All(progress, item =>
+        {
+            Assert.InRange(item.ProcessedChunks, 0, item.TotalChunks);
+            Assert.True(
+                item.EstimatedRemaining is null || item.EstimatedRemaining >= TimeSpan.Zero,
+                $"Estimated remaining was {item.EstimatedRemaining}.");
+        });
+        Assert.Equal(result.ChunksEmbedded, progress[^1].ProcessedChunks);
+        Assert.Equal(result.ChunksEmbedded, progress[^1].TotalChunks);
         Assert.Equal(result.ChunkCount, CodeIndex.Load(indexPath).Chunks.Count);
     }
 
