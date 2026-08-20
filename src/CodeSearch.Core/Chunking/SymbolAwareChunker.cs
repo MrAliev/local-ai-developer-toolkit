@@ -293,10 +293,25 @@ public sealed class SymbolAwareChunker : IChunker
     /// before the next thing the indexer named, and trailing blank lines go back to the window
     /// rather than padding the chunk. Two rules keep that honest.
     ///
-    /// A declaration inside a reported body is skipped. Its extent cannot be read off the next
-    /// top-level declaration, and it is already inside the chunk of the definition that holds it.
-    /// (What such a declaration would need instead is its own boundary and a name composed from
-    /// its parent — the nested-definition case, deliberately still open.)
+    /// A declaration inside a reported body is skipped, and that is a decision rather than a gap
+    /// left for later. scip-typescript gives such a declaration <c>local N</c> — no name in the
+    /// id, no body span — so the only thing left to identify it by is the hover string the
+    /// indexer renders for it. Measured on the same React repository, that string says
+    /// <c>(parameter)</c> 6 559 times, <c>var … : any</c> 3 992 times, <c>var</c> of some other
+    /// type 2 678 times and <c>(property)</c> 910 times. It says <c>function</c>, <c>class</c> or
+    /// <c>interface</c> exactly never; the 1 085 that are genuinely definitions read as
+    /// <c>var handleGoBack: () =&gt; void</c>, and their median extent is five lines.
+    ///
+    /// Cutting on those would take 7 866 lines out of the components that contain them and leave
+    /// each parent a table of contents where its body used to be — the opposite of what giving a
+    /// declaration its own chunk achieved above, because here the parent is already named and
+    /// already answers for the handler inside it. And the rule would have to read a presentation
+    /// string to do it, which cannot tell a nested function from a variable holding one and finds
+    /// nothing at all in a repository whose locals infer to <c>any</c>.
+    ///
+    /// What would change the answer is a corpus where nested <c>function</c> and <c>class</c>
+    /// statements are common: those arrive with an unambiguous hover, and the rule for them would
+    /// be the narrow one this measurement could not justify writing.
     ///
     /// A declaration that ends on the line it starts on is skipped too. One line is not a body,
     /// and the trade was measured rather than assumed: on the same repository 487 of the 1 222
