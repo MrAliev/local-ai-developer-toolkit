@@ -772,6 +772,7 @@ failed.
 |---|---|
 | `src/LocalAi.Contracts` | Broker, index, and repository wire contracts. |
 | `src/LocalAi.Broker` | Durable machine-wide FIFO and exclusive Ollama transport. |
+| `src/LocalAi.Broker.Core` | The queue, the runtime ACL bootstrap, and everything the client shares with the broker process. |
 | `src/LocalAi.Broker.Client` | Client and broker-process integration. |
 | `src/LocalAi.Launcher` | Stable tool dispatch and atomic immutable-version activation. |
 | `src/LocalAi.Repository` | Repository identity, manifest, and worktree state. |
@@ -781,6 +782,9 @@ failed.
 | `src/CodeSearch.Mcp` | Stdio MCP server exposing CodeSearch operations. |
 | `src/LocalLm.Core` | Local-model task helpers, image metadata, and token estimates. |
 | `src/LocalLm.Mcp` | Stdio MCP server exposing LocalLm operations. |
+| `src/LocalAi.Installer` | The GUI installer: system check, prerequisites, package, models, residency, client registration. |
+| `src/LocalAi.Installer.Core` | What the installer does rather than shows — signature verification, layout leases, dependencies, agent instruction blocks. |
+| `src/LocalAi.ReleaseSigner` | Packing, signing and publishing a release, and verifying a published manifest. |
 | `tests/*` | Unit and integration coverage for all toolkit components. |
 
 ## Development rules

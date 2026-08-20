@@ -95,7 +95,7 @@ public static class ManagedInstructionBlock
         read-only check first:
 
         ```
-        localai repo status
+        localai-launcher.exe run localai repo status --root <repository>
         ```
 
         If it is not connected, offer the whole kit — the immutable base generation, branch
