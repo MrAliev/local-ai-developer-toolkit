@@ -80,12 +80,16 @@ public sealed class AnonymousReleaseFeedTests : IDisposable
             "https://objects.githubusercontent.com/package");
         handler.RespondBytes("https://objects.githubusercontent.com/package", payload);
         using var feed = new AnonymousReleaseFeed(new HttpClient(handler));
-        var seen = new List<long>();
+        // Deliberately not Progress<T>: that one posts its callbacks to a synchronization
+        // context and delivers them whenever the scheduler gets to it, so this assertion
+        // passed on a developer machine and failed on a CI runner with an empty list. A
+        // test must not depend on how busy the machine is.
+        var seen = new SynchronousProgress();
 
         var path = await feed.DownloadPackageAsync(
             "0.1.45",
             root,
-            new Progress<long>(seen.Add),
+            seen,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(payload, await File.ReadAllBytesAsync(
@@ -93,7 +97,10 @@ public sealed class AnonymousReleaseFeedTests : IDisposable
             TestContext.Current.CancellationToken));
         // Progress is observed from the transfer itself rather than polled off a growing
         // file, so the last report is the real total rather than whatever the poll caught.
-        Assert.Equal(payload.Length, seen.LastOrDefault());
+        Assert.Equal(payload.Length, seen.Reports[^1]);
+        Assert.True(
+            seen.Reports.Zip(seen.Reports.Skip(1)).All(pair => pair.First <= pair.Second),
+            "progress must only ever grow");
     }
 
     /// <summary>
@@ -168,6 +175,13 @@ public sealed class AnonymousReleaseFeedTests : IDisposable
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private sealed class SynchronousProgress : IProgress<long>
+    {
+        public List<long> Reports { get; } = [];
+
+        public void Report(long value) => Reports.Add(value);
     }
 
     private sealed class ScriptedHandler : HttpMessageHandler
