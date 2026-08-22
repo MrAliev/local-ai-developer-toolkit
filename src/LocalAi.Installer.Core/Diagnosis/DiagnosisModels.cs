@@ -142,6 +142,7 @@ public sealed record EnvironmentDiagnosis
         DependencySnapshot winGet,
         DependencySnapshot git,
         DependencySnapshot gitHubCli,
+        DependencySnapshot gitHubSignIn,
         DependencySnapshot ollama,
         DependencySnapshot dotNetSdk,
         DependencySnapshot nodeJs,
@@ -160,6 +161,7 @@ public sealed record EnvironmentDiagnosis
         WinGet = winGet;
         Git = git;
         GitHubCli = gitHubCli;
+        GitHubSignIn = gitHubSignIn;
         Ollama = ollama;
         DotNetSdk = dotNetSdk;
         NodeJs = nodeJs;
@@ -190,6 +192,19 @@ public sealed record EnvironmentDiagnosis
     /// plainly worked. It now travels with the rest of the diagnosis.
     /// </summary>
     public DependencySnapshot GitHubCli { get; }
+
+    /// <summary>
+    /// Whether that CLI is signed in — a separate fact from whether it exists, and the one
+    /// that actually decides whether this machine can read the release.
+    ///
+    /// Installing the CLI is something the wizard can do; signing in is not, because
+    /// <c>gh auth login</c> is interactive and the installer deliberately never handles a
+    /// token. Reporting only the executable therefore produced the worst possible first run
+    /// on a clean machine: every prerequisite green, the package step failing with "could not
+    /// determine the newest release", and nothing anywhere saying that one command in a
+    /// terminal was all that was missing.
+    /// </summary>
+    public DependencySnapshot GitHubSignIn { get; }
     public DependencySnapshot Ollama { get; }
     public DependencySnapshot DotNetSdk { get; }
     public DependencySnapshot NodeJs { get; }

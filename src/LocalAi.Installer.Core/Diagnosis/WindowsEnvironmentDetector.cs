@@ -15,6 +15,11 @@ public sealed class WindowsEnvironmentDetector(
 {
     private static readonly TimeSpan VersionProbeTimeout = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// The sign-in probe talks to GitHub, so five seconds is the wrong budget for it.
+    /// </summary>
+    private static readonly TimeSpan SignInProbeTimeout = TimeSpan.FromSeconds(20);
+
     public async Task<EnvironmentDiagnosis> DetectAsync(
         CancellationToken cancellationToken)
     {
@@ -58,6 +63,8 @@ public sealed class WindowsEnvironmentDetector(
                 "gh.exe",
                 cancellationToken)
             .ConfigureAwait(false);
+        var gitHubSignIn = await DetectGitHubSignInAsync(gitHubCli, cancellationToken)
+            .ConfigureAwait(false);
         var ollama = await DetectOllamaAsync(cancellationToken).ConfigureAwait(false);
         var dotNetSdk = await DetectVersionedCommandDependencyAsync(
                 "DotNetSdk",
@@ -65,10 +72,16 @@ public sealed class WindowsEnvironmentDetector(
                 "10",
                 cancellationToken)
             .ConfigureAwait(false);
-        var nodeJs = await DetectVersionedCommandDependencyAsync(
+        // A floor, not an exact version. Node 20 is what the installer offers to install,
+        // because that is the line this product is tested against — but demanding exactly it
+        // told everyone already running 20's successors that they had no Node at all, and
+        // then offered to install a second one beside the newer one they were using. PATH
+        // decides which of the two answers afterwards, so the machine ends up with two
+        // runtimes and the check still says "not found".
+        var nodeJs = await DetectMinimumVersionCommandDependencyAsync(
                 "NodeJs",
                 "node.exe",
-                "20",
+                new Version(20, 0),
                 cancellationToken)
             .ConfigureAwait(false);
         var npm = await DetectCommandDependencyAsync(
@@ -120,6 +133,7 @@ public sealed class WindowsEnvironmentDetector(
             winGet,
             git,
             gitHubCli,
+            gitHubSignIn,
             ollama,
             dotNetSdk,
             nodeJs,
@@ -131,6 +145,102 @@ public sealed class WindowsEnvironmentDetector(
             existing,
             agents,
             unsupportedReasons);
+    }
+
+    /// <summary>
+    /// Asks the GitHub CLI whether it is signed in, and never asks anything else.
+    ///
+    /// <c>gh auth status</c> exits non-zero when no account is configured for a host, and it
+    /// prints the account it found otherwise. Its output carries a host and a user name, so
+    /// only the first line is kept: the rest is scopes and token provenance, and a diagnosis
+    /// page has no business reproducing those.
+    ///
+    /// This probe contacts GitHub, so it gets its own, longer budget than a <c>--version</c>
+    /// call — and a probe that times out is reported as unknown rather than as signed out. A
+    /// slow network must not tell someone to run a command they have already run.
+    /// </summary>
+    private async Task<DependencySnapshot> DetectGitHubSignInAsync(
+        DependencySnapshot gitHubCli,
+        CancellationToken cancellationToken)
+    {
+        const string name = "GitHubSignIn";
+        if (gitHubCli.State != DependencyState.Detected ||
+            gitHubCli.ExecutablePath is not { Length: > 0 } executablePath)
+        {
+            return new DependencySnapshot(
+                name,
+                DependencyState.NotFound,
+                null,
+                null,
+                "The GitHub CLI is not installed, so no sign-in could be checked.");
+        }
+
+        try
+        {
+            var result = await processRunner.RunAsync(
+                    executablePath,
+                    ["auth", "status"],
+                    SignInProbeTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (result.TimedOut || result.Cancelled)
+            {
+                return new DependencySnapshot(
+                    name,
+                    DependencyState.Failed,
+                    executablePath,
+                    null,
+                    "The sign-in check did not finish, so it is unknown.");
+            }
+
+            if (result.ExitCode == 0)
+            {
+                return new DependencySnapshot(
+                    name,
+                    DependencyState.Detected,
+                    executablePath,
+                    FirstLine(result.StandardOutput, result.StandardError),
+                    null);
+            }
+
+            return new DependencySnapshot(
+                name,
+                DependencyState.NotFound,
+                executablePath,
+                null,
+                "Not signed in. Run 'gh auth login' in a terminal, then check the release again.");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+            System.ComponentModel.Win32Exception)
+        {
+            return new DependencySnapshot(
+                name,
+                DependencyState.Failed,
+                executablePath,
+                null,
+                exception.Message);
+        }
+    }
+
+    private static string? FirstLine(string standardOutput, string standardError)
+    {
+        var text = string.IsNullOrWhiteSpace(standardOutput) ? standardError : standardOutput;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        foreach (var line in text.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length > 0)
+            {
+                return trimmed;
+            }
+        }
+
+        return null;
     }
 
     private async Task<DependencySnapshot> DetectCommandDependencyAsync(
@@ -245,10 +355,17 @@ public sealed class WindowsEnvironmentDetector(
             return snapshot;
         }
 
+        // The leading "v" is part of the pattern, not something to skip over.
+        //
+        // Without it there is no word boundary before the digits of `node --version`'s
+        // "v20.20.2", so the match started after the first dot and read the version as
+        // "20.2" — right by luck. On "v24.4.1" the same accident reads "4.1" and rejects a
+        // perfectly good runtime. Nothing caught it because the only test that fed this a
+        // v-prefixed string expected a rejection and got one, for the wrong reason.
         var match = Regex.Match(
             snapshot.Version ?? string.Empty,
-            @"\b([0-9]+(?:\.[0-9]+){1,3})\b",
-            RegexOptions.CultureInvariant);
+            @"\b(?:v)?([0-9]+(?:\.[0-9]+){1,3})\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         var compatible = match.Success &&
             Version.TryParse(match.Groups[1].Value, out var detected) &&
             detected >= minimumVersion;
@@ -259,8 +376,15 @@ public sealed class WindowsEnvironmentDetector(
                 DependencyState.Failed,
                 snapshot.ExecutablePath,
                 snapshot.Version,
-                $"Version {minimumVersion.Major}.{minimumVersion.Minor} or newer is required.");
+                // "Version 20 or newer", not "Version 20.0 or newer": the trailing zero
+                // reads as a precision this floor does not have, and 20.1 satisfies it.
+                $"Version {Describe(minimumVersion)} or newer is required.");
     }
+
+    private static string Describe(Version version) =>
+        version.Minor == 0 && version.Build <= 0
+            ? version.Major.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : version.ToString();
 
     private async Task<DependencySnapshot> DetectOllamaAsync(
         CancellationToken cancellationToken)

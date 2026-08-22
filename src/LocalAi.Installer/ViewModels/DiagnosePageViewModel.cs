@@ -13,6 +13,7 @@ public sealed class DiagnosePageViewModel : ObservableObject
     private bool isSupported;
     private string? unsupportedReason;
     private bool hasUsableAdapter;
+    private bool hasGitHubSignIn;
     private bool isChecking = true;
 
     public ObservableCollection<EnvironmentCheck> Checks { get; } = [];
@@ -61,6 +62,17 @@ public sealed class DiagnosePageViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Drives the hint on the package page. A missing sign-in never blocks installation —
+    /// prerequisites and client integration are still worth applying — but it does decide
+    /// whether the release can be read at all.
+    /// </summary>
+    public bool HasGitHubSignIn
+    {
+        get => hasGitHubSignIn;
+        private set => SetProperty(ref hasGitHubSignIn, value);
+    }
+
+    /// <summary>
     /// Blocked while the check runs: continuing on results that are not in yet would show
     /// the next pages an environment nobody has looked at.
     /// </summary>
@@ -94,6 +106,19 @@ public sealed class DiagnosePageViewModel : ObservableObject
         Checks.Add(Describe(
             diagnosis.GitHubCli,
             "Reads the private release repository through your existing 'gh auth login'."));
+
+        // Its own line, and a warning rather than "not found": the CLI can be installed from
+        // the next page, the sign-in cannot. Someone whose package step is about to fail
+        // needs to read that here, where the wizard is still describing the machine, not two
+        // pages later as "could not determine the newest release".
+        HasGitHubSignIn = diagnosis.GitHubSignIn.State == DependencyState.Detected;
+        Checks.Add(new EnvironmentCheck(
+            "GitHub sign-in",
+            HasGitHubSignIn ? CheckStatus.Ok : CheckStatus.Warning,
+            HasGitHubSignIn
+                ? diagnosis.GitHubSignIn.Version ?? "signed in"
+                : diagnosis.GitHubSignIn.Reason ??
+                    "Not signed in. Run 'gh auth login' in a terminal."));
         Checks.Add(Describe(
             diagnosis.Ollama,
             "Runs the local models."));

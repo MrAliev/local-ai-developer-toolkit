@@ -1,10 +1,11 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO.Compression;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Abstractions;
+using LocalAi.Installer.Core.Models;
 using LocalAi.Installer.Core.Releases;
 
 namespace LocalAi.ReleaseSigner;
@@ -30,6 +31,7 @@ internal static class Program
             return args.FirstOrDefault() switch
             {
                 "pack" => Pack(Args.Parse(args.Skip(1))),
+                "models" => Models(Args.Parse(args.Skip(1))).GetAwaiter().GetResult(),
                 "sign" => Sign(Args.Parse(args.Skip(1))),
                 "verify" => Verify(Args.Parse(args.Skip(1))),
                 "verify-package" => VerifyPackage(Args.Parse(args.Skip(1))).GetAwaiter().GetResult(),
@@ -53,9 +55,12 @@ internal static class Program
                                           --version-directory <name>
                                           [--model-catalog-version <name>] --out <zip>
 
+              localai-release-signer models --out <file>
+
               localai-release-signer sign --package <file> --package-uri <https url>
                                           --release-version <1.2.3> --version-directory <name>
-                                          [--model-catalog-version <name>] [--models <file>]
+                                          [--model-catalog-version <name>]
+                                          (--models <file> | --no-models)
                                           [--require-authenticode] [--private-key <file>]
                                           --out <directory>
 
@@ -69,6 +74,11 @@ internal static class Program
             builds, signs, verifies that the manifest describes this release, and then tags and
             publishes. The two halves are separate invocations because the second one is not
             reversible.
+
+            `models` reads the download size of every catalogue model from the public model
+            registry and writes the list `sign` embeds in the manifest. The installer installs
+            only models the signed manifest names, so `sign` demands that list explicitly:
+            pass --models, or --no-models to publish a release that installs none on purpose.
 
             The private key defaults to
             %LOCALAPPDATA%\LocalAi\release-signing\release-signing-private.pkcs8.der.
@@ -149,6 +159,29 @@ internal static class Program
             $"\"ProtocolVersion\":{BrokerCompatibilityContract.ProtocolVersion.ToString(CultureInfo.InvariantCulture)}," +
             $"\"BuildCompatibilityId\":{JsonSerializer.Serialize(BrokerCompatibilityContract.BuildCompatibilityId)}}}");
 
+    /// <summary>
+    /// Writes the model list for a release, sized from the public registry at this moment.
+    /// </summary>
+    private static async Task<int> Models(Args args)
+    {
+        var output = Path.GetFullPath(args.Require("out"));
+        using var registry = new OllamaRegistryClient(TimeSpan.FromSeconds(30));
+        var entries = await ReleaseModelList.BuildAsync(registry);
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        await File.WriteAllTextAsync(output, ReleaseModelList.Render(entries));
+
+        Console.WriteLine($"models  : {output}");
+        Console.WriteLine($"entries : {entries.Count}");
+        foreach (var group in entries.GroupBy(entry => entry.Name, StringComparer.Ordinal))
+        {
+            Console.WriteLine(
+                $"  {group.Key}: {group.First().DownloadSize / (1024d * 1024 * 1024):N1} GB, " +
+                $"{group.Count()} context sizes");
+        }
+
+        return 0;
+    }
+
     private static int Sign(Args args)
     {
         var packagePath = args.Require("package");
@@ -170,7 +203,7 @@ internal static class Program
             // The verifier accepts upper-case hex only.
             packageSha256: Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(packagePath))),
             requiresAuthenticode: args.Flag("require-authenticode"),
-            models: ReadModels(args.Optional("models")));
+            models: ReadModels(args.Optional("models"), args.Flag("no-models")));
 
         // Throws if any field violates the manifest contract, so a bad release fails here
         // rather than on the user's machine.
@@ -247,21 +280,51 @@ internal static class Program
             Task.FromResult<Stream>(File.OpenRead(path));
     }
 
-    private static IReadOnlyList<ManifestModel> ReadModels(string? path)
+    /// <summary>
+    /// The signed model list, and a refusal when nobody said which one.
+    ///
+    /// This used to default to an empty list, which is a valid manifest and a useless release:
+    /// the installer installs only what the manifest names, so an omitted argument produced a
+    /// release that silently installs no model at all. It stayed omitted for sixteen releases.
+    /// An empty list is still publishable — but only by saying so.
+    /// </summary>
+    private static IReadOnlyList<ManifestModel> ReadModels(string? path, bool noModels)
     {
         if (path is null)
         {
+            if (!noModels)
+            {
+                throw new InvalidOperationException(
+                    "Missing required option --models. The installer installs only models the " +
+                    "signed manifest names, so a release signed without the list installs " +
+                    "none. Generate it with 'localai-release-signer models --out <file>', or " +
+                    "pass --no-models to publish a release that installs none on purpose.");
+            }
+
             return [];
         }
 
+        if (noModels)
+        {
+            throw new InvalidOperationException(
+                "--models and --no-models contradict each other.");
+        }
+
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
-        return document.RootElement.EnumerateArray()
+        var models = document.RootElement.EnumerateArray()
             .Select(element => new ManifestModel(
                 element.GetProperty("Name").GetString()!,
                 element.GetProperty("ContextTokens").GetInt32(),
                 element.GetProperty("DownloadSize").GetInt64(),
                 element.GetProperty("EstimatedVramBytes").GetInt64()))
             .ToArray();
+        if (models.Length == 0)
+        {
+            throw new InvalidOperationException(
+                $"The model list at {path} is empty. Pass --no-models if that is deliberate.");
+        }
+
+        return models;
     }
 
     /// <summary>

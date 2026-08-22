@@ -322,10 +322,33 @@ being downloaded and left unusable. Anything downloaded is then preflighted, so 
 cannot load fully resident is reported rather than silently accepted.
 
 Because the selection is manifest-driven, a release published without a model list installs
-no models at all. Pass `--models` when signing.
+no models at all — and that is exactly what shipped from 0.1.29 to 0.1.44, because `--models`
+was optional and the publish script never passed it. The list is now generated per release
+from the routing catalogue and the public registry, and signing demands it:
 
-**Residency policy.** The video-memory page writes `%LOCALAPPDATA%\LocalAi\policy.json`.
-Relaxing it is deliberate and stays visible in the run report.
+```powershell
+localai-release-signer models --out publish\release\release-models.json
+localai-release-signer sign --models publish\release\release-models.json ...
+```
+
+`sign` refuses to run without `--models` (or an explicit `--no-models`), `release --publish`
+refuses a manifest whose model list is empty, and the wizard now reports a run that installed
+no model as a failure rather than as a line in the log. Sizes are read from the registry at
+signing time rather than committed here: a tag republished with different quantisation keeps
+its name, so a size in the source tree goes stale without anyone noticing.
+
+**Residency policy.** The video-memory page writes `%LOCALAPPDATA%\LocalAi\policy.json` —
+but only when LocalAi is installed. That write creates its parent directory with inherited
+permissions, and the layout lease refuses such a root without mutating it, so a run that
+failed before installing anything used to leave behind a directory that made every later
+installation refuse itself with "the directory still inherits access rules". Relaxing the
+policy is deliberate and stays visible in the run report.
+
+**GitHub sign-in.** The system check reports whether `gh` is signed in as a line of its own,
+separate from whether the executable exists. The wizard can install the CLI and cannot sign
+in for anyone — `gh auth login` is interactive and the installer never handles a token — so a
+machine that is merely signed out would otherwise pass every prerequisite and fail at the
+package step with a message about resolving releases.
 
 ## Build and test
 
@@ -451,6 +474,14 @@ localai-release-signer pack `
     --out publish\release\localai-package.zip
 ```
 
+Build the model list the manifest will carry. Sizes come from the public model registry,
+so this step needs the network, and it fails rather than skipping a tag it could not
+size:
+
+```powershell
+localai-release-signer models --out publish\release\release-models.json
+```
+
 Then sign it with `localai-release-signer`. It builds the manifest through the same
 canonical serializer the verifier uses, normalises the signature to the canonical low-S
 form the verifier requires, and re-verifies the result before it can be published:
@@ -461,8 +492,13 @@ localai-release-signer sign `
     --package-uri https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/0.1.22/localai-package.zip `
     --release-version 0.1.22 `
     --version-directory d9c52d2 `
+    --models publish\release\release-models.json `
     --out publish\release
 ```
+
+`--models` is not optional. A release signed without it installs no model at all, so
+the signer refuses to run unless the list is supplied or `--no-models` states that the
+omission is deliberate.
 
 Before publishing, run the finished artifacts through the installer's own package verifier.
 This exercises the archive inspection, extraction and metadata comparison an installer
@@ -487,9 +523,34 @@ package. Field rules worth knowing before a release fails validation: `ReleaseVe
 strict semver with **no leading `v`**, `PackageSha256` is **upper-case** hex, and
 `PackageUri` must be `https` without user info or a fragment.
 
-Authenticode is a separate and optional mechanism: leave `--require-authenticode` off and
-the installer skips executable trust checks entirely. Signed binaries are only needed to
-avoid the SmartScreen prompt on machines other than the build machine.
+### Authenticode: two separate things
+
+Authenticode appears twice in this project, at different layers, and they are easy to
+confuse.
+
+**The installer executable.** `LocalAi.Installer.exe` is published unsigned. It is the file
+a person downloads and double-clicks, so it is the one Windows judges: an unsigned
+executable carrying the mark of the web produces the full-screen "Windows protected your
+PC" prompt, which is dismissed through *More info -> Run anyway*. Signing this file is the
+only thing that removes that prompt; nothing inside the release affects it. Until there is
+a certificate, `release --publish` prints the installer's SHA-256 so whoever passes the file
+on has something for the recipient to compare against.
+
+**The files inside the package.** `RequiresAuthenticode` in the signed manifest is a
+different check, performed by the installer rather than by Windows: with it set, every
+`.exe` and `.dll` extracted from the package must be signed by the publisher named in
+`AuthenticodePublisherPolicy`, and any file that is not fails the installation. That policy
+is currently a placeholder — subject `CN=LocalAi` and a SHA-256 of sixty-four zeroes — so
+passing `--require-authenticode` today would refuse every install rather than harden one.
+Replace both values with the real signer's distinguished name and the SHA-256 of its
+SubjectPublicKeyInfo (not the certificate thumbprint) before turning the flag on.
+
+**Order, when a certificate exists.** Sign the artifacts before packing, never after:
+`pack` hashes the archive and `sign` hashes the package, so signing a binary afterwards
+invalidates both. The sequence is publish, `signtool` over `publish\artifacts` and over
+`LocalAi.Installer.exe`, then `pack`, `models`, `sign`, `verify-package`. Always
+countersign with a timestamp (`signtool /tr`), or every signature stops validating the day
+the certificate expires.
 
 ### Immutable versions and atomic activation
 

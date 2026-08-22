@@ -262,6 +262,12 @@ public sealed class InstallerExecutionPlanFactoryTests : IDisposable
                 "2.97",
                 null),
             new DependencySnapshot(
+                "GitHubSignIn",
+                DependencyState.Detected,
+                @"C:\Program Files\GitHub CLI\gh.exe",
+                "github.com",
+                null),
+            new DependencySnapshot(
                 "Ollama",
                 DependencyState.NotFound,
                 null,

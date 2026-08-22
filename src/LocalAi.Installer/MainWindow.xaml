@@ -209,6 +209,11 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
+                        <TextBlock Text="{Binding Package.SignInHint}"
+                                   Style="{StaticResource WarningText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,12"
+                                   Visibility="{Binding Package.HasSignInHint, Converter={StaticResource BoolToVisibility}}" />
                         <TextBlock Text="Release tag" />
                         <TextBox Text="{Binding Package.ReleaseVersion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  Width="280" Height="24" HorizontalAlignment="Left" Margin="0,4,0,8" />

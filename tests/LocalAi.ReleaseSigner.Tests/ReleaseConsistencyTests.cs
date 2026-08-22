@@ -93,7 +93,13 @@ public sealed class ReleaseConsistencyTests
         Assert.Equal(
             ReleaseConsistency.ExpectedPackageUri(ReleaseVersion.Parse("0.1.35")),
             manifest.PackageUri);
-        Assert.Empty(ReleaseConsistency.Check(manifest, ReleaseVersion.Parse("0.1.35"), Commit));
+        // This document is also the record of the defect: 0.1.35 was published with an empty
+        // model list, like every release from 0.1.29 to 0.1.44, so the installer set up all
+        // the binaries and not one model. The consistency check now says so.
+        Assert.Equal(
+            ["The manifest carries no models"],
+            ReleaseConsistency.Check(manifest, ReleaseVersion.Parse("0.1.35"), Commit)
+                .Select(problem => problem.Split(',')[0]));
     }
 
     /// <summary>
@@ -108,15 +114,38 @@ public sealed class ReleaseConsistencyTests
             Published.Replace("\"Models\":[]", "\"Models\":[],\"Signed\":true", StringComparison.Ordinal)));
     }
 
+    /// <summary>
+    /// The one field that is wrong by omission rather than by disagreement, and the reason it
+    /// went unnoticed for sixteen releases: an empty model list contradicts nothing, verifies
+    /// correctly and publishes cleanly. It just installs no model.
+    /// </summary>
+    [Fact]
+    public void A_manifest_without_models_stops_the_release()
+    {
+        var problems = ReleaseConsistency.Check(
+            Manifest("0.1.35", "cfa6449df663", "0.1.35", models: []),
+            ReleaseVersion.Parse("0.1.35"),
+            Commit);
+
+        Assert.Contains(
+            problems,
+            problem => problem.Contains("carries no models", StringComparison.Ordinal));
+    }
+
     private const string Published =
         """
         {"SchemaVersion":1,"ReleaseVersion":"0.1.35","VersionDirectory":"cfa6449df663","ModelCatalogVersion":"1","ProtocolVersion":1,"BuildCompatibilityId":"localai-broker-v1","PackageUri":"https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/0.1.35/localai-package.zip","PackageSize":235178344,"PackageSha256":"CD8909A6DD901D1E6ABF7008BF464D37A32ADB8B90B1C2E12F668E1F12B68A0E","RequiresAuthenticode":false,"Models":[]}
         """;
 
+    /// <summary>
+    /// Carries a model by default, because a release without one is its own problem and would
+    /// otherwise be reported alongside every version disagreement these tests are about.
+    /// </summary>
     private static ReleaseManifest Manifest(
         string releaseVersion,
         string versionDirectory,
-        string packageUriVersion) =>
+        string packageUriVersion,
+        IReadOnlyList<ManifestModel>? models = null) =>
         new(
             schemaVersion: 1,
             releaseVersion: releaseVersion,
@@ -129,5 +158,5 @@ public sealed class ReleaseConsistencyTests
             packageSize: 1024,
             packageSha256: new string('A', 64),
             requiresAuthenticode: false,
-            models: []);
+            models: models ?? [new ManifestModel("qwen3-embedding:8b-q8_0", 8192, 1024, 1024)]);
 }
