@@ -251,13 +251,14 @@ public sealed class ReleaseCommand
             "publish",
             "LocalAi.Installer",
             "LocalAi.Installer.exe");
+        var hash = InstallerHash(installer);
         await RunAsync(
             "gh",
             [
                 "release", "create", version.ToString(),
                 "--target", head,
                 "--title", $"LocalAi {version}",
-                "--notes-file", ReleaseNotes.EnglishPath(_repositoryRoot, version),
+                "--notes-file", await ReleaseBodyAsync(version, hash, cancellationToken),
                 Path.Combine(releaseDirectory, "localai-package.zip"),
                 Path.Combine(releaseDirectory, "release-manifest.json"),
                 Path.Combine(releaseDirectory, "release-manifest.sig"),
@@ -267,14 +268,7 @@ public sealed class ReleaseCommand
             cancellationToken);
 
         _output.WriteLine($"Published {version} at {head[..12]}.");
-
-        // The package has a signed manifest to prove what it is; the installer that downloads
-        // it has nothing. It is not Authenticode-signed, so Windows shows the whole
-        // "unrecognised app" screen and offers no way to tell a real download from a
-        // substituted one. Printing its hash here means whoever hands the file to somebody
-        // else can hand them something to check it against — a weak substitute for a
-        // certificate, and much better than the nothing that was here before.
-        _output.WriteLine($"Installer SHA-256: {InstallerHash(installer)}");
+        _output.WriteLine($"Installer SHA-256: {hash}");
         return 0;
     }
 
@@ -395,6 +389,54 @@ public sealed class ReleaseCommand
     /// paths ever are, so an unquoted comparison is enough and a quoted path simply fails to
     /// match and is reported, which is the safe direction.
     /// </summary>
+    /// <summary>
+    /// The release body: the English notes, with the installer's hash appended.
+    ///
+    /// The package proves what it is with a signed manifest. The installer that downloads it
+    /// proves nothing — it is not Authenticode-signed, so Windows shows the whole
+    /// "unrecognised app" screen and gives a reader no way to tell a real download from a
+    /// substituted one. A hash on the release page is a weak substitute for a certificate and
+    /// a great deal better than nothing, and it belongs where the download is rather than in
+    /// the console of whoever ran the release.
+    ///
+    /// A hash that could not be computed simply leaves the notes alone. A release that is
+    /// otherwise ready must not fail over an annotation.
+    /// </summary>
+    private async Task<string> ReleaseBodyAsync(
+        ReleaseVersion version,
+        string hash,
+        CancellationToken cancellationToken)
+    {
+        var notes = ReleaseNotes.EnglishPath(_repositoryRoot, version);
+        if (hash.StartsWith("unavailable", StringComparison.Ordinal))
+        {
+            return notes;
+        }
+
+        try
+        {
+            var body = await File.ReadAllTextAsync(notes, cancellationToken)
+                .ConfigureAwait(false);
+            var path = Path.Combine(
+                Path.GetTempPath(),
+                $"localai-release-body-{version}.md");
+            await File.WriteAllTextAsync(
+                    path,
+                    body.TrimEnd() + Environment.NewLine + Environment.NewLine +
+                    "---" + Environment.NewLine + Environment.NewLine +
+                    "`LocalAi.Installer.exe` SHA-256: `" + hash + "`" + Environment.NewLine,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return path;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                ArgumentException or NotSupportedException)
+        {
+            return notes;
+        }
+    }
+
     /// <summary>
     /// The published installer's hash, or a reason it could not be read. A missing hash must
     /// never fail a release that has already been published — the tag exists by this point.
