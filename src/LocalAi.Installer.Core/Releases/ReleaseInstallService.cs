@@ -40,7 +40,7 @@ public sealed record ReleaseInstallResult(
 /// anything is extracted, and activation swaps the version pointer atomically.
 /// </summary>
 public sealed class ReleaseInstallService(
-    GitHubReleaseFeed feed,
+    IReleaseFeed feed,
     IProcessRunner processRunner,
     IFileSystemProbe fileSystemProbe)
 {
@@ -52,7 +52,7 @@ public sealed class ReleaseInstallService(
     /// </summary>
     private static readonly TimeSpan ModelInstallTimeout = TimeSpan.FromMinutes(30);
 
-    private readonly GitHubReleaseFeed feed =
+    private readonly IReleaseFeed feed =
         feed ?? throw new ArgumentNullException(nameof(feed));
 
     private readonly IProcessRunner processRunner =

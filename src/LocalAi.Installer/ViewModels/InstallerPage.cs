@@ -123,6 +123,14 @@ public sealed record DependencySelection(string Id, string Title, bool IsRequire
 
     public string StateText => IsInstalled ? "Already installed" : "Not installed";
 
+    /// <summary>
+    /// Whether the wizard refuses to continue without it. Shown, because a list where
+    /// every line looks equally mandatory makes an optional item feel like an obligation
+    /// — and the GitHub CLI is exactly that: useful for a private fork, needed by nobody
+    /// installing a public release.
+    /// </summary>
+    public string RequirementText => IsRequired ? "required" : "optional";
+
     public string ActionText => !IsInstallable
         ? "Install manually"
         : IsInstalled ? "Reinstall" : "Install";

@@ -41,6 +41,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private readonly WindowsEnvironmentDetector environmentDetector;
     private readonly IProcessRunner processRunner;
 
+    private readonly AnonymousReleaseFeed anonymousFeed = new();
     private CancellationTokenSource? runCancellation;
     private InstallerPage currentPage = InstallerPage.Diagnose;
     private bool isRunning;
@@ -667,11 +668,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 "Warning: no release has been verified, so LocalAi itself will not be " +
                 "installed and the client applications will be left unconfigured. Only the " +
                 "prerequisites above will be applied. Go back to the LocalAi package step to " +
-                "check a release first." +
-                (package.HasSignInHint
-                    ? " This computer is not signed in to GitHub; run 'gh auth login' in a " +
-                        "terminal and check the release again."
-                    : string.Empty));
+                "check a release first.");
         }
 
         return builder.ToString().Trim();
@@ -785,7 +782,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         diagnose.Load(diagnosis);
         residency.HasUsableAdapter = diagnose.HasUsableAdapter;
-        package.HasGitHubSignIn = diagnose.HasGitHubSignIn;
         agents.ApplyDetection(diagnosis.Agents);
         await RefreshRecommendationAsync(diagnosis, cancellationToken);
 
@@ -868,6 +864,24 @@ public sealed class InstallerWizardViewModel : ObservableObject
             ? path
             : null;
 
+    /// <summary>
+    /// The release feed for this machine: anonymous HTTPS first, the GitHub CLI behind it.
+    ///
+    /// The repository is public, so an installation must not begin by demanding an account —
+    /// that used to be three obstacles (an account, an invitation, `gh auth login`) in front
+    /// of a download anyone is allowed to make. The CLI is still offered to the chain when it
+    /// is installed and signed in, because a fork kept private stays installable that way,
+    /// and because a network that blocks the release host may not block the API.
+    ///
+    /// Neither path is trusted for being itself: the manifest is checked against the embedded
+    /// key and the package against the hash in that manifest, whichever one fetched them.
+    /// </summary>
+    private IReleaseFeed CreateFeed() => new FallbackReleaseFeed(
+        anonymousFeed,
+        GitHubCliPath is null
+            ? null
+            : new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath));
+
     private static DependencyDefinition? ResolveDependencyDefinition(string dependencyId) =>
         dependencyId switch
         {
@@ -905,7 +919,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         RefreshAll();
         try
         {
-            var feed = new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath);
+            var feed = CreateFeed();
             package.InstalledVersionDirectory = InstalledVersionDirectory();
             // "latest" is not a tag GitHub knows; resolve it to the newest published one so
             // the field can keep its convenient default.
@@ -966,7 +980,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         try
         {
-            var feed = new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath);
+            var feed = CreateFeed();
             var newest = await feed.ResolveTagAsync(
                 PackagePageViewModel.LatestTag,
                 cancellationToken);
@@ -1009,16 +1023,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             AppendLog(
                 report,
                 "LocalAi package: no verified release was selected, so nothing was installed. " +
-                "Return to the package step and check the release before continuing." +
-                // The overwhelmingly likely reason on a first run, and the one the wizard
-                // cannot fix for anyone: the release repository is private, and the GitHub
-                // CLI it reads through has to be signed in by hand. Saying it here means the
-                // run report alone is enough to know what to do next, without going back for
-                // the system check page.
-                (package.HasSignInHint
-                    ? " This computer is not signed in to GitHub, and the release repository " +
-                        "is private: run 'gh auth login' in a terminal first."
-                    : string.Empty));
+                "Return to the package step and check the release before continuing.");
             hasRunError = true;
             return;
         }
@@ -1050,7 +1055,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         SetProgress(40, "Downloading the LocalAi package...");
 
         var service = new ReleaseInstallService(
-            new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath),
+            CreateFeed(),
             processRunner,
             new SystemFileSystemProbe());
         var modelProgress = new Progress<ModelProvisioningProgress>(step =>

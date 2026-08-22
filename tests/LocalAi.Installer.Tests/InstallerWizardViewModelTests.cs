@@ -325,21 +325,26 @@ public sealed class InstallerWizardViewModelTests
     }
 
     /// <summary>
-    /// The release repository is private, so a signed-out machine cannot install the package
-    /// however complete the rest of the environment is. Saying so on the confirmation page
-    /// costs a clause and saves a second pass through the whole wizard.
+    /// Nothing in the wizard asks anyone to sign in to GitHub any more. Releases are public
+    /// and read over plain HTTPS, so an instruction to run `gh auth login` would send someone
+    /// to create an account for a download they are already allowed to make.
     /// </summary>
     [Fact]
-    public void The_review_names_the_missing_sign_in_when_there_is_one()
+    public void No_page_asks_for_a_GitHub_account()
     {
         var wizard = SupportedWizard();
-        wizard.Package.HasGitHubSignIn = false;
-
-        Assert.Contains("gh auth login", wizard.ReviewText!, StringComparison.Ordinal);
-
-        wizard.Package.HasGitHubSignIn = true;
 
         Assert.DoesNotContain("gh auth login", wizard.ReviewText!, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "gh auth login",
+            wizard.Package.StatusText,
+            StringComparison.Ordinal);
+        Assert.All(
+            wizard.Dependencies.Dependencies.Where(dependency => dependency.IsRequired),
+            dependency => Assert.DoesNotContain(
+                "GitHub",
+                dependency.Title,
+                StringComparison.Ordinal));
     }
 
     [Fact]

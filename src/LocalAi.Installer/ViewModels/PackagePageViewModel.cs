@@ -23,38 +23,8 @@ public sealed class PackagePageViewModel : ObservableObject
 
     private string releaseVersion = LatestTag;
     private PackageSourceState state = PackageSourceState.NotChecked;
-    private bool hasGitHubSignIn = true;
     private string statusText =
         "No release has been checked yet.";
-
-    /// <summary>
-    /// Whether this machine is signed in to GitHub, as the system check found it.
-    ///
-    /// The release repository is private, so without a sign-in this page cannot resolve
-    /// anything and the run cannot install the package. It used to find that out by trying:
-    /// the button reported "could not determine the newest release", which describes the
-    /// symptom of a signed-out CLI exactly as it describes a deleted tag or a broken network.
-    /// Saying it up front costs one line and removes the guesswork.
-    /// </summary>
-    public bool HasGitHubSignIn
-    {
-        get => hasGitHubSignIn;
-        set
-        {
-            SetProperty(ref hasGitHubSignIn, value);
-            OnPropertyChanged(nameof(HasSignInHint));
-            OnPropertyChanged(nameof(SignInHint));
-        }
-    }
-
-    public bool HasSignInHint => !HasGitHubSignIn;
-
-    public string SignInHint => HasGitHubSignIn
-        ? string.Empty
-        : "This computer is not signed in to GitHub. The release repository is private, so " +
-            "the package cannot be downloaded until you run 'gh auth login' in a terminal " +
-            "and check the release again. Everything else on the following pages still " +
-            "applies; only the LocalAi package itself needs the sign-in.";
 
     public string ReleaseVersion
     {

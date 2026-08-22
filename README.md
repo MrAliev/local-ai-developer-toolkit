@@ -211,7 +211,31 @@ A connected walkthrough for the people who use this daily — what it does, how 
 what protects it, and what it saves — is in the developer overview
 ([Russian only for now](docs/overview.ru.md)).
 
+## Installing
+
+Download `LocalAi.Installer.exe` from the
+[latest release](https://github.com/MrAliev/local-ai-developer-toolkit/releases/latest) and
+run it. Nothing else is needed first: no GitHub account, no sign-in, no clone of this
+repository. Windows 10 or 11 on x64 is the only requirement the wizard refuses to proceed
+without.
+
+The installer is not Authenticode-signed, so Windows shows *"Windows protected your PC"*.
+Choose **More info → Run anyway**. The SHA-256 of the file is printed in the release notes,
+so a download can be checked against it if it was passed on by someone else.
+
+The wizard walks through what it finds on the machine, which prerequisites to install (Git,
+Ollama and the language indexers — all through winget, each one consented to individually),
+which release to install, which local models fit the graphics adapter, and which AI clients to
+register. Nothing is applied until the confirmation page.
+
+Expect the models to dominate the time and the disk: a machine with a 16 GB adapter and none
+of them installed downloads tens of gigabytes. Choosing **Skip** on the models page installs
+the tooling alone, and models can be added later by asking a registered client to run
+`local_models_sync`.
+
 ## Prerequisites
+
+These are for building the solution from source. Installing a release needs none of them.
 
 - .NET 10 SDK
 - Access to `https://api.nuget.org/v3/index.json` for a clean restore
@@ -344,11 +368,22 @@ failed before installing anything used to leave behind a directory that made eve
 installation refuse itself with "the directory still inherits access rules". Relaxing the
 policy is deliberate and stays visible in the run report.
 
-**GitHub sign-in.** The system check reports whether `gh` is signed in as a line of its own,
-separate from whether the executable exists. The wizard can install the CLI and cannot sign
-in for anyone — `gh auth login` is interactive and the installer never handles a token — so a
-machine that is merely signed out would otherwise pass every prerequisite and fail at the
-package step with a message about resolving releases.
+**No account, no sign-in.** Releases are public, so the installer downloads the manifest, its
+signature and the package over plain HTTPS with no credentials of any kind. A GitHub account
+is not needed to install this, and the GitHub CLI is listed as an optional prerequisite
+rather than a required one.
+
+The CLI remains as a fallback and is tried only when the anonymous path fails — a fork kept
+private is still installable through a sign-in its owner already has, and a network that
+blocks the release host may still allow the API. A verification failure is never retried
+through the other transport: a manifest that failed the embedded key is not a transport
+problem, and asking a second channel for the same document until one of them is believed is
+the shape of the attack this design refuses.
+
+What the transport never does is confer trust. The manifest is checked against the key
+embedded in the installer, and the package against the SHA-256 inside that manifest, whichever
+path fetched them. An anonymous download of a signed document is exactly as trustworthy as an
+authenticated one.
 
 ## Build and test
 
@@ -885,3 +920,7 @@ failed.
   changes touch the same file, land the first and rebase the second.
 - Keep this English README and `README.ru.md` synchronized.
 - Preserve UTF-8 without BOM and Windows CRLF line endings for repository documentation.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
