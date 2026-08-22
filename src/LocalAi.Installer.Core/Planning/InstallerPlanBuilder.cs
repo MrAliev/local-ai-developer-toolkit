@@ -568,6 +568,7 @@ public sealed class InstallerPlanBuilder
             diagnosis.WinGet with { },
             diagnosis.Git with { },
             diagnosis.GitHubCli with { },
+            diagnosis.GitHubSignIn with { },
             diagnosis.Ollama with { },
             diagnosis.DotNetSdk with { },
             diagnosis.NodeJs with { },

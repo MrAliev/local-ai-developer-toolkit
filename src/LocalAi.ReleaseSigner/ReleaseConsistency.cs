@@ -110,6 +110,18 @@ public static class ReleaseConsistency
                 $"publishes {expectedUri}.");
         }
 
+        // The last line of defence for the one field that is wrong by omission rather than by
+        // disagreement. Everything above compares two values and catches a typo; a manifest
+        // with no models contradicts nothing, publishes cleanly, and produces installations
+        // that set up every binary and not one model. Sixteen releases went out that way.
+        if (manifest.Models.Count == 0)
+        {
+            problems.Add(
+                "The manifest carries no models, so installing this release would install " +
+                "none: the installer accepts only models the signed manifest names. Sign it " +
+                "with --models (generate the list with 'localai-release-signer models').");
+        }
+
         return problems.AsReadOnly();
     }
 }

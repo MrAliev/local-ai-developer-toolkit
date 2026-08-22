@@ -390,20 +390,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // here must not leave half-installed dependencies unexplained.
             await InstallPackageAsync(report, token);
 
-            // Deliberately after the package, never before it.
-            //
-            // Writing the policy creates %LOCALAPPDATA%\LocalAi with a plain CreateDirectory,
-            // so the root inherits whatever the parent grants. The installer then opens that
-            // existing root - its own hardened creation path no longer applies - and refuses
-            // it, because the layout lease rejects an inherited or over-granted ACL and is
-            // required to do so without mutating anything. Applying the policy first therefore
-            // guaranteed "the layout is unsafe (check: ValidateAcl)" on every clean machine:
-            // the wizard defeated itself with its own first write.
-            //
-            // Ordering it after the install means the root is created by the installer with the
-            // ACL the validator demands, and the policy simply lands inside it. The cost is
-            // that a run interrupted mid-install no longer leaves the residency setting behind
-            // - a setting the next run asks for again anyway.
+            // Deliberately after the package, never before it, and never at all when there is
+            // no installation to write into. See ResidencyPolicyWriter for why this write is
+            // the one that used to poison every later installation on a clean machine.
             ApplyResidencyPolicy(report);
 
             // After the package, for the same reason the models are: the registration points
@@ -609,9 +598,20 @@ public sealed class InstallerWizardViewModel : ObservableObject
     {
         try
         {
-            var store = new ModelResidencyPolicyStore(
-                ModelResidencyPolicyStore.DefaultRuntimeRoot);
-            store.Write(store.Read() with { ModelResidency = residency.Policy });
+            var outcome = ResidencyPolicyWriter.Apply(
+                ModelResidencyPolicyStore.DefaultRuntimeRoot,
+                residency.Policy);
+            if (outcome == ResidencyPolicyOutcome.SkippedWithoutInstallation)
+            {
+                AppendLog(
+                    report,
+                    "Model residency policy: not stored, because LocalAi is not installed on " +
+                    "this computer. Storing it would create the LocalAi directory without the " +
+                    "permissions an installation requires, and every later installation would " +
+                    "then refuse it. The next run asks for this setting again.");
+                return;
+            }
+
             AppendLog(report, $"Model residency policy: {residency.Policy}.");
             if (residency.Policy != ModelResidencyPolicy.RequireFullVram)
             {
@@ -654,6 +654,24 @@ public sealed class InstallerWizardViewModel : ObservableObject
         {
             builder.AppendLine();
             builder.AppendLine("Warning: " + residency.Warning);
+        }
+
+        // The package is the point of the run, and its absence is the one line on this page a
+        // reader skims past — "not resolved" sits in a list of five neutral statements. An
+        // installation that goes ahead without it leaves the clients unconfigured too, so it
+        // is worth saying twice, in the register the rest of the page reserves for warnings.
+        if (!package.HasPackage)
+        {
+            builder.AppendLine();
+            builder.AppendLine(
+                "Warning: no release has been verified, so LocalAi itself will not be " +
+                "installed and the client applications will be left unconfigured. Only the " +
+                "prerequisites above will be applied. Go back to the LocalAi package step to " +
+                "check a release first." +
+                (package.HasSignInHint
+                    ? " This computer is not signed in to GitHub; run 'gh auth login' in a " +
+                        "terminal and check the release again."
+                    : string.Empty));
         }
 
         return builder.ToString().Trim();
@@ -767,6 +785,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         diagnose.Load(diagnosis);
         residency.HasUsableAdapter = diagnose.HasUsableAdapter;
+        package.HasGitHubSignIn = diagnose.HasGitHubSignIn;
         agents.ApplyDetection(diagnosis.Agents);
         await RefreshRecommendationAsync(diagnosis, cancellationToken);
 
@@ -990,7 +1009,16 @@ public sealed class InstallerWizardViewModel : ObservableObject
             AppendLog(
                 report,
                 "LocalAi package: no verified release was selected, so nothing was installed. " +
-                "Return to the package step and check the release before continuing.");
+                "Return to the package step and check the release before continuing." +
+                // The overwhelmingly likely reason on a first run, and the one the wizard
+                // cannot fix for anyone: the release repository is private, and the GitHub
+                // CLI it reads through has to be signed in by hand. Saying it here means the
+                // run report alone is enough to know what to do next, without going back for
+                // the system check page.
+                (package.HasSignInHint
+                    ? " This computer is not signed in to GitHub, and the release repository " +
+                        "is private: run 'gh auth login' in a terminal first."
+                    : string.Empty));
             hasRunError = true;
             return;
         }
@@ -1038,15 +1066,45 @@ public sealed class InstallerWizardViewModel : ObservableObject
                     : step.Message);
             AppendLog(report, step.Message);
         });
-        var result = await service.InstallAsync(
-            resolved,
-            WorkingDirectory,
-            resolvedTag ?? resolved.Manifest.ReleaseVersion,
-            downloadProgress,
-            models.BuildProvisioningSelection(),
-            environmentDiagnosis?.Gpu,
-            modelProgress,
-            cancellationToken);
+        var selection = models.BuildProvisioningSelection();
+        ReleaseInstallResult result;
+        try
+        {
+            result = await service.InstallAsync(
+                resolved,
+                WorkingDirectory,
+                resolvedTag ?? resolved.Manifest.ReleaseVersion,
+                downloadProgress,
+                selection,
+                environmentDiagnosis?.Gpu,
+                modelProgress,
+                cancellationToken);
+        }
+        catch (LocalAiPackageInstallationException exception)
+        {
+            // A refused layout is the one installation failure a user can actually fix, and
+            // the refusal alone never says how. Letting it reach the outer handler produced
+            // "Failed: The LocalAi installation layout is unsafe (check: ValidateAcl)" and
+            // nothing else — accurate, unactionable, and indistinguishable from a product
+            // defect. It is caught here so the advice can name the directory and say what is
+            // in it, and so the run still finishes its own reporting instead of aborting.
+            packageInstalled = false;
+            packageOutcome = $"not installed — {exception.Message}";
+            AppendLog(report, $"LocalAi package: {exception.Message}");
+            var layout = InstallationLayout.CreateDefault();
+            var advice = InstallationFailureAdvice.ForLayoutFailure(
+                exception.Message,
+                layout.Root,
+                HoldsInstalledVersions(layout));
+            if (advice is not null)
+            {
+                AppendLog(report, advice);
+            }
+
+            hasRunError = true;
+            return;
+        }
+
         SetProgress(90, "Installing the LocalAi package...");
 
         packageInstalled = result.Installed;
@@ -1063,7 +1121,28 @@ public sealed class InstallerWizardViewModel : ObservableObject
             hasRunError = true;
         }
 
-        ReportModelOutcome(report, result.Models);
+        ReportModelOutcome(report, result.Models, selection);
+    }
+
+    /// <summary>
+    /// Whether the LocalAi root holds an installed version. Only used to choose which advice
+    /// to print after a refused layout, so an unreadable directory answers "assume it does":
+    /// advising someone to delete a tree that might hold their indexes has to be the answer
+    /// this is sure about, never the one it guesses.
+    /// </summary>
+    private static bool HoldsInstalledVersions(InstallationLayout layout)
+    {
+        try
+        {
+            return Directory.Exists(layout.VersionsRoot) &&
+                Directory.EnumerateFileSystemEntries(layout.VersionsRoot).Any();
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                ArgumentException or NotSupportedException)
+        {
+            return true;
+        }
     }
 
     /// <summary>
@@ -1071,10 +1150,35 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// answers per model, and a refusal carries the smaller context sizes that would have
     /// fitted, so both are printed rather than collapsed into "models: failed".
     /// </summary>
-    private void ReportModelOutcome(StringBuilder report, ReleaseModelInstallReport? models)
+    private void ReportModelOutcome(
+        StringBuilder report,
+        ReleaseModelInstallReport? models,
+        ModelProvisioningSelection selection)
     {
         if (models?.Batch is not { } batch)
         {
+            // No batch means the planner produced no request at all. When models were asked
+            // for, that is a failure of the run, not an absence of news — and it used to be
+            // reported as neither. A release signed without a model list, or a machine no
+            // catalogue model fits, ended as "Installation complete" with one explanatory
+            // line buried in the log, and the first sign of trouble was CodeSearch having no
+            // embedding model days later.
+            if (selection.Mode == ModelProvisioningMode.None || models is null)
+            {
+                return;
+            }
+
+            var reasons = models.Excluded.Count == 0
+                ? "The installer produced no model request."
+                : string.Join(" ", models.Excluded);
+            AppendLog(
+                report,
+                "Local models: none were installed. " + reasons +
+                " Nothing else in this installation is affected, but local model work — " +
+                "CodeSearch indexing included — cannot run until at least one model is " +
+                "present. Ask the client to run the 'local_models_sync' tool, or install " +
+                "one from a release whose manifest carries the model list.");
+            hasRunError = true;
             return;
         }
 

@@ -111,16 +111,13 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
     }
 
     [Fact]
-    public async Task Rejects_incompatible_dotnet_node_and_scip_versions()
+    public async Task Rejects_incompatible_dotnet_and_scip_versions()
     {
         var fixture = CreateFixture();
         fixture.Environment.Executables["dotnet.exe"] = @"C:\Tools\dotnet.exe";
-        fixture.Environment.Executables["node.exe"] = @"C:\Tools\node.exe";
         fixture.Environment.Executables["scip-typescript"] = @"C:\Tools\scip.cmd";
         fixture.Process.Results[@"C:\Tools\dotnet.exe"] =
             new ProcessResult(0, "8.0.419", "", false, false);
-        fixture.Process.Results[@"C:\Tools\node.exe"] =
-            new ProcessResult(0, "v26.7.0", "", false, false);
         fixture.Process.Results[@"C:\Tools\scip.cmd"] =
             new ProcessResult(0, "scip-typescript 0.3.0", "", false, false);
 
@@ -128,11 +125,56 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
             TestContext.Current.CancellationToken);
 
         Assert.Equal(DependencyState.Failed, diagnosis.DotNetSdk.State);
-        Assert.Equal(DependencyState.Failed, diagnosis.NodeJs.State);
         Assert.Equal(DependencyState.Failed, diagnosis.ScipTypeScript.State);
         Assert.Contains("10", diagnosis.DotNetSdk.Reason, StringComparison.Ordinal);
-        Assert.Contains("20", diagnosis.NodeJs.Reason, StringComparison.Ordinal);
         Assert.Contains("0.4.0", diagnosis.ScipTypeScript.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Node 20 is a floor, not an exact version.
+    ///
+    /// Requiring exactly it reported "not found" on every machine already running something
+    /// newer, and then offered to install a second Node beside the one in use. Which of the
+    /// two answers afterwards is decided by PATH order, so such a machine gains a runtime and
+    /// the check keeps failing.
+    ///
+    /// The versions here are the real shape of `node --version`, and that matters: the
+    /// leading "v" leaves no word boundary before the digits, so a pattern without it read
+    /// "v24.4.1" as "4.1" and rejected the runtime. The one test that used to feed this a
+    /// v-prefixed string expected a rejection, so it passed on the wrong arithmetic.
+    /// </summary>
+    [Theory]
+    [InlineData("v20.20.2")]
+    [InlineData("v22.11.0")]
+    [InlineData("v24.4.1")]
+    [InlineData("v26.7.0")]
+    public async Task Accepts_Node_20_and_anything_newer(string version)
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["node.exe"] = @"C:\Tools\node.exe";
+        fixture.Process.Results[@"C:\Tools\node.exe"] =
+            new ProcessResult(0, version, "", false, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Detected, diagnosis.NodeJs.State);
+        Assert.Equal(version, diagnosis.NodeJs.Version);
+    }
+
+    [Fact]
+    public async Task Rejects_a_Node_older_than_20()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["node.exe"] = @"C:\Tools\node.exe";
+        fixture.Process.Results[@"C:\Tools\node.exe"] =
+            new ProcessResult(0, "v18.20.4", "", false, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Failed, diagnosis.NodeJs.State);
+        Assert.Contains("20", diagnosis.NodeJs.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -231,6 +273,87 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
         Assert.Equal(DependencyState.NotFound, diagnosis.Ollama.State);
         Assert.Null(diagnosis.Ollama.ExecutablePath);
         Assert.Null(diagnosis.Ollama.Version);
+    }
+
+    /// <summary>
+    /// Whether the CLI exists and whether it is signed in are separate facts, and only the
+    /// second one decides whether this machine can read the private release repository. The
+    /// wizard reported the first and acted on the second, so a clean machine passed every
+    /// prerequisite and then failed the package step with "could not determine the newest
+    /// release" — a sentence that describes a signed-out CLI exactly as it describes a deleted
+    /// tag.
+    /// </summary>
+    [Fact]
+    public async Task Reports_a_signed_in_GitHub_CLI_separately_from_the_executable()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["gh.exe"] = @"C:\Tools\gh.exe";
+        fixture.Process.Results[@"C:\Tools\gh.exe"] =
+            new ProcessResult(0, "gh version 2.97.0", "", false, false);
+        fixture.Process.ResultsByCommand[@"C:\Tools\gh.exe auth status"] =
+            new ProcessResult(
+                0,
+                "github.com" + Environment.NewLine + "  Logged in to github.com account MrAliev",
+                "",
+                false,
+                false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Detected, diagnosis.GitHubCli.State);
+        Assert.Equal(DependencyState.Detected, diagnosis.GitHubSignIn.State);
+        Assert.Equal("github.com", diagnosis.GitHubSignIn.Version);
+    }
+
+    [Fact]
+    public async Task Reports_an_installed_but_signed_out_CLI_with_the_command_to_run()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["gh.exe"] = @"C:\Tools\gh.exe";
+        fixture.Process.Results[@"C:\Tools\gh.exe"] =
+            new ProcessResult(0, "gh version 2.97.0", "", false, false);
+        fixture.Process.ResultsByCommand[@"C:\Tools\gh.exe auth status"] =
+            new ProcessResult(1, "", "You are not logged into any GitHub hosts.", false, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Detected, diagnosis.GitHubCli.State);
+        Assert.Equal(DependencyState.NotFound, diagnosis.GitHubSignIn.State);
+        Assert.Contains("gh auth login", diagnosis.GitHubSignIn.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The probe contacts GitHub, so a slow or blocked network must report "unknown" rather
+    /// than "signed out": telling someone to run a command they have already run is worse than
+    /// admitting the check did not finish.
+    /// </summary>
+    [Fact]
+    public async Task Reports_an_unfinished_sign_in_check_as_unknown()
+    {
+        var fixture = CreateFixture();
+        fixture.Environment.Executables["gh.exe"] = @"C:\Tools\gh.exe";
+        fixture.Process.Results[@"C:\Tools\gh.exe"] =
+            new ProcessResult(0, "gh version 2.97.0", "", false, false);
+        fixture.Process.ResultsByCommand[@"C:\Tools\gh.exe auth status"] =
+            new ProcessResult(1, "", "", true, false);
+
+        var diagnosis = await fixture.Detector.DetectAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.Failed, diagnosis.GitHubSignIn.State);
+        Assert.Contains("did not finish", diagnosis.GitHubSignIn.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Does_not_probe_a_sign_in_without_the_CLI()
+    {
+        var fixture = CreateFixture();
+
+        var diagnosis = await fixture.Detector.DetectAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DependencyState.NotFound, diagnosis.GitHubSignIn.State);
+        Assert.DoesNotContain(
+            fixture.Process.Calls,
+            call => call.Arguments.Contains("auth"));
     }
 
     [Fact]
@@ -367,6 +490,16 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
     {
         public Dictionary<string, ProcessResult> Results { get; } =
             new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Answers keyed by executable and arguments, for the one dependency that is asked two
+        /// different questions: `gh --version` says whether the CLI is there, `gh auth status`
+        /// says whether it can read the private release repository, and the two answers are
+        /// independent.
+        /// </summary>
+        public Dictionary<string, ProcessResult> ResultsByCommand { get; } =
+            new(StringComparer.OrdinalIgnoreCase);
+
         public List<ProcessCall> Calls { get; } = [];
 
         public Task<ProcessResult> RunAsync(
@@ -376,7 +509,9 @@ public sealed class WindowsEnvironmentDetectorTests : IDisposable
             CancellationToken cancellationToken)
         {
             Calls.Add(new ProcessCall(executable, arguments.ToArray(), timeout));
+            var command = executable + " " + string.Join(' ', arguments);
             return Task.FromResult(
+                ResultsByCommand.GetValueOrDefault(command) ??
                 Results.GetValueOrDefault(executable) ??
                 new ProcessResult(1, "", "not configured", false, false));
         }

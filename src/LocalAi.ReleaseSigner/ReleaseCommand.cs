@@ -246,6 +246,11 @@ public sealed class ReleaseCommand
             return 1;
         }
 
+        var installer = Path.Combine(
+            _repositoryRoot,
+            "publish",
+            "LocalAi.Installer",
+            "LocalAi.Installer.exe");
         await RunAsync(
             "gh",
             [
@@ -256,12 +261,20 @@ public sealed class ReleaseCommand
                 Path.Combine(releaseDirectory, "localai-package.zip"),
                 Path.Combine(releaseDirectory, "release-manifest.json"),
                 Path.Combine(releaseDirectory, "release-manifest.sig"),
-                Path.Combine(_repositoryRoot, "publish", "LocalAi.Installer", "LocalAi.Installer.exe"),
+                installer,
             ],
             QuickCommand,
             cancellationToken);
 
         _output.WriteLine($"Published {version} at {head[..12]}.");
+
+        // The package has a signed manifest to prove what it is; the installer that downloads
+        // it has nothing. It is not Authenticode-signed, so Windows shows the whole
+        // "unrecognised app" screen and offers no way to tell a real download from a
+        // substituted one. Printing its hash here means whoever hands the file to somebody
+        // else can hand them something to check it against — a weak substitute for a
+        // certificate, and much better than the nothing that was here before.
+        _output.WriteLine($"Installer SHA-256: {InstallerHash(installer)}");
         return 0;
     }
 
@@ -382,6 +395,25 @@ public sealed class ReleaseCommand
     /// paths ever are, so an unquoted comparison is enough and a quoted path simply fails to
     /// match and is reported, which is the safe direction.
     /// </summary>
+    /// <summary>
+    /// The published installer's hash, or a reason it could not be read. A missing hash must
+    /// never fail a release that has already been published — the tag exists by this point.
+    /// </summary>
+    private static string InstallerHash(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                ArgumentException or NotSupportedException)
+        {
+            return $"unavailable ({exception.Message})";
+        }
+    }
+
     private static string PorcelainPath(string line) =>
         line.Length > 3 ? line[3..].Trim() : line;
 

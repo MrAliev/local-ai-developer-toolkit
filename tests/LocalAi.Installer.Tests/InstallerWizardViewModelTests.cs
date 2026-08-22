@@ -305,6 +305,43 @@ public sealed class InstallerWizardViewModelTests
         Assert.Contains("Warning", review, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The confirmation page is the last screen before anything is applied, so the one
+    /// omission that costs the whole point of the run has to read as a warning there. An
+    /// unresolved package leaves the clients unconfigured too, and the package line alone —
+    /// "not resolved" among four neutral statements — is what a person skims past.
+    /// </summary>
+    [Fact]
+    public void The_review_warns_when_no_release_was_verified()
+    {
+        var wizard = SupportedWizard();
+        wizard.Dependencies.SetConsent("Git", true);
+
+        var review = wizard.ReviewText!;
+
+        Assert.Contains("Warning", review, StringComparison.Ordinal);
+        Assert.Contains("will not be installed", review, StringComparison.Ordinal);
+        Assert.Contains("left unconfigured", review, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The release repository is private, so a signed-out machine cannot install the package
+    /// however complete the rest of the environment is. Saying so on the confirmation page
+    /// costs a clause and saves a second pass through the whole wizard.
+    /// </summary>
+    [Fact]
+    public void The_review_names_the_missing_sign_in_when_there_is_one()
+    {
+        var wizard = SupportedWizard();
+        wizard.Package.HasGitHubSignIn = false;
+
+        Assert.Contains("gh auth login", wizard.ReviewText!, StringComparison.Ordinal);
+
+        wizard.Package.HasGitHubSignIn = true;
+
+        Assert.DoesNotContain("gh auth login", wizard.ReviewText!, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_dry_run_reports_completion_without_installing_anything()
     {

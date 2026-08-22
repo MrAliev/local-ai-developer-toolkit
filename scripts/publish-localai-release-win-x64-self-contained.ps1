@@ -193,10 +193,24 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($SignManifest) {
+    # The installer installs only models the signed manifest names. This argument was
+    # optional and never passed, so every release from 0.1.29 to 0.1.44 was signed with an
+    # empty list: the wizard offered six models, the run installed none, and the single line
+    # saying so was printed under a green "Installation complete". Sizes come from the model
+    # registry at signing time, because a size committed to the source tree goes stale the
+    # moment a tag is republished with different quantisation.
+    $models = Join-Path $release "release-models.json"
+    dotnet run --project $SignerProject `
+        -c $Configuration --no-restore --no-build -- models --out $models
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release model list generation failed with code $LASTEXITCODE."
+    }
+
     dotnet run --project $SignerProject `
         -c $Configuration --no-restore --no-build -- sign `
         --package $package --package-uri $PackageUri `
-        --release-version $ReleaseVersion --version-directory $VersionDirectory --out $release
+        --release-version $ReleaseVersion --version-directory $VersionDirectory `
+        --models $models --out $release
     if ($LASTEXITCODE -ne 0) {
         throw "Release manifest signing failed with code $LASTEXITCODE."
     }
