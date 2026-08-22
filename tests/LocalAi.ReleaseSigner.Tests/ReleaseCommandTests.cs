@@ -226,11 +226,78 @@ public sealed class ReleaseCommandTests : IDisposable
         Assert.Single(unexpected);
     }
 
+    /// <summary>
+    /// The installer is not Authenticode-signed, so Windows tells whoever downloads it that it
+    /// is an unrecognised app and gives them nothing to check it against. Its hash belongs on
+    /// the release page, next to the download — not in the console of whoever ran the release.
+    /// </summary>
+    [Fact]
+    public async Task The_release_body_carries_the_installer_hash()
+    {
+        WriteNotes("0.1.36");
+        var installer = Path.Combine(_root, "publish", "LocalAi.Installer");
+        Directory.CreateDirectory(installer);
+        await File.WriteAllTextAsync(
+            Path.Combine(installer, "LocalAi.Installer.exe"),
+            "not really an installer",
+            TestContext.Current.CancellationToken);
+        WriteManifest("0.1.36", new string('a', 12));
+        var runner = Runner();
+
+        var exitCode = await new ReleaseCommand(runner, _root, _output)
+            .PublishAsync(ReleaseVersion.Parse("0.1.36"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        var create = Assert.Single(
+            runner.Invocations,
+            line => line.Contains("release create"));
+        var body = create.Split(' ').First(part => part.EndsWith(".md", StringComparison.Ordinal));
+        var text = await File.ReadAllTextAsync(body, TestContext.Current.CancellationToken);
+        Assert.Contains("A real change.", text, StringComparison.Ordinal);
+        Assert.Contains("SHA-256", text, StringComparison.Ordinal);
+        // The notes themselves stay as they were written: the hash belongs to this release,
+        // not to the file a later release would copy from.
+        Assert.DoesNotContain(
+            "SHA-256",
+            await File.ReadAllTextAsync(
+                Path.Combine(_root, "docs", "releases", "0.1.36.md"),
+                TestContext.Current.CancellationToken),
+            StringComparison.Ordinal);
+    }
+
     private static void AssertNothingPublished(ScriptedRunner runner)
     {
         Assert.DoesNotContain(runner.Invocations, line => line.Contains("release create"));
         Assert.DoesNotContain(runner.Invocations, line => line.Contains("publish-localai-release"));
     }
+
+    /// <summary>
+    /// The signed manifest as the publish script would have left it, so the consistency check
+    /// this command runs before tagging has something real to compare against.
+    /// </summary>
+    private void WriteManifest(string version, string versionDirectory)
+    {
+        var directory = Path.Combine(_root, "publish", "release");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "release-manifest.json"),
+            "{" + Quote("SchemaVersion") + ":1," +
+            Quote("ReleaseVersion") + ":" + Quote(version) + "," +
+            Quote("VersionDirectory") + ":" + Quote(versionDirectory) + "," +
+            Quote("ModelCatalogVersion") + ":" + Quote("1") + "," +
+            Quote("ProtocolVersion") + ":1," +
+            Quote("BuildCompatibilityId") + ":" + Quote("localai-broker-v1") + "," +
+            Quote("PackageUri") + ":" +
+            Quote(ReleaseConsistency.PackageUriPrefix + version + "/localai-package.zip") + "," +
+            Quote("PackageSize") + ":1024," +
+            Quote("PackageSha256") + ":" + Quote(new string('A', 64)) + "," +
+            Quote("RequiresAuthenticode") + ":false," +
+            Quote("Models") + ":[{" + Quote("Name") + ":" + Quote("qwen3-embedding:8b-q8_0") +
+            "," + Quote("ContextTokens") + ":8192," + Quote("DownloadSize") + ":1024," +
+            Quote("EstimatedVramBytes") + ":1024}]}");
+    }
+
+    private static string Quote(string value) => "\"" + value + "\"";
 
     private void WriteNotes(string version)
     {

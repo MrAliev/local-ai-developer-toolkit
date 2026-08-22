@@ -41,9 +41,11 @@ public static class DependencyCatalog
         "https://ollama.com/download/windows");
 
     /// <summary>
-    /// Needed to download release assets from a private repository. The installer never
-    /// handles a token itself: it reuses the sign-in the user already established with
-    /// <c>gh auth login</c> on that machine.
+    /// Optional. Releases are public and are downloaded over plain HTTPS, so an ordinary
+    /// installation needs no account at all. This is kept for the cases that do: a fork
+    /// kept private, or a network where the release host is unreachable but the API is
+    /// not. The installer never handles a token itself — it reuses the sign-in already
+    /// established with <c>gh auth login</c>.
     /// </summary>
     public static DependencyDefinition GitHubCli { get; } = Create(
         "dependency.github-cli",

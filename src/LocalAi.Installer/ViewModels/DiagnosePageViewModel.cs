@@ -62,9 +62,9 @@ public sealed class DiagnosePageViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Drives the hint on the package page. A missing sign-in never blocks installation —
-    /// prerequisites and client integration are still worth applying — but it does decide
-    /// whether the release can be read at all.
+    /// Whether the GitHub CLI on this machine is signed in. Reported, not required: releases
+    /// are public and are read over plain HTTPS, so this only says whether the fallback path
+    /// is available — for a network that blocks the release host, or a fork kept private.
     /// </summary>
     public bool HasGitHubSignIn
     {
@@ -105,41 +105,19 @@ public sealed class DiagnosePageViewModel : ObservableObject
             "Needed to index repositories."));
         Checks.Add(Describe(
             diagnosis.GitHubCli,
-            "Reads the private release repository through your existing 'gh auth login'."));
+            "Optional. Releases are downloaded over plain HTTPS; this is only used as "
+            + "a fallback, or for a repository kept private."));
 
-        // Its own line, and a warning rather than "not found": the CLI can be installed from
-        // the next page, the sign-in cannot. Someone whose package step is about to fail
-        // needs to read that here, where the wizard is still describing the machine, not two
-        // pages later as "could not determine the newest release".
+        // Reported, never demanded. Signing in changes nothing for a public release, so
+        // this line exists to answer "is my gh usable" for the fallback path and for a
+        // private fork — not to make anyone feel unprepared for an ordinary install.
         HasGitHubSignIn = diagnosis.GitHubSignIn.State == DependencyState.Detected;
         Checks.Add(new EnvironmentCheck(
             "GitHub sign-in",
-            HasGitHubSignIn ? CheckStatus.Ok : CheckStatus.Warning,
+            CheckStatus.Ok,
             HasGitHubSignIn
                 ? diagnosis.GitHubSignIn.Version ?? "signed in"
-                : diagnosis.GitHubSignIn.Reason ??
-                    "Not signed in. Run 'gh auth login' in a terminal."));
-        Checks.Add(Describe(
-            diagnosis.Ollama,
-            "Runs the local models."));
-        Checks.Add(Describe(
-            diagnosis.DotNetSdk,
-            "Loads C# solutions and restores project dependencies for exact navigation."));
-        Checks.Add(Describe(
-            diagnosis.NodeJs,
-            "Runs the TypeScript semantic indexer."));
-        Checks.Add(Describe(
-            diagnosis.Npm,
-            "Installs the pinned TypeScript semantic indexer."));
-        Checks.Add(Describe(
-            diagnosis.ScipTypeScript,
-            "Provides exact TypeScript and JavaScript navigation."));
-        Checks.Add(Describe(
-            diagnosis.Python,
-            "Runs the Python semantic indexer."));
-        Checks.Add(Describe(
-            diagnosis.ScipPython,
-            "Provides exact Python navigation."));
+                : "not signed in — not required, releases are public"));
 
         var usableAdapters = diagnosis.Gpu.Adapters
             .Where(adapter => !adapter.IsSoftware)

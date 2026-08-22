@@ -122,24 +122,6 @@ public sealed class PackagePageViewModelTests
         Assert.False(page.IsAlreadyInstalled);
     }
 
-    /// <summary>
-    /// A signed-out machine used to find out by pressing the button: "could not determine the
-    /// newest release" describes a signed-out CLI exactly as it describes a deleted tag or a
-    /// dropped network, and none of the three is fixed the same way.
-    /// </summary>
-    [Fact]
-    public void A_missing_GitHub_sign_in_is_stated_before_the_release_is_checked()
-    {
-        var page = new PackagePageViewModel();
-        Assert.False(page.HasSignInHint);
-
-        page.HasGitHubSignIn = false;
-
-        Assert.True(page.HasSignInHint);
-        Assert.Contains("gh auth login", page.SignInHint, StringComparison.Ordinal);
-        Assert.Contains("private", page.SignInHint, StringComparison.Ordinal);
-    }
-
     private static ResolvedRelease Release(string version) =>
         new(
             new ReleaseManifest(

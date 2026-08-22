@@ -16,9 +16,12 @@ public sealed class DependenciesPageViewModel : ObservableObject
     [
         new("Git", "Git", true),
         new("Ollama", "Ollama", true),
-        // Required because the release repository is private: the installer reads it with
-        // the sign-in already established by 'gh auth login' rather than handling a token.
-        new("GitHubCli", "GitHub CLI", true),
+        // Optional, and deliberately so. The repository is public, so releases are read
+        // over plain HTTPS with no account at all. The CLI is kept as a fallback — a fork
+        // kept private is still installable through an existing 'gh auth login', and a
+        // network that blocks the release host may not block the API — but demanding it
+        // from someone installing a published tool asks for an account they do not need.
+        new("GitHubCli", "GitHub CLI", false),
         new("DotNetSdk", ".NET SDK 10", true),
         new("NodeJs", "Node.js 20", true),
         new("ScipTypeScript", "SCIP TypeScript", true),

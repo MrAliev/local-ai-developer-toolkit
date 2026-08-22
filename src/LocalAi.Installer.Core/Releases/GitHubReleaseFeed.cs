@@ -12,21 +12,23 @@ public sealed class ReleaseResolutionException(string message, Exception? inner 
     : Exception(message, inner);
 
 /// <summary>
-/// Resolves a release from the project's GitHub releases.
+/// Resolves a release through the GitHub CLI: the path for a repository that is not
+/// public.
 ///
-/// The repository is private, so assets are fetched through the GitHub CLI rather than over
-/// anonymous HTTP. That is deliberate: the installer never asks for, stores or even sees a
-/// token — it reuses the sign-in the user already established on that machine with
-/// <c>gh auth login</c>. A machine that is not signed in gets a clear message instead of an
-/// unexplained download failure.
+/// This used to be the only way in, because the repository was private. It is now the
+/// fallback behind <see cref="AnonymousReleaseFeed"/>, and it still earns its place: a
+/// fork kept private stays installable through a sign-in its owner already has, and a
+/// network that blocks the release host may still allow the API.
 ///
-/// Whichever transport is used, the manifest is verified against the key embedded in the
-/// installer before anything is downloaded on the strength of it.
+/// The installer never asks for, stores or even sees a token — it reuses the sign-in
+/// established on that machine with <c>gh auth login</c>. Whichever transport is used,
+/// the manifest is verified against the key embedded in the installer before anything
+/// is downloaded on the strength of it.
 /// </summary>
 public sealed class GitHubReleaseFeed(
     IProcessRunner processRunner,
     string? repository = null,
-    string? gitHubCliPath = null)
+    string? gitHubCliPath = null) : IReleaseFeed
 {
     public const string DefaultRepository = "MrAliev/local-ai-developer-toolkit";
     public const string ManifestAsset = "release-manifest.json";
@@ -80,8 +82,9 @@ public sealed class GitHubReleaseFeed(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             throw new ReleaseResolutionException(
-                "The GitHub CLI could not be started. Install it and sign in with " +
-                "'gh auth login' so the installer can read this private repository.",
+                "The GitHub CLI could not be started. It is only needed when the anonymous " +
+                "download is unavailable — install it and sign in with 'gh auth login' if " +
+                "this repository is not public.",
                 exception);
         }
 
@@ -114,8 +117,9 @@ public sealed class GitHubReleaseFeed(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             throw new ReleaseResolutionException(
-                "The GitHub CLI could not be started. Install it and sign in with " +
-                "'gh auth login' so the installer can read this private repository.",
+                "The GitHub CLI could not be started. It is only needed when the anonymous " +
+                "download is unavailable — install it and sign in with 'gh auth login' if " +
+                "this repository is not public.",
                 exception);
         }
 
@@ -128,7 +132,7 @@ public sealed class GitHubReleaseFeed(
         cancellationToken.ThrowIfCancellationRequested();
         throw new ReleaseResolutionException(
             "Could not determine the newest release. Check that this computer is signed " +
-            $"in with 'gh auth login'. Primary: {primaryDetail} " +
+            $"in with 'gh auth login' if the repository is not public. Primary: {primaryDetail} " +
             $"Fallback: {ProcessDetail(fallback)}".Trim());
     }
 
@@ -267,8 +271,9 @@ public sealed class GitHubReleaseFeed(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             throw new ReleaseResolutionException(
-                "The GitHub CLI could not be started. Install it and sign in with " +
-                "'gh auth login' so the installer can read this private repository.",
+                "The GitHub CLI could not be started. It is only needed when the anonymous " +
+                "download is unavailable — install it and sign in with 'gh auth login' if " +
+                "this repository is not public.",
                 exception);
         }
 
@@ -283,7 +288,8 @@ public sealed class GitHubReleaseFeed(
         {
             throw new ReleaseResolutionException(
                 $"Could not download '{assetName}' from release '{tag}'. Check that this " +
-                "computer is signed in with 'gh auth login' and that the release exists. " +
+                "computer is signed in with 'gh auth login', if the repository is not public, " +
+            "and that the release exists. " +
                 primaryDetail);
         }
 
@@ -561,7 +567,8 @@ public sealed class GitHubReleaseFeed(
         Exception? inner = null) =>
         new(
             $"Could not download '{assetName}' from release '{tag}'. Check that this " +
-            "computer is signed in with 'gh auth login' and that the release exists. " +
+            "computer is signed in with 'gh auth login', if the repository is not public, " +
+            "and that the release exists. " +
             $"Primary: {primaryDetail} Fallback: {fallbackDetail}",
             inner);
 

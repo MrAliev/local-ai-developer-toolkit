@@ -176,6 +176,8 @@
                                                 <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" />
                                                 <Run Text=" — " />
                                                 <Run Text="{Binding StateText, Mode=OneWay}" />
+                                                <Run Text=" · " />
+                                                <Run Text="{Binding RequirementText, Mode=OneWay}" />
                                             </TextBlock>
                                             <TextBlock Text="No automated installer is available; install it yourself."
                                                        FontSize="11">
@@ -209,11 +211,6 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <TextBlock Text="{Binding Package.SignInHint}"
-                                   Style="{StaticResource WarningText}"
-                                   TextWrapping="Wrap"
-                                   Margin="0,0,0,12"
-                                   Visibility="{Binding Package.HasSignInHint, Converter={StaticResource BoolToVisibility}}" />
                         <TextBlock Text="Release tag" />
                         <TextBox Text="{Binding Package.ReleaseVersion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  Width="280" Height="24" HorizontalAlignment="Left" Margin="0,4,0,8" />
