@@ -102,8 +102,16 @@ jobs:
           # VSTest stopped at the first failing project and because `dotnet test` refused a
           # non-test project under tests/; neither is true here.
           #
-          # --timeout replaces --blame-hang. It is deliberately far larger than any correct run
-          # — the whole solution takes about twenty seconds — and smaller than the job timeout,
-          # so a hang is reported as a named failure rather than consuming the job and leaving
-          # the log saying only that the operation was cancelled.
-          dotnet test LocalAi.slnx --configuration Release --no-build --timeout 20m
+          # --timeout replaces --blame-hang. It is deliberately far larger than any correct
+          # run and smaller than the job timeout, so a hang is reported as a named failure
+          # rather than consuming the job and leaving the log saying only that the
+          # operation was cancelled.
+          # One module at a time. The platform runs test modules in parallel by default,
+          # and these do not tolerate it: the broker tests, the launcher tests and the
+          # integration tests share named mutexes and one runtime directory, so running
+          # them side by side is a race rather than a saving. The first attempt at this
+          # step proved it — the broker module sat for twenty minutes and hit the timeout
+          # while every other module passed. The old loop over projects had serialised
+          # them by accident; this says so on purpose.
+          dotnet test LocalAi.slnx --configuration Release --no-build `
+            --max-parallel-test-modules 1 --timeout 20m
