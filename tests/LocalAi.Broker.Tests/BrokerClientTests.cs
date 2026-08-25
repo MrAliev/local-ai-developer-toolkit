@@ -20,7 +20,6 @@ public sealed class BrokerClientTests
             request,
             TestContext.Current.CancellationToken);
         await fixture.Process.Started.Task.WaitAsync(
-            TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
         await fixture.CompleteNextAsync(
             JsonSerializer.SerializeToElement(
@@ -51,7 +50,6 @@ public sealed class BrokerClientTests
             request,
             TestContext.Current.CancellationToken);
         await fixture.Process.Started.Task.WaitAsync(
-            TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
         await fixture.FailNextAsync("HttpRequestException");
 
@@ -73,7 +71,6 @@ public sealed class BrokerClientTests
             request,
             cancellation.Token);
         await fixture.Process.Started.Task.WaitAsync(
-            TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
         cancellation.Cancel();
 
@@ -86,6 +83,18 @@ public sealed class BrokerClientTests
 
     private sealed class BrokerClientFixture : IDisposable
     {
+        /// <summary>
+        /// The client's own deadline, set far beyond anything a correct run needs.
+        ///
+        /// It used to be five seconds, which is a measurement of how busy the machine is
+        /// rather than of whether the client works: on a loaded CI runner the poll loop ran
+        /// out of budget and the test died inside the queue's mutex with "The operation was
+        /// canceled", pointing at nothing. Hang detection belongs to --blame-hang, which CI
+        /// already applies to every test project; this value only has to be large enough
+        /// never to expire while the code under test is working.
+        /// </summary>
+        private static readonly TimeSpan ClientTimeout = TimeSpan.FromMinutes(5);
+
         private readonly string _root =
             Path.Combine(Path.GetTempPath(), "localai-client-" + Guid.NewGuid().ToString("N"));
 
@@ -97,7 +106,7 @@ public sealed class BrokerClientTests
                 Queue,
                 Process,
                 static (delay, token) => Task.Delay(TimeSpan.FromMilliseconds(5), token),
-                TimeSpan.FromSeconds(5));
+                ClientTimeout);
         }
 
         public DurableQueue Queue { get; }
