@@ -1,5 +1,7 @@
 # Canonical CRLF and Exact Overlay Status Implementation Plan
 
+[Русская версия](2026-07-28-canonical-crlf-overlay-status.ru.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Canonicalize every indexed text file to Windows CRLF in memory and make status report the exact overlay requirement for generation-backed indexes.

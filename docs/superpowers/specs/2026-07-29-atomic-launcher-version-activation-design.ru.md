@@ -1,5 +1,7 @@
 # Дизайн атомарной активации версии через launcher
 
+[English version](2026-07-29-atomic-launcher-version-activation-design.md)
+
 ## Проблема
 
 LocalAi установлен в неизменяемых каталогах версий внутри

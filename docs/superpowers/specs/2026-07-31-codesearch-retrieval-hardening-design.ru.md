@@ -1,5 +1,7 @@
 # Проект усиления retrieval в CodeSearch
 
+[English version](2026-07-31-codesearch-retrieval-hardening-design.md)
+
 ## Назначение
 
 Реализовать GitHub issue #5 в одной feature-ветке и одном pull request.

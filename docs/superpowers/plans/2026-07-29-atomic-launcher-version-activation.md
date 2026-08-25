@@ -1,5 +1,7 @@
 # Atomic Launcher Version Activation Implementation Plan
 
+[Русская версия](2026-07-29-atomic-launcher-version-activation.ru.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Route every LocalAi consumer through one stable launcher and atomically activate complete immutable versions without allowing mixed client/broker binaries.

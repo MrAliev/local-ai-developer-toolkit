@@ -1,5 +1,7 @@
 # Model-aware Local AI Routing Implementation Plan
 
+[Русская версия](2026-07-29-model-aware-routing.ru.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Route local work through a shared task-aware model catalog, keep all Ollama operations behind the durable LocalAi broker, minimize model swaps, validate zero-offload execution on the RTX 5080, and evaluate a new TranslateGemma candidate independently for the first ten tasks of every applicable profile.

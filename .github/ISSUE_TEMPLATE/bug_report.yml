@@ -1,0 +1,49 @@
+name: Bug report
+description: Something behaves differently from what it says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report security problems here. Open a private
+        [security advisory](https://github.com/MrAliev/local-ai-developer-toolkit/security/advisories/new)
+        instead.
+  - type: input
+    id: version
+    attributes:
+      label: LocalAi version / Версия LocalAi
+      description: >-
+        Run `%LOCALAPPDATA%\LocalAi\bin\launcher\localai-launcher.exe run localai --version`,
+        or name the release you installed.
+      placeholder: 0.1.45
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened / Что произошло
+      description: >-
+        What you did, what you expected, and what you got instead.
+        Что вы делали, чего ожидали и что получили вместо этого.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / Подтверждение
+      description: >-
+        The exact message, and the relevant log. Installation logs are in
+        `%LOCALAPPDATA%\LocalAi-installer-logs`. Redact anything private — paths from a
+        work repository are usually worth trimming.
+      render: text
+  - type: textarea
+    id: machine
+    attributes:
+      label: Machine / Машина
+      description: Windows edition and build, graphics adapter and its memory, Ollama version.
+      placeholder: |
+        Windows 11 Pro 26200
+        RTX 5080, 16 GB
+        ollama 0.32.5
+    validations:
+      required: true

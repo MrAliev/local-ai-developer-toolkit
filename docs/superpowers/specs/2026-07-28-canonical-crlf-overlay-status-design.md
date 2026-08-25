@@ -1,5 +1,7 @@
 # Canonical CRLF Indexing and Exact Overlay Status
 
+[Русская версия](2026-07-28-canonical-crlf-overlay-status-design.ru.md)
+
 ## Context
 
 LocalAi builds an immutable CodeSearch base from a Git snapshot and an exact overlay for each

@@ -1,5 +1,7 @@
 # Broker Auto-start Recovery Design
 
+[Русская версия](2026-07-29-broker-autostart-recovery-design.ru.md)
+
 ## Problem
 
 After a reboot or an unclean client shutdown, `host.json` can outlive the LocalAi

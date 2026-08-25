@@ -1,5 +1,7 @@
 # CodeSearch Retrieval Hardening Implementation Plan
 
+[Русская версия](2026-07-31-codesearch-retrieval-hardening.ru.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a measured model-specific relevance floor, exact-snapshot full-chunk retrieval, nonce-based untrusted-content boundaries, and a repeatable A/B quality/token report to the existing CodeSearch pipeline.

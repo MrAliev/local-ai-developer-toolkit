@@ -1,5 +1,7 @@
 # Дизайн совместимости протокола и сборки broker
 
+[English version](2026-07-31-broker-protocol-build-compatibility-design.md)
+
 **Issue:** [#6](https://github.com/MrAliev/local-ai-developer-toolkit/issues/6)
 
 **Дата:** 2026-07-31

@@ -1,5 +1,7 @@
 # Model-aware Local AI Routing Design
 
+[Русская версия](2026-07-29-model-aware-routing-design.ru.md)
+
 ## Purpose
 
 Route every local-model task to one or more suitable models, prefer work that

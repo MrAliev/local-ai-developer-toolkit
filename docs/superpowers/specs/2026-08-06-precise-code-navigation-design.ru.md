@@ -1,5 +1,7 @@
 # Проект точной навигации по коду
 
+[English version](2026-08-06-precise-code-navigation-design.md)
+
 ## Назначение
 
 Добавить в LocalAi точные `Go to definition`, `Find references` и позднее

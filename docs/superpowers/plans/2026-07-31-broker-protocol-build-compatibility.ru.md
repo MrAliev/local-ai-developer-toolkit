@@ -1,5 +1,7 @@
 # План реализации совместимости протокола и сборки broker
 
+[English version](2026-07-31-broker-protocol-build-compatibility.md)
+
 > **Для agentic workers:** ОБЯЗАТЕЛЬНЫЙ SUB-SKILL: используйте superpowers:subagent-driven-development (рекомендуется) или superpowers:executing-plans для пошагового выполнения. Шаги отмечены checkbox (`- [ ]`).
 
 **Цель:** заменить привязку к пути assembly явным protocol/build compatibility contract и выдавать точные результаты запуска без ослабления гарантий LocalAi.

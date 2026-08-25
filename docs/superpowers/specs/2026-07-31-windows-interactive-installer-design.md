@@ -1,5 +1,7 @@
 # Windows Interactive Installer Design
 
+[Русская версия](2026-07-31-windows-interactive-installer-design.ru.md)
+
 **Date:** 2026-07-31
 
 **Status:** Approved for a separate follow-up issue and PR

@@ -1,5 +1,7 @@
 # Windows Interactive Installer Implementation Plan
 
+[Русская версия](2026-07-31-windows-interactive-installer.ru.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a self-contained Windows 10/11 x64 WPF installer that diagnoses prerequisites, installs consented dependencies, verifies and activates LocalAi releases, recommends and validates local models through the shared FIFO broker, and safely configures supported agents.

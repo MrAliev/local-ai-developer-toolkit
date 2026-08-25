@@ -1,5 +1,7 @@
 # Broker Auto-start Recovery Implementation Plan
 
+[Русская версия](2026-07-29-broker-autostart-recovery.ru.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make LocalAi clients recover automatically when stale broker state points to a missing, reused, or inaccessible Windows process.

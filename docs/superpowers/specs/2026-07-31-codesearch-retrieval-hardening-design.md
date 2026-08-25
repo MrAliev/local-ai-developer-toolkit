@@ -1,5 +1,7 @@
 # CodeSearch Retrieval Hardening Design
 
+[Русская версия](2026-07-31-codesearch-retrieval-hardening-design.ru.md)
+
 ## Purpose
 
 Implement GitHub issue #5 in one feature branch and one pull request. The change

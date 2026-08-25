@@ -1,5 +1,7 @@
 # Precise Code Navigation Design
 
+[Русская версия](2026-08-06-precise-code-navigation-design.ru.md)
+
 ## Purpose
 
 Add precise `Go to definition`, `Find references`, and later

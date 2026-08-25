@@ -1,5 +1,7 @@
 # Local AI Developer Toolkit Publication Design
 
+[Русская версия](2026-07-29-github-publication-design.ru.md)
+
 **Date:** 2026-07-29
 
 ## Goal
