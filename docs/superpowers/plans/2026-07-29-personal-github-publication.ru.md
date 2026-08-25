@@ -1,5 +1,7 @@
 # План публикации в личном GitHub
 
+[English version](2026-07-29-personal-github-publication.md)
+
 > **Для агентных исполнителей:** ОБЯЗАТЕЛЬНЫЙ ДОПОЛНИТЕЛЬНЫЙ НАВЫК: используйте superpowers:subagent-driven-development (рекомендуется) или superpowers:executing-plans для пошагового выполнения этого плана. Для отслеживания шагов используются флажки (`- [ ]`).
 
 **Цель:** Опубликовать полное решение LocalAi как приватный личный репозиторий `MrAliev/local-ai-developer-toolkit` с синхронизированными README на английском и русском языках.

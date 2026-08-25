@@ -1,5 +1,7 @@
 # Precise Code Navigation Implementation Plan
 
+[Русская версия](2026-08-06-precise-code-navigation.ru.md)
+
 **Goal:** add a snapshot-bound semantic index and precise definition/reference
 queries without changing the current CIDX retrieval pipeline.
 

@@ -1,5 +1,7 @@
 # Broker Protocol/Build Compatibility Design
 
+[Русская версия](2026-07-31-broker-protocol-build-compatibility-design.ru.md)
+
 **Issue:** [#6](https://github.com/MrAliev/local-ai-developer-toolkit/issues/6)
 
 **Date:** 2026-07-31

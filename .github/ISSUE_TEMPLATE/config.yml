@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/MrAliev/local-ai-developer-toolkit/security/advisories/new
+    about: Report privately, not as a public issue.
+  - name: Installing and first steps
+    url: https://github.com/MrAliev/local-ai-developer-toolkit#installing
+    about: Download the installer from the latest release; no account required.

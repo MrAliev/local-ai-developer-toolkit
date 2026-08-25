@@ -1,5 +1,7 @@
 # План реализации маршрутизации локального ИИ с учётом моделей
 
+[English version](2026-07-29-model-aware-routing.md)
+
 > **Для агентных исполнителей:** план выполняется последовательно с помощью
 > `superpowers:executing-plans` либо `superpowers:subagent-driven-development`.
 > Состояние шагов отмечается флажками.

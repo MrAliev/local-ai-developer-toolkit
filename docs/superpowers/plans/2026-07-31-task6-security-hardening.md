@@ -1,5 +1,7 @@
 # Task 6 Security Hardening Implementation Plan
 
+[Русская версия](2026-07-31-task6-security-hardening.ru.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the Task 6 activation, layout, pointer-concurrency, trusted-launcher, and immutable-version safety findings without introducing a runtime dependency on the launcher executable project.

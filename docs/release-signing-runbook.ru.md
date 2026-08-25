@@ -62,9 +62,13 @@ dotnet run --project src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj -c R
     --package publish/release/localai-package.zip `
     --package-uri "https://example.invalid/probe" `
     --release-version 0.0.0-probe --version-directory probe `
+    --no-models `
     --private-key "$restored\release-signing-private.pkcs8.der" `
     --out $restored
 ```
+
+Именно `--no-models` делает это проверкой, а не релизом: без списка моделей подпись не
+запускается, пока пропуск не объявлен явно, — а этот манифест никогда не публикуется.
 
 Подпись сверяет приватный ключ с якорем, который поставляет установщик, поэтому несовпадающая
 копия падает здесь, а не на машине пользователя. После проверки удалите `$restored`.

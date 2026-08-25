@@ -1,0 +1,649 @@
+# Local AI Developer Toolkit (LocalAi)
+
+**The full picture, for developers who work with Codex and Claude every day**
+
+This document describes `main` after release **0.1.45**, which includes work already merged and
+due to reach users in the next release. Where that distinction matters, the text says so.
+
+[Русская версия](overview.ru.md)
+
+The Russian counterpart is [overview.ru.md](overview.ru.md). It used to be the only version on
+purpose: this was treated as an internal walkthrough, read in one language. The repository has
+since become public and the rule changed — every document exists in both languages and links to
+its pair, and a test checks that rather than the author's memory.
+
+Every statement here was checked against the source rather than copied from the README. The
+result of that check is in Appendix A, including three places where the description disagreed
+with the behaviour; all three are fixed in the project itself.
+
+---
+
+## 1. Why this exists
+
+An agent in the cloud answers "where does logic X live in this repository" the only way it can:
+by reading candidate files whole. Five misses in a row and tens of thousands of tokens have
+gone into the context, of which hundreds were useful. The same goes for a 600 KB build log, a
+screenshot of an error, and a request to "list every TODO in these files".
+
+LocalAi moves exactly that work — search, reading images, triaging logs, mechanical passes over
+known files — onto local models running on the developer's graphics card. The cloud model
+receives a result rather than raw material.
+
+| Effect | How it shows up |
+|---|---|
+| Context is spent on reasoning, not on raw material | The whole task fits in the window, rather than half of one file |
+| Answers by meaning, not by string match | "Where is payment cancellation handled" finds code that never says "cancel" |
+| Private by default | Local models see the code; only what the agent decides to send leaves the machine |
+| Predictable GPU load | Every local task goes through one queue instead of competing for video memory |
+| One index for every tool | Codex, Claude, the CLI and the Git hooks share one view of the repository |
+
+What this does **not** replace: reading a file before editing it, a literal sweep for a known
+token, and architectural decisions.
+
+---
+
+## 2. What gets installed on the machine
+
+![Diagram: what an installation is made of](images/overview-01-arhitektura.png)
+
+Fifteen source projects and twelve test projects; day to day, what matters is six executables
+from an immutable version directory plus a launcher that stands apart from them.
+
+| Component | Role |
+|---|---|
+| Broker | The queue, and the only transport to the models |
+| `codesearch` server | Code search and navigation over MCP |
+| `locallm` server | Local models over MCP |
+| `codesearch` CLI | Indexing and search from the command line |
+| `localai` CLI | Repository setup, hooks, policies, diagnostics, cleanup, telemetry |
+| Launcher | The stable entry point: clients register against it rather than against a version path |
+
+A version directory's path changes with every update; the launcher's path never does. That is
+why the MCP registrations in Codex and Claude point at the launcher.
+
+---
+
+## 3. The broker: why everything goes through one queue
+
+Talking to the Ollama endpoint directly is not supported. The reason is not bureaucratic: on a
+single 16 GB card, two concurrent tasks against different models mean unloading and reloading in
+a circle — both end up several times slower than they would have been in sequence.
+
+![Diagram: the path of one request](images/overview-02-put-zaprosa.png)
+
+The parameters below come from the code, not from the documentation.
+
+| Mechanism | How it actually works |
+|---|---|
+| Durable queue | A task survives a client crash and a broker restart; a lease with a heartbeat stops two processes taking the same task |
+| Watchdog | Separate from the heartbeat: ten minutes of silence before the first probe, then a probe a minute with a ten-second timeout; an attempt fails only after two consecutive confirmed unhealthy probes, and an inconclusive probe resets the counter |
+| Residency | Full residency is required by default: a model is accepted only when all of it is in video memory. The relaxations are "allow partial offload" and "allow CPU" |
+| Scheduler | Prefers work for an already resident model, gathers related tasks for two seconds, orders the snapshot by predicted duration, and force-includes anything older than fifteen minutes |
+| Contexts | Discrete steps from 2K to 256K tokens; a step is used only when preflight proved the runner fits entirely |
+| Experiments | A new candidate runs on the first ten completed tasks of a profile, then pauses until the owner decides: promote, continue, keep as fallback only, or disable |
+
+Partial offload to system memory is not an error — it makes the answer several times slower and
+says nothing about it. That is precisely why it is forbidden by default, and why relaxing it
+stays visible in the run report.
+
+### 3.1 The queue: three properties visible in use
+
+**Deduplication by key.** Before enqueuing, the queue scans everything queued and running. If an
+existing task carries the same deduplication key, a new one is **not created** — the caller
+receives the identifier of the task already in flight and joins it. Two clients asking for the
+same thing at the same time pay for one piece of work, not two.
+
+**Quarantine instead of corruption.** A task record that cannot be read or parsed is neither
+deleted nor repaired in place: it moves to quarantine and the queue carries on. One broken
+record therefore does not stop the pipeline and remains available for inspection. Diagnostics
+report the quarantine count.
+
+**The archive is a handover, not a journal.** The client collects a response on its next poll,
+so the response body is short-lived: a minimum protection period applies first, then age and
+size limits, and what is removed is the body — the request and the state document remain as a
+trace. Cleanup runs continuously but no more than one pass a minute and with a per-pass limit,
+so the queue is not left idle behind housekeeping.
+
+### 3.2 The model catalogue and the routes
+
+The routing catalogue is embedded in the broker. In the current version: six models and
+seventeen task profiles.
+
+| Model | Status | Context steps | Images |
+|---|---|---|---|
+| `qwen2.5-coder:14b` | established | 2K–32K | no |
+| `qwen3.5:9b` | established | 2K–256K | yes |
+| `gpt-oss:20b` | established | 2K–128K | no |
+| `qwen3-vl:8b-instruct-q8_0` | established | 2K–256K | yes |
+| `qwen3-embedding:8b-q8_0` | established | 2K–32K | no |
+| `translategemma:12b` | experimental | 2K–128K | yes |
+
+Routes are ordered lists of eligible models rather than a single binding:
+
+| Task profile | Model order |
+|---|---|
+| Code analysis, code review | `qwen2.5-coder:14b` → `gpt-oss:20b` |
+| Code editing, log triage | `qwen2.5-coder:14b` |
+| Code reranking | `qwen2.5-coder:14b` → `qwen3.5:9b` |
+| Extraction, classification, short summary | `qwen3.5:9b` → `qwen2.5-coder:14b` |
+| Multi-file synthesis, planning | `gpt-oss:20b` → `qwen3.5:9b` → `qwen2.5-coder:14b` |
+| OCR, visual analysis | `qwen3-vl:8b-instruct-q8_0` |
+| Translation: plain, technical, from an image | `translategemma:12b` |
+| Vector embeddings | `qwen3-embedding:8b-q8_0` |
+| Literal search | no model at all — deterministic lexical matching |
+
+There is a separate list of models allowed to be installed automatically through the queue; it
+currently holds one entry. A model cannot be installed by saying "install this one" — there is
+no general download command, and models already installed are never removed.
+
+### 3.3 Experiments and the circuit breaker
+
+A model marked experimental is not assigned silently and permanently.
+
+| Mechanism | Rule |
+|---|---|
+| Trial batch | A candidate runs on the first **ten** completed logical tasks of the profile, after which the profile/model pair is paused |
+| Report before decision | Feedback before that pause is refused: the decision is made on the batch, not on a first impression |
+| Circuit breaker | **Two consecutive** technical failures open the circuit and the candidate stops being selected |
+| Resetting the breaker | The only early exception is an explicit "continue the experiment" |
+| Owner decisions | Promote · continue · fallback only · disable |
+| Composite tasks | Fragments of one translation share a stream identifier and spend a single attempt — after the final check, keeping the original failure category |
+
+Technical, structural and context errors trigger the fallback path along the established model
+order. Telemetry shows how often that happened: over the measured period, in 30% of tasks.
+
+---
+
+## 4. Indexing
+
+### 4.1 What ends up in the index at all
+
+Only allowed extensions are indexed — around forty: sources (C#, TypeScript/JavaScript, Python,
+Go, Java, Kotlin, Rust, Ruby, PHP, C/C++), markup and templates (XAML, XML, Razor, CSHTML, HTML,
+CSS/SCSS/LESS), queries and schemas (SQL, GraphQL, Proto), documentation (Markdown, TXT,
+AsciiDoc), configuration (YAML, TOML, INI, JSON), scripts (PowerShell, Bash), infrastructure
+(Terraform, Bicep) and project files.
+
+Deliberately excluded: package lock files, minified bundles, designer files and generated C#.
+They produce tens of thousands of chunks and never answer a question anyone asks. A file with a
+zero byte inside is treated as binary and dropped, even with a textual extension.
+
+### 4.2 How it is chunked
+
+![Diagram: how sources become chunks](images/overview-05-chanking.png)
+
+| File type | Rule |
+|---|---|
+| C# | A chunk for the type as a whole (with its fields and a table of contents of its members) and one for every **executable** member: method, constructor, destructor, operator, conversion operator, indexer, and property **with a real body** |
+| C#: what gets no chunk of its own | Fields and auto-properties — they ride inside the type chunk. A DTO with twenty properties must not become twenty-one useless vectors |
+| C#: generated code | Not indexed at all — parsing stops before the first chunk |
+| TypeScript and Python | One chunk per definition, on the boundaries the external indexer reports: real symbol, signature and exact lines. A definition containing others lists its children rather than repeating their bodies |
+| TypeScript: a declaration with no reported boundary | `scip-typescript` reports no body for a declaration whose initialiser is a call — which is exactly `export const X = memo(...)`. Such a declaration still gets a chunk: the boundary is read off the file, as far as the line before the next thing the indexer named |
+| TypeScript: what gets no chunk | A declaration inside a function body (the indexer calls it `local N` — no name, no span) and a declaration that fits on one line: one line is not a body, and a vector per line does not pay for itself. Both stay with the window |
+| Everything else, and any region no definition covers | A sliding window over lines: **60 lines per window, 12 lines of overlap**, a step of 48 lines. No syntax is parsed, but exact line numbers are kept — and they are what makes a hit actionable |
+
+The overlap exists so that meaning is not lost exactly at a window boundary.
+
+**What symbol chunking gives, and what it does not.** The boundaries are not invented by a
+parser — they come from the navigation index that is built before embedding anyway
+([#82](https://github.com/MrAliev/local-ai-developer-toolkit/issues/82)). Measured on a private
+React/TypeScript repository of 2,653 files with twelve natural-language queries; the details and
+caveats are in the [evaluation report](codesearch-evaluation.md).
+
+| Metric | Windows everywhere | Chunked by body | Plus boundary-less declarations |
+|---|---:|---:|---:|
+| Hits naming a symbol in `.ts`/`.tsx`/`.py` | 0 of 86 | 33 of 85 (39%) | 50 of 89 (56%) |
+| Mean rank of the first relevant hit | 5.50 | 4.92 | 4.75 |
+| Characters in the answers | 70,245 | 66,087 | 63,281 |
+| Chunks in the corpus | 3,471 | 6,079 | 6,894 |
+
+Precision and recall barely moved: on this corpus the right file was found either way; what
+changed is what arrives alongside it. Fifty-six percent rather than a hundred, because for
+uncovered regions the window is still correct: imports, module-level code, the gaps between
+functions, and anything the indexer gives neither a name nor a boundary for.
+
+The price is a corpus twice the size: a definition that used to share a window with its
+neighbours now gets a vector of its own. Changing the chunk format rebuilds the base generation
+completely, which is why it is announced in the release notes rather than happening silently on
+the first commit.
+
+What still helps regardless of chunking: twelve lines of overlap keep meaning from being lost at
+a seam; a header with the path and line range is added to the chunk text, so a vector "knows"
+where it came from; the lexical branch of search matches exact names; and precise navigation is
+a separate layer that does understand TypeScript and Python.
+
+### 4.3 Base, overlay and dirty overlay
+
+![Diagram: base, branch overlay and uncommitted code](images/overview-03-indeks.png)
+
+The order in which the base is chosen was checked against the code: first the ref recorded in
+the repository manifest, then a local `dev`, then a local `main`. Promoting a remote branch does
+not by itself move the base.
+
+A repository is identified by its normalised Git common directory, so Claude, Codex, the CLI and
+every worktree share one repository identity and one index.
+
+### 4.4 Keeping it current
+
+The shared Git hooks — after a commit, a merge, a history rewrite and a branch switch — trigger
+synchronization: a small delta is computed immediately, a large one is queued. The hook itself
+never talks to a model. Installing the hooks is an explicit, consented operation.
+
+They are installed where git actually looks. Usually that is `$GIT_DIR/hooks`, but when the
+repository sets `core.hooksPath` — and husky, lefthook and simple-git-hooks all set it, husky
+from `npm install` — they go there instead. For husky that means the `.husky` directory rather
+than `.husky/_`, which husky recreates on every run. An existing hook of the same name is not
+overwritten: it is kept alongside and called first, and a non-zero exit from it stops the chain.
+Files that land in the working tree are added to `.git/info/exclude` so they never show up in
+`git status`.
+
+### 4.5 Search
+
+Hybrid: vector similarity plus lexical matching. The vector branch is cut off by a floor
+**calibrated for the specific embedding model**; with no profile for that model, search fails
+rather than borrowing somebody else's floor. Candidates with a positive lexical score are
+admitted even with a low vector score — that is how a query by exact symbol name works.
+
+Before results are returned, the repository identity, generation, tree, model, dimension, format
+and checksum are all checked. Mixing a new base with an old overlay, or quietly answering from
+stale code, is not possible.
+
+A loaded index frees its memory automatically after ten minutes without queries; a separate tool
+releases it immediately, leaving the file on disk untouched.
+
+### 4.6 Precise navigation and its honest degradation
+
+Go-to-definition has to be different from a text search, so navigation has three sources and a
+strict order between them.
+
+| Source | When it works | Precision |
+|---|---|---|
+| Live language server | While the document is open through the matching tool. Off by default, enabled by its own settings file | Authoritative |
+| Precise navigation snapshot | Built with the index generation: C# and XAML are parsed directly, TypeScript and Python are imported from external indexers | Exact |
+| Bounded text search | Only when the first two did not answer | Marked as heuristic |
+
+Separately, what ties search to navigation. A search hit names a path and a line range but not
+the column of the identifier within the line, so the natural call passes column 0. A position
+that names nothing itself resolves, on a line with exactly one declaration, to that declaration
+— and the hit's start line is usable for navigation as it is. A line with two declarations
+(`const a = f(), b = g()`) has no unambiguous answer, and there the previous degradation notice
+is still returned rather than whichever of the two came first.
+
+Two exceptions: finding implementations and finding relationships have no text approximation at
+all — a plausible answer there is worse than an empty one. When an answer did come from a
+heuristic, it says why, and the two possible reasons are worded differently because only one of
+them is curable: a generation built before precise navigation existed is fixed by resyncing,
+while a symbol absent at the given position is not.
+
+---
+
+## 5. Twenty tools
+
+### The codesearch server — 11
+
+| Tool | Purpose | When to call it |
+|---|---|---|
+| `search_code` | Code search | The first step for "where does X live", "what handles Y", "is there already something like Z" |
+| `get_code_chunk` | Fetch a chunk | The full body of a hit, by the identifier from the search results |
+| `go_to_definition` | Go to definition | The definition of a symbol at a position |
+| `find_references` | Find references | Every use of a symbol |
+| `find_implementations` | Find implementations | Implementations, overrides, derived types — deliberately with no text approximation |
+| `find_relationships` | Find relationships | The snapshot's relationship graph, incoming and outgoing |
+| `index_status` | Index state | Whether an index exists, which model built it, whether it is behind HEAD, the synchronization phase |
+| `index_refresh` | Refresh the index | Targeted; refuses to do large work inside the call and returns the command to run in the background |
+| `index_unload` | Unload the index | Release memory immediately |
+| `lsp_open_document`, `lsp_close_document` | Live language server | The authoritative navigation source while a document is open |
+
+### The locallm server — 9
+
+| Tool | Purpose | When to call it |
+|---|---|---|
+| `read_image` | Read an image | Screenshot, scan, diagram, PDF page — as a file on disk |
+| `triage_log` | Triage a log | Build and test logs, dependency dumps, query plans, long stack traces |
+| `ask_local` | Ask about known files | Mechanical work: list, summarise, extract |
+| `translate_local` | Local translation | With a check that the structure survived |
+| `local_models_status` | Model state | Installed, resident, recommended-but-missing |
+| `local_model_preflight` | Model preflight | Proof of full residency with no payload |
+| `local_models_sync` | Sync models | Install the missing ones through the queue |
+| `local_model_experiment_report` | Experiment report | Timings, errors, fallbacks, cold and warm loads |
+| `local_model_feedback` | Model feedback | The owner's decision on one task/model pair |
+
+Every tool on the second server returns a line naming the model it used and its estimate of the
+cloud tokens avoided. That line belongs in the reply: the point is for it to be visible when
+work went downstairs, not merely that it got done.
+
+### How a long log is triaged
+
+A log does not have to fit in the model's context — nor, in whole, in memory.
+
+1. **Choosing a step.** The broker checks the configured context steps from largest to smallest
+   and takes the largest one proven fully resident on this machine.
+2. **Slicing.** The file is read as a stream and cut into fragments sized for the chosen
+   context, with overlap, so an error split by a fragment boundary is not lost.
+3. **Sequential triage.** Each fragment goes through the shared queue, strictly in order.
+4. **Bounded folding.** Partial results are merged hierarchically, so neither the whole log nor
+   an unbounded list of summaries is ever held in memory; repeated evidence collapses.
+
+The behaviour is configured by a policy file read **before every call** — no rebuild, no
+restart. It sets the context ceiling, the reserve for the answer, the characters-per-token
+estimate, and maximum fragment, overlap and partial-summary sizes. Defaults: a 256K token
+ceiling, a reserve of 4096, a conservative 2.0 characters per token, fragments up to a million
+characters, overlap up to 2048.
+
+Note: the configured context is only a ceiling. It does not override the residency check, and if
+a larger step is not confirmed the pipeline steps down rather than spilling into system memory.
+
+---
+
+## 6. Protections
+
+### 6.1 The untrusted boundary around source
+
+Repository code is data, not instructions. But a comment may say "ignore previous instructions",
+and a vendored directory may contain anything at all. So everything derived from source is
+returned inside its own block, marked with a random 96-bit nonce.
+
+![Diagram: the untrusted boundary around source](images/overview-04-granica-nedoveriya.png)
+
+How it actually works:
+
+| Property | Behaviour |
+|---|---|
+| Where the nonce comes from | A cryptographic generator, 12 bytes |
+| Uniqueness check | The nonce is checked for absence from the content itself — up to ten attempts; if none is found the call fails rather than returning a forgeable boundary |
+| Escaping the origin | The attribute carrying the path is escaped in full, control characters included — a path cannot close the tag |
+| Marker symmetry | The opening and closing markers carry the same nonce, so a "closing" tag cannot be planted in the source |
+| What stays outside | Only what is trusted: the index summary, diagnostics, validation errors |
+
+**Six tools use the boundary**, not two as the README claimed until 18.08.2026: search, chunk
+retrieval, go-to-definition, find references, find implementations and find relationships. Paths,
+symbol identifiers and ranges were written by whoever wrote the repository, so they are data as
+much as a snippet is.
+
+### 6.2 The result identifier
+
+A chunk identifier is opaque and carries the repository, generation, tree, the hash of
+uncommitted content and an ordinal, plus a checksum of the payload.
+
+An important precision, written into the code itself: the checksum is **not an authentication
+boundary**. It catches accidental corruption and casual tampering. What authorizes reading
+source is something else — equality of repository, generation, tree and dirty overlay, checked
+before anything is read. An identifier from another repository, from an old generation, or with
+an ordinal out of range is rejected rather than resolved against a different snapshot.
+
+### 6.3 Transport, permissions and delivery
+
+| Boundary | What it guarantees |
+|---|---|
+| One transport | The only path to the models is the broker; the agent-facing Ollama endpoint is unsupported |
+| Runtime permissions | Directories are brought to their expected shape and validated in a single pass. Separate passes left a race window: Claude and Codex running concurrently hit a spurious permission failure |
+| Protocol cleanliness | The MCP servers reserve standard output for the protocol |
+| Release signature | The public key is embedded in the installer binary rather than sitting in a file beside it: a package signed with someone else's key cannot be substituted |
+| Immutable versions | A published version directory is never rewritten; rollback is the activation of a previously verified directory |
+| Atomic switching | Activation requires naming the pointer being replaced, so a concurrent activation cannot be silently overwritten |
+| Graceful stop | The broker is asked to finish: it notices the request on its per-second heartbeat, stops taking new work and finishes what it has. Only what has not left by the deadline is killed |
+| Growth limits | Index generations, installed versions, backups, the task archive, response bodies and telemetry are all bounded |
+
+One subtlety about retention: the minimum lifetime of a response body protects correctness
+rather than disk — a response younger than that is deleted by nothing, and a manually configured
+zero is clamped rather than obeyed.
+
+---
+
+## 7. Cloud tokens saved
+
+### 7.1 Method
+
+There is no live token counter in the system, so every number is an estimate and is given as a
+range. The conversion constants were checked against the code: **4.0 characters per token** for
+Latin text, **2.2** for Cyrillic, and for images **the pixel area divided by 750**. The saving
+is "what it would have cost to drag this raw material into the cloud context" minus "what was
+actually spent".
+
+Not to be confused with another constant: log triage has its own, deliberately conservative
+**2.0 characters per token**, and it exists to size fragments for a model's context rather than
+to count savings.
+
+### 7.2 Measured on this machine
+
+A telemetry summary for 29.07 to 17.08.2026, 277 tasks:
+
+| Metric | Value |
+|---|---|
+| Successful tasks | 263 of 277 (95%) |
+| Cold model load | 172 (62%) |
+| Fallback used | 83 (30%) |
+| Queue wait | median 2.1 s, p90 2.2 s, maximum 6 min 12 s |
+| Execution | median 4.8 s, p90 27.8 s, maximum 3 min 30 s |
+| **Saved** | **~0.7–1.1 million cloud tokens** |
+
+How the saving is distributed across task profiles (share of the total, about 0.9 million tokens
+at the midpoint):
+
+| Profile | Tasks | Median | Saved | Share |
+|---|---:|---:|---:|---|
+| Code review | 25 | 12.8 s | ~269–404K | `████████████████████` 37% |
+| Data extraction | 34 | 15.9 s | ~161–242K | `████████████` 22% |
+| Log triage | 30 | 5.7 s | ~117–175K | `████████` 16% |
+| Code analysis | 10 | 3.3 s | ~80–109K | `█████` 10% |
+| Classification | 8 | 10.5 s | ~51–69K | `███` 7% |
+| Technical translation | 104 | 1.9 s | ~32–44K | `██` 4% |
+| Other | 66 | — | ~25K | `█` 3% |
+
+The conclusion worth remembering: **the expensive thing to delegate is not translation or OCR,
+but work over large volumes of code and logs.**
+
+### 7.3 The arithmetic for typical tasks
+
+Measured on two real repositories:
+
+| Repository | Files | Source size | Average file | Whole repository in tokens |
+|---|---:|---:|---:|---:|
+| LocalAi | 522 | 4.16 MB | 7,972 chars | ~1.04 million |
+| IntelWash | 7,587 | 29.3 MB | 3,865 chars | ~7.33 million |
+
+The size of a search answer was measured separately: 147,651 characters over 24 queries, so
+about 6,150 characters, or roughly 1.5 thousand tokens per query.
+
+| Task | Without LocalAi | With LocalAi | Saved |
+|---|---:|---:|---:|
+| "Where does X live" in LocalAi, 10 candidate files | ~20K | ~1.5K | **~18K, 13× less** |
+| "Where does X live" in IntelWash, 10 candidate files | ~9.7K | ~1.5K | **~8K, 6× less** |
+| The same, 25 candidates — typical for an unfamiliar module | ~24K | ~1.5K | **~22K, 16× less** |
+| A 600 KB build log | ~150K | ~0.3K | **~150K, 500× less** |
+| A 1920×1080 screenshot | ~2.8K | ~0.2K | **~2.6K, 14× less** |
+| "List the TODOs in these 12 files" | ~24K | ~0.5K | **~23K** |
+| Surveying an unfamiliar repository as a whole | 1.04–7.33 million | — | The task becomes possible at all |
+
+### 7.4 Honest estimates, and the cases where there is no saving
+
+The same harness that produced the answer size also measures search quality on a fixture of 24
+cases: precision at five is 0.13, recall at ten is 0.78, and the relevance floor removed only
+two chunks out of 240. Search saves context radically, but it produces a good short list of
+candidates rather than a guaranteed single right answer.
+
+| Situation | Why there is no saving |
+|---|---|
+| A screenshot pasted straight into the chat window | It has already been paid for; handing it to a local model afterwards buys nothing. Ask for a file path |
+| A very small image | A button-sized screenshot costs a couple of dozen tokens; any useful answer about it is longer |
+| A literal search for a known token | Nothing is cheaper than an ordinary text search |
+
+### 7.5 Telemetry: what it collects and what it deliberately never holds
+
+Every delegated task leaves one record in the runtime directory. The summary above is built from
+those records.
+
+| What is recorded | What the record never holds |
+|---|---|
+| Task identifier, profile, model, context size | Prompts and answers |
+| Input and output sizes — **as buckets**, not exact values | File contents and image bytes |
+| Cold load, model switch, fallback used | File paths and repository names |
+| Validator result and execution outcome | Secrets of any kind |
+| Durations: queue, load, execution, total | — |
+| Token estimates: gross, spent on verification, net | — |
+
+Retention: task records are kept for thirty days, experiment records for a week. An experiment
+report therefore states honestly how many surviving records its timings are built on: the number
+of attempts comes from the experiment state and outlives the measurements.
+
+The saving in the summary is given as a range and split into gross, spent on verification, and
+net. A sum of a hundred thousand estimates does not become exact by being large.
+
+---
+
+## 8. Everyday recipes
+
+| Situation | What to do |
+|---|---|
+| "Where is subscription cancellation handled?" | `search_code` — describe it in words, not by symbol name |
+| Found a fragment, need the full text | `get_code_chunk` with the identifier from the results |
+| "Who calls this method?" | `find_references`, not a text search |
+| "What implements this interface?" | `find_implementations` — an approximate answer here is worse than none |
+| The build failed, the log is hundreds of kilobytes | `triage_log` with the path to the file |
+| A colleague sent a screenshot of an error | Save it as a file, then `read_image` by path |
+| "Collect the TODOs across these eight files" | `ask_local`, extraction profile |
+| Search is answering oddly | `index_status`: check whether the index is behind HEAD |
+| A long pause in the work and memory to spare | `index_unload`; the index stays on disk and the next search rereads it in about a second |
+
+**A new repository.** Start with the read-only check (`localai repo status --root <repository>`).
+If it is not connected, synchronize (`localai sync`) and install the hooks
+(`localai hooks install`) — both require explicit consent. While the first generation is being
+built the state is "initializing": answering from a partial index is not allowed, and the right
+answer from an agent is "the repository is still indexing".
+
+**Diagnostics.** `localai doctor` checks the version and the integrity of the binaries, the
+stable entry point, whether the broker is alive, the queue and the quarantine, the policies in
+force and the state of the index. It only reads and starts nothing; a stopped broker is noted
+rather than reported as an error, because it starts on demand.
+
+**Cleanup.** `localai prune` frees space against the retention limits; a dry-run flag previews
+it. It never touches the active version pointer or the current index generation.
+
+---
+
+## 9. Installing and updating
+
+![Diagram: installing and updating](images/overview-06-ustanovka.png)
+
+Since 0.1.38 nothing has to be stopped by hand: the installer shuts the broker and the MCP
+servers down itself and replaces them. Before 0.1.38 the directory-shape check required the
+right to delete the runtime directory that a running broker holds — it is its working directory
+— and the update refused before ever reaching its own stop step.
+
+Delivery goes through GitHub only: change → release → installer. Hand-made builds are never
+placed into the runtime.
+
+Since 0.1.45 installation needs no GitHub account: releases are public, and the installer
+downloads the manifest, the signature and the package over plain HTTPS with no credentials. The
+GitHub CLI remains as a fallback — for a fork kept private, or a network where the release host
+is unreachable but the API is not. The checks are the same either way: the manifest is verified
+against the key embedded in the installer, the package against the SHA-256 inside the manifest.
+
+The same release closed a defect that left the installer setting up no models at all: manifests
+from 0.1.29 to 0.1.44 were signed with an empty model list, and the model step quietly did
+nothing. The list is now built per release, and signing without it refuses to run.
+
+### 9.1 Activation, rollback and stopping
+
+| Operation | How it works |
+|---|---|
+| Activation | Requires naming the pointer being replaced — either its checksum or the assertion "there is no pointer yet". Omitting both guarantees is a usage error; a mismatch is a refusal |
+| Rollback | Not an "undo" but the activation of a previously verified immutable directory: it was never rewritten, so it is available whole |
+| Stopping | The broker is asked to finish: a request carrying its identifier and start time is placed beside the state document, the broker notices it on its per-second heartbeat, stops taking new work and finishes what it has |
+| Force | Only what has not left by the deadline is killed. The broker owns a durable queue and may be in the middle of a multi-minute generation, so killing is a last resort rather than a mechanism |
+| MCP tools | They hold no state of their own and have no channel to be asked, and the client restarts them itself, so for them stopping is simply exiting |
+
+The stop request names the start time as well as the process identifier: otherwise a stale
+request could take down a healthy broker that inherited the same identifier.
+
+### 9.2 Settings that are read on the fly
+
+None of them requires a rebuild; some do not even require a restart.
+
+| File | What it sets | When it takes effect |
+|---|---|---|
+| Model policy | The residency requirement, keeping a model after idle | The broker reads it at start: one already running keeps the previous policy |
+| Retention limits | Generations, versions, backups, the archive, response bodies, telemetry | On the next cleanup pass |
+| Log triage profile | Contexts, fragments, overlap, characters-per-token estimate | Before every call |
+| Language servers | Enablement, executables, timeouts, message size limit | The next time a document is opened |
+| External indexers | Enablement, paths, arguments, parsing limits | On every synchronization |
+
+A corrupt policy file, or one of an unknown version, does **not** weaken the check: safe defaults
+apply. A parse error never turns into silent permission.
+
+---
+
+## 10. Boundaries and limitations
+
+| Limitation | What it means in practice |
+|---|---|
+| The hardware ceiling | The target is a single 16 GB card. A model that survives only by being spread across two cards pays for it over the bus, and simply will not start on one |
+| Model tags are misleading | A tag like "8b" can mean a four-bit quantisation. Quality needs an explicit quantisation tag, checked against the registry manifest rather than against the name |
+| Changing the embedding model | Requires rebuilding the index: the model is recorded in the header, and querying an index with a different model is impossible by design |
+| Live language servers | Off by default, enabled by their own settings file |
+| An NPU does not help | Everything goes through Ollama, whose backends are CPU, CUDA, ROCm, Metal and Vulkan |
+| Local models are weaker | Good at "list this" and "summarise that", unreliable on subtle analysis; anything a decision depends on is verified |
+
+---
+
+## Appendix A. What was checked against the code
+
+| Statement | Result |
+|---|---|
+| Untrusted content wrapper: 96-bit nonce, up to 10 attempts, escaped origin | ✅ matched |
+| A relevance floor per model, and failing closed without one | ✅ matched |
+| Watchdog: ten minutes of silence, a probe a minute, a ten-second timeout, two confirmed probes | ✅ matched |
+| Scheduler: a two-second gathering window, force-including tasks older than fifteen minutes | ✅ matched |
+| Full residency as the default requirement | ✅ matched |
+| Context steps from 2K to 256K | ✅ matched |
+| An experiment pauses after ten completed tasks | ✅ matched |
+| Retention limits: generations, versions, backups, archive, response bodies, telemetry | ✅ matched |
+| Token estimates: 4.0 Latin, 2.2 Cyrillic, 750 pixels | ✅ matched |
+| Base selection: the manifest ref, then dev, then main | ✅ matched |
+| Index unloaded after ten idle minutes | ✅ matched |
+| Twenty tools: 11 and 9 | ✅ matched |
+| Index refresh refuses to do large work inside the call | ✅ matched |
+| Git hooks trigger synchronization through the launcher | ✅ matched |
+| A sliding window for non-C# files | ✅ matched, **refined**: 60-line window, 12 lines of overlap; only allowed extensions are indexed; lock files, minified bundles and generated C# are excluded; a file with a zero byte is dropped |
+| "A vector per type and per method" | ⚠️ **was imprecise**: constructors, destructors, operators, indexers and properties with bodies also get their own chunks. The exact rule was added to both READMEs |
+| "The untrusted boundary is search and chunk retrieval" | ⚠️ **was understated**: six tools use the boundary, navigation included. Fixed in both READMEs |
+| "A forged chunk identifier is rejected" | ⚠️ **was imprecise**: the checksum is not authentication; what authorizes is snapshot equality. Fixed in both READMEs |
+
+All three disagreements were closed in the project, not only here.
+
+| What was fixed | Where | Change |
+|---|---|---|
+| The reach of the untrusted boundary and the meaning of the identifier checksum | both READMEs | [#81](https://github.com/MrAliev/local-ai-developer-toolkit/pull/81) |
+| Chunking granularity per language | both READMEs, both tool lists, the `search_code` description, the managed instruction block | [#83](https://github.com/MrAliev/local-ai-developer-toolkit/pull/83) |
+
+The last change touches more than documentation: the tool description and the managed block are
+compiled into the binaries, so the corrected wording reaches `CLAUDE.md` and `AGENTS.md` with
+the 0.1.39 installation.
+
+Symbol chunking for TypeScript and Python
+([#82](https://github.com/MrAliev/local-ai-developer-toolkit/issues/82)) has since been done and
+shipped in 0.1.42, and declarations for which the indexer reports no body boundary shipped in
+0.1.43. Section 4.2 describes the result; the evaluation report holds the measurements.
+
+The check made before 0.1.45 found four disagreements that were no longer in the documentation
+but in the installer itself: an empty model list in the signed manifest, a residency-policy write
+that made the installation root unusable, an undeclared requirement to be signed in to GitHub,
+and a requirement for exactly Node 20. All four are described in the
+[0.1.45 release notes](releases/0.1.45.md) and closed in the code.
+
+## Appendix B. Where things live
+
+| Path | What |
+|---|---|
+| `bin\versions\<version>` | The immutable binaries of a version |
+| `bin\launcher` | The stable entry point |
+| `bin\current.json` | The active version pointer |
+| `repositories\<id>\generations` | Index generations |
+| `policy.json` | Model residency and keeping a model in memory |
+| `retention.json` | Retention limits |
+| `log-triage.json` | The log triage profile |
+| `language-servers.json` | Live language servers, off by default |
+| `semantic-indexing.json` | The external indexers for precise navigation |
+| `telemetry\metrics` | Task records |
+
+Every path is relative to the LocalAi runtime directory in the user's local application data.

@@ -2,6 +2,10 @@
 
 [Русская версия](README.ru.md)
 
+[![Build and test](https://github.com/MrAliev/local-ai-developer-toolkit/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/MrAliev/local-ai-developer-toolkit/actions/workflows/build-and-test.yml)
+[![Latest release](https://img.shields.io/github/v/release/MrAliev/local-ai-developer-toolkit?display_name=tag)](https://github.com/MrAliev/local-ai-developer-toolkit/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ## Overview
 
 Local AI Developer Toolkit is a .NET solution for running local-model developer tools
@@ -918,8 +922,16 @@ failed.
   rebase it saves: GitHub closes it when its base branch is deleted on merge rather than moving
   it to `main` — which is what happened to #91 and cost a recreated pull request. When two
   changes touch the same file, land the first and rebase the second.
-- Keep this English README and `README.ru.md` synchronized.
+- Every document in the repository exists in English and in Russian, as `name.md` and
+  `name.ru.md`, and each one links to the other in its opening lines. A document that
+  exists in one language only is unfinished — including plans and design notes.
 - Preserve UTF-8 without BOM and Windows CRLF line endings for repository documentation.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how changes are built, tested and reviewed, and
+[SECURITY.md](SECURITY.md) for what the product promises and how to report a vulnerability
+privately.
 
 ## License
 

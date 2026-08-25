@@ -1,5 +1,7 @@
 # Atomic Launcher Version Activation Design
 
+[Русская версия](2026-07-29-atomic-launcher-version-activation-design.ru.md)
+
 ## Problem
 
 LocalAi is installed as immutable version directories below

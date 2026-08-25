@@ -1,5 +1,7 @@
 # План реализации усиления retrieval в CodeSearch
 
+[English version](2026-07-31-codesearch-retrieval-hardening.md)
+
 > **Для agentic workers:** ОБЯЗАТЕЛЬНЫЙ SUB-SKILL: использовать superpowers:subagent-driven-development (рекомендуется) или superpowers:executing-plans и выполнять план по задачам. Для отслеживания используются checkbox (`- [ ]`).
 
 **Цель:** Добавить в существующий pipeline CodeSearch измеренный model-specific порог релевантности, получение полного чанка точного snapshot, nonce-границы недоверенного содержимого и воспроизводимый A/B-отчёт о качестве/токенах.

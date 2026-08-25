@@ -1,5 +1,7 @@
 # Дизайн интерактивного Windows-установщика
 
+[English version](2026-07-31-windows-interactive-installer-design.md)
+
 **Дата:** 2026-07-31
 
 **Статус:** согласован для отдельного последующего issue и PR

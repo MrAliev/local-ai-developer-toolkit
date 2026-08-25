@@ -1,5 +1,7 @@
 # Status and ACL Race Fixes Implementation Plan
 
+[Русская версия](2026-07-29-status-acl-race-fixes.ru.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make generation status follow the configured mainline ref and make Windows runtime ACL enforcement tolerate broker-owned paths that are atomically moved during inspection.

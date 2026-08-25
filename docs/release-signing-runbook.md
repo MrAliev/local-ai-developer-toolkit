@@ -63,9 +63,13 @@ dotnet run --project src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj -c R
     --package publish/release/localai-package.zip `
     --package-uri "https://example.invalid/probe" `
     --release-version 0.0.0-probe --version-directory probe `
+    --no-models `
     --private-key "$restored\release-signing-private.pkcs8.der" `
     --out $restored
 ```
+
+`--no-models` is what makes this a probe rather than a release: signing refuses to run without
+a model list unless the omission is stated, and this manifest is never published.
 
 Signing validates the private key against the anchor the installer ships, so a copy that does not
 match fails here rather than on a user's machine. Delete `$restored` afterwards.

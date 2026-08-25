@@ -1,5 +1,7 @@
 # План реализации канонического CRLF и точного статуса overlay
 
+[English version](2026-07-28-canonical-crlf-overlay-status.md)
+
 > **Для agentic workers:** ОБЯЗАТЕЛЬНЫЙ SUB-SKILL: использовать superpowers:executing-plans для пошагового выполнения этого плана. Для отслеживания используются checkbox-шаги (`- [ ]`).
 
 **Цель:** Канонизировать каждый индексируемый текстовый файл в Windows CRLF в памяти и корректно показывать необходимость exact overlay для индексов с generation.

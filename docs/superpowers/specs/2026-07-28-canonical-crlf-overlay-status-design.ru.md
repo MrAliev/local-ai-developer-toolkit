@@ -1,5 +1,7 @@
 # Канонический CRLF в индексе и точный статус overlay
 
+[English version](2026-07-28-canonical-crlf-overlay-status-design.md)
+
 ## Контекст
 
 LocalAi строит неизменяемую базу CodeSearch из Git snapshot и точный overlay для каждого
