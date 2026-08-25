@@ -42,7 +42,7 @@ jobs:
       LOCALAI_STRICT_FIXTURES_EXCEPT: "scip-python"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Several fixtures create their own repositories with `git init`; none need history
           # here, and a shallow clone keeps the checkout quick.
