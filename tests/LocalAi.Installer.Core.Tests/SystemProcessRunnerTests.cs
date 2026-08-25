@@ -18,7 +18,7 @@ public sealed class SystemProcessRunnerTests
     /// here into a coin flip, and one of them came up tails — the run returned no exit code and
     /// the failure read as a broken argument list.
     ///
-    /// A hung child is caught here, and by `--blame-hang` in CI if it ever escapes this.
+    /// A hung child is caught here, and by the CI run timeout if it ever escapes this.
     /// </remarks>
     private static readonly TimeSpan Completion = TimeSpan.FromSeconds(30);
 

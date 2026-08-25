@@ -25,8 +25,8 @@ changes touch the same file, land the first and rebase the second.
 
 **Tests come with behaviour, and never assert how fast the machine is.** Wait for the condition
 rather than for a duration, prefer a purpose-built child process over an interpreter whose
-startup cost is unbounded, and leave hang detection to `--blame-hang`, which CI applies to every
-test project. A deadline a correct run can miss proves nothing and reports itself as a fault in
+startup cost is unbounded, and leave hang detection to the run timeout CI applies to the whole
+solution. A deadline a correct run can miss proves nothing and reports itself as a fault in
 the code under test. This is not a style preference — it is the single most common way a test
 in this repository has been wrong.
 
