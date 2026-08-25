@@ -57,7 +57,7 @@ jobs:
       # predictable interpreter it fails inside its own environment setup rather than in
       # anything this repository owns.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
