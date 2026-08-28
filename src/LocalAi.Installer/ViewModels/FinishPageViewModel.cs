@@ -5,7 +5,7 @@ public sealed class FinishPageViewModel : ObservableObject
     private bool success;
     private bool requiresRestart;
     private string? summary;
-    private string? rollbackNotes;
+    private string? runLog;
     private string? progress;
 
     public bool Success
@@ -36,12 +36,17 @@ public sealed class FinishPageViewModel : ObservableObject
         }
     }
 
-    public string? RollbackNotes
+    /// <summary>
+    /// What the run did, line by line. It was called RollbackNotes, which promised an
+    /// installation that could be undone; there has never been one, and the value has
+    /// always been the log.
+    /// </summary>
+    public string? RunLog
     {
-        get => rollbackNotes;
+        get => runLog;
         set
         {
-            SetProperty(ref rollbackNotes, value);
+            SetProperty(ref runLog, value);
         }
     }
 
