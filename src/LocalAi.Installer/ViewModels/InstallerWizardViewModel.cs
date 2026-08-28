@@ -51,7 +51,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private bool hasInitialized;
     private int progress;
     private string progressText = "Ready";
-    private string? rollbackMessage;
+    private string? runLogMessage;
     private EnvironmentDiagnosis? environmentDiagnosis;
     private CatalogRecommendation lastRecommendation = CatalogRecommendation.Empty;
     private string? resolvedTag;
@@ -184,7 +184,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     public string ProgressText => progressText;
 
-    public string? RollbackResult => rollbackMessage;
+    public string? RunLog => runLogMessage;
 
     public string? FinishSummary => finish.Summary;
 
@@ -415,7 +415,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             SetProgress(100, hasRunError ? "Failed" : "Completed");
             isComplete = !hasRunError;
             finish.Progress = report.ToString().Trim();
-            SetRollbackInfo(report.ToString(), false);
+            SetRunLog(report.ToString(), false);
             CurrentPage = InstallerPage.Finish;
             return !hasRunError;
         }
@@ -449,7 +449,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 failedActions,
                 exception.Message);
             finish.Progress = report.ToString().Trim();
-            SetRollbackInfo(report.ToString(), false);
+            SetRunLog(report.ToString(), false);
             CurrentPage = InstallerPage.Finish;
             return false;
         }
@@ -508,12 +508,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(ProgressText));
     }
 
-    public void SetRollbackInfo(string message, bool requiresRestart)
+    public void SetRunLog(string message, bool requiresRestart)
     {
-        rollbackMessage = message;
+        runLogMessage = message;
         finish.RequiresRestart = requiresRestart;
-        finish.RollbackNotes = message;
-        OnPropertyChanged(nameof(RollbackResult));
+        finish.RunLog = message;
+        OnPropertyChanged(nameof(RunLog));
     }
 
     public void RefreshNavigationState() => RefreshAll();
@@ -1248,7 +1248,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         if (environmentDiagnosis?.WinGet is not
             { State: DependencyState.Detected, ExecutablePath: { } wingetPath })
         {
-            SetRollbackInfo(
+            SetRunLog(
                 $"WinGet is unavailable; install {displayName} manually from " +
                 $"{dependency.OfficialInstallerUri}.",
                 false);
@@ -1282,7 +1282,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             cancellationToken);
         if (result.ExitCode is not 0)
         {
-            SetRollbackInfo(
+            SetRunLog(
                 $"{displayName} installation failed with exit code {result.ExitCode}.",
                 false);
             return false;
@@ -1298,14 +1298,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
     {
         if (dependency.PackageVersion is not { Length: > 0 } packageVersion)
         {
-            SetRollbackInfo($"{displayName} has no pinned package version.", false);
+            SetRunLog($"{displayName} has no pinned package version.", false);
             return false;
         }
 
         if (environmentDiagnosis?.Npm is not
             { State: DependencyState.Detected, ExecutablePath: { } npmPath })
         {
-            SetRollbackInfo(
+            SetRunLog(
                 $"npm is unavailable; install Node.js 20 before {displayName}.",
                 false);
             return false;
@@ -1318,7 +1318,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             cancellationToken);
         if (result.ExitCode is not 0)
         {
-            SetRollbackInfo(
+            SetRunLog(
                 $"{displayName} installation failed with exit code {result.ExitCode}.",
                 false);
             return false;
@@ -1340,7 +1340,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 npmGlobalRoot.Contains('\n', StringComparison.Ordinal) ||
                 npmGlobalRoot.Contains('\r', StringComparison.Ordinal))
             {
-                SetRollbackInfo(
+                SetRunLog(
                     "SCIP Python was installed, but npm did not return a valid global " +
                     "package directory.",
                     false);
@@ -1357,7 +1357,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 exception is IOException or UnauthorizedAccessException or
                 InvalidOperationException or JsonException)
             {
-                SetRollbackInfo(
+                SetRunLog(
                     $"SCIP Python Windows compatibility patch failed: {exception.Message}",
                     false);
                 return false;
@@ -1369,7 +1369,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 : Path.Combine(globalPrefix, "scip-python.cmd");
             if (scipPythonPath is null || !File.Exists(scipPythonPath))
             {
-                SetRollbackInfo(
+                SetRunLog(
                     "SCIP Python was patched, but its npm command shim was not found.",
                     false);
                 return false;
@@ -1384,7 +1384,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             if (verification.ExitCode is not 0 ||
                 !versionOutput.Contains(packageVersion, StringComparison.Ordinal))
             {
-                SetRollbackInfo(
+                SetRunLog(
                     "SCIP Python was patched, but its executable verification failed.",
                     false);
                 return false;
