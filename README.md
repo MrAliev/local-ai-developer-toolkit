@@ -241,6 +241,19 @@ of them installed downloads tens of gigabytes. Choosing **Skip** on the models p
 the tooling alone, and models can be added later by asking a registered client to run
 `local_models_sync`.
 
+### Installing from a folder
+
+The executable is a wizard; the product is the package it fetches while it runs. To install on
+a machine with no route to GitHub, download `release-manifest.json`, `release-manifest.sig` and
+`localai-package.zip` from the release on a machine that has one, put all three in a folder, and
+give that folder to the installer — either by typing its path on the package page, or by placing
+`LocalAi.Installer.exe` in the folder alongside them, which the wizard offers on its own.
+
+Nothing is trusted for coming from a folder. The manifest is verified against the key embedded
+in the installer and the package against the SHA-256 inside that manifest, exactly as over
+HTTPS. Models still come from the Ollama registry, so this makes an installation possible
+without GitHub, not without the internet.
+
 ## Prerequisites
 
 These are for building the solution from source. Installing a release needs none of them.

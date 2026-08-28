@@ -22,6 +22,7 @@ public sealed class PackagePageViewModel : ObservableObject
     public const string LatestTag = "latest";
 
     private string releaseVersion = LatestTag;
+    private string sourceFolder = string.Empty;
     private PackageSourceState state = PackageSourceState.NotChecked;
     private string statusText =
         "No release has been checked yet.";
@@ -39,6 +40,45 @@ public sealed class PackagePageViewModel : ObservableObject
             OnPropertyChanged(nameof(WantsLatest));
             State = PackageSourceState.NotChecked;
             StatusText = "No release has been checked yet.";
+        }
+    }
+
+    /// <summary>
+    /// A folder holding the three files a release publishes, for a machine with no route to
+    /// GitHub. Empty means the release is fetched from GitHub, which is what almost every
+    /// installation does.
+    ///
+    /// Reading from a folder changes where the bytes came from, not whether they are believed:
+    /// the manifest is still checked against the embedded key and the package against the hash
+    /// inside it.
+    /// </summary>
+    public string SourceFolder
+    {
+        get => sourceFolder;
+        set
+        {
+            SetProperty(ref sourceFolder, value ?? string.Empty);
+            // Changing where a release comes from invalidates whatever the last one resolved to.
+            Resolved = null;
+            ResolvedTag = null;
+            OnPropertyChanged(nameof(ResolvedTag));
+            State = PackageSourceState.NotChecked;
+            StatusText = "No release has been checked yet.";
+        }
+    }
+
+    /// <summary>
+    /// Offers the folder the installer was started from, when it holds a release. That is what
+    /// makes "download it once and pass the folder on" work without the person at the far end
+    /// having to type a path — and it is only ever an offer, because a folder that merely has
+    /// the right three file names still has to pass verification.
+    /// </summary>
+    public void OfferLocalFolder(string? installerDirectory)
+    {
+        if (sourceFolder.Length == 0 &&
+            DirectoryReleaseFeed.LooksLikeReleaseFolder(installerDirectory))
+        {
+            SourceFolder = installerDirectory!;
         }
     }
 

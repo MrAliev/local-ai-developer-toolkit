@@ -214,6 +214,11 @@
                         <TextBlock Text="Release tag" />
                         <TextBox Text="{Binding Package.ReleaseVersion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  Width="280" Height="24" HorizontalAlignment="Left" Margin="0,4,0,8" />
+                        <TextBlock Text="Install from a folder (optional)" Margin="0,4,0,0" />
+                        <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,4"
+                                   Text="A folder holding release-manifest.json, release-manifest.sig and localai-package.zip. Leave empty to install from GitHub. The manifest is verified against the key built into this installer either way; models still come from the Ollama registry." />
+                        <TextBox Text="{Binding Package.SourceFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="480" Height="24" HorizontalAlignment="Left" Margin="0,0,0,8" />
                         <Button Content="Check release" Width="140" Height="26" HorizontalAlignment="Left"
                                 Click="OnPackageCheckRelease" />
                         <TextBlock Text="{Binding Package.StatusText}" Style="{StaticResource Muted}" Margin="0,10,0,0" />
