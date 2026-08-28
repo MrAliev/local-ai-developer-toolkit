@@ -108,6 +108,120 @@ public sealed class CodeSearchSyncTests : IDisposable
         Assert.DoesNotContain("python", written);
     }
 
+    /// <summary>
+    /// The silent half of the same problem. A workspace whose projects all failed to load still
+    /// returns, the fallback writes an index covering nothing, the generation is published, and
+    /// sync exits 0 -- so a hook or a CI step is told the repository is indexed while every
+    /// definition query answers from bounded text matching.
+    /// </summary>
+    [Fact]
+    public void Csharp_that_produced_no_semantic_document_is_warned_about()
+    {
+        var source = SourceTree("Widget.cs");
+
+        var written = CaptureError(() =>
+            CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
+                source,
+                SemanticIndexCovering(),
+                requireSemantics: false));
+
+        Assert.Contains("covered no C# document", written);
+        Assert.Contains("text matching", written);
+    }
+
+    [Fact]
+    public void Csharp_that_produced_a_semantic_document_says_nothing()
+    {
+        var source = SourceTree("Widget.cs");
+
+        var written = CaptureError(() =>
+            CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
+                source,
+                SemanticIndexCovering("src/Widget.cs"),
+                requireSemantics: false));
+
+        Assert.Equal(string.Empty, written);
+    }
+
+    /// <summary>
+    /// A repository with no C# in it has nothing to be missing, and warning there would teach
+    /// everyone to ignore the line.
+    /// </summary>
+    [Fact]
+    public void A_repository_without_csharp_is_not_called_degraded()
+    {
+        var source = SourceTree("README.md");
+
+        var written = CaptureError(() =>
+            CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
+                source,
+                SemanticIndexCovering(),
+                requireSemantics: false));
+
+        Assert.Equal(string.Empty, written);
+    }
+
+    /// <summary>
+    /// Counting C# documents rather than all of them: an index carrying TypeScript and no C# is
+    /// exactly the case a total count would call healthy.
+    /// </summary>
+    [Fact]
+    public void Documents_from_another_language_do_not_stand_in_for_csharp()
+    {
+        var source = SourceTree("Widget.cs");
+
+        var written = CaptureError(() =>
+            CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
+                source,
+                SemanticIndexCovering("src/app.ts"),
+                requireSemantics: false));
+
+        Assert.Contains("covered no C# document", written);
+    }
+
+    [Fact]
+    public void Require_semantics_turns_the_warning_into_a_failure()
+    {
+        var source = SourceTree("Widget.cs");
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
+                source,
+                SemanticIndexCovering(),
+                requireSemantics: true));
+
+        Assert.Contains("covered no C# document", exception.Message);
+    }
+
+    private string SourceTree(params string[] relativePaths)
+    {
+        var source = Path.Combine(_root, "sources-" + Guid.NewGuid().ToString("N"));
+        foreach (var relativePath in relativePaths)
+        {
+            var full = Path.Combine(source, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, "// content");
+        }
+
+        return source;
+    }
+
+    private static SemanticIndex SemanticIndexCovering(params string[] documents) =>
+        new()
+        {
+            RepositoryId = "repository",
+            GenerationId = "generation",
+            GitTree = "tree",
+            BaseCommit = "commit",
+            IndexedAtUtc = DateTime.UnixEpoch,
+            Documents = documents
+                .Select(path => new SemanticDocument { RelPath = path, Hash = new byte[32] })
+                .ToList(),
+            Symbols = [],
+            Occurrences = [],
+            Relationships = [],
+        };
+
     [Fact]
     public void A_branch_whose_adapters_worked_says_nothing()
     {

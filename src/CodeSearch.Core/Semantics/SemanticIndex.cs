@@ -69,6 +69,53 @@ public sealed record SemanticIndex
         return ReadFrom(reader, path, requireEnd: true);
     }
 
+    /// <summary>
+    /// How many documents this index covers, read from the header alone.
+    ///
+    /// A status line is printed after every query, so it cannot afford to load a semantic index
+    /// that runs to tens of megabytes just to learn whether it holds anything. The document count
+    /// sits immediately after a short fixed header, which is one small read.
+    ///
+    /// Returns null when the file cannot be read as a semantic index at all. A caller asking this
+    /// is describing an index, not trusting it, so an unreadable one is reported rather than
+    /// thrown — and it is a caller's job to treat null as "cannot say".
+    /// </summary>
+    public static int? TryReadDocumentCount(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var reader = new BinaryReader(stream, Encoding.UTF8);
+            if (!string.Equals(
+                    Encoding.ASCII.GetString(reader.ReadBytes(4)),
+                    Magic,
+                    StringComparison.Ordinal) ||
+                reader.ReadInt32() != CurrentVersion)
+            {
+                return null;
+            }
+
+            reader.ReadString();
+            reader.ReadString();
+            reader.ReadString();
+            if (reader.ReadBoolean())
+            {
+                reader.ReadString();
+            }
+
+            reader.ReadString();
+            reader.ReadInt64();
+            return ReadCount(reader, "document");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                InvalidDataException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
     internal static SemanticIndex ReadFrom(
         BinaryReader reader,
         string origin,

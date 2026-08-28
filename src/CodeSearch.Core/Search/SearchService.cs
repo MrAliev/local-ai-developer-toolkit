@@ -3,6 +3,7 @@ using System.Runtime;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
+using CodeSearch.Core.Semantics;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
 using LocalAi.Repository;
@@ -45,7 +46,12 @@ public sealed record IndexStatus(
     // generation published before semantic indexing existed carries no semantic.sidx, and that
     // is invisible in every other field here: the vectors are current, the commit has not
     // drifted, and navigation quietly answers from text matches instead.
-    bool SemanticIndexPresent = false)
+    bool SemanticIndexPresent = false,
+    // A semantic index that exists but covers nothing answers navigation exactly as badly as one
+    // that is missing, and used to report itself as precise. That is the shape a broken C#
+    // workspace leaves behind: the file is written, the generation is published, and every
+    // definition query quietly falls back to text.
+    bool SemanticIndexCoversNothing = false)
 {
     public bool CommitDrifted =>
         Exists && IndexedCommit.Length > 0 && CurrentCommit.Length > 0 && IndexedCommit != CurrentCommit;
@@ -420,6 +426,7 @@ public sealed class SearchService
             index,
             currentCommit,
             identity);
+        var presence = SemanticIndexPresence(index, identity);
 
         return new IndexStatus(
             workingRoot,
@@ -437,33 +444,44 @@ public sealed class SearchService
             index.Root,
             requiresOverlay,
             overlay,
-            SemanticIndexPresent(index, identity));
+            presence.Present,
+            presence.CoversNothing);
     }
 
     /// <summary>
-    /// Whether the current generation carries a semantic index, by one stat rather than a manifest
-    /// read — verifying a manifest rehashes a half-gigabyte corpus, which is not a price a status
-    /// line printed after every query can pay.
+    /// Whether the current generation carries a semantic index, and whether that index covers any
+    /// document — by one stat and one header read rather than a manifest read, because verifying a
+    /// manifest rehashes a half-gigabyte corpus and a status line printed after every query cannot
+    /// pay that. The document count sits just past a short fixed header, so the second question
+    /// costs a few bytes rather than the whole index.
     /// </summary>
-    private static bool SemanticIndexPresent(
+    private static (bool Present, bool CoversNothing) SemanticIndexPresence(
         CodeIndex index,
         WorkingIndexIdentity? identity)
     {
         if (identity is null || string.IsNullOrWhiteSpace(index.GenerationId))
         {
-            return false;
+            return (false, false);
         }
 
         try
         {
-            return File.Exists(
-                new GenerationStore(identity.RepositoryRuntimeRoot)
-                    .SemanticIndexPath(index.GenerationId));
+            var path = new GenerationStore(identity.RepositoryRuntimeRoot)
+                .SemanticIndexPath(index.GenerationId);
+            if (!File.Exists(path))
+            {
+                return (false, false);
+            }
+
+            // Unreadable is reported as present and not empty: this line describes the index, and
+            // guessing that a file it could not parse holds nothing would be a louder claim than
+            // the evidence supports.
+            return (true, SemanticIndex.TryReadDocumentCount(path) == 0);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            return false;
+            return (false, false);
         }
     }
 

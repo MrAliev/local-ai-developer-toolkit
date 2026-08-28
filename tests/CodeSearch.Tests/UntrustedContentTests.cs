@@ -7,6 +7,7 @@ using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Security;
 using CodeSearch.Core.Search;
+using CodeSearch.Core.Semantics;
 using CodeSearch.Mcp;
 using LocalAi.Contracts;
 using LocalAi.Repository;
@@ -365,6 +366,25 @@ public sealed class UntrustedContentMcpTests : IDisposable
         Assert.Contains("localai sync --root", status, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The quieter half of the same failure. A semantic index that covers no document answers
+    /// definition queries exactly as a missing one does, but every other signal here looks
+    /// healthy -- the file is present, the checksum agrees, the commit has not drifted -- and it
+    /// used to report itself as precise. That is the shape a C# workspace that failed to load
+    /// leaves behind.
+    /// </summary>
+    [Fact]
+    public void Status_reports_that_a_semantic_index_covering_nothing_navigates_by_text()
+    {
+        PublishGenerationWithEmptySemanticIndex();
+
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        Assert.Contains("Navigation: HEURISTIC", status, StringComparison.Ordinal);
+        Assert.Contains("covers no document", status, StringComparison.Ordinal);
+        Assert.Contains("localai sync --root", status, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void A_phase_that_counts_no_chunks_does_not_show_the_last_phase_tally()
     {
@@ -498,7 +518,47 @@ public sealed class UntrustedContentMcpTests : IDisposable
         }
     }
 
-    private CodeIndex CreateIndex() =>
+    /// <summary>
+    /// Publishes a second generation whose semantic index is present and empty, and makes it the
+    /// current one. A generation is immutable, so the semantic index cannot be added to the one
+    /// the fixture already published -- this identity differs by its semantic version.
+    /// </summary>
+    private void PublishGenerationWithEmptySemanticIndex()
+    {
+        var generation = _generation with { SemanticIndexVersion = 3 };
+        var sourceIndex = Path.Combine(
+            Path.GetTempPath(),
+            generation.Id + "-" + Guid.NewGuid().ToString("N") + ".cidx");
+        var sourceSemanticIndex = Path.Combine(
+            Path.GetTempPath(),
+            generation.Id + "-" + Guid.NewGuid().ToString("N") + ".sidx");
+        try
+        {
+            CreateIndex(generation.Id).Save(sourceIndex);
+            new SemanticIndex
+            {
+                RepositoryId = _identity.RepositoryId,
+                GenerationId = generation.Id,
+                GitTree = _identity.HeadTree,
+                BaseCommit = _identity.HeadCommit,
+                IndexedAtUtc = DateTime.UnixEpoch,
+                Documents = [],
+                Symbols = [],
+                Occurrences = [],
+                Relationships = [],
+            }.Save(sourceSemanticIndex);
+            var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
+            var manifest = store.PublishIndex(sourceIndex, generation, sourceSemanticIndex);
+            store.SetCurrent(manifest);
+        }
+        finally
+        {
+            File.Delete(sourceIndex);
+            File.Delete(sourceSemanticIndex);
+        }
+    }
+
+    private CodeIndex CreateIndex(string? generationId = null) =>
         new()
         {
             Dim = 2,
@@ -507,7 +567,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
             GitCommit = _identity.HeadCommit,
             GitTree = _identity.HeadTree,
             RepositoryId = _identity.RepositoryId,
-            GenerationId = _generation.Id,
+            GenerationId = generationId ?? _generation.Id,
             DirtyHash = _identity.DirtyHash,
             IndexedAtUtc = DateTime.UtcNow,
             Files =
