@@ -154,8 +154,9 @@ public sealed class BrokerHost
                 return;
             }
 
-            var scheduled = await _scheduleMetadata(queued, cancellationToken);
-            if (scheduled.Any(candidate =>
+            var scheduled = await TryScheduleAsync(queued, cancellationToken);
+            if (scheduled is null ||
+                scheduled.Any(candidate =>
                     string.Equals(
                         candidate.Model,
                         residentModel,
@@ -165,7 +166,23 @@ public sealed class BrokerHost
             }
         }
 
-        await _idleUnload(cancellationToken);
+        try
+        {
+            await _idleUnload(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // Unloading talks to the backend too, and a backend that cannot be reached is one
+            // that is holding no model to unload. Leave _idleUnloadIssued alone so the next
+            // idle turn tries again.
+            Report("idle-unload", exception);
+            return;
+        }
+
         _idleUnloadIssued = true;
     }
 
@@ -179,7 +196,12 @@ public sealed class BrokerHost
         }
 
         var queued = await selectable.ListQueuedAsync(cancellationToken);
-        var scheduled = await _scheduleMetadata(queued, cancellationToken);
+        var scheduled = await TryScheduleAsync(queued, cancellationToken);
+        if (scheduled is null)
+        {
+            return null;
+        }
+
         var decision = _scheduler.Decide(
             scheduled,
             _residentModel());
@@ -423,14 +445,53 @@ public sealed class BrokerHost
         }
     }
 
-    private void Report(LeasedJob lease, string operation, Exception exception)
+    /// <summary>
+    /// Deciding what to lease reaches the backend, and the backend is allowed to be down: a boot
+    /// race, a service restart, a user who closed the tray app.
+    ///
+    /// Until this returned null instead of throwing, that exception travelled out of
+    /// LeaseNextAsync, out of RunAsync and off the top of the process — a Windows crash dialog on
+    /// every boot where the MCP servers start before Ollama does. Nothing has been leased at this
+    /// point, so the turn is skipped and the queued work waits for a backend that answers. The
+    /// transport has already spent its own retries getting here, which is what paces the waiting.
+    /// </summary>
+    private async Task<IReadOnlyList<ScheduledJobCandidate>?> TryScheduleAsync(
+        IReadOnlyList<QueuedJobCandidate> queued,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _scheduleMetadata!(queued, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            Report("schedule", exception);
+            return null;
+        }
+    }
+
+    private void Report(LeasedJob lease, string operation, Exception exception) =>
+        Report(lease.Request.JobId, lease.LeaseId, operation, exception);
+
+    /// <summary>
+    /// Reports a failure that happened before any job was leased, so there is no job and no
+    /// lease to name.
+    /// </summary>
+    private void Report(string operation, Exception exception) =>
+        Report(Guid.Empty, Guid.Empty, operation, exception);
+
+    private void Report(Guid jobId, Guid leaseId, string operation, Exception exception)
     {
         try
         {
             _diagnostic(new BrokerHostDiagnostic(
-                lease.Request.JobId,
+                jobId,
                 _workerId,
-                lease.LeaseId,
+                leaseId,
                 operation,
                 exception.GetType().Name));
         }

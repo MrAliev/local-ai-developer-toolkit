@@ -90,6 +90,9 @@ internal static class BrokerProgram
                 coordinator,
                 control,
                 transport.ExecuteAsync);
+            // Advice, not an event: repeating it once per retry turn would bury the diagnostics
+            // it is meant to explain.
+            var backendHintPrinted = false;
             var durationEstimator = new DurationEstimator();
             var scheduleMetadata = new ScheduleMetadataResolver(
                 catalog,
@@ -121,10 +124,17 @@ internal static class BrokerProgram
                 idleUnload: executionRouter.UnloadResidentAsync,
                 idleUnloadAfter: TimeSpan.FromSeconds(policy.IdleModelKeepAliveSeconds),
                 backendProbe: transport.ProbeActiveModelAsync,
-                diagnostic: diagnostic => Console.Error.WriteLine(
-                    $"LocalAi broker diagnostic: job={diagnostic.JobId:N} " +
-                    $"operation={diagnostic.Operation} " +
-                    $"exception={diagnostic.ExceptionType}."));
+                diagnostic: diagnostic =>
+                {
+                    Console.Error.WriteLine(
+                        $"LocalAi broker diagnostic: job={diagnostic.JobId:N} " +
+                        $"operation={diagnostic.Operation} " +
+                        $"exception={diagnostic.ExceptionType}.");
+                    backendHintPrinted = ReportUnreachableBackend(
+                        diagnostic,
+                        ollamaUri,
+                        backendHintPrinted);
+                });
             // Set by the heartbeat loop, read by the host loop between jobs. A stopper asks for
             // this instead of killing the process, so the job in flight is finished and
             // reported rather than abandoned half way through an inference.
@@ -150,11 +160,46 @@ internal static class BrokerProgram
 
             return 0;
         }
+        catch (Exception exception)
+        {
+            // Last line of defence. An HttpRequestException from a backend that was not up yet
+            // used to travel out of the host loop and off the top of the process, which Windows
+            // reports as a crashed application rather than as a broker that could not work. The
+            // scheduling path no longer throws it, but a broker that dies must still say why and
+            // leave a non-zero code behind for whoever started it.
+            Console.Error.WriteLine(
+                $"LocalAi broker stopped: {exception.GetType().Name}: {exception.Message}");
+            return 70;
+        }
         finally
         {
             stateStore.DeleteIfOwnedBy(owner);
             Console.CancelKeyPress -= cancelHandler;
         }
+    }
+
+    /// <summary>
+    /// Names the endpoint when the backend is what failed. The diagnostic line above carries an
+    /// exception type, which does not tell an operator that starting Ollama is the fix.
+    /// </summary>
+    private static bool ReportUnreachableBackend(
+        BrokerHostDiagnostic diagnostic,
+        Uri ollamaUri,
+        bool alreadyPrinted)
+    {
+        if (alreadyPrinted ||
+            !string.Equals(
+                diagnostic.ExceptionType,
+                nameof(HttpRequestException),
+                StringComparison.Ordinal))
+        {
+            return alreadyPrinted;
+        }
+
+        Console.Error.WriteLine(
+            $"LocalAi broker: Ollama is not reachable at {ollamaUri}. Queued work is kept and " +
+            "waits for it to answer; start Ollama if it is not running.");
+        return true;
     }
 
     private sealed class DrainSignal
