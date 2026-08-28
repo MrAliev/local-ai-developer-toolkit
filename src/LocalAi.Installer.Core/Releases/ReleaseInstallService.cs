@@ -47,10 +47,11 @@ public sealed class ReleaseInstallService(
     private static readonly TimeSpan ActivationTimeout = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// The broker installer's own ceiling, and the right value here: a pull is a multi-gigabyte
-    /// download, and anything shorter turns a slow connection into a failed installation.
+    /// For the commands around a model install -- status and preflight -- which answer promptly
+    /// or not at all. It does not bound the pull: a download's duration belongs to the network,
+    /// and BrokerModelInstaller gives it its own, far larger guard.
     /// </summary>
-    private static readonly TimeSpan ModelInstallTimeout = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan ModelCommandTimeout = TimeSpan.FromMinutes(30);
 
     private readonly IReleaseFeed feed =
         feed ?? throw new ArgumentNullException(nameof(feed));
@@ -169,7 +170,7 @@ public sealed class ReleaseInstallService(
             processRunner,
             lease,
             package,
-            ModelInstallTimeout);
+            ModelCommandTimeout);
         var batch = await modelInstaller
             .InstallAsync(plan.Requests, progress, cancellationToken)
             .ConfigureAwait(false);

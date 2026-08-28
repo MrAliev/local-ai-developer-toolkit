@@ -38,6 +38,8 @@ public sealed class BrokerModelInstallerTests : IDisposable
                 typeof(InstallationLayoutLease),
                 typeof(VerifiedPackage),
                 typeof(TimeSpan),
+                // The pull's own ceiling, optional so every existing caller keeps compiling.
+                typeof(TimeSpan?),
             ],
             constructor.GetParameters().Select(parameter => parameter.ParameterType));
         Assert.DoesNotContain(
@@ -621,6 +623,70 @@ public sealed class BrokerModelInstallerTests : IDisposable
             runner, Launcher(), layout, Trust(), TimeSpan.Zero));
         Assert.Throws<ArgumentOutOfRangeException>(() => new BrokerModelInstaller(
             runner, Launcher(), layout, Trust(), TimeSpan.FromMinutes(31)));
+        Assert.Empty(runner.Calls);
+    }
+
+    /// <summary>
+    /// A pull is a download, and its duration belongs to the network rather than to this
+    /// product. gpt-oss:20b is about 12.8 GB, so while every command shared the 30-minute
+    /// ceiling it could not be finished below roughly 8 MB/s, and no setting helped because a
+    /// larger timeout threw.
+    /// </summary>
+    [Fact]
+    public async Task A_pull_is_given_far_longer_than_a_command()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status([], [], "signed-7")),
+            Success(Pull("model-a", "signed-7")),
+            Success(Preflight("model-a", 2048, 80, 80, true)));
+        var installer = Installer(runner, Launcher());
+
+        await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7")],
+            TestContext.Current.CancellationToken);
+
+        var timeouts = runner.Calls
+            .ToDictionary(call => call.Arguments[3], call => call.Timeout, StringComparer.Ordinal);
+        Assert.Equal(TimeSpan.FromMinutes(5), timeouts["status"]);
+        Assert.Equal(TimeSpan.FromMinutes(5), timeouts["preflight"]);
+        Assert.True(
+            timeouts["pull"] > TimeSpan.FromHours(1),
+            $"The pull was given {timeouts["pull"]}, which is a command's deadline, not a download's.");
+    }
+
+    [Fact]
+    public async Task A_caller_that_wants_to_give_up_sooner_can_say_so()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status([], [], "signed-7")),
+            Success(Pull("model-a", "signed-7")),
+            Success(Preflight("model-a", 2048, 80, 80, true)));
+        var installer = new BrokerModelInstaller(
+            runner,
+            Launcher(),
+            layout,
+            Trust(),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromHours(2));
+
+        await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7")],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            TimeSpan.FromHours(2),
+            runner.Calls.Single(call => call.Arguments[3] == "pull").Timeout);
+    }
+
+    [Fact]
+    public void The_pull_timeout_is_positive_and_bounded()
+    {
+        var runner = new RecordingProcessRunner();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BrokerModelInstaller(
+            runner, Launcher(), layout, Trust(), TimeSpan.FromMinutes(5), TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BrokerModelInstaller(
+            runner, Launcher(), layout, Trust(), TimeSpan.FromMinutes(5), TimeSpan.FromHours(13)));
         Assert.Empty(runner.Calls);
     }
 
