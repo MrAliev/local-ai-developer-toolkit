@@ -1,4 +1,4 @@
-using LocalAi.Installer.Core.Releases;
+﻿using LocalAi.Installer.Core.Releases;
 using LocalAi.Installer.ViewModels;
 
 namespace LocalAi.Installer.Tests;
@@ -120,6 +120,77 @@ public sealed class PackagePageViewModelTests
         page.SelectResolvedRelease(Release("0.1.30"), "0.1.30");
 
         Assert.False(page.IsAlreadyInstalled);
+    }
+
+    /// <summary>
+    /// Where a release comes from is part of which release it is. Leaving the previous answer
+    /// standing after the source changed would offer a package the new source may not hold.
+    /// </summary>
+    [Fact]
+    public void Choosing_a_folder_invalidates_what_the_previous_source_resolved()
+    {
+        var page = new PackagePageViewModel();
+        page.SelectResolvedRelease(Release("0.1.45"), "0.1.45");
+
+        page.SourceFolder = @"D:\handover";
+
+        Assert.Null(page.ResolvedTag);
+        Assert.Equal(PackageSourceState.NotChecked, page.State);
+    }
+
+    [Fact]
+    public void The_installer_own_folder_is_offered_when_it_holds_a_release()
+    {
+        var folder = ReleaseFolder(complete: true);
+        var page = new PackagePageViewModel();
+
+        page.OfferLocalFolder(folder);
+
+        Assert.Equal(folder, page.SourceFolder);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_folder_that_is_not_a_release_is_not_offered(bool exists)
+    {
+        var folder = exists
+            ? ReleaseFolder(complete: false)
+            : Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var page = new PackagePageViewModel();
+
+        page.OfferLocalFolder(folder);
+
+        Assert.Equal(string.Empty, page.SourceFolder);
+    }
+
+    /// <summary>An offer never overrules a path somebody typed on purpose.</summary>
+    [Fact]
+    public void An_explicit_folder_survives_the_offer()
+    {
+        var page = new PackagePageViewModel { SourceFolder = @"D:\chosen" };
+
+        page.OfferLocalFolder(ReleaseFolder(complete: true));
+
+        Assert.Equal(@"D:\chosen", page.SourceFolder);
+    }
+
+    private static string ReleaseFolder(bool complete)
+    {
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "LocalAi.Installer.Tests.Folder",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var names = complete
+            ? DirectoryReleaseFeed.RequiredFiles
+            : DirectoryReleaseFeed.RequiredFiles.Take(2).ToArray();
+        foreach (var name in names)
+        {
+            File.WriteAllText(Path.Combine(folder, name), "placeholder");
+        }
+
+        return folder;
     }
 
     private static ResolvedRelease Release(string version) =>

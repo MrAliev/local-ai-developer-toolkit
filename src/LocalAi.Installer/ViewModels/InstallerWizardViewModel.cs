@@ -86,6 +86,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
             }
         };
 
+        // The folder the installer was started from, when someone has already put a release
+        // beside it. AppContext.BaseDirectory rather than the current directory: a wizard is
+        // usually launched from Explorer, whose current directory is not where the file is.
+        package.OfferLocalFolder(AppContext.BaseDirectory);
         RebuildSteps();
     }
 
@@ -876,11 +880,20 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// Neither path is trusted for being itself: the manifest is checked against the embedded
     /// key and the package against the hash in that manifest, whichever one fetched them.
     /// </summary>
-    private IReleaseFeed CreateFeed() => new FallbackReleaseFeed(
-        anonymousFeed,
-        GitHubCliPath is null
-            ? null
-            : new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath));
+    /// <remarks>
+    /// A chosen folder replaces the chain rather than joining it. Falling back to GitHub after a
+    /// folder failed would be the opposite of what asking for a folder means — on an air-gapped
+    /// machine it turns one clear error into a long timeout, and on any machine it would install
+    /// something other than what the operator pointed at.
+    /// </remarks>
+    private IReleaseFeed CreateFeed() =>
+        string.IsNullOrWhiteSpace(package.SourceFolder)
+            ? new FallbackReleaseFeed(
+                anonymousFeed,
+                GitHubCliPath is null
+                    ? null
+                    : new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath))
+            : new DirectoryReleaseFeed(package.SourceFolder);
 
     private static DependencyDefinition? ResolveDependencyDefinition(string dependencyId) =>
         dependencyId switch
