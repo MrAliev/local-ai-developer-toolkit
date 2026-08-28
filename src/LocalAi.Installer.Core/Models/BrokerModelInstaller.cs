@@ -211,11 +211,26 @@ public sealed class BrokerModelInstaller : IDisposable
 {
     private const int MaximumResponseCharacters = 65_536;
     private const int MaximumStatusModels = 256;
+    /// <summary>A command answers promptly or something is wrong; this is the runaway guard.</summary>
     private static readonly TimeSpan MaximumCommandTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// A pull is not a command. Its duration belongs to the network, and gpt-oss:20b is about
+    /// 12.8 GB -- under the command ceiling that model could not be finished below roughly
+    /// 8 MB/s, and nothing could raise the ceiling because a larger timeout threw.
+    ///
+    /// Twelve hours is a runaway guard rather than an expectation: it tolerates about 0.3 MB/s on
+    /// that model, which is slower than any connection someone would try this over. A caller that
+    /// wants to give up sooner says so; one that says nothing gets the guard, because for a
+    /// download there is no useful deadline shorter than "this has clearly stopped".
+    /// </summary>
+    private static readonly TimeSpan MaximumPullTimeout = TimeSpan.FromHours(12);
+
     private readonly IProcessRunner processRunner;
     private readonly ITrustedStableLauncher launcher;
     private readonly string launcherPath;
     private readonly TimeSpan timeout;
+    private readonly TimeSpan pullTimeout;
     private readonly IDisposable? ownedLauncher;
     private readonly IModelInstallTrust trust;
     private bool disposed;
@@ -225,7 +240,8 @@ public sealed class BrokerModelInstaller : IDisposable
         ITrustedStableLauncher launcher,
         InstallationLayout layout,
         IModelInstallTrust trust,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        TimeSpan? pullTimeout = null)
     {
         this.processRunner = processRunner ??
             throw new ArgumentNullException(nameof(processRunner));
@@ -239,6 +255,7 @@ public sealed class BrokerModelInstaller : IDisposable
 
         launcherPath = ValidateLauncherPath(launcher, layout);
         this.timeout = timeout;
+        this.pullTimeout = ValidatePullTimeout(pullTimeout);
     }
 
     [SupportedOSPlatform("windows")]
@@ -246,7 +263,8 @@ public sealed class BrokerModelInstaller : IDisposable
         IProcessRunner processRunner,
         InstallationLayoutLease layoutLease,
         VerifiedPackage package,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        TimeSpan? pullTimeout = null)
     {
         this.processRunner = processRunner ??
             throw new ArgumentNullException(nameof(processRunner));
@@ -270,6 +288,7 @@ public sealed class BrokerModelInstaller : IDisposable
             launcher = adapter;
             launcherPath = ValidateLauncherPath(adapter, layoutLease.Layout);
             this.timeout = timeout;
+            this.pullTimeout = ValidatePullTimeout(pullTimeout);
             ownedLauncher = adapter;
             trust = new VerifiedModelInstallTrust(
                 package,
@@ -281,6 +300,21 @@ public sealed class BrokerModelInstaller : IDisposable
             adapter.Dispose();
             throw;
         }
+    }
+
+    private static TimeSpan ValidatePullTimeout(TimeSpan? requested)
+    {
+        if (requested is not { } value)
+        {
+            return MaximumPullTimeout;
+        }
+
+        if (value <= TimeSpan.Zero || value > MaximumPullTimeout)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requested));
+        }
+
+        return value;
     }
 
     public Task<BrokerModelInstallBatchResult> InstallAsync(
@@ -378,6 +412,7 @@ public sealed class BrokerModelInstaller : IDisposable
             var process = await RunAsync(
                 ["run", "localai", "model", "status"],
                 mayChangeExternalState: false,
+                timeout,
                 cancellationToken);
             EnsureExitSuccess(process, "status", mayChangeExternalState: false);
             status = Parse<ModelStatusCommandSuccess>(
@@ -417,6 +452,7 @@ public sealed class BrokerModelInstaller : IDisposable
                             "--catalog-version", trust.CatalogVersion,
                         ],
                         mayChangeExternalState: true,
+                        pullTimeout,
                         cancellationToken);
                     EnsureExitSuccess(pull, "pull", mayChangeExternalState: true);
                     ValidatePull(
@@ -438,6 +474,7 @@ public sealed class BrokerModelInstaller : IDisposable
                         "--catalog-version", trust.CatalogVersion,
                     ],
                     mayChangeExternalState: true,
+                    timeout,
                     cancellationToken);
                 if (preflight.ExitCode == 3)
                 {
@@ -517,6 +554,7 @@ public sealed class BrokerModelInstaller : IDisposable
     private async Task<ProcessResult> RunAsync(
         IReadOnlyList<string> arguments,
         bool mayChangeExternalState,
+        TimeSpan commandTimeout,
         CancellationToken cancellationToken)
     {
         try
@@ -538,7 +576,7 @@ public sealed class BrokerModelInstaller : IDisposable
             process = await processRunner.RunAsync(
                 launcherPath,
                 arguments,
-                timeout,
+                commandTimeout,
                 cancellationToken);
         }
         catch (ProcessTerminationException exception)
