@@ -96,27 +96,22 @@ jobs:
       - name: Test
         shell: pwsh
         run: |
-          # Not every project under tests/ is a test project: a fixture the tests start as a
-          # child process lives there too, and handing it to `dotnet test` fails for having no
-          # tests in it. Each project says which it is, so read that rather than guess from the
-          # path or the name.
-          $projects = Get-ChildItem tests -Filter *.csproj -Recurse |
-            Where-Object { (Get-Content $_.FullName -Raw) -match '<IsTestProject>\s*true\s*</IsTestProject>' }
-          Write-Host "Test projects: $($projects.Count)"
-          $failed = @()
-          foreach ($project in $projects) {
-            Write-Host "::group::$($project.BaseName)"
-            # --blame-hang turns a stuck test into a named failure with a dump. Without it a hang
-            # consumes the job timeout and the log says only that the operation was cancelled,
-            # which is what happened on the first run of this workflow: twenty-five minutes spent
-            # on an unidentified test.
-            dotnet test $project.FullName --configuration Release --no-build --nologo `
-              --blame-hang --blame-hang-timeout 5m --blame-hang-dump-type none
-            if ($LASTEXITCODE -ne 0) { $failed += $project.BaseName }
-            Write-Host "::endgroup::"
-          }
-          if ($failed.Count -gt 0) {
-            # Every project runs even after one fails: a single red project tells you less than
-            # the whole picture, and re-running CI to discover the second failure wastes a cycle.
-            throw "Failing test projects: $($failed -join ', ')"
-          }
+          # One command for the whole solution, and one reason it can be one command: xunit.v3
+          # 4.0 runs on Microsoft.Testing.Platform, which reports every project in the run and
+          # keeps going after one of them fails. The previous loop over projects existed because
+          # VSTest stopped at the first failing project and because `dotnet test` refused a
+          # non-test project under tests/; neither is true here.
+          #
+          # --timeout replaces --blame-hang. It is deliberately far larger than any correct
+          # run and smaller than the job timeout, so a hang is reported as a named failure
+          # rather than consuming the job and leaving the log saying only that the
+          # operation was cancelled.
+          # One module at a time. The platform runs test modules in parallel by default,
+          # and these do not tolerate it: the broker tests, the launcher tests and the
+          # integration tests share named mutexes and one runtime directory, so running
+          # them side by side is a race rather than a saving. The first attempt at this
+          # step proved it — the broker module sat for twenty minutes and hit the timeout
+          # while every other module passed. The old loop over projects had serialised
+          # them by accident; this says so on purpose.
+          dotnet test LocalAi.slnx --configuration Release --no-build `
+            --max-parallel-test-modules 1 --timeout 20m

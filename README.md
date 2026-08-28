@@ -914,8 +914,8 @@ failed.
   before publishing.
 - Never let a test assert how fast the machine is. Wait for the condition rather than for
   a duration, prefer a purpose-built child process over an interpreter whose startup cost
-  is unbounded, and leave hang detection to `--blame-hang`, which CI already applies to
-  every test project. A deadline a correct run can miss proves nothing and reports itself
+  is unbounded, and leave hang detection to the run timeout CI applies to the whole
+  solution. A deadline a correct run can miss proves nothing and reports itself
   as a fault in the code under test.
 - Branch a pull request from `main`, and give it one subject. Two subjects in one branch cannot
   be reviewed apart or reverted apart. Stacking a pull request on another one is worse than the

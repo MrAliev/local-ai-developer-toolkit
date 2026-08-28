@@ -89,7 +89,7 @@ public sealed class BrokerClientTests
         /// It used to be five seconds, which is a measurement of how busy the machine is
         /// rather than of whether the client works: on a loaded CI runner the poll loop ran
         /// out of budget and the test died inside the queue's mutex with "The operation was
-        /// canceled", pointing at nothing. Hang detection belongs to --blame-hang, which CI
+        /// canceled", pointing at nothing. Hang detection belongs to the run timeout CI
         /// already applies to every test project; this value only has to be large enough
         /// never to expire while the code under test is working.
         /// </summary>
