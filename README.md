@@ -130,7 +130,11 @@ vectors in `semantic.sidx`.
 XAML ranges and dialect-aware namespaces, `x:DataType`, dependency/styled properties, and binding
 syntax, and imports bounded output from installed `scip-typescript` and `scip-python`
 indexers. A missing external indexer is reported as skipped in the generation manifest rather
-than invalidating other languages. The base SIDX is published atomically with CIDX and dirty
+than invalidating other languages. When a repository has C# and semantic indexing
+covered none of it, `localai sync` says so instead of reporting success quietly, and
+`index_status` calls that generation heuristic rather than precise; `localai sync
+--require-semantics` turns the warning into a failure for a hook or a CI step that would rather
+stop. The base SIDX is published atomically with CIDX and dirty
 worktrees receive compact snapshot-bound semantic overlays containing changed semantic slices
 and explicit deletion tombstones. MCP exposes
 `go_to_definition`, `find_references`, `find_implementations`, and `find_relationships`; local

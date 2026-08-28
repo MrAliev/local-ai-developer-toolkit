@@ -25,7 +25,7 @@ internal static class CliUsage
         "localai repo status [--root dir | git-common-dir] | " +
         "localai policy <show|set> [options] | " +
         "localai semantic <operation> [--request file] | localai bootstrap --dry-run | " +
-        "localai sync [--root dir] [--base-only] | " + Hook + " | " +
+        "localai sync [--root dir] [--base-only] [--require-semantics] | " + Hook + " | " +
         "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +
         Telemetry;
 }

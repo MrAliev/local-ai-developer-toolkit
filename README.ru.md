@@ -121,7 +121,11 @@ generation, tree и dirty-overlay — оно проверяется до люб�
 lossless-диапазонами XAML, platform namespaces, `x:DataType`, dependency/styled properties и
 вариантами binding, а также импортирует ограниченный результат установленных индексаторов
 `scip-typescript` и `scip-python`. Отсутствующий внешний индексатор отмечается как skipped в
-manifest поколения и не ломает другие языки. Базовый SIDX атомарно публикуется вместе с CIDX,
+manifest поколения и не ломает другие языки. Если в репозитории есть C#, а семантика
+не покрыла ни одного его файла, `localai sync` сообщает об этом вместо тихого успеха, а
+`index_status` называет такое поколение эвристическим, а не точным; `localai sync
+--require-semantics` превращает предупреждение в отказ для хука или шага CI, которому лучше
+остановиться. Базовый SIDX атомарно публикуется вместе с CIDX,
 а для dirty worktree строится компактный snapshot-bound semantic overlay с изменёнными
 семантическими срезами и явными tombstone для удалённых документов. MCP предоставляет
 `go_to_definition`, `find_references`, `find_implementations` и `find_relationships`; локальная

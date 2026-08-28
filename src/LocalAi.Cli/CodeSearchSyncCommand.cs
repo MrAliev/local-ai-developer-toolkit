@@ -58,7 +58,8 @@ public static class CodeSearchSyncCommand
         string model = DefaultModel,
         CancellationToken cancellationToken = default,
         bool includeOverlays = true,
-        string? runtimeRoot = null)
+        string? runtimeRoot = null,
+        bool requireSemantics = false)
     {
         var requested = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
         var progressStore = new RepositoryIndexProgressStore(
@@ -176,6 +177,7 @@ public static class CodeSearchSyncCommand
                         progress),
                     phase => ReportPhase(phase, mainline.Identity.WorkingRoot),
                     runtimeRoot,
+                    requireSemantics,
                     cancellationToken);
             }
 
@@ -485,6 +487,7 @@ public static class CodeSearchSyncCommand
         Action<IndexBuildProgress> progress,
         Action<RepositoryIndexProgressPhase> phase,
         string? runtimeRoot,
+        bool requireSemantics,
         CancellationToken cancellationToken)
     {
         var stagingRoot = Path.Combine(
@@ -546,6 +549,11 @@ public static class CodeSearchSyncCommand
                 WriteSemanticAdapterStatuses(semanticAdapterStatusPath, built.AdapterStatuses);
                 semanticIndex = built;
             }
+
+            ReportCsharpSemanticCoverage(
+                snapshot.Root,
+                semanticIndex.Index,
+                requireSemantics);
 
             phase(RepositoryIndexProgressPhase.EmbeddingBase);
             var embedder = new BrokerEmbeddingClient(
@@ -735,6 +743,51 @@ public static class CodeSearchSyncCommand
             ". Files this worktree changed are cut by line window until the adapter works " +
             "again; the base generation is unaffected.");
     }
+
+    /// <summary>
+    /// Says so when a repository has C# and semantic indexing covered none of it.
+    ///
+    /// This was silent. A workspace whose projects all failed to load still returns, the fallback
+    /// writes an index with nothing in it, the generation is published, and sync exits 0 — so a
+    /// hook, a script or a CI step is told the repository is indexed while every definition query
+    /// answers from bounded text matching. That is how a split between the Microsoft.CodeAnalysis
+    /// package versions survived a green build and 1875 tests.
+    ///
+    /// Counting C# documents rather than all of them on purpose: an index carrying TypeScript and
+    /// no C# is exactly the case a total count would call healthy.
+    /// </summary>
+    internal static void ReportCsharpSemanticCoverage(
+        string sourceRoot,
+        SemanticIndex index,
+        bool requireSemantics)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
+        ArgumentNullException.ThrowIfNull(index);
+        if (index.Documents.Any(document => IsCsharp(document.RelPath)))
+        {
+            return;
+        }
+
+        if (!FileScanner.Enumerate(sourceRoot).Any(IsCsharp))
+        {
+            return;
+        }
+
+        const string Message =
+            "Semantic indexing covered no C# document, yet this repository has C# sources. " +
+            "go_to_definition, find_references, find_implementations and find_relationships " +
+            "will fall back to bounded text matching until this is fixed. Any 'Roslyn:' line " +
+            "above says why the workspace did not load.";
+        if (requireSemantics)
+        {
+            throw new InvalidOperationException(Message);
+        }
+
+        Console.Error.WriteLine("WARNING: " + Message);
+    }
+
+    private static bool IsCsharp(string path) =>
+        path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 
     internal static void EnsureSemanticAdaptersSucceeded(
         IReadOnlyList<SemanticAdapterStatus> statuses)

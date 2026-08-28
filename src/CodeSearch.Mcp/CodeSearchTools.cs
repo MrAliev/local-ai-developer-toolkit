@@ -496,13 +496,25 @@ public static class CodeSearchTools
     /// "current" — and go_to_definition still answers with text matches. The state is fixed by a
     /// re-sync, so the line that reports it names the command.
     /// </summary>
-    private static string Navigation(IndexStatus status) =>
-        status.SemanticIndexPresent
-            ? "precise (semantic.sidx present)"
-            : "HEURISTIC - this generation has no semantic.sidx, so go_to_definition, " +
-              "find_references, find_implementations and find_relationships fall back to " +
-              "bounded text matching. Re-sync to build it: " +
-              $"localai-launcher.exe run localai sync --root {status.RepositoryRoot}";
+    private static string Navigation(IndexStatus status) => status switch
+    {
+        // Covering nothing is not a milder version of precise. A semantic.sidx with no documents
+        // answers definition queries exactly as a missing one does, and reporting it as precise
+        // was how a broken C# workspace stayed invisible: the file is there, the checksum agrees,
+        // and every answer is a text match wearing the wrong label.
+        { SemanticIndexPresent: true, SemanticIndexCoversNothing: true } =>
+            "HEURISTIC - this generation has a semantic.sidx that covers no document, so " +
+            "go_to_definition, find_references, find_implementations and find_relationships " +
+            "fall back to bounded text matching. Semantic indexing ran and produced nothing; " +
+            "the sync output says why. Re-sync after fixing that: " +
+            $"localai-launcher.exe run localai sync --root {status.RepositoryRoot}",
+        { SemanticIndexPresent: true } => "precise (semantic.sidx present)",
+        _ =>
+            "HEURISTIC - this generation has no semantic.sidx, so go_to_definition, " +
+            "find_references, find_implementations and find_relationships fall back to " +
+            "bounded text matching. Re-sync to build it: " +
+            $"localai-launcher.exe run localai sync --root {status.RepositoryRoot}",
+    };
 
     /// <summary>
     /// Puts the reason a result is heuristic above the result, when there is one.
