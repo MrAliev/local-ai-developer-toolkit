@@ -244,6 +244,59 @@ public sealed class RoslynSemanticIndexerTests : IDisposable
         .Select(path => MetadataReference.CreateFromFile(path))
         .ToArray();
 
+    /// <summary>
+    /// End-to-end and deliberately free of hand-made occurrences. The containment rule for
+    /// column 0 shipped proven against a fixture that supplied enclosing ranges by hand,
+    /// while the C# indexer produced none — so column 0 kept degrading on exactly the
+    /// language the rule was written for (#184). This arrangement goes through the real
+    /// indexer: if it stops emitting enclosing ranges for definitions, this fails.
+    /// </summary>
+    [Fact]
+    public async Task Column_zero_on_a_single_line_signature_resolves_to_the_method()
+    {
+        Directory.CreateDirectory(_root);
+        using var workspace = new AdhocWorkspace();
+        var project = AddProject(workspace.CurrentSolution, "Signature");
+        const string source =
+            """
+            namespace Demo;
+            public sealed class Journal
+            {
+                private static bool IsRunAlive(string journalPath)
+                {
+                    return journalPath.Length > 0;
+                }
+            }
+            """;
+        var solution = project.Solution.AddDocument(
+            DocumentId.CreateNewId(project.Id),
+            "Journal.cs",
+            SourceText.From(source),
+            filePath: Path.Combine(_root, "Journal.cs"));
+
+        var index = await new RoslynSemanticIndexer().BuildAsync(
+            solution,
+            _root,
+            Identity(),
+            TestContext.Current.CancellationToken);
+
+        var method = index.Occurrences.Single(occurrence =>
+            occurrence.Roles.HasFlag(SemanticOccurrenceRoles.Definition) &&
+            index.Symbols.Single(symbol => symbol.Id == occurrence.SymbolId)
+                .DisplayName == "IsRunAlive");
+        Assert.NotNull(method.EnclosingRange);
+
+        var signatureLine = Position(source, "IsRunAlive").Line;
+        var resolved = new SemanticNavigationService(index).ResolveOccurrence(
+            "Journal.cs",
+            signatureLine,
+            0,
+            new SemanticSnapshotIdentity("repo", "generation", "tree", null));
+
+        Assert.NotNull(resolved);
+        Assert.Equal(method.SymbolId, resolved.SymbolId);
+    }
+
     private static SemanticIndexBuildIdentity Identity() =>
         new(
             "repo",
