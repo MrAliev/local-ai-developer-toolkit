@@ -151,7 +151,12 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
 
         Assert.Same(cancellation, cancellationError);
         Assert.Same(unrelated, unrelatedError);
-        Assert.Equal("Search failed: bug", mcpResponse);
+        // The type as well as the message: an exception whose message names nothing used to
+        // reach the caller as "Search failed:" and nothing else. What this test is about is that
+        // an unrelated failure is not dressed up as embeddings being unavailable, and it still
+        // is not.
+        Assert.Equal("Search failed: InvalidOperationException: bug", mcpResponse);
+        Assert.DoesNotContain("unavailable", mcpResponse, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

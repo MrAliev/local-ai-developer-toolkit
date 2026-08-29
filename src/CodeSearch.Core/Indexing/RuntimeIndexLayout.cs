@@ -38,19 +38,23 @@ public static class RuntimeIndexLayout
     {
         workingRoot = RepoLocator.ResolveWorkingRoot(workingRoot);
         var repositoryRoot = RepoLocator.ResolveRoot(workingRoot);
-        var commonDirectory = RepoLocator.GitOutput(
+        var commonDirectory = RepoLocator.GitOutputOrThrow(
             workingRoot,
-            "rev-parse --path-format=absolute --git-common-dir")
-            ?? throw new InvalidOperationException("Git common directory is unavailable.");
+            "rev-parse --path-format=absolute --git-common-dir",
+            "The git common directory");
         var identity = RepositoryIdentity.FromCommonDirectory(commonDirectory);
         var repositoryRuntimeRoot = Path.Combine(
             string.IsNullOrWhiteSpace(runtimeRoot) ? DefaultRuntimeRoot : runtimeRoot,
             "repositories",
             identity.Id);
-        var head = RepoLocator.GitOutput(workingRoot, "rev-parse HEAD")
-            ?? throw new InvalidOperationException("Git HEAD is unavailable.");
-        var tree = RepoLocator.GitOutput(workingRoot, "rev-parse HEAD^{tree}")
-            ?? throw new InvalidOperationException("Git HEAD tree is unavailable.");
+        var head = RepoLocator.GitOutputOrThrow(
+            workingRoot,
+            "rev-parse HEAD",
+            "Git HEAD");
+        var tree = RepoLocator.GitOutputOrThrow(
+            workingRoot,
+            "rev-parse HEAD^{tree}",
+            "The git HEAD tree");
         var dirtyPaths = GetDirtyPaths(workingRoot);
         var dirtyHash = dirtyPaths.Count == 0
             ? null
