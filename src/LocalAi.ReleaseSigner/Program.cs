@@ -202,7 +202,7 @@ internal static class Program
             packageSize: package.Length,
             // The verifier accepts upper-case hex only.
             packageSha256: Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(packagePath))),
-            requiresAuthenticode: args.Flag("require-authenticode"),
+            requiresAuthenticode: RequireAuthenticode(args),
             models: ReadModels(args.Optional("models"), args.Flag("no-models")));
 
         // Throws if any field violates the manifest contract, so a bad release fails here
@@ -363,6 +363,34 @@ internal static class Program
     /// </summary>
     private static byte[] LoadPublicKeyBytes(string? path) =>
         path is null ? ReleaseTrustAnchor.PublicKey : File.ReadAllBytes(path);
+
+    /// <summary>
+    /// Refuses to stamp a release nobody can install.
+    ///
+    /// The publisher policy compiled into the installer is still a placeholder, so a manifest
+    /// that requires Authenticode would be rejected on every machine -- and rejected with a
+    /// signature mismatch, which points at the package rather than at this flag. Better to
+    /// fail here, once, in front of the person who asked for it.
+    /// </summary>
+    private static bool RequireAuthenticode(Args args)
+    {
+        if (!args.Flag("require-authenticode"))
+        {
+            return false;
+        }
+
+        if (new AuthenticodePublisherPolicy("CN=LocalAi", new string('0', 64)).IsPlaceholder)
+        {
+            throw new InvalidOperationException(
+                "--require-authenticode cannot be used yet: the publisher policy built into " +
+                "the installer is a placeholder (CN=LocalAi, an all-zero SPKI hash), so every " +
+                "installation of this release would be refused. Replace the subject and the " +
+                "SHA-256 of the signer's SubjectPublicKeyInfo -- not the certificate " +
+                "thumbprint -- before setting this flag.");
+        }
+
+        return true;
+    }
 
     private static string DefaultPrivateKeyPath() =>
         Path.Combine(

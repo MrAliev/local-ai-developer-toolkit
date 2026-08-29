@@ -601,6 +601,18 @@ public sealed class ReleasePackageVerifier
             return;
         }
 
+        // Refusing here rather than below, where every file would fail to match and the caller
+        // would be told only that verification failed. This is a fact about the installer's own
+        // configuration, not about the package, so naming it leaks nothing.
+        if (publisherPolicy.IsPlaceholder)
+        {
+            throw new ReleaseVerificationException(
+                "This release requires Authenticode, and this build carries a placeholder " +
+                "publisher policy that no file can match. It was built before a code-signing " +
+                "certificate existed. Publish the release without --require-authenticode, or " +
+                "build an installer whose policy names the real signer.");
+        }
+
         foreach (var file in LocalAiPackageLayout.PackageArtifactFiles.Where(
                      file => file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
                              file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)))
