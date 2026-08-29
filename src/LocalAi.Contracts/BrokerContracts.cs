@@ -39,7 +39,12 @@ public sealed record BrokerCompatibility(
 
 public static class BrokerCompatibilityContract
 {
-    public const int HostStateSchemaVersion = 3;
+    /// <summary>
+    /// 4 adds the backend state. Unmapped members are refused, so a client reading a
+    /// newer document would reject it outright -- the version is what turns that into an
+    /// orderly "not my broker" and a respawn.
+    /// </summary>
+    public const int HostStateSchemaVersion = 4;
     public const int ProtocolVersion = 1;
     public const string BuildCompatibilityId = "localai-broker-v1";
 
@@ -55,6 +60,19 @@ public static class BrokerCompatibilityContract
             StringComparison.Ordinal);
 }
 
+/// <summary>
+/// What the broker last found when it reached for the model backend.
+///
+/// Published because the client cannot see it any other way. A job waits in the queue while
+/// Ollama is down -- the broker keeps retrying, which is right for a boot race -- and when the
+/// client's own wait runs out it used to report a bare cancellation. "The tool hung and gave up"
+/// is not something anybody can act on; "Ollama is not answering at this address" is.
+/// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record BrokerBackendState(
+    [property: JsonRequired] bool Reachable,
+    [property: JsonRequired] string Endpoint);
+
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record BrokerProcessState(
     [property: JsonRequired] int ProcessId,
@@ -62,7 +80,8 @@ public sealed record BrokerProcessState(
     [property: JsonRequired] DateTimeOffset HeartbeatAtUtc,
     [property: JsonRequired] int SchemaVersion,
     [property: JsonRequired] string BrokerAssemblyPath,
-    BrokerCompatibility? Compatibility = null);
+    BrokerCompatibility? Compatibility = null,
+    BrokerBackendState? Backend = null);
 
 [JsonPolymorphic(
     TypeDiscriminatorPropertyName = "$type",

@@ -149,7 +149,7 @@ public sealed class BrokerProcessTests
                 BrokerCompatibilityContract.HostStateSchemaVersion,
                 BrokerAssemblyPath,
                 new BrokerCompatibility(2, "other")),
-            "actual schema=3 protocol=2 build=other; broker path=" + BrokerAssemblyPath);
+            $"actual schema={BrokerCompatibilityContract.HostStateSchemaVersion} protocol=2 build=other; broker path=" + BrokerAssemblyPath);
     }
 
     [Fact]
@@ -183,7 +183,7 @@ public sealed class BrokerProcessTests
                 new BrokerCompatibility(
                     BrokerCompatibilityContract.ProtocolVersion,
                     BrokerCompatibilityContract.BuildCompatibilityId.ToUpperInvariant())),
-            "actual schema=3 protocol=1 build=" +
+            $"actual schema={BrokerCompatibilityContract.HostStateSchemaVersion} protocol=1 build=" +
             BrokerCompatibilityContract.BuildCompatibilityId.ToUpperInvariant() +
             "; broker path=" + BrokerAssemblyPath);
     }
@@ -204,7 +204,7 @@ public sealed class BrokerProcessTests
                 new BrokerCompatibility(
                     BrokerCompatibilityContract.ProtocolVersion,
                     "other\r\nbuild")),
-            "actual schema=3 protocol=1 build=other??build; broker path=path?" +
+            $"actual schema={BrokerCompatibilityContract.HostStateSchemaVersion} protocol=1 build=other??build; broker path=path?" +
             new string('p', 507));
     }
 
@@ -223,7 +223,7 @@ public sealed class BrokerProcessTests
                 new BrokerCompatibility(
                     BrokerCompatibilityContract.ProtocolVersion,
                     new string('b', 511) + "\U0001F600")),
-            "actual schema=3 protocol=1 build=" + new string('b', 511) +
+            $"actual schema={BrokerCompatibilityContract.HostStateSchemaVersion} protocol=1 build=" + new string('b', 511) +
             "; broker path=" + BrokerAssemblyPath);
     }
 
@@ -242,7 +242,7 @@ public sealed class BrokerProcessTests
                 new BrokerCompatibility(
                     BrokerCompatibilityContract.ProtocolVersion,
                     "high\uD800low\uDC00")),
-            "actual schema=3 protocol=1 build=high\uFFFDlow\uFFFD; broker path=" +
+            $"actual schema={BrokerCompatibilityContract.HostStateSchemaVersion} protocol=1 build=high\uFFFDlow\uFFFD; broker path=" +
             BrokerAssemblyPath);
     }
 
@@ -261,7 +261,7 @@ public sealed class BrokerProcessTests
                 new BrokerCompatibility(
                     BrokerCompatibilityContract.ProtocolVersion,
                     "build\u2028\u2029\u202E\u2066id")),
-            "actual schema=3 protocol=1 build=build????id; broker path=path????tail");
+            $"actual schema={BrokerCompatibilityContract.HostStateSchemaVersion} protocol=1 build=build????id; broker path=path????tail");
     }
 
     [Fact]
@@ -1213,8 +1213,13 @@ public sealed class BrokerProcessTests
             () => process.EnsureRunningAsync(TestContext.Current.CancellationToken));
 
         Assert.Equal("broker_incompatible", exception.Code);
+        // The number is read from the contract rather than written here: these tests are about
+        // the shape of the diagnostic and the bounding of untrusted values in it, not about
+        // which schema version is current. Pinning it made a deliberate bump look like eight
+        // regressions.
         Assert.Equal(
-            "expected schema=3 protocol=1 build=localai-broker-v1; " +
+            $"expected schema={BrokerCompatibilityContract.HostStateSchemaVersion} " +
+            "protocol=1 build=localai-broker-v1; " +
             expectedActualDetail,
             exception.Message);
         Assert.Equal(0, starts);

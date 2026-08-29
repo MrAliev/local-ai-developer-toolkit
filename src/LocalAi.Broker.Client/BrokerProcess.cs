@@ -11,6 +11,14 @@ namespace LocalAi.Broker.Client;
 public interface IBrokerProcess
 {
     Task EnsureRunningAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What the running broker last said about its model backend, or null when it has said
+    /// nothing -- an older broker, or one that has not reached for the backend yet.
+    ///
+    /// Defaulted so a caller that only starts a broker does not have to answer this.
+    /// </summary>
+    BrokerBackendState? ReadBackendState() => null;
 }
 
 public sealed class BrokerProcess : IBrokerProcess
@@ -329,6 +337,23 @@ public sealed class BrokerProcess : IBrokerProcess
             BrokerObservationStatus.CompatibleHealthy,
             "host broker assembly path: " + state.BrokerAssemblyPath,
             state.ProcessId);
+    }
+
+    /// <summary>
+    /// Read straight from the published state rather than cached: the question is only ever
+    /// asked once something has already gone wrong, and a stale answer would be worse than none.
+    /// </summary>
+    public BrokerBackendState? ReadBackendState()
+    {
+        try
+        {
+            return _readState(_runtimeRoot)?.Backend;
+        }
+        catch (Exception exception) when (
+            exception is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private BrokerObservation ReadObservation()

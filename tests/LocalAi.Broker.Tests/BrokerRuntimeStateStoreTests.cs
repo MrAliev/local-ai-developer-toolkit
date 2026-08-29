@@ -32,7 +32,9 @@ public sealed class BrokerRuntimeStateStoreTests
             File.ReadAllText(fixture.StatePath),
             LocalAiJson.Strict);
         Assert.Equal(BrokerCompatibilityContract.Current, actual!.Compatibility);
-        Assert.Equal(3, actual.SchemaVersion);
+        Assert.Equal(
+            BrokerCompatibilityContract.HostStateSchemaVersion,
+            actual.SchemaVersion);
     }
 
     [Fact]

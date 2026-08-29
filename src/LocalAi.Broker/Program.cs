@@ -93,6 +93,10 @@ internal static class BrokerProgram
             // Advice, not an event: repeating it once per retry turn would bury the diagnostics
             // it is meant to explain.
             var backendHintPrinted = false;
+
+            // Published on the heartbeat so a client can say why its job never ran. The broker's
+            // own stderr goes nowhere a user looks: it is started detached, with no console.
+            var backendReachable = new BackendReachability(ollamaUri);
             var durationEstimator = new DurationEstimator();
             var scheduleMetadata = new ScheduleMetadataResolver(
                 catalog,
@@ -120,7 +124,13 @@ internal static class BrokerProgram
                         .ToArray();
                 },
                 residentModel: () => executionRouter.ResidentModel,
-                durationObserver: scheduleMetadata.Observe,
+                durationObserver: (request, receipt, duration) =>
+                {
+                    // A finished job is the only proof the backend answered; failures are
+                    // what the diagnostic carries, and successes are silent.
+                    backendReachable.Answered();
+                    scheduleMetadata.Observe(request, receipt, duration);
+                },
                 idleUnload: executionRouter.UnloadResidentAsync,
                 idleUnloadAfter: TimeSpan.FromSeconds(policy.IdleModelKeepAliveSeconds),
                 backendProbe: transport.ProbeActiveModelAsync,
@@ -134,6 +144,7 @@ internal static class BrokerProgram
                         diagnostic,
                         ollamaUri,
                         backendHintPrinted);
+                    backendReachable.Observe(diagnostic);
                 });
             // Set by the heartbeat loop, read by the host loop between jobs. A stopper asks for
             // this instead of killing the process, so the job in flight is finished and
@@ -144,6 +155,7 @@ internal static class BrokerProgram
                 owner,
                 runtimeRoot,
                 drain,
+                backendReachable,
                 shutdown.Token);
             try
             {
@@ -202,6 +214,33 @@ internal static class BrokerProgram
         return true;
     }
 
+    /// <summary>
+    /// Whether the backend answered, as last seen by the host loop.
+    ///
+    /// Written from the diagnostic callback and read by the heartbeat, both on the broker's own
+    /// threads, so a volatile flag is the whole of it -- this is a fact to publish, not a
+    /// decision to coordinate.
+    /// </summary>
+    private sealed class BackendReachability(Uri endpoint)
+    {
+        private volatile bool _unreachable;
+
+        public BrokerBackendState Current => new(!_unreachable, endpoint.ToString());
+
+        public void Observe(BrokerHostDiagnostic diagnostic)
+        {
+            if (string.Equals(
+                    diagnostic.ExceptionType,
+                    nameof(HttpRequestException),
+                    StringComparison.Ordinal))
+            {
+                _unreachable = true;
+            }
+        }
+
+        public void Answered() => _unreachable = false;
+    }
+
     private sealed class DrainSignal
     {
         private volatile bool requested;
@@ -224,12 +263,17 @@ internal static class BrokerProgram
         BrokerProcessState owner,
         string runtimeRoot,
         DrainSignal drain,
+        BackendReachability backend,
         CancellationToken cancellationToken)
     {
         while (true)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-            store.Publish(owner with { HeartbeatAtUtc = DateTimeOffset.UtcNow });
+            store.Publish(owner with
+            {
+                HeartbeatAtUtc = DateTimeOffset.UtcNow,
+                Backend = backend.Current,
+            });
             if (drain.Requested)
             {
                 continue;
