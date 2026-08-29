@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using LocalAi.Contracts;
+using LocalAi.Broker.Client;
 using LocalLm.Core;
 using ModelContextProtocol.Server;
 
@@ -31,12 +32,12 @@ public static class LocalLmTools
         [Description("Optional model override. Normally leave blank so the router can choose a resident eligible model.")]
         string? model = null,
         CancellationToken cancellationToken = default)
-        => await Run(() => tasks.ReadImageAsync(
-            paths,
-            question,
-            ParseProfile(mode),
-            model,
-            cancellationToken));
+    {
+        var profile = ParseProfile(mode);
+        return await Run(
+            () => tasks.ReadImageAsync(paths, question, profile, model, cancellationToken),
+            profile);
+    }
 
     [McpServerTool(Name = "triage_log")]
     [Description("""
@@ -183,12 +184,32 @@ public static class LocalLmTools
     /// Failures come back as readable text rather than a protocol error, which keeps a missing
     /// file or a stopped Ollama from looking like a broken tool.
     /// </summary>
-    private static async Task<string> Run(Func<Task<LocalResult>> job)
+    private static async Task<string> Run(
+        Func<Task<LocalResult>> job,
+        LocalTaskProfile? profile = null)
     {
         try
         {
             var result = await job();
             return $"{result.Notice}\n\n{result.Answer}";
+        }
+        catch (BrokerJobFailedException ex)
+            when (profile is { } wanted &&
+                ex.FailureCode.Equals(
+                    "NoModelInstalledException",
+                    StringComparison.Ordinal))
+        {
+            // The code is all the broker sends back, so the sentence is assembled here
+            // from the catalog. Before this the caller was told only the exception type.
+            return MissingModelAdvice.ForProfile(wanted);
+        }
+        catch (BrokerJobFailedException ex)
+            when (profile is { } wanted &&
+                ex.FailureCode.Equals(
+                    "NoEligibleModelException",
+                    StringComparison.Ordinal))
+        {
+            return MissingModelAdvice.ForIneligibleRequest(wanted);
         }
         catch (FileNotFoundException ex)
         {
