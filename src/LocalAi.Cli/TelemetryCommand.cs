@@ -130,6 +130,10 @@ public static class TelemetryCommand
         text.AppendLine(
             $"fallback    {summary.Fallback} " +
             $"({Percent(summary.Fallback, summary.Jobs)})");
+        foreach (var line in FailureOutliers(summary.ByModel))
+        {
+            text.AppendLine(line);
+        }
         text.AppendLine($"queue       {Latencies(summary.Queue)}");
         text.AppendLine($"execution   {Latencies(summary.Execution)}");
         text.AppendLine(
@@ -140,6 +144,40 @@ public static class TelemetryCommand
         AppendBreakdown(text, "by model", summary.ByModel);
         AppendBreakdown(text, "by task profile", summary.ByProfile);
         return text.ToString();
+    }
+
+    /// <summary>
+    /// One plain line for a model that owns the failures. The pattern this surfaces stayed
+    /// invisible for a month on the reference machine: one model failed half of its jobs —
+    /// every technical failure in the system — while the profile view showed acceptable
+    /// success rates, because the fallback quietly absorbed each miss. The numbers were all
+    /// printed; seeing the pattern required cross-reading two tables. A model is named here
+    /// when it has enough jobs to mean something, fails at least a quarter of them, and
+    /// carries at least half of all recorded failures.
+    /// </summary>
+    public static IReadOnlyList<string> FailureOutliers(
+        IReadOnlyList<TelemetryBreakdown> byModel)
+    {
+        ArgumentNullException.ThrowIfNull(byModel);
+        var totalFailures = byModel.Sum(row => row.Jobs - row.Succeeded);
+        if (totalFailures == 0)
+        {
+            return [];
+        }
+
+        return byModel
+            .Where(row => row.Jobs >= 10)
+            .Select(row => (Row: row, Failures: row.Jobs - row.Succeeded))
+            .Where(entry =>
+                entry.Failures * 4 >= entry.Row.Jobs &&
+                entry.Failures * 2 >= totalFailures)
+            .OrderByDescending(entry => entry.Failures)
+            .Select(entry =>
+                $"attention   {entry.Row.Name} fails " +
+                $"{Percent(entry.Failures, entry.Row.Jobs)} of its jobs — " +
+                $"{entry.Failures} of the {totalFailures} failure(s) recorded; " +
+                "see the by-model table")
+            .ToArray();
     }
 
     private static void AppendUnreadable(StringBuilder text, TelemetrySummary summary)

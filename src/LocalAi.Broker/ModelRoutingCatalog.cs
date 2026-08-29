@@ -49,6 +49,14 @@ public sealed class ModelRoutingCatalog
     public bool IsMaintenanceAllowed(string tag) =>
         _maintenanceAllowlist.Contains(tag);
 
+    /// <summary>
+    /// Whether routed chat must ask Ollama to switch the model's reasoning off. False for a
+    /// model outside the catalog: the transport also carries native passthrough traffic, and
+    /// an unknown tag there is the caller's own request to leave untouched.
+    /// </summary>
+    public bool DisablesThinking(string tag) =>
+        _modelsByTag.TryGetValue(tag, out var model) && model.DisableThinking;
+
     public static ModelRoutingCatalog LoadEmbedded()
     {
         // The document itself is owned by LocalAi.Contracts so the installer can read the

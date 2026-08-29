@@ -50,7 +50,8 @@
       "Capabilities": [ "Text", "Translation", "Vision", "Reasoning" ],
       "ContextTokens": [ 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144 ],
       "SupportsImages": true,
-      "MaxImagePixels": 4194304
+      "MaxImagePixels": 4194304,
+      "DisableThinking": true
     },
     {
       "Tag": "translategemma:12b",
