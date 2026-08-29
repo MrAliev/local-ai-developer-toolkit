@@ -1,4 +1,4 @@
-﻿# MCP tools: the complete inventory
+# MCP tools: the complete inventory
 
 [Русская версия](mcp-tools.ru.md)
 
@@ -31,7 +31,7 @@ overridden per query.
 
 Configured in `language-servers.json`, disabled by default both globally and per language.
 
-Since 0.1.34 an adapter carries `InitializationOptions` — an arbitrary JSON object passed straight
+An adapter carries `InitializationOptions` — an arbitrary JSON object passed straight
 into the LSP `initialize` request. For `typescript-language-server` it is the only way to name a
 tsserver in a workspace that has no `node_modules/typescript` of its own:
 
@@ -104,10 +104,8 @@ real fault: a stopped broker is a note, because it starts on demand.
 
 ## Reading what the local models actually did
 
-`localai telemetry` summarises the per-job records the broker has been writing all along. Every
-delegated job leaves one under the runtime root and they are kept for thirty days; until this
-command existed the only thing that read any of them was the experiment report, which covers the
-handful of jobs belonging to a running model experiment.
+`localai telemetry` summarises the per-job records the broker writes. Every delegated job
+leaves one under the runtime root, and they are kept for thirty days.
 
 It answers the questions a routing or residency decision turns on: how jobs ended, how often a
 model had to be loaded rather than found warm, how often the fallback was taken, what the queue

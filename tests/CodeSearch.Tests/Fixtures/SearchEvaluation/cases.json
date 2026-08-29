@@ -212,7 +212,11 @@
       "noAnswer": false,
       "relevant": [
         {
-          "path": "docs/superpowers/specs/2026-07-29-model-aware-routing-design.md",
+          "path": "README.md",
+          "symbol": null
+        },
+        {
+          "path": "docs/overview.md",
           "symbol": null
         }
       ]
