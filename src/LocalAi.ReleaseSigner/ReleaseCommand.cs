@@ -459,10 +459,36 @@ public sealed class ReleaseCommand
     private static string PorcelainPath(string line) =>
         line.Length > 3 ? line[3..].Trim() : line;
 
+    /// <summary>
+    /// An existing, empty directory handed to git as <c>core.hooksPath</c>, so none of this
+    /// command's own git operations fire repository hooks. The first real release run died on
+    /// exactly that: <c>git switch --create</c> fired the LocalAi post-checkout hook, the hook
+    /// began synchronizing another worktree's index, and <see cref="QuickCommand"/> expired
+    /// measuring an embedding queue rather than git — after the branch existed and before the
+    /// notes were committed. The hooks still run on the user's next real git operation, so
+    /// nothing drifts; the release's bookkeeping just stops volunteering for them. An empty
+    /// directory rather than a missing path, because a missing hooks path is a configuration
+    /// error to some git versions and silently nothing to others.
+    /// </summary>
+    private static readonly Lazy<string> NoHooksDirectory = new(() =>
+    {
+        var path = Path.Combine(Path.GetTempPath(), "localai-release-signer-no-hooks");
+        Directory.CreateDirectory(path);
+        return path;
+    });
+
     private async Task<string> GitAsync(
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken) =>
-        (await RunAsync("git", ["-C", _repositoryRoot, .. arguments], QuickCommand, cancellationToken))
+        (await RunAsync(
+            "git",
+            [
+                "-C", _repositoryRoot,
+                "-c", $"core.hooksPath={NoHooksDirectory.Value}",
+                .. arguments,
+            ],
+            QuickCommand,
+            cancellationToken))
             .StandardOutput;
 
     private async Task<ProcessResult> RunAsync(
