@@ -130,10 +130,10 @@ public static class CodeSearchSyncCommand
                 1,
                 CurrentSemanticGenerationVersion);
             var commonDirectory = RepositoryIdentity.FromCommonDirectory(
-                RepoLocator.GitOutput(
+                RepoLocator.GitOutputOrThrow(
                     requested.WorkingRoot,
-                    "rev-parse --path-format=absolute --git-common-dir")
-                ?? throw new InvalidOperationException("Git common directory is unavailable."))
+                    "rev-parse --path-format=absolute --git-common-dir",
+                    "The git common directory"))
                 .CommonDirectory;
             manifestStore.Save(new RepositoryManifest(
                 requested.RepositoryId,

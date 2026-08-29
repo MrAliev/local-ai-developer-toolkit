@@ -194,7 +194,18 @@ public static class RepoLocator
         return parent?.FullName.TrimEnd(Path.DirectorySeparatorChar);
     }
 
-    private const int GitTimeoutMs = 10_000;
+    /// <summary>
+    /// A runaway guard, not an expectation.
+    ///
+    /// <c>git rev-parse</c> answers in milliseconds. Ten seconds was short enough that a loaded
+    /// machine -- several MCP clients sharing one server, each spawning git -- could miss it, and
+    /// a missed deadline came back as "Git common directory is unavailable": a claim about the
+    /// repository, when the truth was about the moment. That is why every retry succeeded.
+    ///
+    /// Two minutes cannot be mistaken for a performance budget and still bounds a git that has
+    /// genuinely hung, which is what this exists for.
+    /// </summary>
+    private const int GitTimeoutMs = 120_000;
 
     /// <summary>
     /// Runs git and returns its trimmed stdout, or null for any failure.
@@ -211,7 +222,90 @@ public static class RepoLocator
     /// ReadToEnd first, so the timeout could never fire - a hung git hung the whole server.</item>
     /// </list>
     /// </summary>
+    /// <summary>
+    /// What running git actually did, so a caller can say which of the several very different
+    /// failures it hit. <see cref="RunGit"/> throws all of them away on purpose, because most
+    /// callers only want to know whether there is a repository here.
+    /// </summary>
+    private readonly record struct GitRun(
+        string Output,
+        int? ExitCode,
+        string Error,
+        bool TimedOut,
+        Exception? Fault)
+    {
+        public bool Succeeded => ExitCode == 0 && Output.Length > 0;
+    }
+
     private static string? RunGit(string workingDirectory, string arguments)
+    {
+        var run = Run(workingDirectory, arguments);
+        return run.Succeeded ? run.Output : null;
+    }
+
+    /// <summary>
+    /// Runs git and returns its output, or throws naming what went wrong.
+    ///
+    /// <see cref="GitOutput"/> cannot tell "there is no repository here" from "git could not be
+    /// run just now", so callers turned both into one sentence about the repository. Under
+    /// several concurrent MCP clients the second is the one that happens, and the message sent
+    /// whoever read it looking in the wrong place.
+    /// </summary>
+    /// <param name="description">
+    /// What was being read, named as the caller would say it -- this becomes the first half of
+    /// the message somebody has to act on.
+    /// </param>
+    public static string GitOutputOrThrow(
+        string workingDirectory,
+        string arguments,
+        string description)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(description);
+        var run = Run(workingDirectory, arguments);
+        if (run.Succeeded)
+        {
+            return run.Output;
+        }
+
+        throw new InvalidOperationException(
+            $"{description} could not be read: {Explain(run, arguments)}");
+    }
+
+    private static string Explain(GitRun run, string arguments)
+    {
+        if (run.Fault is { } fault)
+        {
+            return $"'git {arguments}' could not be started " +
+                $"({fault.GetType().Name}: {fault.Message}).";
+        }
+
+        if (run.TimedOut)
+        {
+            return $"'git {arguments}' did not finish within " +
+                $"{TimeSpan.FromMilliseconds(GitTimeoutMs).TotalSeconds:0} seconds and was " +
+                "stopped. This is a machine under load rather than a broken repository; the " +
+                "same call usually succeeds straight afterwards.";
+        }
+
+        if (run.ExitCode is { } exitCode && exitCode != 0)
+        {
+            var detail = FirstLine(run.Error);
+            return detail.Length > 0
+                ? $"'git {arguments}' exited {exitCode}: {detail}"
+                : $"'git {arguments}' exited {exitCode}.";
+        }
+
+        return $"'git {arguments}' produced no output.";
+    }
+
+    private static string FirstLine(string text)
+    {
+        var trimmed = text.Trim();
+        var end = trimmed.IndexOfAny(['\r', '\n']);
+        return end < 0 ? trimmed : trimmed[..end];
+    }
+
+    private static GitRun Run(string workingDirectory, string arguments)
     {
         try
         {
@@ -227,7 +321,7 @@ public static class RepoLocator
 
             if (process is null)
             {
-                return null;
+                return new GitRun(string.Empty, null, string.Empty, false, null);
             }
 
             process.StandardInput.Close();
@@ -246,22 +340,26 @@ public static class RepoLocator
                     // Already gone, or not ours to kill - nothing useful to do either way.
                 }
 
-                return null;
+                return new GitRun(string.Empty, null, string.Empty, true, null);
             }
 
             // WaitForExit(int) returns once the process ends but does not await the redirected
             // readers, so the buffers still have to be drained before reading the result.
             if (!Task.WaitAll([stdout, stderr], GitTimeoutMs))
             {
-                return null;
+                return new GitRun(string.Empty, null, string.Empty, true, null);
             }
 
-            var output = stdout.Result.Trim();
-            return process.ExitCode == 0 && output.Length > 0 ? output : null;
+            return new GitRun(
+                stdout.Result.Trim(),
+                process.ExitCode,
+                stderr.Result,
+                false,
+                null);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            return null;
+            return new GitRun(string.Empty, null, string.Empty, false, exception);
         }
     }
 }

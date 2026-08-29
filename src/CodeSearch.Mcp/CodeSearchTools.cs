@@ -68,7 +68,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"go_to_definition failed: {ex.Message}";
+            return $"go_to_definition failed: {Describe(ex)}";
         }
     }
 
@@ -119,7 +119,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"find_references failed: {ex.Message}";
+            return $"find_references failed: {Describe(ex)}";
         }
     }
 
@@ -165,7 +165,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"find_implementations failed: {ex.Message}";
+            return $"find_implementations failed: {Describe(ex)}";
         }
     }
 
@@ -229,7 +229,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"find_relationships failed: {ex.Message}";
+            return $"find_relationships failed: {Describe(ex)}";
         }
     }
 
@@ -340,7 +340,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"Search failed: {ex.Message}";
+            return $"Search failed: {Describe(ex)}";
         }
 
         if (hits.Count == 0)
@@ -437,8 +437,25 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"get_code_chunk failed: {ex.Message}";
+            // The type as well as the message: two of the three failures reported in #140 came
+            // back with a message that named nothing, and a caller left holding "get_code_chunk
+            // failed" has nothing to retry, report or look up.
+            return $"get_code_chunk failed: {Describe(ex)}";
         }
+    }
+
+    /// <summary>
+    /// Names an exception the way somebody diagnosing it needs: the type, the message, and the
+    /// cause underneath when the outer one is only a wrapper.
+    /// </summary>
+    internal static string Describe(Exception exception)
+    {
+        var described = exception.Message.Length > 0
+            ? $"{exception.GetType().Name}: {exception.Message}"
+            : exception.GetType().Name;
+        return exception.InnerException is { } inner
+            ? $"{described} ({Describe(inner)})"
+            : described;
     }
 
     [McpServerTool(Name = "index_status")]
