@@ -124,12 +124,21 @@ public sealed record DependencySelection(string Id, string Title, bool IsRequire
     public string StateText => IsInstalled ? "Already installed" : "Not installed";
 
     /// <summary>
-    /// Whether the wizard refuses to continue without it. Shown, because a list where
-    /// every line looks equally mandatory makes an optional item feel like an obligation
-    /// — and the GitHub CLI is exactly that: useful for a private fork, needed by nobody
-    /// installing a public release.
+    /// What is given up by skipping this. "Optional" on its own invites skipping everything
+    /// and finding the cost later, at the point where a tool quietly stops answering
+    /// precisely — which is the worst moment to learn it.
     /// </summary>
-    public string RequirementText => IsRequired ? "required" : "optional";
+    public string Consequence { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Whether the wizard refuses to continue without it. Shown, because a list where
+    /// every line looks equally mandatory makes an optional item feel like an obligation —
+    /// and most of this list is exactly that: three to four gigabytes and several UAC
+    /// prompts for capabilities a given user may not want.
+    /// </summary>
+    public string RequirementText => IsRequired
+        ? "required"
+        : Consequence.Length == 0 ? "optional" : "optional — " + Consequence;
 
     public string ActionText => !IsInstallable
         ? "Install manually"
