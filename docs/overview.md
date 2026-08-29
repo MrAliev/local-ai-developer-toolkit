@@ -244,10 +244,11 @@ strict order between them.
 
 Separately, what ties search to navigation. A search hit names a path and a line range but not
 the column of the identifier within the line, so the natural call passes column 0. A position
-that names nothing itself resolves, on a line with exactly one declaration, to that declaration
-— and the hit's start line is usable for navigation as it is. A line with two declarations
-(`const a = f(), b = g()`) has no unambiguous answer, and there the previous degradation notice
-is still returned rather than whichever of the two came first.
+that names nothing itself resolves to the line's outermost declaration — for a single-line
+method signature, the method rather than its parameters, which is what makes the hit's start
+line usable for navigation as it is. A line of sibling declarations
+(`const a = f(), b = g()`), where neither contains the other, has no unambiguous answer, and
+there the degradation notice is returned rather than whichever of the two came first.
 
 Two exceptions: finding implementations and finding relationships have no text approximation at
 all — a plausible answer there is worse than an empty one. When an answer did come from a
