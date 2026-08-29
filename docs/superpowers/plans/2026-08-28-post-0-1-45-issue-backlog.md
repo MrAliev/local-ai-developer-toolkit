@@ -57,13 +57,13 @@ on every boot, the other tells a caller that a failed sync succeeded. #140 and
 
 ## Task 1: #143 — a real solution through MSBuildWorkspace
 
-- [ ] RED: load this repository's own `LocalAi.Contracts.csproj` through
+- [x] RED: load this repository's own `LocalAi.Contracts.csproj` through
   `RoslynSolutionLoader.LoadAsync` and assert a document and a symbol came back.
-- [ ] Prove it: split the Roslyn package versions locally, watch the new test go
+- [x] Prove it: split the Roslyn package versions locally, watch the new test go
   red, restore them. A regression test never seen failing is a guess.
-- [ ] Decide fail-versus-skip through `FixturePrerequisite` with
+- [x] Decide fail-versus-skip through `FixturePrerequisite` with
   `LOCALAI_STRICT_FIXTURES`; a skip on a runner restores the blindness.
-- [ ] Place it in `CodeSearch.Tests` beside the other semantic fixtures.
+- [x] Place it in `CodeSearch.Tests` beside the other semantic fixtures.
 
 The existing `RoslynSolutionLoaderTests` already open a synthetic project and
 assert only `NotNull`, which a zero-project workspace satisfies. The assertion
@@ -71,14 +71,14 @@ that was missing is that something came back, not that loading returned.
 
 ## Task 2: #142 — the broker must not die when Ollama is down
 
-- [ ] RED: drive the broker against a refused endpoint and assert the process
+- [x] RED: drive the broker against a refused endpoint and assert the process
   survives and reports a named cause. Wait for the state, never for a duration.
-- [ ] Guard the paths that reach the backend outside the executor's own catch —
+- [x] Guard the paths that reach the backend outside the executor's own catch —
   scheduling metadata (`PrepareAsync`), the watchdog probe, and the outer body
   of `BrokerProgram.RunAsync`, which today has no general catch at all.
-- [ ] Treat backend-unreachable as retryable, and fail queued jobs with
+- [x] Treat backend-unreachable as retryable, and fail queued jobs with
   "Ollama is not reachable at <endpoint>" rather than an exception type.
-- [ ] Leave the endpoint flag alone: `serve --ollama <url>` already exists. A
+- [x] Leave the endpoint flag alone: `serve --ollama <url>` already exists. A
   configurable endpoint is a separate subject and a separate issue.
 
 ## Task 3: #139 — the single-file CLI reports its failures
@@ -86,84 +86,129 @@ that was missing is that something came back, not that loading returned.
 - [ ] Reproduce from a single-file publish and capture the real exception, its
   type and the DLL it names; the report's message alone does not identify it.
 - [ ] Fix the bundling defect the repro identifies.
-- [ ] Make a degraded sync observable: an empty C# semantic index on a
+- [x] Make a degraded sync observable: an empty C# semantic index on a
   repository that has C# is a failure, not a quiet fallback.
 - [ ] If the bundling fix and the reporting fix turn out to be two subjects,
   raise it before splitting into two pull requests rather than merging both.
 
 ## Task 4: #144 — install from a folder
 
-- [ ] Add a `DirectoryReleaseFeed` beside `GitHubReleaseFeed` and
+- [x] Add a `DirectoryReleaseFeed` beside `GitHubReleaseFeed` and
   `AnonymousReleaseFeed`, implementing the existing `IReleaseFeed`.
-- [ ] Choose it on the package page: an explicit path, or the installer's own
+- [x] Choose it on the package page: an explicit path, or the installer's own
   directory.
-- [ ] Verify exactly as before — manifest against the embedded key, package
+- [x] Verify exactly as before — manifest against the embedded key, package
   against the SHA-256 in the manifest. Where bytes came from is not evidence.
-- [ ] Say in the documentation that models still come from the Ollama registry.
+- [x] Say in the documentation that models still come from the Ollama registry.
 
 ## Task 5: #145 — decide what the installer is
 
-- [ ] Choose between wiring `InstallerJournal` and `RollbackService` into the
+- [x] Choose between wiring `InstallerJournal` and `RollbackService` into the
   wizard, and deleting them with their tests. Put the reasoning in the pull
   request; this is the one issue whose answer is a decision, not a defect.
-- [ ] Whichever way it goes, `RollbackNotes` is renamed to what it holds.
-- [ ] Leave no class referenced only by its own tests.
+- [x] Whichever way it goes, `RollbackNotes` is renamed to what it holds.
+- [x] Leave no class referenced only by its own tests.
 
 ## Task 6: #146 — a download is not a command
 
-- [ ] Give the model pull its own ceiling, or liveness based on progress rather
+- [x] Give the model pull its own ceiling, or liveness based on progress rather
   than a deadline. `MaximumCommandTimeout` stays where it belongs, on commands.
-- [ ] Cover a pull that outlives the command ceiling. Drive it with a fake
+- [x] Cover a pull that outlives the command ceiling. Drive it with a fake
   runner and a controllable clock; do not make the suite wait.
 
 ## Task 7: #140 — git access under concurrent clients
 
-- [ ] RED: concurrent `Inspect` calls against one working tree, and a `git`
+- [x] RED: concurrent `Inspect` calls against one working tree, and a `git`
   invocation that exceeds the deadline, asserting neither is reported as a
   missing common directory.
-- [ ] Replace the fixed deadline with something that does not measure the
+- [x] Replace the fixed deadline with something that does not measure the
   machine, and carry the underlying cause — exit code, stderr, exception — into
   the message instead of collapsing everything to `null`.
-- [ ] Confirm the diagnosis against the report before changing behaviour: the
+- [x] Confirm the diagnosis against the report before changing behaviour: the
   reporter suspected a shared libgit2 handle, and there is none.
 
 ## Task 8: #141 — read_image without a vision model
 
-- [ ] Fail closed with an explanation naming a model to install, in the shape
+- [x] Fail closed with an explanation naming a model to install, in the shape
   the calibration path already uses.
-- [ ] Surface a vision model through `RecommendedMissingModels`; the catalog
+- [x] Surface a vision model through `RecommendedMissingModels`; the catalog
   already carries `Vision` capabilities, so a fresh install can discover it.
 
 ## Task 9: #147 — signing and the placeholder policy
 
-- [ ] Replace the `CN=LocalAi` subject and the sixty-four-zero hash, or make
+- [x] Replace the `CN=LocalAi` subject and the sixty-four-zero hash, or make
   `--require-authenticode` refuse to run against a placeholder. Today the flag
   would reject every installation.
-- [ ] Write down the order — sign before `pack`, always countersign with a
+- [x] Write down the order — sign before `pack`, always countersign with a
   timestamp — where the person cutting a release will read it.
-- [ ] The certificate itself is a purchase and a maintainer decision; the code
+- [x] The certificate itself is a purchase and a maintainer decision; the code
   and the documentation are what this pull request can close.
 
 ## Task 10: #148 — prerequisites that are actually required
 
-- [ ] Separate what semantic search over C# needs from what the TypeScript and
+- [x] Separate what semantic search over C# needs from what the TypeScript and
   Python indexers need.
-- [ ] Let the rest be skipped, with the consequence stated on the page.
-- [ ] Cover each prerequisite's blocking decision.
+- [x] Let the rest be skipped, with the consequence stated on the page.
+- [x] Cover each prerequisite's blocking decision.
 
 ## Task 11: #149 — starting Ollama
 
-- [ ] Re-scope first: #142 already makes an unreachable backend explain itself,
+- [x] Re-scope first: #142 already makes an unreachable backend explain itself,
   so what remains here is starting it on demand.
-- [ ] Whatever starts it goes through the shared broker; no tool invokes the
+- [x] Whatever starts it goes through the shared broker; no tool invokes the
   `ollama` binary and nothing talks to port 11434 directly.
 
 ## Task 12: #150 — code of conduct
 
-- [ ] Add `CODE_OF_CONDUCT.md` with a contact route that publishes no personal
+- [x] Add `CODE_OF_CONDUCT.md` with a contact route that publishes no personal
   address — a private security advisory, or a dedicated address.
-- [ ] Add `CODE_OF_CONDUCT.ru.md` linking back, as `DocumentationShapeTests`
+- [x] Add `CODE_OF_CONDUCT.ru.md` linking back, as `DocumentationShapeTests`
   requires of every document outside `.github/` and `Fixtures/`.
+
+## What happened
+
+Seventeen pull requests, #151 to #168. Ten of the twelve issues are closed; the two that are
+not are open on purpose.
+
+| Issue | Landed in | Note |
+| --- | --- | --- |
+| #143 | #152 | Confirmed red against the 5.6.0/5.9.0 split before it was believed. |
+| #142 | #153 | The escape was scheduling, not the watchdog probe, which was already guarded. |
+| #139 | #154 | The exit-0 half only. See below. |
+| #144 | #155 | |
+| #145 | #158 | Deleted; the feature is recorded in #157. |
+| #146 | #159 | |
+| #140 | #162 | Not a shared libgit2 handle. There is none. |
+| #141 | #163 | Not "no vision model" either: the installed one was not on the route. |
+| #147 | #164 | The code half; the certificate is a purchase. |
+| #148 | #166 | |
+| #149 | #167, #168 | Both halves the issue offered. |
+| #150 | #165 | |
+
+Two more pull requests were not planned. #161 verifies winget before running it, which #158
+turned up and #156 records: the wizard ran whatever path the environment detector reported, and
+the detector returns the first file named `winget.exe` on a user-writable search path. #160
+fixes a flake this work introduced in #154 — two tests asserted that a process-wide console
+buffer was empty, which any parallel test could spoil.
+
+### The two that stay open
+
+**#139** keeps its native-library half. It did not reproduce: the released binary produced full
+C# semantics on a bare `.csproj`, a two-project `.slnx`, a two-project `.sln`, and a fresh clone
+of this repository — 576 files, 26 projects, TypeScript and Python present — with no `Roslyn:`
+line and no "Dll was not found.". The questions that would settle it are in the issue. Closing
+it would record a fix that does not exist.
+
+**#157** is the transactional installer, split out of #145 deliberately so that choosing not to
+have one now is not the same as deciding against one.
+
+### Where the plan was wrong
+
+The order held, but three diagnoses in the issues did not, and each was worth more than the fix:
+#140 was a ten-second deadline and a swallowed cause rather than a shared git handle, #141 was a
+message lost at the broker boundary rather than a missing model, and #139 and #143 turned out to
+be one blind spot seen from two sides. The plan's own triage section called two of those; the
+third only became clear while reproducing.
 
 ## Rules every one of these is held to
 
