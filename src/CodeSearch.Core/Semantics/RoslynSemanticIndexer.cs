@@ -86,7 +86,8 @@ public sealed class RoslynSemanticIndexer
                             occurrences,
                             occurrenceKeys,
                             relationships,
-                            root);
+                            root,
+                            declaration.NodeSpan);
                     }
 
                     if (node is not SimpleNameSyntax name)
@@ -161,7 +162,7 @@ public sealed class RoslynSemanticIndexer
         }
 
         return model.GetDeclaredSymbol(node, cancellationToken) is { } symbol
-            ? new Declaration(symbol, token)
+            ? new Declaration(symbol, token, node.Span)
             : null;
     }
 
@@ -175,7 +176,8 @@ public sealed class RoslynSemanticIndexer
         List<SemanticOccurrence> occurrences,
         HashSet<OccurrenceKey> occurrenceKeys,
         HashSet<SemanticRelationship> relationships,
-        string repositoryRoot)
+        string repositoryRoot,
+        TextSpan? enclosingSpan = null)
     {
         if (!IsNavigable(symbol))
         {
@@ -184,6 +186,13 @@ public sealed class RoslynSemanticIndexer
 
         var id = AddSymbol(symbol, symbols, relationships, repositoryRoot);
         var range = ToRange(text.Lines.GetLinePositionSpan(span));
+        // The whole declaration node, not just the identifier. Column-0 resolution picks the
+        // outermost declaration on a line by containment over these spans, and without them
+        // the rule could never fire for C# — the language whose single-line signatures it was
+        // written for. The SCIP importers already carry the ranges their indexers report.
+        SourceRange? enclosing = enclosingSpan is { } value
+            ? ToRange(text.Lines.GetLinePositionSpan(value))
+            : null;
         var key = new OccurrenceKey(relativePath, range, id);
         if (!occurrenceKeys.Add(key))
         {
@@ -194,6 +203,7 @@ public sealed class RoslynSemanticIndexer
             occurrences[existing] = occurrences[existing] with
             {
                 Roles = occurrences[existing].Roles | roles,
+                EnclosingRange = occurrences[existing].EnclosingRange ?? enclosing,
             };
             return;
         }
@@ -205,6 +215,7 @@ public sealed class RoslynSemanticIndexer
             SymbolId = id,
             Roles = roles,
             Precision = NavigationPrecision.Precise,
+            EnclosingRange = enclosing,
         });
     }
 
@@ -382,6 +393,6 @@ public sealed class RoslynSemanticIndexer
         return true;
     }
 
-    private sealed record Declaration(ISymbol Symbol, SyntaxToken Token);
+    private sealed record Declaration(ISymbol Symbol, SyntaxToken Token, TextSpan NodeSpan);
     private sealed record OccurrenceKey(string Path, SourceRange Range, string SymbolId);
 }
