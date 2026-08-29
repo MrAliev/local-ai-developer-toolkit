@@ -686,6 +686,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
         catch (Exception exception) when (IsJournalWriteFailure(exception))
         {
+            journal.Dispose();
             runJournal = null;
             return null;
         }
@@ -708,6 +709,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
         catch (Exception exception) when (IsJournalWriteFailure(exception))
         {
+            journal.Dispose();
             runJournal = null;
         }
     }
@@ -725,6 +727,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
         catch (Exception exception) when (IsJournalWriteFailure(exception))
         {
+            journal.Dispose();
             runJournal = null;
         }
     }
@@ -742,6 +745,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
         catch (Exception exception) when (IsJournalWriteFailure(exception))
         {
+            journal.Dispose();
             runJournal = null;
         }
     }

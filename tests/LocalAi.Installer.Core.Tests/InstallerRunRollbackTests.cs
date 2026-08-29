@@ -30,7 +30,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
     {
         WritePointer("v2");
         WriteLauncher();
-        var journal = InstallerRunJournal.Start(journalDirectory);
+        using var journal = InstallerRunJournal.Start(journalDirectory);
         var step = journal.BeginStep(
             InstallerRunEffectKind.PackageActivation,
             "LocalAi package v2");
@@ -72,7 +72,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
     {
         WritePointer("v3");
         WriteLauncher();
-        var journal = JournalWithActivation("v2", "v1");
+        using var journal = JournalWithActivation("v2", "v1");
         var runner = new RecordingRunner((_, _, _, _) =>
             Task.FromResult(new ProcessResult(0, "", "", false, false)));
 
@@ -91,7 +91,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
     {
         WritePointer("v2");
         WriteLauncher();
-        var journal = JournalWithActivation("v2", "v1");
+        using var journal = JournalWithActivation("v2", "v1");
         var runner = new RecordingRunner((_, _, _, _) =>
             Task.FromResult(new ProcessResult(7, "", "", false, false)));
 
@@ -112,7 +112,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var written = "{\"path\":\"C:/ollama.exe\"}"u8.ToArray();
         File.WriteAllBytes(path, written);
-        var journal = JournalWithFileStep(CreatedFileUndo(path, written));
+        using var journal = JournalWithFileStep(CreatedFileUndo(path, written));
 
         var result = await Rollback(NoProcessRunner()).RollbackAsync(journal, TestContext.Current.CancellationToken);
 
@@ -128,7 +128,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
         var before = "{\"residency\":\"RequireFullVram\"}"u8.ToArray();
         var after = "{\"residency\":\"AllowCpu\"}"u8.ToArray();
         File.WriteAllBytes(path, after);
-        var journal = JournalWithFileStep(new InstallerRunFileUndo(
+        using var journal = JournalWithFileStep(new InstallerRunFileUndo(
             path,
             true,
             Convert.ToHexString(SHA256.HashData(before)),
@@ -154,7 +154,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
         var written = "{\"residency\":\"AllowCpu\"}"u8.ToArray();
         var edited = "{\"residency\":\"AllowCpu\",\"edited\":true}"u8.ToArray();
         File.WriteAllBytes(path, edited);
-        var journal = JournalWithFileStep(CreatedFileUndo(path, written));
+        using var journal = JournalWithFileStep(CreatedFileUndo(path, written));
 
         var result = await Rollback(NoProcessRunner()).RollbackAsync(journal, TestContext.Current.CancellationToken);
 
@@ -172,7 +172,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
         var after = "{\"mcpServers\":{\"codesearch\":{}}}"u8.ToArray();
         File.WriteAllBytes(path, after);
         File.WriteAllBytes(backupPath, before);
-        var journal = JournalWithFileStep(new InstallerRunFileUndo(
+        using var journal = JournalWithFileStep(new InstallerRunFileUndo(
             path,
             true,
             Convert.ToHexString(SHA256.HashData(before)),
@@ -201,7 +201,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
         var after = "{\"mcpServers\":{\"codesearch\":{}}}"u8.ToArray();
         File.WriteAllBytes(path, after);
         File.WriteAllBytes(backupPath, "{\"tampered\":true}"u8.ToArray());
-        var journal = JournalWithFileStep(new InstallerRunFileUndo(
+        using var journal = JournalWithFileStep(new InstallerRunFileUndo(
             path,
             true,
             Convert.ToHexString(SHA256.HashData(before)),
@@ -219,7 +219,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
     [Fact]
     public async Task Irreversible_effects_are_reported_left_in_place_and_untouched()
     {
-        var journal = InstallerRunJournal.Start(journalDirectory);
+        using var journal = InstallerRunJournal.Start(journalDirectory);
         var step = journal.BeginStep(
             InstallerRunEffectKind.DependencyInstall,
             "Prerequisite Git (Git.Git)");
@@ -244,7 +244,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
     [Fact]
     public async Task A_step_that_never_finished_is_reported_as_unknown_state()
     {
-        var journal = InstallerRunJournal.Start(journalDirectory);
+        using var journal = InstallerRunJournal.Start(journalDirectory);
         journal.BeginStep(
             InstallerRunEffectKind.AgentConfiguration,
             "Claude client configuration");
@@ -270,7 +270,7 @@ public sealed class InstallerRunRollbackTests : IDisposable
         var secondBytes = "{\"second\":2}"u8.ToArray();
         File.WriteAllBytes(first, firstBytes);
         File.WriteAllBytes(second, secondBytes);
-        var journal = InstallerRunJournal.Start(journalDirectory);
+        using var journal = InstallerRunJournal.Start(journalDirectory);
         var firstStep = journal.BeginStep(InstallerRunEffectKind.ResidencyPolicy, "first");
         journal.CompleteStep(
             firstStep,

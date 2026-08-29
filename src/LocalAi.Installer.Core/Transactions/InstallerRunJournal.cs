@@ -105,10 +105,11 @@ public sealed record InstallerRunJournalSnapshot(
 /// before the effect it describes proceeds — the failure this exists for is the one where
 /// the wizard never gets to run its own cleanup.
 /// </summary>
-public sealed class InstallerRunJournal
+public sealed class InstallerRunJournal : IDisposable
 {
     public const int CurrentSchemaVersion = 1;
     private const string FilePrefix = "journal-";
+    private const string LiveLockSuffix = ".lock";
 
     /// <summary>
     /// Inline pre-install content is meant for the runtime's small JSON files. Anything
@@ -120,6 +121,16 @@ public sealed class InstallerRunJournal
     private static readonly JsonSerializerOptions Serializer = CreateSerializer();
 
     private readonly object sync = new();
+
+    /// <summary>
+    /// Held open, unshared, for as long as the run that writes this journal is alive. An
+    /// outcome of null alone cannot tell a killed wizard from one still installing in
+    /// another window, and offering to "roll back" a run that is mid-install would race its
+    /// own effects. The operating system releases this handle at the exact moment the
+    /// process dies, so its release — not a guess about elapsed time — is what turns an
+    /// outcome-less journal into an interrupted one.
+    /// </summary>
+    private FileStream? liveLock;
 
     private InstallerRunJournal(string journalPath, InstallerRunJournalSnapshot snapshot)
     {
@@ -144,7 +155,27 @@ public sealed class InstallerRunJournal
             path,
             new(CurrentSchemaVersion, runId, now, now, null, []));
         journal.Save();
+        // DeleteOnClose makes the lock vanish with the process, however it dies;
+        // FileShare.Delete lets a cleanup remove the file without being able to open it,
+        // which is the combination that keeps a held lock unreadable but not undeletable.
+        journal.liveLock = new FileStream(
+            path + LiveLockSuffix,
+            FileMode.Create,
+            FileAccess.ReadWrite,
+            FileShare.Delete,
+            1,
+            FileOptions.DeleteOnClose);
         return journal;
+    }
+
+    /// <summary>
+    /// Releases the live lock, declaring the owning process done with this run. The journal
+    /// file itself stays: it is the record, the lock is only the pulse.
+    /// </summary>
+    public void Dispose()
+    {
+        liveLock?.Dispose();
+        liveLock = null;
     }
 
     public static InstallerRunJournal Load(string journalPath)
@@ -172,7 +203,9 @@ public sealed class InstallerRunJournal
 
     /// <summary>
     /// The newest journal whose run never wrote an outcome — a wizard that was killed, or a
-    /// machine that lost power, mid-installation. Unreadable files are skipped rather than
+    /// machine that lost power, mid-installation. A journal whose live lock is still held
+    /// belongs to a run happening right now in another window and is skipped: offering to
+    /// roll it back would race its own effects. Unreadable files are skipped rather than
     /// fatal: a corrupt journal must not block the installation that could fix the machine,
     /// and there is nothing rollback could do with it anyway.
     /// </summary>
@@ -199,13 +232,56 @@ public sealed class InstallerRunJournal
                 continue;
             }
 
-            if (journal.Snapshot.IsInterrupted)
+            if (journal.Snapshot.IsInterrupted && !IsRunAlive(path))
             {
                 return journal;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether the run that owns this journal still holds its live lock. The probe is the
+    /// open itself: an unshared handle refuses a second open for as long as its process
+    /// lives, and the operating system releases it the moment that process dies — a
+    /// condition, where any elapsed-time rule would call a slow install dead. A lock file
+    /// that opens is a leftover from a power loss (DeleteOnClose never ran) and is cleaned
+    /// up; one that cannot be opened for any access reason is treated as alive, because
+    /// "possibly still installing" must never be answered with a rollback.
+    /// </summary>
+    private static bool IsRunAlive(string journalPath)
+    {
+        var lockPath = journalPath + LiveLockSuffix;
+        if (!File.Exists(lockPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using (new FileStream(lockPath, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+
+        try
+        {
+            File.Delete(lockPath);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // A stale lock that cannot be removed still proves nothing is alive; the next
+            // scan will just probe it again.
+        }
+
+        return false;
     }
 
     /// <summary>Writes the intent to disk and returns the step id. The effect runs after this.</summary>

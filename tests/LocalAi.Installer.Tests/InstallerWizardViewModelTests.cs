@@ -488,6 +488,10 @@ public sealed class InstallerWizardViewModelTests
                 InstallerRunEffectKind.AgentConfiguration,
                 "Claude client configuration");
 
+            // Releases the live lock the way process death does; a held lock means the run
+            // is still alive in another window and must not be offered back.
+            journal.Dispose();
+
             var wizard = SupportedWizard();
             wizard.LogDirectory = logDirectory;
             wizard.LoadInterruptedRunJournal();
@@ -520,6 +524,10 @@ public sealed class InstallerWizardViewModelTests
                 InstallerRunEffectKind.ResidencyPolicy,
                 "Model residency policy (RequireFullVram)");
             journal.CompleteStep(step, "written", isReversible: true);
+
+            // Releases the live lock the way process death does; a held lock means the run
+            // is still alive in another window and must not be offered back.
+            journal.Dispose();
 
             var wizard = SupportedWizard();
             wizard.LogDirectory = logDirectory;
@@ -572,6 +580,10 @@ public sealed class InstallerWizardViewModelTests
                 InstallerRunEffectKind.DependencyInstall,
                 "Prerequisite Git (Git.Git)");
             journal.CompleteStep(dependencyStep, "Installed machine-wide.", isReversible: false);
+
+            // Releases the live lock the way process death does; a held lock means the run
+            // is still alive in another window and must not be offered back.
+            journal.Dispose();
 
             var wizard = SupportedWizard();
             wizard.LogDirectory = logDirectory;

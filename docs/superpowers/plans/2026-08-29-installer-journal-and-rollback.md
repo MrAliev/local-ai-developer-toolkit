@@ -48,6 +48,16 @@ collected at the moment the effect completed:
   existed before the run, so its presence doubles as the existed-before record.
 - **Dependency and model installs:** description only, marked irreversible.
 
+An outcome of null alone cannot tell a killed wizard from one still installing
+in another window, so the journal also holds an unshared live lock beside
+itself for as long as its process runs, released by the operating system the
+moment that process dies. The interrupted-run scan probes the lock: held means
+alive and skipped — offering to roll back a run that is mid-install would race
+its own effects; released, however the process ended, means the run is offered
+back. This is a condition, not a deadline: any elapsed-time rule would call a
+slow install dead. A lock file a power loss left behind opens freely, proves
+nothing is alive, and is cleaned up.
+
 ## What rollback undoes, and what it will not
 
 `InstallerRunRollback` walks completed steps newest first.
