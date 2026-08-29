@@ -106,6 +106,27 @@ public sealed class ModelRouterTests
                 ExperimentSnapshot.Empty));
     }
 
+    /// <summary>
+    /// The failure code the broker records is this exception's type name, and it is the only
+    /// thing that reaches the client -- messages do not cross that boundary. read_image reads the
+    /// code to say which model to install, so the type is a contract between the two, not an
+    /// implementation detail.
+    /// </summary>
+    [Fact]
+    public void No_installed_model_for_a_profile_fails_by_a_name_the_client_can_act_on()
+    {
+        var router = new ModelRouter(Catalog);
+
+        var exception = Assert.Throws<NoModelInstalledException>(
+            () => router.Select(
+                Request(LocalTaskProfile.VisualAnalysis),
+                Availability(installed: ["qwen2.5-coder:14b", "translategemma:12b"]),
+                ExperimentSnapshot.Empty));
+
+        Assert.Equal(LocalTaskProfile.VisualAnalysis, exception.Profile);
+        Assert.Equal("NoModelInstalledException", exception.GetType().Name);
+    }
+
     [Fact]
     public void Image_workload_rejects_a_model_below_the_required_pixel_capacity()
     {
@@ -118,7 +139,9 @@ public sealed class ModelRouterTests
             5_000_000,
             LocalDurationClass.Medium);
 
-        Assert.Throws<InvalidOperationException>(
+        // Installed but unusable for this request, which is the opposite instruction to "install
+        // one": the two are separate types so the client can tell them apart from the code alone.
+        Assert.Throws<NoEligibleModelException>(
             () => router.Select(
                 Request(
                     LocalTaskProfile.VisualAnalysis,

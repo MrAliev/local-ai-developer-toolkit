@@ -42,6 +42,36 @@ public sealed record ModelSelection(
     string Reason,
     LocalWorkloadMetadata? Workload = null);
 
+/// <summary>
+/// None of the models this task routes to is installed.
+///
+/// A distinct type because the type name is the failure code the broker records, and the code is
+/// all that crosses back to the client -- messages do not, deliberately, since a raw exception
+/// text is not something this boundary should hand out. "InvalidOperationException" told a caller
+/// of read_image nothing at all; this one tells the tool layer enough to name what to install.
+/// </summary>
+public sealed class NoModelInstalledException(LocalTaskProfile profile)
+    : InvalidOperationException(
+        $"No model for task profile '{profile}' is installed.")
+{
+    public LocalTaskProfile Profile { get; } = profile;
+}
+
+/// <summary>
+/// A model for this task is installed, but none can take this particular request -- the context
+/// size asked for, or an image with more pixels than any of them accepts.
+///
+/// Separate from <see cref="NoModelInstalledException"/> because the two need opposite advice,
+/// and only the type name survives the trip back to the client. Telling someone to install a
+/// model they already have is worse than saying nothing.
+/// </summary>
+public sealed class NoEligibleModelException(LocalTaskProfile profile)
+    : InvalidOperationException(
+        $"No installed model is eligible for task profile '{profile}' with this request.")
+{
+    public LocalTaskProfile Profile { get; } = profile;
+}
+
 public sealed class ModelRouter(ModelRoutingCatalog catalog)
 {
     private readonly ModelRoutingCatalog _catalog =
@@ -121,8 +151,7 @@ public sealed class ModelRouter(ModelRoutingCatalog catalog)
             .FirstOrDefault(model =>
                 IsEligible(model, request, availability));
         return fallback is null
-            ? throw new InvalidOperationException(
-                $"No eligible model is available for task profile '{request.Profile}'.")
+            ? throw Unavailable(route, request.Profile, availability)
             : Selection(
                 request,
                 fallback.Tag,
@@ -161,8 +190,10 @@ public sealed class ModelRouter(ModelRoutingCatalog catalog)
                         ModelOverride: null,
                         failedSelection.Workload),
                     availability))
-            ?? throw new InvalidOperationException(
-                $"No fallback is available for task profile '{failedSelection.Profile}'.");
+            ?? throw Unavailable(
+                _catalog.Route(failedSelection.Profile),
+                failedSelection.Profile,
+                availability);
         return failedSelection with
         {
             Model = fallback.Tag,
@@ -171,6 +202,20 @@ public sealed class ModelRouter(ModelRoutingCatalog catalog)
             Reason = $"{outcome} fallback"
         };
     }
+
+    /// <summary>
+    /// Which of the two failures this is. "Install one of these" and "the ones you have cannot
+    /// take this request" are opposite instructions, and the caller only receives the type name.
+    /// </summary>
+    private static InvalidOperationException Unavailable(
+        TaskRouteEntry route,
+        LocalTaskProfile profile,
+        ModelAvailability availability) =>
+        route.Candidates
+            .Concat(route.Fallbacks)
+            .Any(tag => availability.InstalledModels.Contains(tag))
+            ? new NoEligibleModelException(profile)
+            : new NoModelInstalledException(profile);
 
     private void ValidateOverride(
         TaskRouteEntry route,
