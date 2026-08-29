@@ -111,4 +111,23 @@ public sealed class ModelRoutingCatalogTests
                     model.InstallPolicy == LocalModelInstallPolicy.Recommended);
             });
     }
+
+    /// <summary>
+    /// qwen3.5:9b thinks by default, and on the small context tiers routing favours the
+    /// thinking alone exhausts the window: a full `thinking`, an empty `content`, a technical
+    /// failure the fallback absorbs — every one recorded in a month on the reference machine.
+    /// The catalog switches its reasoning off; the others are deliberately left alone, because
+    /// gpt-oss cannot have its reasoning disabled at all.
+    /// </summary>
+    [Fact]
+    public void Reasoning_is_switched_off_for_qwen35_and_nothing_else()
+    {
+        var catalog = ModelRoutingCatalog.LoadEmbedded();
+
+        Assert.True(catalog.DisablesThinking("qwen3.5:9b"));
+        Assert.All(
+            catalog.Models.Where(model => model.Tag != "qwen3.5:9b"),
+            model => Assert.False(model.DisableThinking));
+        Assert.False(catalog.DisablesThinking("model-outside-the-catalog"));
+    }
 }

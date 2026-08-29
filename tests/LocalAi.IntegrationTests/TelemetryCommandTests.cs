@@ -14,6 +14,100 @@ public sealed class TelemetryCommandTests : IDisposable
         Path.GetTempPath(),
         "localai-telemetry-" + Guid.NewGuid().ToString("N"));
 
+    /// <summary>
+    /// The pattern this line surfaces stayed invisible for a month: one model failed half of
+    /// its jobs — every technical failure in the system — while the fallback quietly absorbed
+    /// each miss and the profile view showed acceptable success rates. All the numbers were
+    /// printed; seeing them required cross-reading two tables.
+    /// </summary>
+    [Fact]
+    public async Task A_model_that_owns_the_failures_is_named_in_one_line()
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            await Write(Record() with
+            {
+                Model = "sick-model",
+                Outcome = ModelExecutionOutcome.TechnicalFailure,
+            });
+        }
+
+        for (var i = 0; i < 5; i++)
+        {
+            await Write(Record() with { Model = "sick-model" });
+        }
+
+        for (var i = 0; i < 10; i++)
+        {
+            await Write(Record() with { Model = "healthy-model" });
+        }
+
+        var rendered = TelemetryCommand.Render(await Summarize(), _root);
+
+        Assert.Contains(
+            "attention   sick-model fails 50% of its jobs — 5 of the 5 failure(s) recorded",
+            rendered,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "attention   healthy-model",
+            rendered,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Failures spread across the catalogue are background noise, not one sick model: each of
+    /// these fails a fifth of its jobs, below the quarter the line requires, and neither owns
+    /// the failure count alone.
+    /// </summary>
+    [Fact]
+    public async Task Scattered_failures_name_no_model()
+    {
+        foreach (var model in new[] { "first-model", "second-model" })
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                await Write(Record() with
+                {
+                    Model = model,
+                    Outcome = ModelExecutionOutcome.TechnicalFailure,
+                });
+            }
+
+            for (var i = 0; i < 8; i++)
+            {
+                await Write(Record() with { Model = model });
+            }
+        }
+
+        var rendered = TelemetryCommand.Render(await Summarize(), _root);
+
+        Assert.DoesNotContain("attention   ", rendered, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Ten jobs is the floor: two failures out of three would satisfy every ratio, and a
+    /// sample that small names a model on what may be one bad afternoon.
+    /// </summary>
+    [Fact]
+    public async Task Too_few_jobs_never_name_a_model()
+    {
+        await Write(Record() with
+        {
+            Model = "tiny-sample",
+            Outcome = ModelExecutionOutcome.TechnicalFailure,
+        });
+        await Write(Record() with
+        {
+            Model = "tiny-sample",
+            Outcome = ModelExecutionOutcome.TechnicalFailure,
+        });
+        await Write(Record() with { Model = "tiny-sample" });
+
+        var rendered = TelemetryCommand.Render(await Summarize(), _root);
+
+        Assert.DoesNotContain("attention   ", rendered, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Outcomes_are_counted_separately_rather_than_summed()
     {

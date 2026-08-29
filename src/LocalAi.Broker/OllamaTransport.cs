@@ -24,20 +24,30 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
     private string? _activeModel;
     private int _activeModelObserved;
 
+    /// <summary>
+    /// Which models must have their reasoning switched off for routed chat. A reasoning model
+    /// that thinks its whole window away returns a full `thinking` and an empty `content`,
+    /// which fails as "empty chat content" and lands on the fallback — on the reference
+    /// machine, sixteen jobs in a month, every one of them qwen3.5:9b.
+    /// </summary>
+    private readonly Func<string, bool>? _disableThinking;
+
     public string? ActiveModel => Volatile.Read(ref _activeModel);
 
     public OllamaTransport(
         HttpClient httpClient,
         Uri baseUri,
-        Func<TimeSpan, CancellationToken, Task>? retryDelay = null)
-        : this(httpClient, baseUri, retryDelay, ownsHttpClient: false)
+        Func<TimeSpan, CancellationToken, Task>? retryDelay = null,
+        Func<string, bool>? disableThinking = null)
+        : this(httpClient, baseUri, retryDelay, disableThinking, ownsHttpClient: false)
     {
     }
 
     public OllamaTransport(
         Uri baseUri,
-        Func<TimeSpan, CancellationToken, Task>? retryDelay = null)
-        : this(CreateOwnedHttpClient(), baseUri, retryDelay, ownsHttpClient: true)
+        Func<TimeSpan, CancellationToken, Task>? retryDelay = null,
+        Func<string, bool>? disableThinking = null)
+        : this(CreateOwnedHttpClient(), baseUri, retryDelay, disableThinking, ownsHttpClient: true)
     {
     }
 
@@ -45,6 +55,7 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         HttpClient httpClient,
         Uri baseUri,
         Func<TimeSpan, CancellationToken, Task>? retryDelay,
+        Func<string, bool>? disableThinking,
         bool ownsHttpClient)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -55,6 +66,7 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         }
 
         _retryDelay = retryDelay ?? Task.Delay;
+        _disableThinking = disableThinking;
         _ownsHttpClient = ownsHttpClient;
     }
 
@@ -457,6 +469,7 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
             model,
             messages,
             Stream: false,
+            Think: _disableThinking?.Invoke(model) is true ? false : null,
             payload.RequestedContextTokens is { } contextTokens
                 ? new GenerateOptions(contextTokens)
                 : null));
@@ -734,6 +747,9 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         [property: JsonPropertyName("model")] string Model,
         [property: JsonPropertyName("messages")] IReadOnlyList<ChatRequestMessage> Messages,
         [property: JsonPropertyName("stream")] bool Stream,
+        [property: JsonPropertyName("think")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool? Think,
         [property: JsonPropertyName("options")]
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         GenerateOptions? Options);

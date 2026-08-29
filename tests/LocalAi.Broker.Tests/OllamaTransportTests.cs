@@ -435,6 +435,70 @@ public sealed class OllamaTransportTests
                 .GetInt32());
     }
 
+    /// <summary>
+    /// A reasoning model on a small context tier can spend the whole generation window
+    /// thinking and return a full `thinking` with an empty `content`, which fails as "empty
+    /// chat content" and lands on the fallback — on the reference machine, every technical
+    /// failure recorded in a month, all of them qwen3.5:9b. The catalog names such models and
+    /// the transport asks Ollama to switch their reasoning off.
+    /// </summary>
+    [Fact]
+    public async Task Chat_disables_thinking_for_models_the_catalog_names()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"message":{"content":"answer"}}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(
+            client,
+            BaseUri,
+            NoDelay,
+            model => model == "thinking-model");
+
+        await transport.ExecuteAsync(
+            LocalJobRequestFactory.CreateChat(
+                "chat-key",
+                LocalJobPriority.Interactive,
+                "thinking-model",
+                "prompt",
+                null,
+                []),
+            TestContext.Current.CancellationToken);
+
+        using var body = JsonDocument.Parse(Assert.Single(fake.Requests).Body!);
+        Assert.False(body.RootElement.GetProperty("think").GetBoolean());
+    }
+
+    /// <summary>
+    /// Only the named models. gpt-oss cannot have its reasoning switched off at all, so an
+    /// unconditional `think: false` would trade one model's empty answers for another's
+    /// refused requests.
+    /// </summary>
+    [Fact]
+    public async Task Chat_says_nothing_about_thinking_for_other_models()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(HttpStatusCode.OK, """{"message":{"content":"answer"}}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(
+            client,
+            BaseUri,
+            NoDelay,
+            model => model == "thinking-model");
+
+        await transport.ExecuteAsync(
+            LocalJobRequestFactory.CreateChat(
+                "chat-key",
+                LocalJobPriority.Interactive,
+                "plain-model",
+                "prompt",
+                null,
+                []),
+            TestContext.Current.CancellationToken);
+
+        using var body = JsonDocument.Parse(Assert.Single(fake.Requests).Body!);
+        Assert.False(body.RootElement.TryGetProperty("think", out _));
+    }
+
     [Fact]
     public async Task Chat_without_optional_values_omits_system_message_and_images()
     {

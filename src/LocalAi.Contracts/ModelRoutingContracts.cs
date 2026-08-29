@@ -256,7 +256,13 @@ public sealed record ModelCatalogEntry(
     [property: JsonRequired] IReadOnlyList<LocalModelCapability> Capabilities,
     [property: JsonRequired] IReadOnlyList<int> ContextTokens,
     [property: JsonRequired] bool SupportsImages,
-    long? MaxImagePixels);
+    long? MaxImagePixels,
+    // A reasoning model spends its generation budget thinking before it answers, and on the
+    // small context tiers routing favours, the thinking alone can exhaust the window: the
+    // response then carries a full `thinking` and an empty `content`, which the transport
+    // rightly refuses — every such job ends as a technical failure the fallback quietly
+    // absorbs. Set for models whose reasoning Ollama can switch off with `think: false`.
+    bool DisableThinking = false);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record TaskRouteEntry(

@@ -53,8 +53,10 @@ internal static class BrokerProgram
         try
         {
             var queue = new DurableQueue(runtimeRoot);
-            using var transport = new OllamaTransport(ollamaUri);
             var catalog = ModelRoutingCatalog.LoadEmbedded();
+            using var transport = new OllamaTransport(
+                ollamaUri,
+                disableThinking: catalog.DisablesThinking);
             var policy = new ModelResidencyPolicyStore(runtimeRoot).Read();
             var runtime = new ModelRuntime(
                 transport,
