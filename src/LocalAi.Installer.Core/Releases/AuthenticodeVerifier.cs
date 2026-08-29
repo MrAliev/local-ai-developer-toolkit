@@ -10,6 +10,18 @@ public sealed class AuthenticodePublisherPolicy
 {
     private readonly byte[] subjectPublicKeyInfoSha256;
 
+    /// <summary>
+    /// Whether this policy names nobody.
+    ///
+    /// The shipped policy is a placeholder -- CN=LocalAi and a SHA-256 of sixty-four
+    /// zeroes -- because there is no code-signing certificate yet. Enforcing it would
+    /// not harden an installation: no file can match it, so every installation would be
+    /// refused, and refused with a signature mismatch that says nothing about why.
+    ///
+    /// Callers ask this so they can refuse to enforce, loudly, instead.
+    /// </summary>
+    public bool IsPlaceholder => subjectPublicKeyInfoSha256.All(part => part == 0);
+
     public AuthenticodePublisherPolicy(
         string canonicalDistinguishedName,
         string subjectPublicKeyInfoSha256)

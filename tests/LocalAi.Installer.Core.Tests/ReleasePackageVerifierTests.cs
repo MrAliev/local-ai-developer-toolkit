@@ -951,6 +951,37 @@ public sealed class ReleasePackageVerifierTests : IDisposable
         _ => new IOException("secret io identity"),
     };
 
+    /// <summary>
+    /// A release that requires Authenticode, verified by a build whose publisher policy names
+    /// nobody. Every file would fail to match, and the caller would be told only that
+    /// verification failed -- pointing at the package, when the fault is that this build has no
+    /// policy to enforce.
+    /// </summary>
+    [Fact]
+    public async Task A_placeholder_publisher_policy_refuses_the_check_rather_than_the_package()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package, requiresAuthenticode: true);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var verifier = new ReleasePackageVerifier(
+            new ReleaseManifestVerifier(key.ExportSubjectPublicKeyInfo()),
+            new MemoryReleaseClient(package),
+            new RecordingAuthenticodeVerifier(true),
+            new AuthenticodePublisherPolicy("CN=LocalAi", new string('0', 64)));
+
+        var exception = await Assert.ThrowsAsync<ReleaseVerificationException>(() =>
+            verifier.VerifyAsync(
+                json,
+                Sign(key, json),
+                StagingPath(),
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("placeholder", exception.Message, StringComparison.OrdinalIgnoreCase);
+        // The way out, both of them, rather than a dead end.
+        Assert.Contains("--require-authenticode", exception.Message, StringComparison.Ordinal);
+    }
+
     private static ReleasePackageVerifier CreateVerifier(
         ECDsa key,
         byte[] package,

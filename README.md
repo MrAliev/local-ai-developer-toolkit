@@ -596,10 +596,12 @@ on has something for the recipient to compare against.
 different check, performed by the installer rather than by Windows: with it set, every
 `.exe` and `.dll` extracted from the package must be signed by the publisher named in
 `AuthenticodePublisherPolicy`, and any file that is not fails the installation. That policy
-is currently a placeholder — subject `CN=LocalAi` and a SHA-256 of sixty-four zeroes — so
-passing `--require-authenticode` today would refuse every install rather than harden one.
+is currently a placeholder — subject `CN=LocalAi` and a SHA-256 of sixty-four zeroes — which
+no file can match. `--require-authenticode` therefore refuses to run while it is one, rather
+than stamping a release that every machine would reject with a signature mismatch; an
+installer that meets such a manifest says the same thing instead of blaming the package.
 Replace both values with the real signer's distinguished name and the SHA-256 of its
-SubjectPublicKeyInfo (not the certificate thumbprint) before turning the flag on.
+SubjectPublicKeyInfo (not the certificate thumbprint) to turn the flag on.
 
 **Order, when a certificate exists.** Sign the artifacts before packing, never after:
 `pack` hashes the archive and `sign` hashes the package, so signing a binary afterwards
