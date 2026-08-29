@@ -767,8 +767,11 @@ note, because it starts on demand.
 `localai telemetry` summarises the bounded per-job records the broker writes for every
 delegated job: how jobs ended, cold versus warm model loads, fallback frequency, queue and
 execution latencies as nearest-rank percentiles, and the estimated cloud tokens avoided —
-broken down by model and by task profile. Savings are ranges, never totals: the estimator
-counts characters, and there is no live token counter anywhere in the system.
+broken down by model and by task profile. A model that fails at least a quarter of its jobs
+and owns at least half of all recorded failures is named in one `attention` line: the
+fallback covers such a model well enough that nothing else makes it visible. Savings are
+ranges, never totals: the estimator counts characters, and there is no live token counter
+anywhere in the system.
 
 ### Retention
 
