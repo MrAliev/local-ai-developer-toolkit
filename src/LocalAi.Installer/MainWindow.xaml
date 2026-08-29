@@ -141,6 +141,19 @@
                         <TextBlock Text="{Binding Diagnose.UnsupportedReason}"
                                    Style="{StaticResource WarningText}"
                                    Margin="0,10,0,0" />
+                        <!-- A previous run that was killed mid-install left effects nobody
+                             wrote down anywhere else; this is where they get offered back. -->
+                        <StackPanel Margin="0,14,0,0"
+                                    Visibility="{Binding HasInterruptedRunNotice, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Interrupted previous run" FontWeight="SemiBold" Margin="0,0,0,4" />
+                            <TextBox Text="{Binding InterruptedRunNotice, Mode=OneWay}"
+                                     IsReadOnly="True" TextWrapping="Wrap" MaxHeight="160"
+                                     VerticalScrollBarVisibility="Auto" Background="#FFF8F0" />
+                            <Button Content="Roll back previous run"
+                                    Command="{Binding RollbackPreviousRunCommand}"
+                                    HorizontalAlignment="Left" Margin="0,8,0,0" Padding="12,4"
+                                    Visibility="{Binding HasInterruptedRun, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- Prerequisites -->
@@ -403,6 +416,18 @@
                         <TextBox Text="{Binding Finish.Progress, Mode=OneWay}"
                                  IsReadOnly="True" TextWrapping="Wrap" Height="180"
                                  VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
+                        <!-- Only after a failed or cancelled run with reversible effects:
+                             rollback is a recovery, not an uninstaller for a good run. -->
+                        <Button Content="Roll back changes"
+                                Command="{Binding RollbackCommand}"
+                                HorizontalAlignment="Left" Margin="0,10,0,0" Padding="12,4"
+                                Visibility="{Binding CanRollback, Converter={StaticResource BoolToVisibility}}" />
+                        <StackPanel Visibility="{Binding Finish.HasRollbackReport, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Rollback" Margin="0,12,0,4" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding Finish.RollbackReport, Mode=OneWay}"
+                                     IsReadOnly="True" TextWrapping="Wrap" Height="140"
+                                     VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </ScrollViewer>

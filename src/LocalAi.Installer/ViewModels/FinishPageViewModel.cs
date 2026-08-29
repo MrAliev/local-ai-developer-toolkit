@@ -7,6 +7,7 @@ public sealed class FinishPageViewModel : ObservableObject
     private string? summary;
     private string? runLog;
     private string? progress;
+    private string? rollbackReport;
 
     public bool Success
     {
@@ -58,6 +59,24 @@ public sealed class FinishPageViewModel : ObservableObject
             SetProperty(ref progress, value);
         }
     }
+
+    /// <summary>
+    /// What rollback actually did, effect by effect: undone, left in place, or failed.
+    /// Distinct from <see cref="RunLog"/> on purpose — the log is what the run did, this is
+    /// what was taken back, and collapsing the two is how "RollbackNotes" came to mean
+    /// nothing.
+    /// </summary>
+    public string? RollbackReport
+    {
+        get => rollbackReport;
+        set
+        {
+            SetProperty(ref rollbackReport, value);
+            OnPropertyChanged(nameof(HasRollbackReport));
+        }
+    }
+
+    public bool HasRollbackReport => !string.IsNullOrWhiteSpace(rollbackReport);
 
     public string RestartNotice => RequiresRestart ? "Restart required." : "No restart needed.";
 }
