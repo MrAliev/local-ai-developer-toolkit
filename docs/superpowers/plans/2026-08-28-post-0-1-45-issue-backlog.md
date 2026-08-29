@@ -193,11 +193,18 @@ buffer was empty, which any parallel test could spoil.
 
 ### The two that stay open
 
-**#139** keeps its native-library half. It did not reproduce: the released binary produced full
-C# semantics on a bare `.csproj`, a two-project `.slnx`, a two-project `.sln`, and a fresh clone
-of this repository — 576 files, 26 projects, TypeScript and Python present — with no `Roslyn:`
-line and no "Dll was not found.". The questions that would settle it are in the issue. Closing
-it would record a fix that does not exist.
+**#139** keeps its native-library half. It did not reproduce on five repository shapes: a bare
+`.csproj`, a two-project `.slnx`, a two-project `.sln`, a fresh clone of this repository — 576
+files, 26 projects, TypeScript and Python present — and a mixed .NET Framework repository holding
+a legacy non-SDK project, which exercises the `BuildHost-net472` path the other four never
+touched. All five produced full C# semantics, with no `Roslyn:` line and no "Dll was not found.".
+The questions that would settle it are in the issue. Closing it would record a fix that does not
+exist.
+
+That last attempt did turn something up. The probe had no solution file, and only one of its two
+projects was indexed while `sync` exited 0 and `index_status` still said `precise` — the same
+blind spot as #143, one level down. Filed as #170 and closed by #171, which names the projects a
+load left out and lets `--require-semantics` refuse them.
 
 **#157** is the transactional installer, split out of #145 deliberately so that choosing not to
 have one now is not the same as deciding against one.
