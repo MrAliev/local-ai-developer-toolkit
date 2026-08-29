@@ -236,6 +236,13 @@ Ollama and the language indexers — all through winget, each one consented to i
 which release to install, which local models fit the graphics adapter, and which AI clients to
 register. Nothing is applied until the confirmation page.
 
+Only Git and Ollama are required: Git is how a repository is identified, scanned and hooked,
+and Ollama is what computes the embeddings, without which there is no index at all. The .NET
+SDK, Node.js, Python and the two SCIP indexers each buy precise navigation for one language,
+and each can be skipped — the page says what skipping it gives up. Between them they are three
+to four gigabytes and several UAC prompts, because winget installs them machine-wide, which is
+a poor thing to demand from somebody who wants semantic search over C#.
+
 Expect the models to dominate the time and the disk: a machine with a 16 GB adapter and none
 of them installed downloads tens of gigabytes. Choosing **Skip** on the models page installs
 the tooling alone, and models can be added later by asking a registered client to run

@@ -11,22 +11,49 @@ public sealed class DependenciesPageViewModel : ObservableObject
     /// no catalogue entry, no detection, no code requiring it. The components are
     /// self-contained .NET and Ollama brings its own native dependencies, so it has been
     /// removed rather than left as a line that informs nobody and installs nothing.
+    ///
+    /// Two are required, and only two. Git is how a repository is identified, scanned and
+    /// hooked; Ollama is what computes the embeddings, without which there is no index at
+    /// all. Everything else buys precise navigation for one language, and demanding all of
+    /// it cost three to four gigabytes and several UAC prompts — winget installs these
+    /// machine-wide — from somebody who may only want semantic search over C#. Each optional
+    /// line therefore says what skipping it gives up, because "optional" alone invites
+    /// skipping everything and discovering the cost at the moment a tool stops answering
+    /// precisely.
     /// </summary>
     public ObservableCollection<DependencySelection> Dependencies { get; } =
     [
         new("Git", "Git", true),
         new("Ollama", "Ollama", true),
-        // Optional, and deliberately so. The repository is public, so releases are read
-        // over plain HTTPS with no account at all. The CLI is kept as a fallback — a fork
-        // kept private is still installable through an existing 'gh auth login', and a
-        // network that blocks the release host may not block the API — but demanding it
-        // from someone installing a published tool asks for an account they do not need.
-        new("GitHubCli", "GitHub CLI", false),
-        new("DotNetSdk", ".NET SDK 10", true),
-        new("NodeJs", "Node.js 20", true),
-        new("ScipTypeScript", "SCIP TypeScript", true),
-        new("Python", "Python 3.10+", true),
-        new("ScipPython", "SCIP Python", true),
+        new("GitHubCli", "GitHub CLI", false)
+        {
+            // The repository is public, so releases are read over plain HTTPS with no
+            // account at all. Kept for a fork held private, or a network that blocks the
+            // release host but not the API.
+            Consequence = "only needed for a private fork, or when the release host is blocked",
+        },
+        new("DotNetSdk", ".NET SDK 10", false)
+        {
+            Consequence =
+                "without it, C# definitions and references are answered by text matching "
+                + "instead of by the compiler",
+        },
+        new("NodeJs", "Node.js 20", false)
+        {
+            Consequence = "only needed to run the TypeScript indexer",
+        },
+        new("ScipTypeScript", "SCIP TypeScript", false)
+        {
+            Consequence = "without it, TypeScript and JavaScript navigate by text matching",
+        },
+        new("Python", "Python 3.10+", false)
+        {
+            Consequence = "only needed to run the Python indexer",
+        },
+        new("ScipPython", "SCIP Python", false)
+        {
+            Consequence = "without it, Python navigates by text matching",
+        },
     ];
 
     public IReadOnlyList<DependencySelection> SelectedDependencies =>

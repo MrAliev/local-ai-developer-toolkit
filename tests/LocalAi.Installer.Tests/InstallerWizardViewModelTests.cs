@@ -70,14 +70,68 @@ public sealed class InstallerWizardViewModelTests
         wizard.Dependencies.SetConsent("Git", true);
         Assert.False(wizard.Dependencies.CanContinue);
 
+        // Git and Ollama, and nothing else: Git is how a repository is identified, scanned
+        // and hooked, Ollama is what computes the embeddings. The rest buys precise
+        // navigation for one language and must not hold an installation hostage.
         wizard.Dependencies.SetInstalled("Ollama", true);
-        wizard.Dependencies.SetInstalled("GitHubCli", true);
-        wizard.Dependencies.SetInstalled("DotNetSdk", true);
-        wizard.Dependencies.SetInstalled("NodeJs", true);
-        wizard.Dependencies.SetInstalled("ScipTypeScript", true);
-        wizard.Dependencies.SetInstalled("Python", true);
-        wizard.Dependencies.SetInstalled("ScipPython", true);
         Assert.True(wizard.Dependencies.CanContinue);
+    }
+
+    /// <summary>
+    /// Three to four gigabytes and several UAC prompts, because winget installs these
+    /// machine-wide -- demanded from somebody who may only want semantic search over C#.
+    /// </summary>
+    [Theory]
+    [InlineData("GitHubCli")]
+    [InlineData("DotNetSdk")]
+    [InlineData("NodeJs")]
+    [InlineData("ScipTypeScript")]
+    [InlineData("Python")]
+    [InlineData("ScipPython")]
+    public void An_optional_dependency_does_not_hold_the_wizard(string id)
+    {
+        var wizard = SupportedWizard();
+        wizard.MoveNext();
+        wizard.Dependencies.SetInstalled("Git", true);
+        wizard.Dependencies.SetInstalled("Ollama", true);
+
+        var dependency = wizard.Dependencies.Dependencies.Single(item => item.Id == id);
+
+        Assert.False(dependency.IsRequired);
+        Assert.True(wizard.Dependencies.CanContinue);
+    }
+
+    /// <summary>
+    /// "Optional" on its own invites skipping everything and finding the cost later, at the
+    /// point where a tool quietly stops answering precisely.
+    /// </summary>
+    [Fact]
+    public void Every_optional_dependency_says_what_skipping_it_gives_up()
+    {
+        var wizard = SupportedWizard();
+
+        var optional = wizard.Dependencies.Dependencies
+            .Where(dependency => !dependency.IsRequired)
+            .ToArray();
+
+        Assert.NotEmpty(optional);
+        Assert.All(optional, dependency =>
+        {
+            Assert.NotEmpty(dependency.Consequence);
+            Assert.Contains("optional — ", dependency.RequirementText, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void Only_git_and_ollama_are_required()
+    {
+        var wizard = SupportedWizard();
+
+        Assert.Equal(
+            ["Git", "Ollama"],
+            wizard.Dependencies.Dependencies
+                .Where(dependency => dependency.IsRequired)
+                .Select(dependency => dependency.Id));
     }
 
     [Fact]
