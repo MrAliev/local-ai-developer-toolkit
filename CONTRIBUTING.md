@@ -43,9 +43,11 @@ recording the reason a thing is the way it is — usually the failure that made 
 ## Documentation
 
 Every document exists twice: `name.md` in English and `name.ru.md` in Russian, each linking
-to the other in its opening lines. This holds for plans and design notes under
-`docs/superpowers/` as much as for the README. A document in one language only is an
-unfinished document.
+to the other in its opening lines. A document in one language only is an unfinished document.
+
+Documentation describes the current state of the product, as fact. What changed and when
+belongs to release notes and to Git history, not to the documents that describe how things
+work.
 
 Repository documentation is UTF-8 without BOM, with Windows CRLF line endings.
 

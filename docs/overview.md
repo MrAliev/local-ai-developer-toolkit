@@ -2,19 +2,11 @@
 
 **The full picture, for developers who work with Codex and Claude every day**
 
-This document describes `main` after release **0.1.45**, which includes work already merged and
-due to reach users in the next release. Where that distinction matters, the text says so.
-
 [Русская версия](overview.ru.md)
 
-The Russian counterpart is [overview.ru.md](overview.ru.md). It used to be the only version on
-purpose: this was treated as an internal walkthrough, read in one language. The repository has
-since become public and the rule changed — every document exists in both languages and links to
-its pair, and a test checks that rather than the author's memory.
-
-Every statement here was checked against the source rather than copied from the README. The
-result of that check is in Appendix A, including three places where the description disagreed
-with the behaviour; all three are fixed in the project itself.
+This document describes the current state of `main`. Features land on users' machines with
+the next release: delivery goes through GitHub only — change → release → installer — and
+hand-made builds are never placed into the runtime.
 
 ---
 
@@ -46,7 +38,7 @@ token, and architectural decisions.
 
 ![Diagram: what an installation is made of](images/overview-01-arhitektura.png)
 
-Fifteen source projects and twelve test projects; day to day, what matters is six executables
+Fifteen source projects and ten test projects; day to day, what matters is six executables
 from an immutable version directory plus a launcher that stands apart from them.
 
 | Component | Role |
@@ -150,7 +142,7 @@ A model marked experimental is not assigned silently and permanently.
 | Composite tasks | Fragments of one translation share a stream identifier and spend a single attempt — after the final check, keeping the original failure category |
 
 Technical, structural and context errors trigger the fallback path along the established model
-order. Telemetry shows how often that happened: over the measured period, in 30% of tasks.
+order. `localai telemetry` shows how often that happens on a given machine.
 
 ---
 
@@ -185,29 +177,17 @@ zero byte inside is treated as binary and dropped, even with a textual extension
 The overlap exists so that meaning is not lost exactly at a window boundary.
 
 **What symbol chunking gives, and what it does not.** The boundaries are not invented by a
-parser — they come from the navigation index that is built before embedding anyway
-([#82](https://github.com/MrAliev/local-ai-developer-toolkit/issues/82)). Measured on a private
-React/TypeScript repository of 2,653 files with twelve natural-language queries; the details and
-caveats are in the [evaluation report](codesearch-evaluation.md).
+parser — they come from the navigation index that is built before embedding anyway. A hit in a
+symbol-chunked language names the type, member or definition it came from; a windowed hit names
+the file and line range. Not every region can be covered by a symbol, and for uncovered regions
+the window is still correct: imports, module-level code, the gaps between functions, and
+anything the indexer gives neither a name nor a boundary for.
 
-| Metric | Windows everywhere | Chunked by body | Plus boundary-less declarations |
-|---|---:|---:|---:|
-| Hits naming a symbol in `.ts`/`.tsx`/`.py` | 0 of 86 | 33 of 85 (39%) | 50 of 89 (56%) |
-| Mean rank of the first relevant hit | 5.50 | 4.92 | 4.75 |
-| Characters in the answers | 70,245 | 66,087 | 63,281 |
-| Chunks in the corpus | 3,471 | 6,079 | 6,894 |
+The price of symbol chunking is a larger corpus: a definition gets a vector of its own instead
+of sharing a window with its neighbours. Changing the chunk format rebuilds the base generation
+completely.
 
-Precision and recall barely moved: on this corpus the right file was found either way; what
-changed is what arrives alongside it. Fifty-six percent rather than a hundred, because for
-uncovered regions the window is still correct: imports, module-level code, the gaps between
-functions, and anything the indexer gives neither a name nor a boundary for.
-
-The price is a corpus twice the size: a definition that used to share a window with its
-neighbours now gets a vector of its own. Changing the chunk format rebuilds the base generation
-completely, which is why it is announced in the release notes rather than happening silently on
-the first commit.
-
-What still helps regardless of chunking: twelve lines of overlap keep meaning from being lost at
+What helps regardless of chunking: twelve lines of overlap keep meaning from being lost at
 a seam; a header with the path and line range is added to the chunk text, so a vector "knows"
 where it came from; the lexical branch of search matches exact names; and precise navigation is
 a separate layer that does understand TypeScript and Python.
@@ -355,10 +335,9 @@ How it actually works:
 | Marker symmetry | The opening and closing markers carry the same nonce, so a "closing" tag cannot be planted in the source |
 | What stays outside | Only what is trusted: the index summary, diagnostics, validation errors |
 
-**Six tools use the boundary**, not two as the README claimed until 18.08.2026: search, chunk
-retrieval, go-to-definition, find references, find implementations and find relationships. Paths,
-symbol identifiers and ranges were written by whoever wrote the repository, so they are data as
-much as a snippet is.
+**Six tools use the boundary**: search, chunk retrieval, go-to-definition, find references,
+find implementations and find relationships. Paths, symbol identifiers and ranges were written
+by whoever wrote the repository, so they are data as much as a snippet is.
 
 ### 6.2 The result identifier
 
@@ -404,63 +383,27 @@ Not to be confused with another constant: log triage has its own, deliberately c
 **2.0 characters per token**, and it exists to size fragments for a model's context rather than
 to count savings.
 
-### 7.2 Measured on this machine
+### 7.2 Measured on a given machine
 
-A telemetry summary for 29.07 to 17.08.2026, 277 tasks:
-
-| Metric | Value |
-|---|---|
-| Successful tasks | 263 of 277 (95%) |
-| Cold model load | 172 (62%) |
-| Fallback used | 83 (30%) |
-| Queue wait | median 2.1 s, p90 2.2 s, maximum 6 min 12 s |
-| Execution | median 4.8 s, p90 27.8 s, maximum 3 min 30 s |
-| **Saved** | **~0.7–1.1 million cloud tokens** |
-
-How the saving is distributed across task profiles (share of the total, about 0.9 million tokens
-at the midpoint):
-
-| Profile | Tasks | Median | Saved | Share |
-|---|---:|---:|---:|---|
-| Code review | 25 | 12.8 s | ~269–404K | `████████████████████` 37% |
-| Data extraction | 34 | 15.9 s | ~161–242K | `████████████` 22% |
-| Log triage | 30 | 5.7 s | ~117–175K | `████████` 16% |
-| Code analysis | 10 | 3.3 s | ~80–109K | `█████` 10% |
-| Classification | 8 | 10.5 s | ~51–69K | `███` 7% |
-| Technical translation | 104 | 1.9 s | ~32–44K | `██` 4% |
-| Other | 66 | — | ~25K | `█` 3% |
-
-The conclusion worth remembering: **the expensive thing to delegate is not translation or OCR,
-but work over large volumes of code and logs.**
+`localai telemetry` prints the measured summary for the machine it runs on: how tasks ended,
+cold versus warm model loads, fallback share, queue and execution latencies as nearest-rank
+percentiles, and the estimated saving — by model and by task profile. The expensive thing to
+delegate is not translation or OCR, but work over large volumes of code and logs.
 
 ### 7.3 The arithmetic for typical tasks
 
-Measured on two real repositories:
-
-| Repository | Files | Source size | Average file | Whole repository in tokens |
-|---|---:|---:|---:|---:|
-| LocalAi | 522 | 4.16 MB | 7,972 chars | ~1.04 million |
-| IntelWash | 7,587 | 29.3 MB | 3,865 chars | ~7.33 million |
-
-The size of a search answer was measured separately: 147,651 characters over 24 queries, so
-about 6,150 characters, or roughly 1.5 thousand tokens per query.
-
-| Task | Without LocalAi | With LocalAi | Saved |
-|---|---:|---:|---:|
-| "Where does X live" in LocalAi, 10 candidate files | ~20K | ~1.5K | **~18K, 13× less** |
-| "Where does X live" in IntelWash, 10 candidate files | ~9.7K | ~1.5K | **~8K, 6× less** |
-| The same, 25 candidates — typical for an unfamiliar module | ~24K | ~1.5K | **~22K, 16× less** |
-| A 600 KB build log | ~150K | ~0.3K | **~150K, 500× less** |
-| A 1920×1080 screenshot | ~2.8K | ~0.2K | **~2.6K, 14× less** |
-| "List the TODOs in these 12 files" | ~24K | ~0.5K | **~23K** |
-| Surveying an unfamiliar repository as a whole | 1.04–7.33 million | — | The task becomes possible at all |
+An average source file runs to a few thousand tokens, so answering "where does X live" by
+reading ten candidate files whole costs tens of thousands of them; a search answer is roughly
+one and a half thousand. A build log of hundreds of kilobytes is on the order of 150K tokens
+read whole and a few hundred as a triage summary. A full-screen screenshot is a couple of
+thousand tokens as pixels and a couple of hundred as extracted text. Surveying an unfamiliar
+repository whole runs into millions of tokens — with an index, that task becomes possible at
+all.
 
 ### 7.4 Honest estimates, and the cases where there is no saving
 
-The same harness that produced the answer size also measures search quality on a fixture of 24
-cases: precision at five is 0.13, recall at ten is 0.78, and the relevance floor removed only
-two chunks out of 240. Search saves context radically, but it produces a good short list of
-candidates rather than a guaranteed single right answer.
+Search saves context radically, but it produces a good short list of candidates rather than a
+guaranteed single right answer.
 
 | Situation | Why there is no saving |
 |---|---|
@@ -470,8 +413,8 @@ candidates rather than a guaranteed single right answer.
 
 ### 7.5 Telemetry: what it collects and what it deliberately never holds
 
-Every delegated task leaves one record in the runtime directory. The summary above is built from
-those records.
+Every delegated task leaves one record in the runtime directory. `localai telemetry` is built
+from those records.
 
 | What is recorded | What the record never holds |
 |---|---|
@@ -525,30 +468,33 @@ it. It never touches the active version pointer or the current index generation.
 
 ![Diagram: installing and updating](images/overview-06-ustanovka.png)
 
-Since 0.1.38 nothing has to be stopped by hand: the installer shuts the broker and the MCP
-servers down itself and replaces them. Before 0.1.38 the directory-shape check required the
-right to delete the runtime directory that a running broker holds — it is its working directory
-— and the update refused before ever reaching its own stop step.
+Nothing has to be stopped by hand: the installer shuts the broker and the MCP servers down
+itself — when, and only when, they are in the way — and replaces them.
 
 Delivery goes through GitHub only: change → release → installer. Hand-made builds are never
 placed into the runtime.
 
-Since 0.1.45 installation needs no GitHub account: releases are public, and the installer
-downloads the manifest, the signature and the package over plain HTTPS with no credentials. The
-GitHub CLI remains as a fallback — for a fork kept private, or a network where the release host
-is unreachable but the API is not. The checks are the same either way: the manifest is verified
+Installation needs no GitHub account: releases are public, and the installer downloads the
+manifest, the signature and the package over plain HTTPS with no credentials. The GitHub CLI
+remains as a fallback — for a fork kept private, or a network where the release host is
+unreachable but the API is not. The checks are the same either way: the manifest is verified
 against the key embedded in the installer, the package against the SHA-256 inside the manifest.
 
-The same release closed a defect that left the installer setting up no models at all: manifests
-from 0.1.29 to 0.1.44 were signed with an empty model list, and the model step quietly did
-nothing. The list is now built per release, and signing without it refuses to run.
+Each run writes a journal of its effects to `%LOCALAPPDATA%\LocalAi-installer-logs` — the
+intent before each effect, the outcome after — so a run killed mid-install still leaves a
+record. A failed or cancelled run offers a rollback of what can be proven reversible: the
+activation of an upgrade, the residency policy, the Ollama launch record and the client
+configuration files. What stays — winget/npm installs, pulled models, a first installation's
+root — is named plainly rather than implied undone. An interrupted run is offered back at the
+next start; a run still installing in another window is recognised by its live lock and left
+alone.
 
 ### 9.1 Activation, rollback and stopping
 
 | Operation | How it works |
 |---|---|
 | Activation | Requires naming the pointer being replaced — either its checksum or the assertion "there is no pointer yet". Omitting both guarantees is a usage error; a mismatch is a refusal |
-| Rollback | Not an "undo" but the activation of a previously verified immutable directory: it was never rewritten, so it is available whole |
+| Version rollback | Not an "undo" but the activation of a previously verified immutable directory: it was never rewritten, so it is available whole |
 | Stopping | The broker is asked to finish: a request carrying its identifier and start time is placed beside the state document, the broker notices it on its per-second heartbeat, stops taking new work and finishes what it has |
 | Force | Only what has not left by the deadline is killed. The broker owns a durable queue and may be in the middle of a multi-minute generation, so killing is a last resort rather than a mechanism |
 | MCP tools | They hold no state of their own and have no channel to be asked, and the client restarts them itself, so for them stopping is simply exiting |
@@ -586,52 +532,7 @@ apply. A parse error never turns into silent permission.
 
 ---
 
-## Appendix A. What was checked against the code
-
-| Statement | Result |
-|---|---|
-| Untrusted content wrapper: 96-bit nonce, up to 10 attempts, escaped origin | ✅ matched |
-| A relevance floor per model, and failing closed without one | ✅ matched |
-| Watchdog: ten minutes of silence, a probe a minute, a ten-second timeout, two confirmed probes | ✅ matched |
-| Scheduler: a two-second gathering window, force-including tasks older than fifteen minutes | ✅ matched |
-| Full residency as the default requirement | ✅ matched |
-| Context steps from 2K to 256K | ✅ matched |
-| An experiment pauses after ten completed tasks | ✅ matched |
-| Retention limits: generations, versions, backups, archive, response bodies, telemetry | ✅ matched |
-| Token estimates: 4.0 Latin, 2.2 Cyrillic, 750 pixels | ✅ matched |
-| Base selection: the manifest ref, then dev, then main | ✅ matched |
-| Index unloaded after ten idle minutes | ✅ matched |
-| Twenty tools: 11 and 9 | ✅ matched |
-| Index refresh refuses to do large work inside the call | ✅ matched |
-| Git hooks trigger synchronization through the launcher | ✅ matched |
-| A sliding window for non-C# files | ✅ matched, **refined**: 60-line window, 12 lines of overlap; only allowed extensions are indexed; lock files, minified bundles and generated C# are excluded; a file with a zero byte is dropped |
-| "A vector per type and per method" | ⚠️ **was imprecise**: constructors, destructors, operators, indexers and properties with bodies also get their own chunks. The exact rule was added to both READMEs |
-| "The untrusted boundary is search and chunk retrieval" | ⚠️ **was understated**: six tools use the boundary, navigation included. Fixed in both READMEs |
-| "A forged chunk identifier is rejected" | ⚠️ **was imprecise**: the checksum is not authentication; what authorizes is snapshot equality. Fixed in both READMEs |
-
-All three disagreements were closed in the project, not only here.
-
-| What was fixed | Where | Change |
-|---|---|---|
-| The reach of the untrusted boundary and the meaning of the identifier checksum | both READMEs | [#81](https://github.com/MrAliev/local-ai-developer-toolkit/pull/81) |
-| Chunking granularity per language | both READMEs, both tool lists, the `search_code` description, the managed instruction block | [#83](https://github.com/MrAliev/local-ai-developer-toolkit/pull/83) |
-
-The last change touches more than documentation: the tool description and the managed block are
-compiled into the binaries, so the corrected wording reaches `CLAUDE.md` and `AGENTS.md` with
-the 0.1.39 installation.
-
-Symbol chunking for TypeScript and Python
-([#82](https://github.com/MrAliev/local-ai-developer-toolkit/issues/82)) has since been done and
-shipped in 0.1.42, and declarations for which the indexer reports no body boundary shipped in
-0.1.43. Section 4.2 describes the result; the evaluation report holds the measurements.
-
-The check made before 0.1.45 found four disagreements that were no longer in the documentation
-but in the installer itself: an empty model list in the signed manifest, a residency-policy write
-that made the installation root unusable, an undeclared requirement to be signed in to GitHub,
-and a requirement for exactly Node 20. All four are described in the
-[0.1.45 release notes](releases/0.1.45.md) and closed in the code.
-
-## Appendix B. Where things live
+## Appendix. Where things live
 
 | Path | What |
 |---|---|
@@ -647,3 +548,5 @@ and a requirement for exactly Node 20. All four are described in the
 | `telemetry\metrics` | Task records |
 
 Every path is relative to the LocalAi runtime directory in the user's local application data.
+The installer's run reports and run journals live beside that directory, in
+`LocalAi-installer-logs`, deliberately outside the validated installation root.

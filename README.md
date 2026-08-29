@@ -203,8 +203,6 @@ reports the right model, an undrifted commit and `Status: current` while every n
 answers from text matching.
 The marker-based `semantic evaluate` command reports correctness, process-cold load time,
 first/warm query percentiles, observed memory deltas, and combined base/overlay SIDX size.
-The current baseline is documented in
-[semantic-navigation-evaluation.md](docs/semantic-navigation-evaluation.md).
 
 CLI equivalents are:
 
@@ -213,16 +211,12 @@ dotnet run --project src/CodeSearch.Cli -- search --query "where is the broker q
 dotnet run --project src/CodeSearch.Cli -- get-chunk --id "<chunk_id>" --root C:\path\to\repository
 ```
 
-See the measured [CodeSearch retrieval evaluation](docs/codesearch-evaluation.md) for
-the calibrated profile, corpus provenance, A/B results, token heuristic, and
-limitations.
-
 The complete inventory of all twenty MCP tools — what exists, what it is for, and the
 constraint that matters — is in the [tool reference](docs/mcp-tools.md).
 
 A connected walkthrough for the people who use this daily — what it does, how it works,
-what protects it, and what it saves — is in the developer overview
-([Russian only for now](docs/overview.ru.md)).
+what protects it, and what it saves — is in the
+[developer overview](docs/overview.md).
 
 ## Installing
 
@@ -348,26 +342,22 @@ the current set explicit.
 
 Only what is missing is written. An existing row or server default is left exactly as the user
 wrote it, including one that refuses the tool, because that is a decision to preserve rather
-than an omission to correct. Without this a machine accumulates rows only for the tools it
-happened to reach for — one long-lived installation carried rows for eleven of the twenty. The
-list is held to the servers by tests that reflect over their tool attributes, so a new tool
-cannot ship without its row.
+than an omission to correct. The list is held to the servers by tests that reflect over their
+tool attributes, so a new tool cannot ship without its row.
 
 The block is repository-agnostic on purpose. Indexing stays opt-in per repository, so rather
 than assuming the repositories that happened to be set up on the machine it was installed on,
 it states the check (`localai repo status`) and the two commands that connect any repository
-wherever it was cloned. Without that, a client on a fresh machine can use the local models but
-never offers to index the first repository it is pointed at.
+wherever it was cloned.
 
 The instruction block is delimited by `<!-- BEGIN LOCALAI MANAGED INSTRUCTIONS -->` and its
 matching end marker. Everything between them is replaced wholesale on the next install and
 everything outside them is preserved, so upgrading the rules never costs a user their own
 notes. The block covers routing — when to reach for `search_code` instead of a text search,
 what belongs to `read_image`, `triage_log` and `ask_local` — as well as the transport
-invariants: the shared broker only, never Ollama directly, full-VRAM validation. Transport
-rules alone proved insufficient in practice: they describe how a call must travel without
-ever saying when to make one, and an assistant reading only those keeps working in the cloud
-while the installed tools sit idle.
+invariants: the shared broker only, never Ollama directly, full-VRAM validation. Routing is
+included because transport rules alone describe how a call must travel without saying when
+to make one.
 
 **Models.** The wizard installs the models the machine can hold and skips the ones already
 present; the broker is asked what is installed rather than a list being assumed, and only
@@ -378,10 +368,8 @@ in; a model too large for the adapter at every context size is reported by name 
 being downloaded and left unusable. Anything downloaded is then preflighted, so a model that
 cannot load fully resident is reported rather than silently accepted.
 
-Because the selection is manifest-driven, a release published without a model list installs
-no models at all — and that is exactly what shipped from 0.1.29 to 0.1.44, because `--models`
-was optional and the publish script never passed it. The list is now generated per release
-from the routing catalogue and the public registry, and signing demands it:
+The model list is generated per release from the routing catalogue and the public registry,
+and signing demands it:
 
 ```powershell
 localai-release-signer models --out publish\release\release-models.json
@@ -389,17 +377,31 @@ localai-release-signer sign --models publish\release\release-models.json ...
 ```
 
 `sign` refuses to run without `--models` (or an explicit `--no-models`), `release --publish`
-refuses a manifest whose model list is empty, and the wizard now reports a run that installed
+refuses a manifest whose model list is empty, and the wizard reports a run that installed
 no model as a failure rather than as a line in the log. Sizes are read from the registry at
 signing time rather than committed here: a tag republished with different quantisation keeps
 its name, so a size in the source tree goes stale without anyone noticing.
 
 **Residency policy.** The video-memory page writes `%LOCALAPPDATA%\LocalAi\policy.json` —
-but only when LocalAi is installed. That write creates its parent directory with inherited
-permissions, and the layout lease refuses such a root without mutating it, so a run that
-failed before installing anything used to leave behind a directory that made every later
-installation refuse itself with "the directory still inherits access rules". Relaxing the
-policy is deliberate and stays visible in the run report.
+but only when LocalAi is installed. On a machine without an installation nothing is written:
+creating the LocalAi root as a side effect would give it inherited permissions, which the
+layout lease refuses without mutating. Relaxing the policy is deliberate and stays visible
+in the run report.
+
+**A run journal, and a rollback it can honestly offer.** Before each effect the wizard
+writes its intent to a journal in `%LOCALAPPDATA%\LocalAi-installer-logs` — atomically and
+write-through, so a run killed mid-effect still leaves a record — and the outcome after it.
+The journal also holds a live lock for as long as the wizard runs, so a second wizard can
+tell a killed run from one still installing in another window. After a failed or cancelled
+run the finish page offers "Roll back changes", and the next start offers the same for a
+run that never got to finish; continuing past that offer is recorded so it is made once.
+Rollback undoes only what it can prove: an upgrade's activation goes back through the
+launcher's guarded pointer swap, and the residency policy, the Ollama launch record and the
+client configuration files are restored only while they still hash to what the run wrote.
+What it will not undo is named plainly, effect by effect: winget and npm installs are shared
+machine software, pulled models live in Ollama's store, and a first installation's root
+holds runtime data as soon as the broker runs. A successful run writes the journal and
+nothing else; rollback is a recovery, not an uninstaller.
 
 **No account, no sign-in.** Releases are public, so the installer downloads the manifest, its
 signature and the package over plain HTTPS with no credentials of any kind. A GitHub account
@@ -449,14 +451,11 @@ dotnet publish src/LocalAi.Broker/LocalAi.Broker.csproj --configuration Release 
 
 > The queue and the runtime ACL bootstrap live in `LocalAi.Broker.Core`, a library, and
 > `LocalAi.Broker.Client` references that rather than the broker executable. Keep it that
-> way. While the client referenced the `OutputType=Exe` project, every dependent publish
-> also emitted the broker's `apphost.exe`, `deps.json` and `runtimeconfig.json`, and a
-> RID-specific framework-dependent publish then failed with `NETSDK1152` — cleaning
-> `bin`/`obj` did not help, because the conflict was produced during the build.
->
-> That reference also placed `LocalAi.Broker.exe` next to its dependants by accident, which
-> is how development builds could start a broker at all. The copy is now explicit, in
-> `src/BrokerBinary.props`, and applies to the projects that need it.
+> way: a project reference to an `OutputType=Exe` project drags the broker's `apphost.exe`,
+> `deps.json` and `runtimeconfig.json` into every dependent publish and breaks RID-specific
+> framework-dependent publishing with `NETSDK1152`. The `LocalAi.Broker.exe` that development
+> builds start is copied explicitly, in `src/BrokerBinary.props`, by the projects that need
+> it.
 
 For an installer that does not depend on preinstalled .NET runtime:
 
@@ -497,12 +496,10 @@ still carrying the scaffold's TODO.
 
 The split is deliberate. Building and signing are repeatable; tagging and publishing are what
 other people's installers resolve, so they are a separate, explicit invocation rather than a
-later stage of the same one. Merging the pull request stays a human decision throughout.
-
-The two halves exist because the same version used to be typed into four places — both note
-filenames, the publish script, the tag — and the commit into two, the manifest's version
-directory and whatever the tag ended up pointing at. Nothing compared them, and a disagreement
-produced a package that verifies, installs, and is not what the tag names.
+later stage of the same one. Merging the pull request stays a human decision throughout. One
+command also means the version and the commit are stated once each: every place that needs
+them — note filenames, the publish script, the manifest's version directory, the tag — gets
+the same value, compared rather than retyped.
 
 ### Signing a release manifest
 
@@ -704,21 +701,18 @@ The stdio tools have no durable state and no channel to be asked through, and th
 restarts them on demand, so for those termination is all there is — and all that is needed.
 
 It stops the processes running out of the active version — or the named one — and does not
-touch the pointer. Activation stops them too, but only as part of switching, and the step
-before that switch is replacing the stable launcher binary. Windows refuses to overwrite a
-running executable, and every connected client keeps one launcher process alive per tool it
-uses, so an installation could publish a new version, fail to put the new launcher in place,
-and roll the whole thing back — with the recovery for it sitting one step further on. The
-installer now stops the tools when, and only when, they are in the way: an upgrade on an idle
-machine touches nothing.
+touch the pointer. Activation stops them too, but only as part of switching. During an
+installation the tools are stopped when, and only when, they are in the way of replacing the
+stable launcher binary — Windows refuses to overwrite a running executable, and every
+connected client keeps one launcher process alive per tool it uses — so an upgrade on an
+idle machine touches nothing.
 
 Reading the pointer takes a **shared** lease; only the swap takes the lock exclusively.
-This matters because every launcher-run tool holds a shared lease for its whole lifetime, so
-on any machine that is actually using LocalAi a connected client is holding one — and an
-installer that took the lock exclusively merely to read the pointer refused the upgrade
-before reaching the activation that would have cleared those processes. A read has never
-needed exclusivity: the swap stays guarded by `--if-current-sha256`, which catches a pointer
-that changed in between rather than overwriting it.
+Every launcher-run tool holds a shared lease for its whole lifetime, so on any machine that
+is actually using LocalAi a connected client is holding one — an exclusive read would refuse
+exactly those machines. A read does not need exclusivity: the swap stays guarded by
+`--if-current-sha256`, which catches a pointer that changed in between rather than
+overwriting it.
 
 ### Model residency policy
 
@@ -760,6 +754,21 @@ relaxing this diverges from what those instructions promise.
 An NPU does not help here. Everything runs through Ollama, whose backends are CPU, CUDA,
 ROCm, Metal and Vulkan; NPUs are driven by a separate stack (OpenVINO, DirectML, Windows ML),
 and the residency numbers this policy is built on do not map onto NPU memory.
+
+### Diagnostics and telemetry
+
+`localai doctor [--root <repo>]` runs the checks anyone verifying an installation performs by
+hand: which version the pointer names and whether its binaries agree with it, the stable entry
+point, whether the broker is alive, the queue and its quarantine, the policy files actually in
+force, and — with `--root` — the repository index. It is read-only and starts nothing,
+including the broker. The exit code is non-zero only for a real fault; a stopped broker is a
+note, because it starts on demand.
+
+`localai telemetry` summarises the bounded per-job records the broker writes for every
+delegated job: how jobs ended, cold versus warm model loads, fallback frequency, queue and
+execution latencies as nearest-rank percentiles, and the estimated cloud tokens avoided —
+broken down by model and by task profile. Savings are ranges, never totals: the estimator
+counts characters, and there is no live token counter anywhere in the system.
 
 ### Retention
 
@@ -875,9 +884,8 @@ LocalLm exposes these model-management and translation MCP tools:
 experiment state — the same counts `local_models_status` shows and the router uses to decide
 when an experiment pauses. Timings and token figures can only be measured over the per-task
 telemetry that still exists, which is bounded to a week, so `ObservedTasks` says how many
-records they rest on. Reporting one number for both is what made a pair with six completed
-attempts answer `Attempts: 1`. Reading the report never discards telemetry; the week-long
-bound is applied by the write that records a new task.
+records they rest on. Reading the report never discards telemetry; the week-long bound is
+applied by the write that records a new task.
 
 `translate_local` is the validated local translation path. The calling agent decides
 whether a translation runs locally or in the cloud; LocalAi does not impose that policy.
@@ -951,11 +959,10 @@ failed.
 - Branch a pull request from `main`, and give it one subject. Two subjects in one branch cannot
   be reviewed apart or reverted apart. Stacking a pull request on another one is worse than the
   rebase it saves: GitHub closes it when its base branch is deleted on merge rather than moving
-  it to `main` — which is what happened to #91 and cost a recreated pull request. When two
-  changes touch the same file, land the first and rebase the second.
+  it to `main`. When two changes touch the same file, land the first and rebase the second.
 - Every document in the repository exists in English and in Russian, as `name.md` and
   `name.ru.md`, and each one links to the other in its opening lines. A document that
-  exists in one language only is unfinished — including plans and design notes.
+  exists in one language only is unfinished.
 - Preserve UTF-8 without BOM and Windows CRLF line endings for repository documentation.
 
 ## Contributing
