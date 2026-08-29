@@ -140,7 +140,7 @@ public sealed class CodeSearchSyncTests : IDisposable
                 SemanticIndexCovering("src/Widget.cs"),
                 requireSemantics: false));
 
-        Assert.Equal(string.Empty, written);
+        Assert.DoesNotContain("covered no C# document", written, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -158,7 +158,7 @@ public sealed class CodeSearchSyncTests : IDisposable
                 SemanticIndexCovering(),
                 requireSemantics: false));
 
-        Assert.Equal(string.Empty, written);
+        Assert.DoesNotContain("covered no C# document", written, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -236,6 +236,11 @@ public sealed class CodeSearchSyncTests : IDisposable
         Assert.Empty(written);
     }
 
+    /// <summary>
+    /// Console.Error belongs to the process, not to one test, and tests in this module run in
+    /// parallel -- so this buffer can catch a line another test wrote. Assert on what the code
+    /// under test would have said, never on the buffer being empty.
+    /// </summary>
     private static string CaptureError(Action action)
     {
         var original = Console.Error;
