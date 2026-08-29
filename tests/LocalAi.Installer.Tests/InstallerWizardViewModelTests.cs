@@ -1,6 +1,7 @@
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Planning;
+using LocalAi.Installer.Core.Transactions;
 using LocalAi.Installer.ViewModels;
 
 namespace LocalAi.Installer.Tests;
@@ -437,5 +438,190 @@ public sealed class InstallerWizardViewModelTests
         wizard.Cancel();
 
         Assert.True(closed);
+    }
+
+    /// <summary>
+    /// A dry run applies nothing, so it must record nothing: a journal describing effects
+    /// that never happened is the same lie the removed transactional installer told, with
+    /// the direction reversed.
+    /// </summary>
+    [Fact]
+    public async Task A_dry_run_writes_no_journal_and_offers_no_rollback()
+    {
+        var logDirectory = TestLogDirectory();
+        try
+        {
+            var wizard = WizardAtConfirm();
+            wizard.LogDirectory = logDirectory;
+
+            wizard.SetReviewConfirmed(true);
+            Assert.True(await wizard.RunAsync(TestContext.Current.CancellationToken));
+
+            Assert.False(wizard.CanRollback);
+            Assert.False(
+                Directory.Exists(logDirectory) &&
+                Directory.EnumerateFiles(logDirectory, "journal-*.json").Any());
+        }
+        finally
+        {
+            DeleteDirectory(logDirectory);
+        }
+    }
+
+    /// <summary>
+    /// The interesting failure is the one where the wizard never ran its own cleanup: the
+    /// process was killed mid-install. The next start has to say what that run applied
+    /// instead of pretending the machine is clean.
+    /// </summary>
+    [Fact]
+    public void An_interrupted_run_is_reported_on_the_first_page()
+    {
+        var logDirectory = TestLogDirectory();
+        try
+        {
+            var journal = InstallerRunJournal.Start(logDirectory);
+            var applied = journal.BeginStep(
+                InstallerRunEffectKind.ResidencyPolicy,
+                "Model residency policy (RequireFullVram)");
+            journal.CompleteStep(applied, "written", isReversible: true);
+            journal.BeginStep(
+                InstallerRunEffectKind.AgentConfiguration,
+                "Claude client configuration");
+
+            var wizard = SupportedWizard();
+            wizard.LogDirectory = logDirectory;
+            wizard.LoadInterruptedRunJournal();
+
+            Assert.True(wizard.HasInterruptedRun);
+            Assert.NotNull(wizard.InterruptedRunNotice);
+            Assert.Contains("Model residency policy", wizard.InterruptedRunNotice);
+            Assert.Contains("applied", wizard.InterruptedRunNotice);
+            Assert.Contains("state unknown", wizard.InterruptedRunNotice);
+            Assert.Contains("roll back", wizard.InterruptedRunNotice);
+        }
+        finally
+        {
+            DeleteDirectory(logDirectory);
+        }
+    }
+
+    /// <summary>
+    /// Continuing past the notice is the explicit "leave it in place" choice it offers.
+    /// Without recording that, every later start would ask about the same abandoned run.
+    /// </summary>
+    [Fact]
+    public void Moving_past_the_first_page_abandons_the_interrupted_journal()
+    {
+        var logDirectory = TestLogDirectory();
+        try
+        {
+            var journal = InstallerRunJournal.Start(logDirectory);
+            var step = journal.BeginStep(
+                InstallerRunEffectKind.ResidencyPolicy,
+                "Model residency policy (RequireFullVram)");
+            journal.CompleteStep(step, "written", isReversible: true);
+
+            var wizard = SupportedWizard();
+            wizard.LogDirectory = logDirectory;
+            wizard.LoadInterruptedRunJournal();
+            Assert.True(wizard.HasInterruptedRun);
+
+            Assert.True(wizard.MoveNext());
+
+            Assert.False(wizard.HasInterruptedRun);
+            Assert.Null(InstallerRunJournal.FindInterrupted(logDirectory));
+            Assert.Equal(
+                InstallerRunOutcome.Abandoned,
+                InstallerRunJournal.Load(journal.JournalPath).Snapshot.Outcome);
+        }
+        finally
+        {
+            DeleteDirectory(logDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task Rolling_back_a_previous_run_undoes_its_files_and_reports_each_effect()
+    {
+        var logDirectory = TestLogDirectory();
+        try
+        {
+            var createdFile = Path.Combine(logDirectory, "runtime", "ollama-launch.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(createdFile)!);
+            var written = "{\"path\":\"C:/ollama.exe\"}"u8.ToArray();
+            File.WriteAllBytes(createdFile, written);
+            var journal = InstallerRunJournal.Start(logDirectory);
+            var fileStep = journal.BeginStep(
+                InstallerRunEffectKind.OllamaLaunchRecord,
+                "Ollama start-on-demand record");
+            journal.CompleteStep(
+                fileStep,
+                "written",
+                isReversible: true,
+                new InstallerRunUndoData(Files:
+                [
+                    new InstallerRunFileUndo(
+                        createdFile,
+                        false,
+                        InstallerRunJournal.Sha256Hex([]),
+                        null,
+                        null,
+                        InstallerRunJournal.Sha256Hex(written)),
+                ]));
+            var dependencyStep = journal.BeginStep(
+                InstallerRunEffectKind.DependencyInstall,
+                "Prerequisite Git (Git.Git)");
+            journal.CompleteStep(dependencyStep, "Installed machine-wide.", isReversible: false);
+
+            var wizard = SupportedWizard();
+            wizard.LogDirectory = logDirectory;
+            wizard.LoadInterruptedRunJournal();
+            Assert.True(wizard.HasInterruptedRun);
+
+            await wizard.RollbackPreviousRunAsync();
+
+            Assert.False(File.Exists(createdFile));
+            Assert.False(wizard.HasInterruptedRun);
+            Assert.NotNull(wizard.InterruptedRunNotice);
+            Assert.Contains("Ollama start-on-demand record: undone", wizard.InterruptedRunNotice);
+            Assert.Contains("Prerequisite Git (Git.Git): left in place", wizard.InterruptedRunNotice);
+            Assert.Null(InstallerRunJournal.FindInterrupted(logDirectory));
+        }
+        finally
+        {
+            DeleteDirectory(logDirectory);
+        }
+    }
+
+    private static string TestLogDirectory() => Path.Combine(
+        Path.GetTempPath(),
+        "LocalAi.Installer.WizardJournal.Tests",
+        Guid.NewGuid().ToString("N"));
+
+    private static void DeleteDirectory(string directory)
+    {
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static InstallerWizardViewModel WizardAtConfirm()
+    {
+        var wizard = SupportedWizard();
+        wizard.Dependencies.SetInstalled("Git", true);
+        wizard.Dependencies.SetInstalled("Ollama", true);
+        wizard.Dependencies.SetInstalled("GitHubCli", true);
+        wizard.Dependencies.SetInstalled("DotNetSdk", true);
+        wizard.Dependencies.SetInstalled("NodeJs", true);
+        wizard.Dependencies.SetInstalled("ScipTypeScript", true);
+        wizard.Dependencies.SetInstalled("Python", true);
+        wizard.Dependencies.SetInstalled("ScipPython", true);
+        for (var step = 0; step < 6; step++)
+        {
+            wizard.MoveNext();
+        }
+
+        return wizard;
     }
 }

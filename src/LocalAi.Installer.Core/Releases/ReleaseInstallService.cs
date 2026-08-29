@@ -70,6 +70,7 @@ public sealed class ReleaseInstallService(
         ModelProvisioningSelection? models = null,
         GpuSnapshot? gpu = null,
         IProgress<ModelProvisioningProgress>? modelProgress = null,
+        Action<ReleaseInstallResult>? activated = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(release);
@@ -105,6 +106,17 @@ public sealed class ReleaseInstallService(
         var result = await installer
             .InstallAsync(verified, InstallationLayout.CreateDefault(), cancellationToken)
             .ConfigureAwait(false);
+
+        // Told to the caller here, between activation and the model pulls, so a run journal
+        // can record the activation as done the moment it is. Journalling it only after the
+        // models meant a process killed mid-pull left the activation - the one reversible
+        // effect of this call - recorded as "state unknown".
+        activated?.Invoke(new ReleaseInstallResult(
+            result.Status,
+            result.Version,
+            result.PriorVersion,
+            result.VersionPath,
+            result.Reason));
 
         var modelReport = ReleaseModelInstallReport.NotRequested;
         var installed = result.Status is LocalAiPackageInstallStatus.Installed

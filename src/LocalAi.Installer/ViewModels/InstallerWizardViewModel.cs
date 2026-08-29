@@ -10,12 +10,16 @@ using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Models;
 using LocalAi.Installer.Core.Releases;
+using LocalAi.Installer.Core.Transactions;
 
 namespace LocalAi.Installer.ViewModels;
 
 public sealed class InstallerWizardViewModel : ObservableObject
 {
     private static readonly TimeSpan DependencyInstallTimeout = TimeSpan.FromMinutes(10);
+
+    /// <summary>Matches the activation timeout the installation itself runs under.</summary>
+    private static readonly TimeSpan RollbackActivationTimeout = TimeSpan.FromMinutes(5);
 
     private static readonly IReadOnlyList<(InstallerPage Page, string Title)> Steps =
     [
@@ -65,6 +69,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private string? resolvedTag;
     private string? packageOutcome;
     private bool packageInstalled;
+    private InstallerRunJournal? runJournal;
+    private InstallerRunJournal? interruptedJournal;
+    private string? interruptedRunNotice;
 
     public InstallerWizardViewModel()
     {
@@ -86,6 +93,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
         NextCommand = new RelayCommand(() => MoveNext(), () => CanMoveNext);
         InstallCommand = new AsyncRelayCommand(() => RunAsync(), () => CanRun);
         CancelCommand = new RelayCommand(Cancel, () => CanCancel);
+        RollbackCommand = new AsyncRelayCommand(() => RollbackThisRunAsync(), () => CanRollback);
+        RollbackPreviousRunCommand = new AsyncRelayCommand(
+            () => RollbackPreviousRunAsync(),
+            () => HasInterruptedRun && !isRunning);
 
         // Relaxing the residency policy immediately widens what the models page can offer,
         // so the two pages stay consistent instead of contradicting each other.
@@ -108,6 +119,16 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     public bool EnableDependencyActions { get; set; }
 
+    /// <summary>
+    /// Where the run report and the run journal are written. Outside the LocalAi root on
+    /// purpose: that tree is validated against an exact name list on every install, so a
+    /// stray file inside it would refuse the next installation. Settable so tests can point
+    /// the journal at their own directory instead of the machine's.
+    /// </summary>
+    public string LogDirectory { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "LocalAi-installer-logs");
+
     public RelayCommand BackCommand { get; }
 
     public RelayCommand NextCommand { get; }
@@ -115,6 +136,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
     public AsyncRelayCommand InstallCommand { get; }
 
     public RelayCommand CancelCommand { get; }
+
+    public AsyncRelayCommand RollbackCommand { get; }
+
+    public AsyncRelayCommand RollbackPreviousRunCommand { get; }
 
     public DiagnosePageViewModel Diagnose => diagnose;
     public DependenciesPageViewModel Dependencies => dependencies;
@@ -199,6 +224,24 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     public string? FinishSummary => finish.Summary;
 
+    /// <summary>
+    /// Whether the last run left reversible effects a rollback could take back. False for a
+    /// successful run on purpose: rollback is a recovery from a run that went wrong, never
+    /// an uninstaller for one that went right.
+    /// </summary>
+    public bool CanRollback =>
+        IsFinishPage &&
+        !isRunning &&
+        runJournal is { } journal &&
+        journal.Snapshot.Outcome is InstallerRunOutcome.Failed or InstallerRunOutcome.Cancelled &&
+        journal.Snapshot.HasReversibleWork;
+
+    public bool HasInterruptedRun => interruptedJournal is not null;
+
+    public string? InterruptedRunNotice => interruptedRunNotice;
+
+    public bool HasInterruptedRunNotice => !string.IsNullOrWhiteSpace(interruptedRunNotice);
+
     public int CurrentPageIndex => StepIndex(CurrentPage);
 
     /// <summary>
@@ -210,7 +253,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         !isRunning &&
         !IsFinishPage;
 
-    public bool CanMoveNext => CurrentPage switch
+    public bool CanMoveNext => !isRunning && CurrentPage switch
     {
         InstallerPage.Diagnose => diagnose.CanContinue,
         InstallerPage.Dependencies => dependencies.CanContinue,
@@ -242,8 +285,64 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return;
         }
 
+        LoadInterruptedRunJournal();
         await RefreshEnvironmentDiagnosticsAsync(cancellationToken);
         hasInitialized = true;
+    }
+
+    /// <summary>
+    /// Looks for a journal from a run that never wrote its outcome — a wizard that was
+    /// killed, or a machine that lost power, mid-installation. Its effects are real and
+    /// undocumented anywhere else, so the first page says what they were and offers to
+    /// undo the reversible ones before the user commits to a fresh run on top of them.
+    /// </summary>
+    public void LoadInterruptedRunJournal()
+    {
+        try
+        {
+            interruptedJournal = InstallerRunJournal.FindInterrupted(LogDirectory);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            interruptedJournal = null;
+        }
+
+        interruptedRunNotice = interruptedJournal is { } journal
+            ? BuildInterruptedRunNotice(journal.Snapshot)
+            : null;
+        RefreshAll();
+    }
+
+    private static string BuildInterruptedRunNotice(InstallerRunJournalSnapshot snapshot)
+    {
+        var notice = new StringBuilder();
+        notice.AppendLine(
+            $"A previous installer run ({snapshot.StartedAtUtc:yyyy-MM-dd HH:mm} UTC) was " +
+            "interrupted before it could finish. What it recorded:");
+        foreach (var step in snapshot.Steps)
+        {
+            var state = step.Status switch
+            {
+                InstallerRunStepStatus.Completed => "applied",
+                InstallerRunStepStatus.Running => "started, state unknown",
+                InstallerRunStepStatus.Failed => "failed",
+                _ => step.Status.ToString(),
+            };
+            notice.AppendLine($"  - {step.Description}: {state}.");
+        }
+
+        if (snapshot.Steps.Count == 0)
+        {
+            notice.AppendLine("  - Nothing was applied before it stopped.");
+        }
+
+        notice.Append(snapshot.HasReversibleWork
+            ? "You can roll back the reversible changes now, or continue and leave them " +
+                "in place."
+            : "Nothing it recorded is reversible by this installer. Continue to leave it " +
+                "as it is.");
+        return notice.ToString();
     }
 
     public void SetReviewConfirmed(bool confirmed)
@@ -257,6 +356,25 @@ public sealed class InstallerWizardViewModel : ObservableObject
         if (!CanMoveNext)
         {
             return false;
+        }
+
+        // Moving past the first page with the interrupted-run notice on screen is the
+        // explicit "leave it in place" choice the notice offers. Recording it stops every
+        // later wizard start from asking about the same abandoned run again.
+        if (CurrentPage == InstallerPage.Diagnose && interruptedJournal is { } abandoned)
+        {
+            try
+            {
+                abandoned.Finish(InstallerRunOutcome.Abandoned);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                // An unwritable journal must not trap the user on the first page.
+            }
+
+            interruptedJournal = null;
+            interruptedRunNotice = null;
         }
 
         CurrentPage = CurrentPage switch
@@ -344,6 +462,25 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 return true;
             }
 
+            // Before the first effect, so a process killed at any later point still leaves
+            // a record. A journal that cannot be written costs the run its rollback, never
+            // the installation itself - but it has to say so, because a user who believes
+            // a rollback exists is worse off than one who knows it does not.
+            try
+            {
+                runJournal = InstallerRunJournal.Start(LogDirectory);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or
+                    NotSupportedException or ArgumentException)
+            {
+                runJournal = null;
+                AppendLog(
+                    report,
+                    $"Run journal could not be created ({exception.Message}). The run " +
+                    "continues, but rollback will not be available for it.");
+            }
+
             await RefreshEnvironmentDiagnosticsAsync(token);
 
             var selected = dependencies.Dependencies
@@ -371,6 +508,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 }
 
                 AppendLog(report, $"{dependency.Title}: installing...");
+                var dependencyStep = JournalBegin(
+                    InstallerRunEffectKind.DependencyInstall,
+                    $"Prerequisite {dependency.Title} ({definition.PackageId})");
                 var installed = definition.InstallerKind switch
                 {
                     DependencyInstallerKind.WinGet =>
@@ -392,11 +532,17 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 if (installed)
                 {
                     successfulActions++;
+                    JournalComplete(
+                        dependencyStep,
+                        "Installed machine-wide. This installer does not uninstall shared " +
+                        "software: other programs may already depend on it.",
+                        isReversible: false);
                 }
                 else
                 {
                     failedActions++;
                     hasRunError = true;
+                    JournalFail(dependencyStep, "The install command did not succeed.");
                 }
 
                 await RefreshEnvironmentDiagnosticsAsync(token);
@@ -429,6 +575,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 failedActions);
             SetProgress(100, hasRunError ? "Failed" : "Completed");
             isComplete = !hasRunError;
+            JournalFinish(hasRunError
+                ? InstallerRunOutcome.Failed
+                : InstallerRunOutcome.Completed);
+            AppendRollbackAvailability(report);
             finish.Progress = report.ToString().Trim();
             SetRunLog(report.ToString(), false);
             CurrentPage = InstallerPage.Finish;
@@ -437,6 +587,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             AppendLog(report, "Cancelled. Actions already applied were left in place.");
+            JournalFinish(InstallerRunOutcome.Cancelled);
+            AppendRollbackAvailability(report);
             wasCancelled = true;
             hasRunError = true;
             isComplete = false;
@@ -454,6 +606,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
         catch (Exception exception)
         {
             AppendLog(report, $"Failed: {exception.Message}");
+            JournalFinish(InstallerRunOutcome.Failed);
+            AppendRollbackAvailability(report);
             hasRunError = true;
             isComplete = false;
             SetProgress(100, "Failed");
@@ -495,9 +649,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         try
         {
-            var directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LocalAi-installer-logs");
+            var directory = LogDirectory;
             Directory.CreateDirectory(directory);
             var path = Path.Combine(
                 directory,
@@ -513,6 +665,190 @@ public sealed class InstallerWizardViewModel : ObservableObject
         {
             // A missing log must never turn a successful install into a failed one.
         }
+    }
+
+    /// <summary>
+    /// Journal writes never fail the installation they describe: a run that applied its
+    /// effects but could not write about them is still a run that applied its effects.
+    /// A write failure silently drops the journal, and with it the rollback offer, so the
+    /// finish page can only promise what the record can actually deliver.
+    /// </summary>
+    private string? JournalBegin(InstallerRunEffectKind kind, string description)
+    {
+        if (runJournal is not { } journal)
+        {
+            return null;
+        }
+
+        try
+        {
+            return journal.BeginStep(kind, description);
+        }
+        catch (Exception exception) when (IsJournalWriteFailure(exception))
+        {
+            runJournal = null;
+            return null;
+        }
+    }
+
+    private void JournalComplete(
+        string? stepId,
+        string detail,
+        bool isReversible,
+        InstallerRunUndoData? undo = null)
+    {
+        if (stepId is null || runJournal is not { } journal)
+        {
+            return;
+        }
+
+        try
+        {
+            journal.CompleteStep(stepId, detail, isReversible, undo);
+        }
+        catch (Exception exception) when (IsJournalWriteFailure(exception))
+        {
+            runJournal = null;
+        }
+    }
+
+    private void JournalFail(string? stepId, string detail)
+    {
+        if (stepId is null || runJournal is not { } journal)
+        {
+            return;
+        }
+
+        try
+        {
+            journal.FailStep(stepId, detail);
+        }
+        catch (Exception exception) when (IsJournalWriteFailure(exception))
+        {
+            runJournal = null;
+        }
+    }
+
+    private void JournalFinish(InstallerRunOutcome outcome)
+    {
+        if (runJournal is not { } journal)
+        {
+            return;
+        }
+
+        try
+        {
+            journal.Finish(outcome);
+        }
+        catch (Exception exception) when (IsJournalWriteFailure(exception))
+        {
+            runJournal = null;
+        }
+    }
+
+    private static bool IsJournalWriteFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or
+            NotSupportedException or ArgumentException or InvalidOperationException;
+
+    /// <summary>
+    /// One line at the end of a failed or cancelled run saying whether anything can be
+    /// taken back. Without it "Cancelled. Actions already applied were left in place." was
+    /// the entire recovery story, and the Roll back button below the log had no explanation.
+    /// </summary>
+    private void AppendRollbackAvailability(StringBuilder report)
+    {
+        if (runJournal is not { } journal || journal.Snapshot.Outcome is
+            not (InstallerRunOutcome.Failed or InstallerRunOutcome.Cancelled))
+        {
+            return;
+        }
+
+        AppendLog(
+            report,
+            journal.Snapshot.HasReversibleWork
+                ? "Some of the applied actions are reversible. Use \"Roll back changes\" " +
+                    "below to undo them; the journal at " + journal.JournalPath +
+                    " records exactly what was done."
+                : "Nothing this run applied is reversible by the installer. The journal " +
+                    "at " + journal.JournalPath + " records exactly what was done.");
+    }
+
+    public async Task RollbackThisRunAsync()
+    {
+        if (!CanRollback || runJournal is not { } journal)
+        {
+            return;
+        }
+
+        var rollbackReport = await ExecuteRollbackAsync(journal);
+        finish.RollbackReport = rollbackReport;
+        RefreshAll();
+    }
+
+    public async Task RollbackPreviousRunAsync()
+    {
+        if (interruptedJournal is not { } journal || isRunning)
+        {
+            return;
+        }
+
+        var rollbackReport = await ExecuteRollbackAsync(journal);
+        // The journal now carries a rollback outcome, so it is no longer "interrupted" and
+        // the next start will not ask about it. The notice space shows the result instead.
+        interruptedJournal = null;
+        interruptedRunNotice = rollbackReport;
+        RefreshAll();
+    }
+
+    private async Task<string> ExecuteRollbackAsync(InstallerRunJournal journal)
+    {
+        isRunning = true;
+        RefreshAll();
+        try
+        {
+            var rollback = new InstallerRunRollback(
+                processRunner,
+                InstallationLayout.CreateDefault(),
+                RollbackActivationTimeout);
+            return FormatRollbackReport(
+                await rollback.RollbackAsync(journal, CancellationToken.None));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return $"Rollback failed: {exception.Message} The journal at " +
+                $"{journal.JournalPath} still records what the run did.";
+        }
+        finally
+        {
+            isRunning = false;
+            RefreshAll();
+        }
+    }
+
+    /// <summary>
+    /// Undone, left in place, failed — by name, effect by effect. The finish page used to
+    /// show "RollbackNotes" that were only ever the run log; this text exists so the page
+    /// never again implies more was undone than actually was.
+    /// </summary>
+    private static string FormatRollbackReport(InstallerRollbackReport rollbackResult)
+    {
+        var text = new StringBuilder();
+        text.AppendLine(rollbackResult.AllReversibleUndone
+            ? "Rollback finished. Effect by effect:"
+            : "Rollback finished with failures. Effect by effect:");
+        foreach (var step in rollbackResult.Steps)
+        {
+            var verdict = step.Outcome switch
+            {
+                InstallerRollbackStepOutcome.Undone => "undone",
+                InstallerRollbackStepOutcome.LeftInPlace => "left in place",
+                InstallerRollbackStepOutcome.Skipped => "left alone",
+                _ => "rollback FAILED",
+            };
+            text.AppendLine($"  - {step.Description}: {verdict}. {step.Detail}");
+        }
+
+        return text.ToString().TrimEnd();
     }
 
     public void SetProgress(int value, string message)
@@ -572,6 +908,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         {
             cancellationToken.ThrowIfCancellationRequested();
             var isClaude = string.Equals(agent.Agent, "claude", StringComparison.OrdinalIgnoreCase);
+            string? agentStep = null;
             try
             {
                 var claude = isClaude ? new ClaudeConfigurationAdapter(home, binRoot) : null;
@@ -586,6 +923,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
                     continue;
                 }
 
+                agentStep = JournalBegin(
+                    InstallerRunEffectKind.AgentConfiguration,
+                    $"{plan.AgentName} client configuration");
                 if (claude is not null)
                 {
                     await claude.ApplyAsync(plan, cancellationToken);
@@ -595,6 +935,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
                     await codex!.ApplyAsync(plan, cancellationToken);
                 }
 
+                JournalComplete(
+                    agentStep,
+                    "Applied to " +
+                    string.Join(", ", plan.Files.Select(file => file.Path)) + ".",
+                    isReversible: true,
+                    new InstallerRunUndoData(
+                        Files: plan.Files.Select(BuildAgentFileUndo).ToArray()));
                 AppendLog(
                     report,
                     $"{plan.AgentName}: {agent.Choice.Title()} applied to " +
@@ -605,6 +952,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
             {
                 // A hand-edited config that the adapter refuses to rewrite is the common case
                 // here, and it is recoverable by hand, so it must not fail the installation.
+                // The adapter also restores its own partial writes before throwing, which is
+                // why a failed step leaves nothing for rollback to undo.
+                JournalFail(agentStep, exception.Message);
                 AppendLog(
                     report,
                     $"{agent.DisplayName}: not configured — {exception.Message} " +
@@ -612,6 +962,25 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 hasRunError = true;
             }
         }
+    }
+
+    /// <summary>
+    /// The restore source is the .bak file the adapter already writes beside the config; a
+    /// backup exists exactly when the file existed before the run, so its presence after a
+    /// successful apply doubles as the existed-before record. The journal keeps hashes for
+    /// both sides so rollback can prove the backup is the pre-install content and that the
+    /// file has not been hand-edited since the run.
+    /// </summary>
+    private static InstallerRunFileUndo BuildAgentFileUndo(AgentConfigurationFilePlan file)
+    {
+        var backupExists = File.Exists(file.BackupPath);
+        return new(
+            file.Path,
+            backupExists,
+            file.ExpectedSha256,
+            null,
+            backupExists ? file.BackupPath : null,
+            file.AfterSha256);
     }
 
     /// <summary>
@@ -627,6 +996,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         StringBuilder report,
         CancellationToken cancellationToken)
     {
+        string? recordStep = null;
         try
         {
             var installed = await installedApplications.FindOllamaAsync(cancellationToken);
@@ -640,13 +1010,26 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 return;
             }
 
+            var recordPath = Path.Combine(
+                ModelResidencyPolicyStore.DefaultRuntimeRoot,
+                OllamaLaunchRecord.FileName);
+            var priorRecord = CaptureFileState(recordPath);
+            recordStep = JournalBegin(
+                InstallerRunEffectKind.OllamaLaunchRecord,
+                "Ollama start-on-demand record");
             new OllamaLaunchRecordStore(ModelResidencyPolicyStore.DefaultRuntimeRoot)
                 .Save(path, installed.DetectedVersion);
+            JournalComplete(
+                recordStep,
+                $"Wrote {recordPath}.",
+                isReversible: true,
+                new InstallerRunUndoData(Files: [BuildFileUndo(recordPath, priorRecord)]));
             AppendLog(report, $"Ollama start-on-demand: recorded {path}.");
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
+            JournalFail(recordStep, exception.Message);
             AppendLog(
                 report,
                 $"Ollama start-on-demand: not recorded ({exception.Message}).");
@@ -655,13 +1038,28 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     private void ApplyResidencyPolicy(StringBuilder report)
     {
+        string? residencyStep = null;
         try
         {
-            var outcome = ResidencyPolicyWriter.Apply(
-                ModelResidencyPolicyStore.DefaultRuntimeRoot,
-                residency.Policy);
+            var runtimeRoot = ModelResidencyPolicyStore.DefaultRuntimeRoot;
+            var policyPath = Path.Combine(runtimeRoot, BrokerPolicy.FileName);
+            // Captured before the write, journalled only when the writer will actually
+            // write: mirroring its own installation check keeps the journal free of steps
+            // for effects that never happened.
+            var priorPolicy = Directory.Exists(runtimeRoot)
+                ? CaptureFileState(policyPath)
+                : null;
+            if (priorPolicy is not null)
+            {
+                residencyStep = JournalBegin(
+                    InstallerRunEffectKind.ResidencyPolicy,
+                    $"Model residency policy ({residency.Policy})");
+            }
+
+            var outcome = ResidencyPolicyWriter.Apply(runtimeRoot, residency.Policy);
             if (outcome == ResidencyPolicyOutcome.SkippedWithoutInstallation)
             {
+                JournalFail(residencyStep, "Nothing was written: LocalAi is not installed.");
                 AppendLog(
                     report,
                     "Model residency policy: not stored, because LocalAi is not installed on " +
@@ -671,6 +1069,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 return;
             }
 
+            JournalComplete(
+                residencyStep,
+                $"Wrote {policyPath}.",
+                isReversible: true,
+                priorPolicy is { } captured
+                    ? new InstallerRunUndoData(Files: [BuildFileUndo(policyPath, captured)])
+                    : null);
             AppendLog(report, $"Model residency policy: {residency.Policy}.");
             if (residency.Policy != ModelResidencyPolicy.RequireFullVram)
             {
@@ -683,9 +1088,37 @@ public sealed class InstallerWizardViewModel : ObservableObject
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException)
         {
+            JournalFail(residencyStep, exception.Message);
             AppendLog(report, $"Could not store the residency policy: {exception.Message}");
             hasRunError = true;
         }
+    }
+
+    /// <summary>The pre-effect content of a file the run is about to change, or its absence.</summary>
+    private sealed record CapturedFileState(bool Existed, byte[] Bytes);
+
+    private static CapturedFileState CaptureFileState(string path) =>
+        File.Exists(path)
+            ? new(true, File.ReadAllBytes(path))
+            : new(false, []);
+
+    /// <summary>
+    /// Pairs the captured pre-effect content with what is on disk now. Small files travel
+    /// inline in the journal; anything above the cap keeps only its hash, which rollback
+    /// reports as unrecoverable instead of guessing.
+    /// </summary>
+    private static InstallerRunFileUndo BuildFileUndo(string path, CapturedFileState before)
+    {
+        var after = File.Exists(path) ? File.ReadAllBytes(path) : [];
+        return new(
+            path,
+            before.Existed,
+            InstallerRunJournal.Sha256Hex(before.Bytes),
+            before.Existed && before.Bytes.Length <= InstallerRunJournal.MaximumInlineContentBytes
+                ? Convert.ToBase64String(before.Bytes)
+                : null,
+            null,
+            InstallerRunJournal.Sha256Hex(after));
     }
 
     private static int StepIndex(InstallerPage page)
@@ -769,10 +1202,16 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(HasRunError));
         OnPropertyChanged(nameof(ReviewText));
         OnPropertyChanged(nameof(FinishSummary));
+        OnPropertyChanged(nameof(CanRollback));
+        OnPropertyChanged(nameof(HasInterruptedRun));
+        OnPropertyChanged(nameof(InterruptedRunNotice));
+        OnPropertyChanged(nameof(HasInterruptedRunNotice));
         BackCommand.RaiseCanExecuteChanged();
         NextCommand.RaiseCanExecuteChanged();
         InstallCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
+        RollbackCommand.RaiseCanExecuteChanged();
+        RollbackPreviousRunCommand.RaiseCanExecuteChanged();
     }
 
     /// <summary>
@@ -1139,6 +1578,15 @@ public sealed class InstallerWizardViewModel : ObservableObject
             AppendLog(report, step.Message);
         });
         var selection = models.BuildProvisioningSelection();
+        // The intent covers the download too, but the download only touches the temp
+        // directory; the effect the journal exists for is the activation. The callback
+        // below closes this step at the exact moment activation finishes, so a process
+        // killed during the model pulls that follow leaves the activation recorded as done
+        // rather than as "state unknown".
+        var packageStep = JournalBegin(
+            InstallerRunEffectKind.PackageActivation,
+            $"LocalAi package {resolved.Manifest.ReleaseVersion}");
+        string? modelsStep = null;
         ReleaseInstallResult result;
         try
         {
@@ -1150,10 +1598,26 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 selection,
                 environmentDiagnosis?.Gpu,
                 modelProgress,
+                activation =>
+                {
+                    JournalPackageActivation(packageStep, activation);
+                    if (activation.Installed && selection.Mode != ModelProvisioningMode.None)
+                    {
+                        modelsStep = JournalBegin(
+                            InstallerRunEffectKind.ModelInstall,
+                            "Local models through the broker");
+                    }
+                },
                 cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            JournalFail(modelsStep ?? packageStep, "Cancelled before it could finish.");
+            throw;
         }
         catch (LocalAiPackageInstallationException exception)
         {
+            JournalFail(packageStep, exception.Message);
             // A refused layout is the one installation failure a user can actually fix, and
             // the refusal alone never says how. Letting it reach the outer handler produced
             // "Failed: The LocalAi installation layout is unsafe (check: ValidateAcl)" and
@@ -1194,6 +1658,54 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
 
         ReportModelOutcome(report, result.Models, selection);
+        if (modelsStep is not null)
+        {
+            var pulled = result.Models?.Batch?.Models
+                .Count(model => model.PullCompleted) ?? 0;
+            JournalComplete(
+                modelsStep,
+                $"Models newly downloaded: {pulled}. Pulled models live in Ollama's own " +
+                "store, shared with everything else that uses it, and are not removed by " +
+                "this installer.",
+                isReversible: false);
+        }
+    }
+
+    /// <summary>
+    /// What activation left behind decides what rollback can promise. Only an upgrade is
+    /// reversible: the launcher can reactivate the version that was current before. A first
+    /// installation has nothing to return to, and its root starts holding runtime data —
+    /// indexes included — the moment the broker runs, so "undo" would mean deleting things
+    /// this run did not create.
+    /// </summary>
+    private void JournalPackageActivation(string? packageStep, ReleaseInstallResult activation)
+    {
+        if (!activation.Installed)
+        {
+            // The package installer recovers its own failures: by the time it reports
+            // anything but success, the prior state is back (or the reason says why not).
+            JournalFail(
+                packageStep,
+                $"{activation.Status}. {activation.Reason}".Trim());
+            return;
+        }
+
+        var isUpgrade = activation.PriorVersion is { Length: > 0 } prior &&
+            !string.Equals(prior, activation.Version, StringComparison.Ordinal);
+        JournalComplete(
+            packageStep,
+            isUpgrade
+                ? $"Activated {activation.Version}; {activation.PriorVersion} was active " +
+                    "before and can be reactivated."
+                : activation.PriorVersion is null
+                    ? $"First installation of {activation.Version}: there is no previous " +
+                        "version to return to, and the LocalAi directory starts holding " +
+                        "runtime data as soon as it is used."
+                    : $"Version {activation.Version} was already active.",
+            isReversible: isUpgrade,
+            isUpgrade
+                ? new InstallerRunUndoData(activation.Version, activation.PriorVersion)
+                : null);
     }
 
     /// <summary>
