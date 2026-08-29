@@ -119,6 +119,37 @@ public sealed class ReleasePreparationOverRealGitTests : IDisposable
         Assert.Contains("README.md", _output.ToString(), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The first real release run died because `git switch --create` fired the repository's
+    /// post-checkout hook, and the hook — synchronizing another worktree's index — outlived
+    /// the command's two-minute git budget: the branch existed, the notes were never
+    /// committed. The command's own bookkeeping must not volunteer for hooks. The probe
+    /// commit first proves the fixture hook fires under plain git, so a machine where hooks
+    /// do not run at all cannot pass this test vacuously.
+    /// </summary>
+    [Fact]
+    public async Task Preparation_does_not_fire_repository_git_hooks()
+    {
+        await Prepare();
+        WriteRealNotes();
+        var marker = Path.Combine(_work, "hook-ran").Replace('\\', '/');
+        foreach (var hook in new[] { "post-checkout", "post-commit", "pre-push" })
+        {
+            File.WriteAllText(
+                Path.Combine(_repository, ".git", "hooks", hook),
+                $"#!/bin/sh\n: > \"{marker}\"\n");
+        }
+
+        Git(_repository, "commit", "--allow-empty", "-m", "hook probe");
+        Assert.True(File.Exists(marker), "The fixture hook did not fire under plain git.");
+        File.Delete(marker);
+
+        var exitCode = await Prepare();
+
+        Assert.True(exitCode == 0, _output.ToString());
+        Assert.False(File.Exists(marker), "A release git operation fired a repository hook.");
+    }
+
     private Task<int> Prepare() =>
         new ReleaseCommand(_runner, _repository, _output)
             .PrepareAsync(Version, TestContext.Current.CancellationToken);

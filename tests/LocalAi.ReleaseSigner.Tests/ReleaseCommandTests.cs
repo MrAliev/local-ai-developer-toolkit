@@ -16,6 +16,34 @@ public sealed class ReleaseCommandTests : IDisposable
 
     private readonly StringWriter _output = new();
 
+    /// <summary>
+    /// Every git operation this command runs must carry an empty hooks path. The first real
+    /// release run died because `git switch --create` fired the repository's post-checkout
+    /// hook and the hook outlived the command's two-minute git budget — the budget was
+    /// measuring an embedding queue, not git.
+    /// </summary>
+    [Fact]
+    public async Task Every_git_invocation_disables_repository_hooks()
+    {
+        WriteNotes("0.1.36");
+        var runner = Runner().Respond("tag --list", "0.1.35\n");
+
+        await new ReleaseCommand(runner, _root, _output)
+            .PrepareAsync(ReleaseVersion.Parse("0.1.36"), TestContext.Current.CancellationToken);
+
+        var directory = Path.Combine(Path.GetTempPath(), "localai-release-signer-no-hooks");
+        var git = runner.Invocations
+            .Where(line => line.StartsWith("git ", StringComparison.Ordinal))
+            .ToArray();
+        Assert.NotEmpty(git);
+        Assert.All(git, line => Assert.Contains(
+            $"-c core.hooksPath={directory}",
+            line,
+            StringComparison.Ordinal));
+        Assert.True(Directory.Exists(directory), $"'{directory}' does not exist.");
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
+    }
+
     [Fact]
     public async Task Preparing_a_version_already_published_is_refused()
     {
