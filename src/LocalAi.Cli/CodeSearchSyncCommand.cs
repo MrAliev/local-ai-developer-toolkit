@@ -46,7 +46,8 @@ public static class CodeSearchSyncCommand
 
     internal sealed record SemanticBuildResult(
         SemanticIndex Index,
-        IReadOnlyList<SemanticAdapterStatus> AdapterStatuses);
+        IReadOnlyList<SemanticAdapterStatus> AdapterStatuses,
+        IReadOnlyList<string>? UncoveredProjects = null);
 
     /// <param name="runtimeRoot">
     /// The installation this sync publishes into and reads its policy from. Null means the
@@ -553,6 +554,7 @@ public static class CodeSearchSyncCommand
             ReportCsharpSemanticCoverage(
                 snapshot.Root,
                 semanticIndex.Index,
+                semanticIndex.UncoveredProjects,
                 requireSemantics);
 
             phase(RepositoryIndexProgressPhase.EmbeddingBase);
@@ -745,45 +747,63 @@ public static class CodeSearchSyncCommand
     }
 
     /// <summary>
-    /// Says so when a repository has C# and semantic indexing covered none of it.
+    /// Says so when semantic indexing did not cover the C# this repository has.
     ///
-    /// This was silent. A workspace whose projects all failed to load still returns, the fallback
-    /// writes an index with nothing in it, the generation is published, and sync exits 0 — so a
-    /// hook, a script or a CI step is told the repository is indexed while every definition query
-    /// answers from bounded text matching. That is how a split between the Microsoft.CodeAnalysis
-    /// package versions survived a green build and 1875 tests.
+    /// Two shapes of the same silence. A workspace whose projects all failed to load still
+    /// returns, the fallback writes an index with nothing in it, and sync exits 0 -- which is how
+    /// a split between the Microsoft.CodeAnalysis package versions survived a green build and
+    /// 1875 tests. And a repository with no solution file has one of its projects chosen and the
+    /// rest left out, which reads exactly the same from outside: an index that is not empty, a
+    /// status that says precise, and navigation that answers from text for most of the tree.
     ///
-    /// Counting C# documents rather than all of them on purpose: an index carrying TypeScript and
-    /// no C# is exactly the case a total count would call healthy.
+    /// Coverage is judged on what the loader reports it left out, not by counting .cs files
+    /// against indexed ones. A repository legitimately holds C# no project compiles -- this one
+    /// keeps test fixtures under tests/Fixtures -- and a check that warned about those would be
+    /// ignored within a week.
     /// </summary>
     internal static void ReportCsharpSemanticCoverage(
         string sourceRoot,
         SemanticIndex index,
+        IReadOnlyList<string>? uncoveredProjects,
         bool requireSemantics)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
         ArgumentNullException.ThrowIfNull(index);
-        if (index.Documents.Any(document => IsCsharp(document.RelPath)))
+
+        if (uncoveredProjects is { Count: > 0 })
+        {
+            Report(
+                $"Semantic indexing covered one project; {uncoveredProjects.Count} more in this " +
+                "repository were not covered, because it has no solution file and only one entry " +
+                "point is loaded without one. Precise navigation answers from bounded text " +
+                "matching everywhere else. Add a solution that lists them, or accept the gap: " +
+                string.Join(", ", uncoveredProjects),
+                requireSemantics);
+            return;
+        }
+
+        if (index.Documents.Any(document => IsCsharp(document.RelPath)) ||
+            !FileScanner.Enumerate(sourceRoot).Any(IsCsharp))
         {
             return;
         }
 
-        if (!FileScanner.Enumerate(sourceRoot).Any(IsCsharp))
-        {
-            return;
-        }
-
-        const string Message =
+        Report(
             "Semantic indexing covered no C# document, yet this repository has C# sources. " +
             "go_to_definition, find_references, find_implementations and find_relationships " +
             "will fall back to bounded text matching until this is fixed. Any 'Roslyn:' line " +
-            "above says why the workspace did not load.";
+            "above says why the workspace did not load.",
+            requireSemantics);
+    }
+
+    private static void Report(string message, bool requireSemantics)
+    {
         if (requireSemantics)
         {
-            throw new InvalidOperationException(Message);
+            throw new InvalidOperationException(message);
         }
 
-        Console.Error.WriteLine("WARNING: " + Message);
+        Console.Error.WriteLine("WARNING: " + message);
     }
 
     private static bool IsCsharp(string path) =>
@@ -862,11 +882,12 @@ public static class CodeSearchSyncCommand
             languageIndex = new XamlSemanticIndexer().Supplement(csharp, sourceRoot);
         }
 
-        return await RunScipAdaptersAsync(
+        var built = await RunScipAdaptersAsync(
             languageIndex,
             sourceRoot,
             runtimeRoot,
             cancellationToken);
+        return built with { UncoveredProjects = loaded?.UncoveredProjects };
     }
 
     private static bool IsCurrentSemanticOverlay(

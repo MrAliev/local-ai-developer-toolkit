@@ -14,12 +14,25 @@ public sealed class LoadedRoslynSolution : IAsyncDisposable
     internal LoadedRoslynSolution(
         MSBuildWorkspace workspace,
         Solution solution,
-        RoslynBuildHostLease? buildHostLease = null)
+        RoslynBuildHostLease? buildHostLease = null,
+        IReadOnlyList<string>? uncoveredProjects = null)
     {
         this.workspace = workspace;
         this.solution = solution;
         this.buildHostLease = buildHostLease;
+        UncoveredProjects = uncoveredProjects ?? [];
     }
+
+    /// <summary>
+    /// Projects in this repository that this load did not cover.
+    ///
+    /// Only ever non-empty when there is no solution file: a repository with one is opened whole,
+    /// but without one a single project is chosen and the rest get no precise navigation at all.
+    /// Reported as a list rather than left to a console line, because the caller has to be able
+    /// to fail on it -- a repository where nine projects out of ten are missing otherwise reads
+    /// exactly like one where none are.
+    /// </summary>
+    public IReadOnlyList<string> UncoveredProjects { get; }
 
     public Task<SemanticIndex> BuildIndexAsync(
         string repositoryRoot,
@@ -118,7 +131,17 @@ public static class RoslynSolutionLoader
                         $"Multiple C# entry points found; semantic indexing selected '{selected}'.");
                 }
 
-                return new LoadedRoslynSolution(workspace, solution, buildHostLease);
+                // Only the project fallback leaves anything out. A solution is opened whole, so
+                // several solutions in one tree means the others were not asked for rather than
+                // silently dropped.
+                var uncovered = projectCandidates
+                    .Where(path => !string.Equals(path, selected, StringComparison.Ordinal))
+                    .ToArray();
+                return new LoadedRoslynSolution(
+                    workspace,
+                    solution,
+                    buildHostLease,
+                    uncovered);
             }
             catch
             {
