@@ -110,7 +110,9 @@ leaves one under the runtime root, and they are kept for thirty days.
 It answers the questions a routing or residency decision turns on: how jobs ended, how often a
 model had to be loaded rather than found warm, how often the fallback was taken, what the queue
 and the execution actually cost at the median and the p90, and how much cloud spend was avoided —
-broken down by model and by task profile.
+broken down by model and by task profile. A model that fails at least a quarter of its jobs and
+owns at least half of all recorded failures is named in one `attention` line, because the
+fallback covers such a model well enough that nothing else makes it visible.
 
 Latencies are nearest-rank percentiles, so every duration printed is one a job really took.
 Savings are bands, never totals: the estimator counts characters, there is no live token counter

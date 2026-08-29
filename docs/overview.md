@@ -110,6 +110,12 @@ seventeen task profiles.
 | `qwen3-embedding:8b-q8_0` | established | 2K–32K | no |
 | `translategemma:12b` | experimental | 2K–128K | yes |
 
+The catalogue also marks models whose reasoning Ollama can switch off, and the broker sends
+`think: false` for exactly those — today, `qwen3.5:9b` alone. A reasoning model on the small
+context tiers routing favours can spend the entire generation window thinking and return an
+empty answer; gpt-oss cannot have its reasoning disabled at all, which is why the flag is
+per-model rather than unconditional.
+
 Routes are ordered lists of eligible models rather than a single binding:
 
 | Task profile | Model order |
@@ -388,8 +394,11 @@ to count savings.
 
 `localai telemetry` prints the measured summary for the machine it runs on: how tasks ended,
 cold versus warm model loads, fallback share, queue and execution latencies as nearest-rank
-percentiles, and the estimated saving — by model and by task profile. The expensive thing to
-delegate is not translation or OCR, but work over large volumes of code and logs.
+percentiles, and the estimated saving — by model and by task profile. When one model with
+enough jobs fails at least a quarter of them and owns at least half of all recorded failures,
+the summary names it in one `attention` line — a failing model that the fallback quietly
+covers is otherwise invisible behind acceptable profile-level success rates. The expensive
+thing to delegate is not translation or OCR, but work over large volumes of code and logs.
 
 ### 7.3 The arithmetic for typical tasks
 
