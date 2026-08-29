@@ -97,6 +97,10 @@ internal static class BrokerProgram
             // Published on the heartbeat so a client can say why its job never ran. The broker's
             // own stderr goes nowhere a user looks: it is started detached, with no console.
             var backendReachable = new BackendReachability(ollamaUri);
+            var backendStarter = new BackendStarter(
+                ollamaUri,
+                new OllamaLaunchRecordStore(runtimeRoot),
+                message => Console.Error.WriteLine("LocalAi broker: " + message));
             var durationEstimator = new DurationEstimator();
             var scheduleMetadata = new ScheduleMetadataResolver(
                 catalog,
@@ -145,6 +149,7 @@ internal static class BrokerProgram
                         ollamaUri,
                         backendHintPrinted);
                     backendReachable.Observe(diagnostic);
+                    backendStarter.OnDiagnostic(diagnostic);
                 });
             // Set by the heartbeat loop, read by the host loop between jobs. A stopper asks for
             // this instead of killing the process, so the job in flight is finished and

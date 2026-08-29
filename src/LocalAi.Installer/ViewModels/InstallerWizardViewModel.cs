@@ -32,6 +32,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     private readonly DiagnosePageViewModel diagnose = new();
     private readonly DependenciesPageViewModel dependencies = new();
+    private readonly IInstalledApplicationProbe installedApplications;
     private readonly PackagePageViewModel package = new();
 
     /// <summary>
@@ -69,11 +70,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
     {
         var runner = new SystemProcessRunner();
         processRunner = runner;
+        // Kept, not just handed to the detector: the detector's answer may have come from a
+        // plain PATH lookup, and only the validated one is worth recording as launchable.
+        installedApplications = new WindowsInstalledApplicationProbe();
         environmentDetector = new WindowsEnvironmentDetector(
             new SystemEnvironmentProbe(),
             new SystemFileSystemProbe(),
             runner,
-            new WindowsInstalledApplicationProbe(),
+            installedApplications,
             new SystemDiskProbe(),
             new SystemNetworkProbe(),
             new WindowsGpuProbe(new DxgiNativeGpuAdapterEnumerator()));
@@ -407,6 +411,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // the one that used to poison every later installation on a clean machine.
             ApplyResidencyPolicy(report);
 
+            // Beside the residency policy and for the same reason: after the package, so the
+            // runtime directory exists with the permissions an installation gives it.
+            await RecordOllamaLaunchPathAsync(report, token);
+
             // After the package, for the same reason the models are: the registration points
             // at the launcher this run installed, so writing it before the launcher exists
             // would hand every client a path to nothing.
@@ -603,6 +611,45 @@ public sealed class InstallerWizardViewModel : ObservableObject
                     "The rest of the installation is unaffected.");
                 hasRunError = true;
             }
+        }
+    }
+
+    /// <summary>
+    /// Records the Ollama the installer verified, so the broker can start it when a model call
+    /// finds it down instead of leaving the work waiting for somebody to notice.
+    ///
+    /// Only the validated answer is recorded. The detector falls back to a plain PATH lookup
+    /// when the uninstall entry does not match, and a path resolved that way is exactly what a
+    /// background process must never launch unattended -- the search path is writable by the
+    /// user. No record is better than a record of the wrong file.
+    /// </summary>
+    private async Task RecordOllamaLaunchPathAsync(
+        StringBuilder report,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var installed = await installedApplications.FindOllamaAsync(cancellationToken);
+            if (installed?.ExecutablePath is not { Length: > 0 } path)
+            {
+                AppendLog(
+                    report,
+                    "Ollama start-on-demand: not recorded, because no verified installation of "
+                    + "Ollama was found. A model call will say Ollama is not answering rather "
+                    + "than starting it.");
+                return;
+            }
+
+            new OllamaLaunchRecordStore(ModelResidencyPolicyStore.DefaultRuntimeRoot)
+                .Save(path, installed.DetectedVersion);
+            AppendLog(report, $"Ollama start-on-demand: recorded {path}.");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            AppendLog(
+                report,
+                $"Ollama start-on-demand: not recorded ({exception.Message}).");
         }
     }
 

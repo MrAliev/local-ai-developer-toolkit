@@ -21,6 +21,11 @@ toolkit rather than renaming those stable contracts.
 
 - A durable machine-wide FIFO broker is the only supported Ollama transport, keeping
   concurrent Codex, Claude, CodeSearch, and LocalLm workloads sequential.
+- Ollama being down is a waiting condition rather than a failure: queued work is kept, the
+  broker retries, and a call that gives up says Ollama is not answering and at which address
+  instead of reporting a bare cancellation. Where the installer recorded a verified Ollama, the
+  broker starts it once — only that recorded executable, never one resolved at the moment of
+  use, and never for an endpoint on another machine.
 - A backend watchdog is separate from the lease heartbeat. Long-running jobs have no total
   duration limit; after ten minutes without completion the broker probes backend/model residency and only
   fails an attempt after two consecutive confirmed unhealthy results. Probe timeouts and
