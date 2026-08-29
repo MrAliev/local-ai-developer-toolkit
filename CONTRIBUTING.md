@@ -66,3 +66,9 @@ carrying the model list, without which an installation would set up no models at
 
 Correctness first, then whether the change tells the next reader why it exists. Expect
 questions about failure modes rather than about formatting.
+
+## Conduct
+
+Disagreement about the work is the point of a review; the rest is in the
+[code of conduct](CODE_OF_CONDUCT.md), including how to report something privately without
+either party publishing an email address.
