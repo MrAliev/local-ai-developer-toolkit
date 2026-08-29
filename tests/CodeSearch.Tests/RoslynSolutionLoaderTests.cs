@@ -111,6 +111,44 @@ public sealed class RoslynSolutionLoaderTests : IAsyncLifetime
         Assert.Empty(loaded.UncoveredProjects);
     }
 
+    /// <summary>
+    /// The line issue #139 turned on was a workspace failure rendered as its bare exception
+    /// message — "Dll was not found.", no entry point, no severity — and five reproduction
+    /// attempts could not trace it. A failure line must say what was being loaded when it
+    /// happened.
+    /// </summary>
+    [Fact]
+    public async Task A_workspace_failure_names_the_entry_point_being_loaded()
+    {
+        Directory.CreateDirectory(root);
+        var solutionPath = Path.Combine(root, "Fixture.sln");
+        // A solution naming a project file that does not exist: the load continues, and the
+        // missing project arrives exactly as a workspace-failed diagnostic.
+        await File.WriteAllTextAsync(
+            solutionPath,
+            """
+            Microsoft Visual Studio Solution File, Format Version 12.00
+            Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Missing", "Missing\Missing.csproj", "{11111111-1111-1111-1111-111111111111}"
+            EndProject
+            Global
+            EndGlobal
+            """,
+            TestContext.Current.CancellationToken);
+
+        var diagnostics = new List<string>();
+        await using var loaded = await RoslynSolutionLoader.LoadAsync(
+            root,
+            diagnostics.Add,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(loaded);
+        Assert.Contains(
+            diagnostics,
+            diagnostic =>
+                diagnostic.Contains("while loading", StringComparison.Ordinal) &&
+                diagnostic.Contains(solutionPath, StringComparison.OrdinalIgnoreCase));
+    }
+
     private async Task WriteProjectAsync(string name)
     {
         var directory = Path.Combine(root, name);
