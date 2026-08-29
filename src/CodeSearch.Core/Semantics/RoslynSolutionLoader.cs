@@ -114,8 +114,15 @@ public static class RoslynSolutionLoader
             }
 
             var workspace = MSBuildWorkspace.Create(WorkspaceProperties);
+            // Kind and entry point, not the message alone. A workspace failure's message is
+            // whatever exception text Roslyn had at hand, and for a bare DllNotFoundException
+            // that is exactly "Dll was not found." — the one anonymous line issue #139 turned
+            // on, which five reproduction attempts could not trace because it named neither
+            // what was being loaded nor how severe the failure was.
             workspace.RegisterWorkspaceFailedHandler(
-                args => diagnostic?.Invoke(args.Diagnostic.Message));
+                args => diagnostic?.Invoke(
+                    $"{args.Diagnostic.Kind} while loading '{selected}': " +
+                    args.Diagnostic.Message));
             try
             {
                 var solution = selected.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)

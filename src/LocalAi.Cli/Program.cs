@@ -28,7 +28,12 @@ catch (EmbeddingChunkException exception)
 }
 catch (Exception exception)
 {
-    Console.Error.WriteLine($"localai: {exception.Message}");
+    // Type names and the inner chain, not just the message: a released binary once printed
+    // exactly "Dll was not found." — a bare DllNotFoundException's default message — and
+    // that one anonymous line cost five reproduction attempts without finding the cause
+    // (#139). An unexpected failure is precisely the one whose message cannot be trusted
+    // to identify itself.
+    Console.Error.WriteLine($"localai: {UnexpectedFailure.Describe(exception)}");
     return 70;
 }
 
