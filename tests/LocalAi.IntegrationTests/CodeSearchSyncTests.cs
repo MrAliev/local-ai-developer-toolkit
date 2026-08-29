@@ -123,6 +123,7 @@ public sealed class CodeSearchSyncTests : IDisposable
             CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
                 source,
                 SemanticIndexCovering(),
+                uncoveredProjects: null,
                 requireSemantics: false));
 
         Assert.Contains("covered no C# document", written);
@@ -138,6 +139,7 @@ public sealed class CodeSearchSyncTests : IDisposable
             CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
                 source,
                 SemanticIndexCovering("src/Widget.cs"),
+                uncoveredProjects: null,
                 requireSemantics: false));
 
         Assert.DoesNotContain("covered no C# document", written, StringComparison.Ordinal);
@@ -156,6 +158,7 @@ public sealed class CodeSearchSyncTests : IDisposable
             CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
                 source,
                 SemanticIndexCovering(),
+                uncoveredProjects: null,
                 requireSemantics: false));
 
         Assert.DoesNotContain("covered no C# document", written, StringComparison.Ordinal);
@@ -174,6 +177,7 @@ public sealed class CodeSearchSyncTests : IDisposable
             CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
                 source,
                 SemanticIndexCovering("src/app.ts"),
+                uncoveredProjects: null,
                 requireSemantics: false));
 
         Assert.Contains("covered no C# document", written);
@@ -188,9 +192,68 @@ public sealed class CodeSearchSyncTests : IDisposable
             CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
                 source,
                 SemanticIndexCovering(),
+                uncoveredProjects: null,
                 requireSemantics: true));
 
         Assert.Contains("covered no C# document", exception.Message);
+    }
+
+    /// <summary>
+    /// A repository with no solution file has one project chosen and the rest left out, and from
+    /// outside that reads exactly like full coverage: the index is not empty, the status says
+    /// precise, and navigation answers from text for most of the tree.
+    /// </summary>
+    [Fact]
+    public void Projects_left_out_for_want_of_a_solution_are_named()
+    {
+        var source = SourceTree("Widget.cs");
+
+        var written = CaptureError(() =>
+            CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
+                source,
+                SemanticIndexCovering("src/Legacy/Helper.cs"),
+                uncoveredProjects: [@"src\Modern\Modern.csproj", @"src\Other\Other.csproj"],
+                requireSemantics: false));
+
+        Assert.Contains("2 more", written, StringComparison.Ordinal);
+        Assert.Contains("Modern.csproj", written, StringComparison.Ordinal);
+        Assert.Contains("no solution file", written, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Require_semantics_also_refuses_a_partly_covered_repository()
+    {
+        var source = SourceTree("Widget.cs");
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
+                source,
+                SemanticIndexCovering("src/Legacy/Helper.cs"),
+                uncoveredProjects: [@"src\Modern\Modern.csproj"],
+                requireSemantics: true));
+
+        Assert.Contains("not covered", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Coverage is judged on what the loader says it left out, never by counting .cs files
+    /// against indexed ones: this repository keeps C# under tests/Fixtures that no project
+    /// compiles, and a check that warned about those would be ignored within a week.
+    /// </summary>
+    [Fact]
+    public void Csharp_that_belongs_to_no_project_is_not_called_missing_coverage()
+    {
+        var source = SourceTree("src/Widget.cs", "fixtures/NotInAnyProject.cs");
+
+        var written = CaptureError(() =>
+            CodeSearchSyncCommand.ReportCsharpSemanticCoverage(
+                source,
+                SemanticIndexCovering("src/Widget.cs"),
+                uncoveredProjects: [],
+                requireSemantics: false));
+
+        Assert.DoesNotContain("covered no C# document", written, StringComparison.Ordinal);
+        Assert.DoesNotContain("not covered", written, StringComparison.Ordinal);
     }
 
     private string SourceTree(params string[] relativePaths)
