@@ -18,7 +18,7 @@ back, but fixes are made on `main` and shipped in the next release rather than b
 
 ## What the product actually promises
 
-Three of these are worth stating precisely, because they are what a report should measure
+Four of these are worth stating precisely, because they are what a report should measure
 against.
 
 **Releases are signed, transports are not trusted.** Every release manifest is signed with an
@@ -38,6 +38,15 @@ doing something the protocol tells it not to do.
 granting only the installing user, SYSTEM and Administrators, and the installer refuses to
 operate on a root that inherits permissions instead of repairing it. A version directory is
 immutable once published; activation swaps a pointer atomically.
+
+**winget is verified before it is run.** The installer executes winget to install prerequisites
+machine-wide, and it finds winget by searching a path the user can write to. Before every
+invocation it checks that the executable belongs to the registered `Microsoft.DesktopAppInstaller`
+package, sits under a path only administrators can write to, and is Authenticode-signed by
+Microsoft Corporation — and it runs the path that check resolves, not the one the search
+returned. The check is repeated before each install rather than once at detection, because the
+two are minutes apart. A winget that fails it is not run, and the installer says which check
+failed.
 
 ## What is not a vulnerability
 
