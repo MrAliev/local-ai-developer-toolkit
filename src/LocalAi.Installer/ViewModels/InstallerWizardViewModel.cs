@@ -33,6 +33,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private readonly DiagnosePageViewModel diagnose = new();
     private readonly DependenciesPageViewModel dependencies = new();
     private readonly PackagePageViewModel package = new();
+
+    /// <summary>
+    /// Kept for the whole run so the executable approved once is the one revalidated before each
+    /// later install, rather than a fresh answer from a search path that may have changed.
+    /// </summary>
+    private readonly TrustedWingetSource wingetSource =
+        new(new WindowsWingetExecutableTrust());
     private readonly ModelsPageViewModel models = new();
     private readonly ResidencyPageViewModel residency = new();
     private readonly AgentIntegrationPageViewModel agents = new();
@@ -1255,6 +1262,19 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return false;
         }
 
+        // Checked here rather than at detection, and before every install rather than once: the
+        // detector reports the first file named winget.exe on a search path the user can write
+        // to, and it reported it several pages ago. What runs is the path this check resolves.
+        var winget = wingetSource.Authorize(wingetPath);
+        if (!winget.Allowed)
+        {
+            SetRunLog(
+                $"{displayName} was not installed. {winget.Message} You can install it " +
+                $"yourself from {dependency.OfficialInstallerUri}.",
+                false);
+            return false;
+        }
+
         var arguments = new List<string>
         {
             "install",
@@ -1276,7 +1296,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
 
         var result = await processRunner.RunAsync(
-            wingetPath,
+            winget.ExecutablePath,
             [.. arguments],
             DependencyInstallTimeout,
             cancellationToken);
