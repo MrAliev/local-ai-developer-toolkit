@@ -117,6 +117,37 @@ public class SemanticNavigationServiceTests
         Assert.Null(service.ResolveOccurrence("Src/Pair.cs", 7, 0, Snapshot()));
     }
 
+    /// <summary>
+    /// `private static bool IsRunAlive(string journalPath)` — a single-line signature declares
+    /// the method and its parameter, which in C# is most method lines there are. Under an
+    /// exactly-one rule, column 0 on exactly the hits the shortcut was written for refused to
+    /// navigate. The parameter's token lies inside the method's enclosing range, so the method
+    /// is the outermost declaration by containment.
+    /// </summary>
+    [Fact]
+    public void Resolves_a_signature_line_to_the_method_rather_than_its_parameter()
+    {
+        var service = new SemanticNavigationService(IndexWithSignatureLine());
+
+        var occurrence = service.ResolveOccurrence("Src/Signature.cs", 9, 0, Snapshot());
+
+        Assert.NotNull(occurrence);
+        Assert.Equal(SignatureMethodId, occurrence.SymbolId);
+    }
+
+    /// <summary>
+    /// Containment must be proven, never assumed: two declarations whose bodies sit side by
+    /// side contain each other's tokens in neither direction, and a declaration without an
+    /// enclosing range cannot contain anything at all. Both stay refused.
+    /// </summary>
+    [Fact]
+    public void Declines_sibling_declarations_even_when_each_has_its_own_body()
+    {
+        var service = new SemanticNavigationService(IndexWithSiblingBodiesOnOneLine());
+
+        Assert.Null(service.ResolveOccurrence("Src/Siblings.cs", 11, 0, Snapshot()));
+    }
+
     [Fact]
     public void Does_not_resolve_a_line_that_only_references_something()
     {
@@ -239,6 +270,58 @@ public class SemanticNavigationServiceTests
                     SemanticOccurrenceRoles.Definition),
                 Occurrence("Src/Pair.cs", new SourceRange(7, 15, 7, 16), MethodId,
                     SemanticOccurrenceRoles.Definition),
+            ],
+        };
+
+    private const string SignatureMethodId = "scip-dotnet pkg MyApp 1.0.0 Journal#IsRunAlive().";
+    private const string SignatureParameterId =
+        "scip-dotnet pkg MyApp 1.0.0 Journal#IsRunAlive().(journalPath)";
+
+    /// <summary>
+    /// A single-line C# method signature: the method's identifier token on the line, its
+    /// enclosing range spanning the whole body, and the parameter's token inside it.
+    /// </summary>
+    private static SemanticIndex IndexWithSignatureLine() =>
+        Index() with
+        {
+            Documents = [.. Index().Documents, Document("Src/Signature.cs", 8)],
+            Occurrences =
+            [
+                .. Index().Occurrences,
+                Occurrence("Src/Signature.cs", new SourceRange(9, 24, 9, 34), SignatureMethodId,
+                    SemanticOccurrenceRoles.Definition) with
+                {
+                    EnclosingRange = new SourceRange(9, 4, 24, 5),
+                },
+                Occurrence(
+                    "Src/Signature.cs",
+                    new SourceRange(9, 42, 9, 53),
+                    SignatureParameterId,
+                    SemanticOccurrenceRoles.Definition),
+            ],
+        };
+
+    /// <summary>
+    /// Two declarations on one line, each with a body of its own beside the other's: neither
+    /// enclosing range contains the other declaration's token.
+    /// </summary>
+    private static SemanticIndex IndexWithSiblingBodiesOnOneLine() =>
+        Index() with
+        {
+            Documents = [.. Index().Documents, Document("Src/Siblings.cs", 10)],
+            Occurrences =
+            [
+                .. Index().Occurrences,
+                Occurrence("Src/Siblings.cs", new SourceRange(11, 5, 11, 6), TypeId,
+                    SemanticOccurrenceRoles.Definition) with
+                {
+                    EnclosingRange = new SourceRange(11, 0, 11, 20),
+                },
+                Occurrence("Src/Siblings.cs", new SourceRange(11, 30, 11, 31), MethodId,
+                    SemanticOccurrenceRoles.Definition) with
+                {
+                    EnclosingRange = new SourceRange(11, 25, 11, 45),
+                },
             ],
         };
 

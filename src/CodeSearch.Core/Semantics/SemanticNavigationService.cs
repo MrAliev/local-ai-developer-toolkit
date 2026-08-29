@@ -231,35 +231,77 @@ public sealed class SemanticNavigationService
     /// completely useless.
     ///
     /// A line that declares exactly one thing has exactly one answer, and giving it is not a
-    /// guess. A line that declares two — <c>const a = f(), b = g()</c> — has no single answer, so
-    /// nothing is returned and the caller gets the same degradation notice as before rather than
-    /// a coin flip. Only declarations count: resolving a position to a reference that merely
-    /// happens to share the line would answer about a different symbol entirely.
+    /// guess. A line whose declarations all nest inside one of them has one answer too: a
+    /// single-line method signature declares the method and its parameters, which is the
+    /// normal C# shape — under an exactly-one rule, the very hits the shortcut was built for
+    /// refused to navigate. The parameters live inside the method's enclosing range, so the
+    /// method is the outermost declaration by containment, not by guesswork. What stays
+    /// unresolved is a line of genuine siblings — <c>const a = f(), b = g()</c> — where
+    /// neither contains the other, and the caller gets the same degradation notice rather
+    /// than a coin flip. Only declarations count: resolving a position to a reference that
+    /// merely happens to share the line would answer about a different symbol entirely.
     /// </remarks>
     private static SemanticOccurrence? SoleDeclarationOn(
         List<SemanticOccurrence> occurrences,
         int line)
     {
-        SemanticOccurrence? sole = null;
+        var declarations = new List<SemanticOccurrence>();
         foreach (var occurrence in occurrences)
         {
-            if (!occurrence.Roles.HasFlag(SemanticOccurrenceRoles.Definition) ||
-                occurrence.Range.StartLine != line)
+            if (occurrence.Roles.HasFlag(SemanticOccurrenceRoles.Definition) &&
+                occurrence.Range.StartLine == line &&
+                !declarations.Any(existing => string.Equals(
+                    existing.SymbolId,
+                    occurrence.SymbolId,
+                    StringComparison.Ordinal)))
+            {
+                declarations.Add(occurrence);
+            }
+        }
+
+        return declarations.Count switch
+        {
+            0 => null,
+            1 => declarations[0],
+            _ => OutermostDeclaration(declarations),
+        };
+    }
+
+    /// <summary>
+    /// The declaration whose enclosing range contains every other declaration on the line, or
+    /// null when there is no such single container. A declaration without an enclosing range
+    /// cannot contain anything — the indexers do not report one for every definition, and a
+    /// missing span must degrade to the old refusal rather than to a guess.
+    /// </summary>
+    private static SemanticOccurrence? OutermostDeclaration(
+        List<SemanticOccurrence> declarations)
+    {
+        SemanticOccurrence? outermost = null;
+        foreach (var candidate in declarations)
+        {
+            if (candidate.EnclosingRange is not { } enclosing ||
+                !declarations.All(other =>
+                    ReferenceEquals(other, candidate) || Contains(enclosing, other.Range)))
             {
                 continue;
             }
 
-            if (sole is not null &&
-                !string.Equals(sole.SymbolId, occurrence.SymbolId, StringComparison.Ordinal))
+            if (outermost is not null)
             {
                 return null;
             }
 
-            sole ??= occurrence;
+            outermost = candidate;
         }
 
-        return sole;
+        return outermost;
     }
+
+    private static bool Contains(SourceRange outer, SourceRange inner) =>
+        (outer.StartLine < inner.StartLine ||
+         (outer.StartLine == inner.StartLine && outer.StartCharacter <= inner.StartCharacter)) &&
+        (outer.EndLine > inner.EndLine ||
+         (outer.EndLine == inner.EndLine && outer.EndCharacter >= inner.EndCharacter));
 
     private void RequireSnapshot(SemanticSnapshotIdentity snapshot)
     {
