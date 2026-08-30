@@ -48,6 +48,13 @@ if ([string]::IsNullOrWhiteSpace($PackageUri)) {
         "$ReleaseVersion/localai-package.zip"
 }
 
+# AssemblyVersion and FileVersion are numeric quads by definition; a prerelease suffix the
+# version pattern deliberately allows would fail there half a build later as CS7034 (#190).
+# The suffix is stripped for those two and for VersionPrefix - whose SDK meaning is exactly
+# "the version without the suffix" - while Version, InformationalVersion, the package URI and
+# the signer keep the full string, so a test build stays labelled as the prerelease it is.
+$NumericVersion = ($ReleaseVersion -split '-', 2)[0]
+
 Write-Host "Release version: $ReleaseVersion"
 Write-Host "Package URI:     $PackageUri"
 
@@ -133,8 +140,8 @@ function Invoke-SafePublish {
         # successes and then failed on the missing artifacts with nothing to explain either.
         $output = dotnet publish $ProjectPath -c $Configuration -r $Runtime `
             -p:SelfContained=true -p:PublishSingleFile=true -p:BuildInParallel=false -p:UseSharedCompilation=false `
-            -p:Version=$ReleaseVersion -p:VersionPrefix=$ReleaseVersion `
-            -p:AssemblyVersion="$ReleaseVersion.0" -p:FileVersion="$ReleaseVersion.0" `
+            -p:Version=$ReleaseVersion -p:VersionPrefix=$NumericVersion `
+            -p:AssemblyVersion="$NumericVersion.0" -p:FileVersion="$NumericVersion.0" `
             -p:InformationalVersion=$ReleaseVersion `
             --no-restore -o $resolvedOutput 2>&1
         $publishExitCode = $LASTEXITCODE
