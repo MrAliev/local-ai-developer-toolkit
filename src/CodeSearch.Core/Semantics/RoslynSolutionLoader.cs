@@ -102,7 +102,7 @@ public static class RoslynSolutionLoader
 
         using (await RoslynBuildHostLease.AcquireLoadLockAsync(cancellationToken))
         {
-            EnsureMsBuildRegistered();
+            EnsureMsBuildRegistered(diagnostic);
             var buildHostLease = RoslynBuildHostLease.CreateIfNeeded();
             var originalBaseDirectory = AppContext.GetData(
                 RoslynBuildHostLease.BaseDirectoryDataName);
@@ -165,12 +165,16 @@ public static class RoslynSolutionLoader
         }
     }
 
-    private static void EnsureMsBuildRegistered()
+    private static void EnsureMsBuildRegistered(Action<string>? diagnostic)
     {
         lock (RegistrationLock)
         {
             if (!MSBuildLocator.IsRegistered)
             {
+                // Inside the self-contained single-file publish, RegisterDefaults()'s
+                // P/Invoke into hostfxr has no module to bind to (#188); the preloader
+                // gives it one and changes nothing where the import already resolves.
+                HostFxrPreloader.EnsureLoaded(diagnostic);
                 MSBuildLocator.RegisterDefaults();
             }
         }
