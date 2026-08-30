@@ -764,6 +764,11 @@ force, and — with `--root` — the repository index. It is read-only and start
 including the broker. The exit code is non-zero only for a real fault; a stopped broker is a
 note, because it starts on demand.
 
+An unexpected CLI failure prints one line naming the exception type and the whole inner chain.
+Setting `LOCALAI_STACK=1` (or `true`) appends the full exception with its stack trace under that
+line — the information a bug report needs, available without a local rebuild. The default output
+stays a single line, because that is what operators and hooks parse.
+
 `localai telemetry` summarises the bounded per-job records the broker writes for every
 delegated job: how jobs ended, cold versus warm model loads, fallback frequency, queue and
 execution latencies as nearest-rank percentiles, and the estimated cloud tokens avoided —
