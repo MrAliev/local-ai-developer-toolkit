@@ -31,15 +31,20 @@ public sealed class VersionActivatorTests
         install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
         var expectation = ExpectCurrent(File.ReadAllBytes(install.CurrentPath));
 
+        // The lease budget is generous on purpose: the loser's deterministic outcome is the
+        // pointer comparison, and it can only reach it after the winner releases the lock. A
+        // one-second budget turned a loaded CI runner's slow swap into activation_timeout and
+        // reported healthy code as broken (#193). Hang detection belongs to the run timeout
+        // the harness applies, not to this assertion.
         var errors = await Task.WhenAll(
             Task.Run(
                 () => Record.Exception(() =>
-                    CreateActivator(install, TimeSpan.FromSeconds(1))
+                    CreateActivator(install, TimeSpan.FromMinutes(5))
                         .Activate("v2", false, expectation)),
                 TestContext.Current.CancellationToken),
             Task.Run(
                 () => Record.Exception(() =>
-                    CreateActivator(install, TimeSpan.FromSeconds(1))
+                    CreateActivator(install, TimeSpan.FromMinutes(5))
                         .Activate("v3", false, expectation)),
                 TestContext.Current.CancellationToken));
 
@@ -49,6 +54,52 @@ public sealed class VersionActivatorTests
         var rejected = Assert.Single(errors, error => error is not null);
         Assert.Equal("current_pointer_changed", Assert.IsType<LauncherException>(rejected).Code);
         Assert.Empty(Directory.EnumerateFiles(install.BinRoot, "*.tmp"));
+    }
+
+    /// <summary>
+    /// The timeout owns its own test, where it is the expected outcome rather than a race:
+    /// the startup gate is held until the assertions are done, so the budget expires
+    /// deterministically. This is the coverage the one-second budget in the concurrent test
+    /// above used to provide by accident (#193). The gate lives entirely on its own thread —
+    /// the mutex is reentrant for the thread that owns it and must be released by that same
+    /// thread — while the activation runs on the test's.
+    /// </summary>
+    [Fact]
+    public async Task A_gate_that_never_opens_times_the_activation_out()
+    {
+        using var install = TestInstall.CreateComplete("v1", "v2");
+        install.WriteCurrent("""{"schemaVersion":1,"version":"v1"}""");
+        var before = File.ReadAllBytes(install.CurrentPath);
+        using var gateHeld = new ManualResetEventSlim();
+        using var assertionsDone = new ManualResetEventSlim();
+        var holder = Task.Run(
+            () =>
+            {
+                using var gate = ActivationCoordinator.AcquireStartupGate(
+                    install.BinRoot,
+                    TimeSpan.Zero);
+                gateHeld.Set();
+                assertionsDone.Wait(TestContext.Current.CancellationToken);
+            },
+            TestContext.Current.CancellationToken);
+        gateHeld.Wait(TestContext.Current.CancellationToken);
+
+        try
+        {
+            var error = Assert.Throws<LauncherException>(
+                () => CreateActivator(install, TimeSpan.FromMilliseconds(50)).Activate(
+                    "v2",
+                    stopRunning: false,
+                    ExpectCurrent(before)));
+
+            Assert.Equal("activation_timeout", error.Code);
+            Assert.Equal(before, File.ReadAllBytes(install.CurrentPath));
+        }
+        finally
+        {
+            assertionsDone.Set();
+            await holder;
+        }
     }
 
     [Fact]
