@@ -23,7 +23,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// <summary>Matches the activation timeout the installation itself runs under.</summary>
     private static readonly TimeSpan RollbackActivationTimeout = TimeSpan.FromMinutes(5);
 
-    private static readonly IReadOnlyList<(InstallerPage Page, string Title)> Steps =
+    private static readonly IReadOnlyList<(InstallerPage Page, string Title)> AllSteps =
     [
         (InstallerPage.Diagnose, "System check"),
         (InstallerPage.Dependencies, "Prerequisites"),
@@ -43,6 +43,60 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// person who had chosen "Update or repair" to work out that it had heard them (#257).
     /// </summary>
     public StartChoice Mode { get; }
+
+    /// <summary>
+    /// The pages this run actually visits.
+    ///
+    /// An update re-asked four questions it had the answers to — prerequisites that are
+    /// already installed, models that are already pulled, a residency policy now read from
+    /// disk, client registrations that already exist — and then told the reader it was on
+    /// "Step 3 of 9" of a nine-page install (#257). The settings pages are folded away and
+    /// their values still appear on the review page, which is what keeps every effect listed
+    /// before it is applied.
+    ///
+    /// One button on the review page brings them back, for the run where the answer really
+    /// has changed. Nothing is skipped irrevocably.
+    /// </summary>
+    private IReadOnlyList<(InstallerPage Page, string Title)> Steps =>
+        Mode == StartChoice.Install || settingsRevealed
+            ? AllSteps
+            : [.. AllSteps.Where(step => !FoldedOnUpdate.Contains(step.Page))];
+
+    /// <summary>
+    /// What an update does not ask again. Diagnose stays: it is where an interrupted run is
+    /// offered back and where an unsupported machine is stopped. Package stays for now — it
+    /// still owns resolving the release, and moving that is its own change.
+    /// </summary>
+    private static readonly IReadOnlySet<InstallerPage> FoldedOnUpdate =
+        new HashSet<InstallerPage>
+        {
+            InstallerPage.Dependencies,
+            InstallerPage.Models,
+            InstallerPage.Residency,
+            InstallerPage.Agents,
+        };
+
+    /// <summary>Set by "Change these settings" on the review page; never unset.</summary>
+    private bool settingsRevealed;
+
+    public bool AreSettingsFolded =>
+        Mode != StartChoice.Install && !settingsRevealed;
+
+    /// <summary>
+    /// Brings the folded pages back and moves to the first of them. Offered on the review
+    /// page, because that is where somebody discovers that a carried-forward answer is not
+    /// the one they want this time.
+    /// </summary>
+    public void RevealSettings()
+    {
+        if (!AreSettingsFolded)
+        {
+            return;
+        }
+
+        settingsRevealed = true;
+        CurrentPage = InstallerPage.Dependencies;
+    }
 
     private readonly DiagnosePageViewModel diagnose = new();
     private readonly DependenciesPageViewModel dependencies = new();
@@ -113,6 +167,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             () => CanRun,
             ReportUnexpectedError);
         CancelCommand = new RelayCommand(Cancel, () => CanCancel);
+        RevealSettingsCommand = new RelayCommand(RevealSettings, () => AreSettingsFolded);
         RollbackCommand = new AsyncRelayCommand(
             () => RollbackThisRunAsync(),
             () => CanRollback,
@@ -160,6 +215,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
     public AsyncRelayCommand InstallCommand { get; }
 
     public RelayCommand CancelCommand { get; }
+
+    /// <summary>Brings back the pages an update folds away.</summary>
+    public RelayCommand RevealSettingsCommand { get; }
 
     public AsyncRelayCommand RollbackCommand { get; }
 
@@ -497,17 +555,34 @@ public sealed class InstallerWizardViewModel : ObservableObject
             interruptedRunNotice = null;
         }
 
-        CurrentPage = CurrentPage switch
-        {
-            InstallerPage.Diagnose => InstallerPage.Dependencies,
-            InstallerPage.Dependencies => InstallerPage.Package,
-            InstallerPage.Package => InstallerPage.Models,
-            InstallerPage.Models => InstallerPage.Residency,
-            InstallerPage.Residency => InstallerPage.Agents,
-            InstallerPage.Agents => InstallerPage.Confirm,
-            _ => CurrentPage,
-        };
+        CurrentPage = Adjacent(CurrentPage, forward: true);
         return true;
+    }
+
+    /// <summary>
+    /// The next or previous page this run visits. Reading it off the step list is what keeps
+    /// the rail, the counter and the buttons agreeing with each other when pages are folded.
+    /// </summary>
+    private InstallerPage Adjacent(InstallerPage page, bool forward)
+    {
+        var steps = Steps;
+        var index = -1;
+        for (var candidate = 0; candidate < steps.Count; candidate++)
+        {
+            if (steps[candidate].Page == page)
+            {
+                index = candidate;
+                break;
+            }
+        }
+
+        if (index < 0)
+        {
+            return page;
+        }
+
+        var target = forward ? index + 1 : index - 1;
+        return target >= 0 && target < steps.Count ? steps[target].Page : page;
     }
 
     public bool MovePrevious()
@@ -517,16 +592,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return false;
         }
 
-        CurrentPage = CurrentPage switch
-        {
-            InstallerPage.Dependencies => InstallerPage.Diagnose,
-            InstallerPage.Package => InstallerPage.Dependencies,
-            InstallerPage.Models => InstallerPage.Package,
-            InstallerPage.Residency => InstallerPage.Models,
-            InstallerPage.Agents => InstallerPage.Residency,
-            InstallerPage.Confirm => InstallerPage.Agents,
-            _ => CurrentPage,
-        };
+        CurrentPage = Adjacent(CurrentPage, forward: false);
         return true;
     }
 
@@ -1308,7 +1374,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             InstallerRunJournal.Sha256Hex(after));
     }
 
-    private static int StepIndex(InstallerPage page)
+    private int StepIndex(InstallerPage page)
     {
         for (var index = 0; index < Steps.Count; index++)
         {
@@ -1402,6 +1468,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(StepDescription));
         OnPropertyChanged(nameof(StepStatus));
         OnPropertyChanged(nameof(VersionContext));
+        OnPropertyChanged(nameof(AreSettingsFolded));
         OnPropertyChanged(nameof(StepList));
         OnPropertyChanged(nameof(CurrentPageIndex));
         OnPropertyChanged(nameof(CanMovePrevious));

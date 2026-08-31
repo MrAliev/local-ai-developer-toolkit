@@ -378,6 +378,12 @@
                         <TextBox Text="{Binding ReviewText, Mode=OneWay}"
                                  IsReadOnly="True" TextWrapping="Wrap" Height="200"
                                  VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
+                        <!-- An update folds the settings pages away; this is how somebody
+                             who wants a different answer this time gets them back. -->
+                        <Button Content="Change these settings…"
+                                Command="{Binding RevealSettingsCommand}"
+                                HorizontalAlignment="Left" Margin="0,10,0,0" Padding="12,4"
+                                Visibility="{Binding AreSettingsFolded, Converter={StaticResource BoolToVisibility}}" />
                         <CheckBox Content="I have reviewed these settings"
                                   Margin="0,12,0,0"
                                   IsChecked="{Binding Review.IsConfirmed, Mode=TwoWay}"

@@ -503,7 +503,13 @@ package against the SHA-256 inside the manifest.
 
 The same executable is also the uninstaller, the updater and the repair tool, so starting it
 asks which of those this run is and offers only what the machine allows, naming the reason for
-the rest. That answer travels with the window: the title bar names the errand, and the step
+the rest. An update also stops re-asking what it already has: prerequisites that are installed, models
+that are pulled, the residency policy read from disk and the client registrations that exist
+are folded away, so the rail shows five steps rather than nine and the counter says so. Their
+values still appear on the review page — a folded page must never become an unlisted effect —
+and one button there brings all four back for the run where a carried-forward answer is wrong.
+
+That answer travels with the window: the title bar names the errand, and the step
 rail carries a version line on every page — `installing 0.1.51`, `0.1.50 → 0.1.51`, or
 `0.1.50 → 0.1.50 (repair)`. It is the one place a version is a question; everywhere else the
 wizard states it. An installation registers itself in Apps & features, whose entry runs a copy of the
