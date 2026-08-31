@@ -353,6 +353,38 @@ public sealed class UntrustedContentMcpTests : IDisposable
         Assert.Contains("ETA:        1.2 min", status, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The update notice rides on this status because it is the one an agent reads routinely.
+    /// It is trusted output — the installation talking about itself — so it sits outside the
+    /// untrusted-content boundary, and it appears only when there is something to say.
+    /// </summary>
+    [Fact]
+    public void Status_carries_the_update_notice_only_when_a_newer_release_is_known()
+    {
+        Assert.DoesNotContain(
+            "Update:",
+            CodeSearchTools.IndexStatus(_service, _root),
+            StringComparison.Ordinal);
+
+        new UpdateCheckPolicyStore(_runtimeRoot).Write(
+            UpdateCheckPolicy.Default with { Enabled = true });
+        new UpdateCheckStateStore(_runtimeRoot).Write(new UpdateCheckState(
+            1,
+            UpdateCheckStatus.Verified,
+            DateTimeOffset.UtcNow,
+            "99.0.0",
+            "https://example.invalid/releases/tag/v99.0.0"));
+        Directory.CreateDirectory(Path.Combine(_runtimeRoot, "bin"));
+        File.WriteAllText(
+            Path.Combine(_runtimeRoot, "bin", "current.json"),
+            """{"schemaVersion":1,"version":"0.1.50"}""");
+
+        var status = CodeSearchTools.IndexStatus(_service, _root);
+
+        Assert.Contains("Update:     LocalAi 99.0.0 is available", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("<untrusted-content", status, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Status_reports_that_a_generation_without_a_semantic_index_navigates_by_text()
     {

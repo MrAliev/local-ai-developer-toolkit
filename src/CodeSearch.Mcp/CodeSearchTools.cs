@@ -524,7 +524,7 @@ public static class CodeSearchTools
             Status:     {staleness}
             Navigation: {Navigation(status)}
             {progressText}
-            """;
+            """ + UpdateNotice.ForStatus(service.RuntimeRoot);
     }
 
     /// <summary>

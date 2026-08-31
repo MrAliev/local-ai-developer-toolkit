@@ -26,7 +26,7 @@ else got a bare protocol error naming nothing.
 | `find_references` | References to that symbol. | Same source order. |
 | `find_implementations` | Implementations, overrides, derived types. | No text fallback: an approximate answer is worse than none here. |
 | `find_relationships` | The snapshot's relationship graph. | SIDX only. Direction `incoming`/`outgoing`, kind `implementation`/`override`/`type-definition`. |
-| `index_status` | Whether an index exists, its model and size, drift behind HEAD, sync phase. | Diagnostic — outside the untrusted boundary. |
+| `index_status` | Whether an index exists, its model and size, drift behind HEAD, sync phase. Carries one trailing `Update:` line when a newer release has been verified. | Diagnostic — outside the untrusted boundary. The update line appears only if release lookups were switched on and the newest version is ahead of this one; it is read from the runtime's state file, never from the network. |
 | `index_refresh` | Incremental refresh after a commit. | Refuses to run large work inline and returns the background command instead. |
 | `index_unload` | Frees a loaded index's memory immediately. | Leaves the file on disk; the next search reloads it in about a second. |
 | `lsp_open_document` | Opens a document in its language server, making it authoritative. | Versions must increase monotonically. Live servers are off by default. |
@@ -108,6 +108,11 @@ is alive, the queue and quarantine, the policies actually in effect, and the rep
 
 Read-only, and it starts nothing — including the broker. The exit code is non-zero only for a
 real fault: a stopped broker is a note, because it starts on demand.
+
+It also carries an `update` line: whether release lookups are switched on, and what the last one
+found. Read from the state file, never from the network — a diagnostic that quietly called GitHub
+would be a second, unthrottled caller of the thing the policy exists to ration. A newer release is
+a warning rather than a failure, for the same reason a stopped broker is a note.
 
 ## Reading what the local models actually did
 
