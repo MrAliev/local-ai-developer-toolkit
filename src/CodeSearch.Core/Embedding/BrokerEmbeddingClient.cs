@@ -61,7 +61,25 @@ public sealed class BrokerEmbeddingClient(
         return result.Value.Embeddings
             .Select(vector =>
             {
-                var values = vector.Select(value => (float)value).ToArray();
+                // The transport rejects non-finite doubles, but a finite double past
+                // float.MaxValue casts to Infinity, the sum of squares follows, the scale
+                // becomes zero and the product NaN — durably persisted into the index and
+                // poisoning every ranking comparison it touches (#205). Checked here, at the
+                // conversion, so the invariant does not hang on one transport implementation.
+                var values = new float[vector.Count];
+                for (var index = 0; index < values.Length; index++)
+                {
+                    var value = (float)vector[index];
+                    if (!float.IsFinite(value))
+                    {
+                        throw new InvalidDataException(
+                            $"The embedding backend returned {vector[index]} at position " +
+                            $"{index}, which is not representable as a finite float.");
+                    }
+
+                    values[index] = value;
+                }
+
                 EmbeddingVector.Normalize(values);
                 return values;
             })
@@ -83,6 +101,11 @@ public sealed class EmbeddingChunkException(
 
 public static class EmbeddingVector
 {
+    /// <summary>
+    /// Normalization refuses what it cannot normalize (#205): a zero vector used to pass
+    /// through silently and a non-finite sum produced NaNs that survived into the durable
+    /// index. Both are backend anomalies worth one loud failure, not a poisoned ranking.
+    /// </summary>
     public static void Normalize(float[] vector)
     {
         ArgumentNullException.ThrowIfNull(vector);
@@ -92,15 +115,23 @@ public static class EmbeddingVector
             sum += value * value;
         }
 
-        if (sum <= 0)
+        if (!double.IsFinite(sum) || sum <= 0)
         {
-            return;
+            throw new InvalidDataException(
+                sum <= 0
+                    ? "The embedding backend returned a zero vector, which cannot be normalized."
+                    : "The embedding vector's magnitude is not finite.");
         }
 
         var scale = (float)(1.0 / Math.Sqrt(sum));
         for (var index = 0; index < vector.Length; index++)
         {
             vector[index] *= scale;
+            if (!float.IsFinite(vector[index]))
+            {
+                throw new InvalidDataException(
+                    "Normalizing the embedding produced a non-finite value.");
+            }
         }
     }
 }

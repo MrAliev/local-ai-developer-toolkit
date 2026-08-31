@@ -112,7 +112,31 @@ public sealed class CodeIndex : ISearchableIndex
     ReadOnlySpan<byte> ISearchableIndex.FileHashAt(int index) =>
         Files[Chunks[index].FileIndex].Hash;
 
+    /// <summary>
+    /// Loads a durable binary cache without trusting anything the file says about itself
+    /// (#205). Counts and string lengths used to size allocations and loops unchecked, so a
+    /// corrupt or truncated index answered with an OOM or a random runtime exception instead
+    /// of the one message that helps: the index is corrupt, rebuild it. Every count is now
+    /// bounded by the bytes actually remaining, every string length is validated before its
+    /// allocation, hashes must be exactly 32 bytes, cross-references and enums must resolve,
+    /// vectors must be finite, and a full read must end at the end of the file.
+    /// </summary>
     public static CodeIndex Load(string path, bool withVectors = true)
+    {
+        try
+        {
+            return LoadValidated(path, withVectors);
+        }
+        catch (EndOfStreamException exception)
+        {
+            throw new InvalidDataException(
+                $"Index '{path}' ended mid-record. The index is corrupt; rebuild it with " +
+                "`localai sync`.",
+                exception);
+        }
+    }
+
+    private static CodeIndex LoadValidated(string path, bool withVectors)
     {
         using var stream = File.OpenRead(path);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
@@ -131,21 +155,26 @@ public sealed class CodeIndex : ISearchableIndex
         }
 
         var dim = reader.ReadInt32();
-        var model = reader.ReadString();
-        var root = reader.ReadString();
-        var commit = reader.ReadString();
+        if (dim is < 1 or > 100_000)
+        {
+            throw Corrupt(path, $"embedding dimension {dim}");
+        }
+
+        var model = ReadBoundedString(reader, stream, path);
+        var root = ReadBoundedString(reader, stream, path);
+        var commit = ReadBoundedString(reader, stream, path);
         var indexedAt = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
 
         var baseCommit = string.Empty;
         var deleted = new List<string>();
         if (version >= 2)
         {
-            baseCommit = reader.ReadString();
-            var deletedCount = reader.ReadInt32();
+            baseCommit = ReadBoundedString(reader, stream, path);
+            var deletedCount = ReadBoundedCount(reader, stream, path, minimumEntryBytes: 1);
             deleted.Capacity = deletedCount;
             for (var i = 0; i < deletedCount; i++)
             {
-                deleted.Add(reader.ReadString());
+                deleted.Add(ReadBoundedString(reader, stream, path));
             }
         }
 
@@ -155,43 +184,95 @@ public sealed class CodeIndex : ISearchableIndex
         string? dirtyHash = null;
         if (version >= 3)
         {
-            repositoryId = reader.ReadString();
-            generationId = reader.ReadString();
-            gitTree = reader.ReadString();
-            dirtyHash = reader.ReadBoolean() ? reader.ReadString() : null;
+            repositoryId = ReadBoundedString(reader, stream, path);
+            generationId = ReadBoundedString(reader, stream, path);
+            gitTree = ReadBoundedString(reader, stream, path);
+            dirtyHash = reader.ReadBoolean()
+                ? ReadBoundedString(reader, stream, path)
+                : null;
         }
 
-        var fileCount = reader.ReadInt32();
+        var fileCount = ReadBoundedCount(reader, stream, path, minimumEntryBytes: 41);
         var files = new List<IndexedFile>(fileCount);
         for (var i = 0; i < fileCount; i++)
         {
+            var relPath = ReadBoundedString(reader, stream, path);
+            var hash = reader.ReadBytes(32);
+            if (hash.Length != 32)
+            {
+                throw Corrupt(path, $"a {hash.Length}-byte file hash");
+            }
+
             files.Add(new IndexedFile
             {
-                RelPath = reader.ReadString(),
-                Hash = reader.ReadBytes(32),
+                RelPath = relPath,
+                Hash = hash,
                 ChunkStart = reader.ReadInt32(),
                 ChunkCount = reader.ReadInt32(),
             });
         }
 
-        var chunkCount = reader.ReadInt32();
+        var chunkCount = ReadBoundedCount(reader, stream, path, minimumEntryBytes: 12);
         var chunks = new List<ChunkMeta>(chunkCount);
         for (var i = 0; i < chunkCount; i++)
         {
+            var fileIndex = reader.ReadInt32();
+            if (fileIndex < 0 || fileIndex >= files.Count)
+            {
+                throw Corrupt(path, $"chunk file index {fileIndex} of {files.Count}");
+            }
+
+            var kind = (ChunkKind)reader.ReadByte();
+            if (!Enum.IsDefined(kind))
+            {
+                throw Corrupt(path, $"chunk kind {(byte)kind}");
+            }
+
+            var symbol = ReadBoundedString(reader, stream, path);
+            var signature = ReadBoundedString(reader, stream, path);
+            var chunkNamespace = ReadBoundedString(reader, stream, path);
+            var lexicalText = version >= 4
+                ? ReadBoundedString(reader, stream, path)
+                : string.Empty;
+            var startLine = reader.ReadInt32();
+            var endLine = reader.ReadInt32();
+            if (startLine < 1 || endLine < startLine)
+            {
+                throw Corrupt(path, $"chunk line range {startLine}..{endLine}");
+            }
+
             chunks.Add(new ChunkMeta
             {
-                FileIndex = reader.ReadInt32(),
-                Kind = (ChunkKind)reader.ReadByte(),
-                Symbol = reader.ReadString(),
-                Signature = reader.ReadString(),
-                Namespace = reader.ReadString(),
-                LexicalText = version >= 4 ? reader.ReadString() : string.Empty,
-                StartLine = reader.ReadInt32(),
-                EndLine = reader.ReadInt32(),
+                FileIndex = fileIndex,
+                Kind = kind,
+                Symbol = symbol,
+                Signature = signature,
+                Namespace = chunkNamespace,
+                LexicalText = lexicalText,
+                StartLine = startLine,
+                EndLine = endLine,
             });
         }
 
-        var vectors = withVectors ? ReadVectors(reader, chunkCount, dim) : [];
+        foreach (var file in files)
+        {
+            if (file.ChunkStart < 0 ||
+                file.ChunkCount < 0 ||
+                (long)file.ChunkStart + file.ChunkCount > chunks.Count)
+            {
+                throw Corrupt(
+                    path,
+                    $"file chunk range {file.ChunkStart}+{file.ChunkCount} of {chunks.Count}");
+            }
+        }
+
+        var vectors = withVectors ? ReadVectors(reader, chunkCount, dim, path) : [];
+        if (withVectors && stream.Position != stream.Length)
+        {
+            throw Corrupt(
+                path,
+                $"{stream.Length - stream.Position} trailing bytes after the vector block");
+        }
 
         return new CodeIndex
         {
@@ -211,6 +292,51 @@ public sealed class CodeIndex : ISearchableIndex
             DirtyHash = dirtyHash,
             FormatVersion = version,
         };
+    }
+
+    private static InvalidDataException Corrupt(string path, string what) =>
+        new($"Index '{path}' declares {what}. The index is corrupt; rebuild it with `localai sync`.");
+
+    /// <summary>
+    /// Wire-compatible with BinaryReader.ReadString — the same 7-bit length prefix — but the
+    /// declared length is validated against the bytes actually remaining before anything is
+    /// allocated, so a corrupt prefix cannot ask for gigabytes.
+    /// </summary>
+    private static string ReadBoundedString(BinaryReader reader, Stream stream, string path)
+    {
+        var length = reader.Read7BitEncodedInt();
+        if (length < 0 || length > stream.Length - stream.Position)
+        {
+            throw Corrupt(path, $"a {length}-byte string with {stream.Length - stream.Position} bytes left");
+        }
+
+        if (length == 0)
+        {
+            return string.Empty;
+        }
+
+        var bytes = reader.ReadBytes(length);
+        if (bytes.Length != length)
+        {
+            throw Corrupt(path, "a string ending mid-record");
+        }
+
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    private static int ReadBoundedCount(
+        BinaryReader reader,
+        Stream stream,
+        string path,
+        long minimumEntryBytes)
+    {
+        var count = reader.ReadInt32();
+        if (count < 0 || count > (stream.Length - stream.Position) / minimumEntryBytes)
+        {
+            throw Corrupt(path, $"{count} entries with {stream.Length - stream.Position} bytes left");
+        }
+
+        return count;
     }
 
     public void Save(string path)
@@ -282,12 +408,24 @@ public sealed class CodeIndex : ISearchableIndex
     // Both directions index by float element rather than by byte offset. BlockCopy's offsets are
     // byte-based ints, which would overflow at 512MB of vectors - reachable here (50k chunks x
     // 2560 dims is already 512MB), so spans do the copying instead.
-    private static float[] ReadVectors(BinaryReader reader, int chunkCount, int dim)
+    private static float[] ReadVectors(
+        BinaryReader reader,
+        int chunkCount,
+        int dim,
+        string path)
     {
         var total = (long)chunkCount * dim;
         if (total > int.MaxValue)
         {
             throw new InvalidDataException($"Index holds {total} floats, past the {int.MaxValue} array limit.");
+        }
+
+        var stream = reader.BaseStream;
+        if (total * sizeof(float) > stream.Length - stream.Position)
+        {
+            throw Corrupt(
+                path,
+                $"{total} vector floats with {stream.Length - stream.Position} bytes left");
         }
 
         var vectors = new float[total];
@@ -312,8 +450,18 @@ public sealed class CodeIndex : ISearchableIndex
                 filled += read;
             }
 
-            MemoryMarshal.Cast<byte, float>(slab.AsSpan(0, bytesWanted))
-                .CopyTo(vectors.AsSpan(floatsRead, floatsThisPass));
+            var floats = MemoryMarshal.Cast<byte, float>(slab.AsSpan(0, bytesWanted));
+            foreach (var value in floats)
+            {
+                if (!float.IsFinite(value))
+                {
+                    // One NaN poisons every comparison it takes part in, and the ranking
+                    // instability it causes looks nothing like the corruption it is.
+                    throw Corrupt(path, "a non-finite vector value");
+                }
+            }
+
+            floats.CopyTo(vectors.AsSpan(floatsRead, floatsThisPass));
 
             floatsRead += floatsThisPass;
         }
