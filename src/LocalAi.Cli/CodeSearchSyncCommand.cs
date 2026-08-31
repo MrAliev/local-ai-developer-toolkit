@@ -4,11 +4,25 @@ using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Semantics;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Indexing;
 using LocalAi.Repository;
 using System.Text;
 using System.Text.Json;
 
 namespace LocalAi.Cli;
+
+/// <summary>
+/// Another sync already holds this repository's gate. A named outcome, not a failure: the
+/// other run is doing the same work, its phase and ETA are in the progress file, and the
+/// caller's next commit will sync again anyway. Hooks and MCP callers must not queue for
+/// the minutes a full generation build can take.
+/// </summary>
+public sealed class RepositorySyncBusyException(string repositoryId) : Exception(
+    $"Another sync is already building repository {repositoryId}. " +
+    "Its progress is visible in `localai repo status`; run sync again once it completes.")
+{
+    public string RepositoryId { get; } = repositoryId;
+}
 
 public sealed record CodeSearchSyncResult(
     string RepositoryId,
@@ -44,6 +58,10 @@ public static class CodeSearchSyncCommand
     // would keep serving the previous semantic graph for an already indexed commit.
     public const int CurrentSemanticGenerationVersion = 10;
 
+    // Long enough to ride out another run's short publish transaction, far too short to
+    // queue behind its embedding phase: a blocked caller exits with the named busy outcome.
+    private static readonly TimeSpan SyncGateWaitBudget = TimeSpan.FromSeconds(5);
+
     internal sealed record SemanticBuildResult(
         SemanticIndex Index,
         IReadOnlyList<SemanticAdapterStatus> AdapterStatuses,
@@ -63,6 +81,15 @@ public static class CodeSearchSyncCommand
         bool requireSemantics = false)
     {
         var requested = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
+        // The gate comes before the first write of any shared state — progress included.
+        // Everything below (progress, manifest, generation directories, checkpoints, the
+        // current pointer, prune) is single-writer while the lease is held, which is what
+        // lets the failure path stamp Failed without asking whose progress it stamps (#199).
+        using var syncLease = RepositorySyncGate.TryAcquire(
+            requested.RepositoryId,
+            SyncGateWaitBudget,
+            cancellationToken)
+            ?? throw new RepositorySyncBusyException(requested.RepositoryId);
         var progressStore = new RepositoryIndexProgressStore(
             requested.RepositoryRuntimeRoot);
         var manifestStore = new RepositoryManifestStore(
@@ -326,7 +353,7 @@ public static class CodeSearchSyncCommand
             }
 
             ReportPhase(RepositoryIndexProgressPhase.Publishing, requested.WorkingRoot);
-            store.SetCurrent(generation);
+            store.SetCurrent(generation, current);
             var manifest = new RepositoryManifest(
                 requested.RepositoryId,
                 commonDirectory,

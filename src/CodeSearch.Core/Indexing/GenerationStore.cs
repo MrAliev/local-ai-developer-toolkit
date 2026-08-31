@@ -150,17 +150,58 @@ public sealed class GenerationStore
                 LocalAiJson.Strict)
             : null;
 
+    /// <summary>
+    /// Unconditional pointer write, for test setup and repair paths. A sync publishes
+    /// through the expectation overload below: an unconditional write is how an older run
+    /// used to move the index backwards over a newer one (#199).
+    /// </summary>
     public void SetCurrent(GenerationManifest generation)
     {
         ArgumentNullException.ThrowIfNull(generation);
         ReadManifest(generation.Identity.Id);
+        WriteCurrent(generation);
+    }
+
+    /// <summary>
+    /// Publishes the pointer only while it still is what the caller observed when planning.
+    /// The sync gate already serializes runs; this is the second guard, for the gate a
+    /// killed process abandoned — the same belt-and-braces the launcher's activation keeps
+    /// with --if-current-sha256. A pointer that moved since planning means this run's whole
+    /// view is stale, and a stale run must not make itself current.
+    /// </summary>
+    public void SetCurrent(
+        GenerationManifest generation,
+        GenerationPointer? expectedCurrent)
+    {
+        ArgumentNullException.ThrowIfNull(generation);
+        ReadManifest(generation.Identity.Id);
+        var observed = ReadCurrent();
+        var matches = observed is null
+            ? expectedCurrent is null
+            : expectedCurrent is not null &&
+              string.Equals(
+                  observed.GenerationId,
+                  expectedCurrent.GenerationId,
+                  StringComparison.Ordinal);
+        if (!matches)
+        {
+            throw new InvalidOperationException(
+                "current_pointer_changed: the repository's current generation moved from " +
+                $"'{expectedCurrent?.GenerationId ?? "none"}' to " +
+                $"'{observed?.GenerationId ?? "none"}' while this sync ran; refusing to " +
+                "publish a stale result. Run sync again.");
+        }
+
+        WriteCurrent(generation);
+    }
+
+    private void WriteCurrent(GenerationManifest generation) =>
         AtomicWriteJson(
             _currentPath,
             new GenerationPointer(
                 generation.Identity.Id,
                 generation.Identity.DevTree,
                 DateTimeOffset.UtcNow));
-    }
 
     public string IndexPath(string generationId) =>
         Path.Combine(_generationsRoot, generationId, "base.cidx");

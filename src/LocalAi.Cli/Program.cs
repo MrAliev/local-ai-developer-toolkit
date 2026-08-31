@@ -21,6 +21,13 @@ catch (EmbeddingUnavailableException exception)
     Console.Error.WriteLine($"localai: {exception.Message}");
     return 75;
 }
+catch (RepositorySyncBusyException exception)
+{
+    // The same "try again later" family as an unreachable embedder: the other run is doing
+    // this run's work, and a hook or script must be able to tell that from a real fault.
+    Console.Error.WriteLine($"localai: {exception.Message}");
+    return 75;
+}
 catch (EmbeddingChunkException exception)
 {
     Console.Error.WriteLine($"localai: {exception.Message}");
