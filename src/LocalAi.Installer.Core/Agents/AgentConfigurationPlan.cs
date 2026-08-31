@@ -50,10 +50,25 @@ internal static class AgentConfigurationFileOperations
             path + "." + now.UtcDateTime.ToString("yyyyMMdd-HHmmss") + ".bak");
     }
 
+    /// <summary>
+    /// Applies the plan as a compare-and-swap against another writer, not merely a check.
+    ///
+    /// The old shape read the file, compared its hash, and replaced it — and a Codex, Claude
+    /// or editor save landing between the check and the replace was silently clobbered, with
+    /// the backup made from the old content rather than from the version actually displaced
+    /// (#203). The swap itself now captures what it displaced: File.Replace parks the real
+    /// displaced bytes at the backup path, and a displaced hash that does not match the
+    /// expectation means the concurrent writer lost the race into the backup slot — it is
+    /// put back and the apply refuses, exactly as if the check had caught it.
+    ///
+    /// <paramref name="beforeSwap"/> exists for the tests that pin this window: it runs
+    /// after the temporary is written and immediately before the swap.
+    /// </summary>
     public static async Task ApplyAsync(
         AgentConfigurationPlan plan,
         Func<string, byte[]> readBack,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? beforeSwap = null)
     {
         var applied = new List<AgentConfigurationFilePlan>();
         try
@@ -70,22 +85,44 @@ internal static class AgentConfigurationFileOperations
                 }
 
                 Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file.Path)!);
-                if (File.Exists(file.Path))
-                {
-                    await File.WriteAllBytesAsync(file.BackupPath, current, cancellationToken);
-                }
-
                 var temporary = file.Path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 try
                 {
                     await File.WriteAllBytesAsync(temporary, file.AfterBytes, cancellationToken);
+                    beforeSwap?.Invoke(file.Path);
                     if (File.Exists(file.Path))
                     {
-                        File.Replace(temporary, file.Path, null);
+                        File.Replace(
+                            temporary,
+                            file.Path,
+                            file.BackupPath,
+                            ignoreMetadataErrors: true);
+                        var displaced = await File.ReadAllBytesAsync(
+                            file.BackupPath,
+                            CancellationToken.None);
+                        if (!string.Equals(
+                                Sha256(displaced),
+                                file.ExpectedSha256,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Copy(file.BackupPath, file.Path, overwrite: true);
+                            throw new InvalidOperationException(
+                                "Refusing to apply agent configuration because the file changed concurrently.");
+                        }
                     }
                     else
                     {
-                        File.Move(temporary, file.Path);
+                        try
+                        {
+                            File.Move(temporary, file.Path);
+                        }
+                        catch (IOException) when (File.Exists(file.Path))
+                        {
+                            // The file appeared between the plan and the swap: somebody
+                            // else's content is there now, and it stays theirs.
+                            throw new InvalidOperationException(
+                                "Refusing to apply agent configuration because the file changed concurrently.");
+                        }
                     }
 
                     applied.Add(file);
@@ -106,11 +143,23 @@ internal static class AgentConfigurationFileOperations
                 }
             }
         }
-        catch
+        catch (Exception exception)
         {
+            var keptExternal = new List<string>();
             for (var index = applied.Count - 1; index >= 0; index--)
             {
-                Restore(applied[index]);
+                if (!Restore(applied[index]))
+                {
+                    keptExternal.Add(applied[index].Path);
+                }
+            }
+
+            if (keptExternal.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Agent configuration was rolled back, except files changed by another " +
+                    $"writer after they were applied — left as found: {string.Join(", ", keptExternal)}.",
+                    exception);
             }
 
             throw;
@@ -126,8 +175,25 @@ internal static class AgentConfigurationFileOperations
             "(?im)(\"?(?:api[_-]?key|apikey|client[_-]?secret|clientsecret|authorization|token|secret|password)\"?\\s*[:=]\\s*)([\"'])(.*?)\\2",
             "$1$2<redacted>$2");
 
-    private static void Restore(AgentConfigurationFilePlan file)
+    /// <summary>
+    /// Restores one applied file, but only while it still holds what the apply wrote: an
+    /// external edit made after the apply is somebody's work, and rolling the installer's
+    /// change back must not take theirs with it (#203). Returns false when the file was
+    /// left as found.
+    /// </summary>
+    private static bool Restore(AgentConfigurationFilePlan file)
     {
+        var current = File.Exists(file.Path)
+            ? File.ReadAllBytes(file.Path)
+            : [];
+        if (!string.Equals(
+                Sha256(current),
+                file.AfterSha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         if (File.Exists(file.BackupPath))
         {
             File.Copy(file.BackupPath, file.Path, overwrite: true);
@@ -140,5 +206,7 @@ internal static class AgentConfigurationFileOperations
         {
             File.WriteAllBytes(file.Path, file.BeforeBytes);
         }
+
+        return true;
     }
 }
