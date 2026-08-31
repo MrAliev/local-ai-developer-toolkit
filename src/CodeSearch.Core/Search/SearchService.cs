@@ -81,11 +81,14 @@ public sealed record SearchChunk(
 /// Resolves the repository, loads its base index plus this worktree's overlay, embeds the query
 /// with the index's own model, and searches.
 /// </summary>
-public sealed class SearchService
+public sealed class SearchService : IDisposable
 {
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<string, IEmbeddingClient> _embeddingClientFactory;
     private readonly Func<string, CancellationToken, Task<string>> _sourceTextReader;
+    private readonly TimeProvider _timeProvider;
+    private readonly object _timerGate = new();
+    private ITimer? _evictionTimer;
 
     /// <summary>
     /// The installation this service reads indexes from. Null means the machine's own — the
@@ -97,7 +100,8 @@ public sealed class SearchService
     public SearchService(
         Func<string, IEmbeddingClient>? embeddingClientFactory = null,
         Func<string, CancellationToken, Task<string>>? sourceTextReader = null,
-        string? runtimeRoot = null)
+        string? runtimeRoot = null,
+        TimeProvider? timeProvider = null)
     {
         _embeddingClientFactory = embeddingClientFactory ??
             (model => new BrokerEmbeddingClient(
@@ -105,6 +109,7 @@ public sealed class SearchService
                 BrokerClientFactory.CreateDefault()));
         _sourceTextReader = sourceTextReader ?? File.ReadAllTextAsync;
         _runtimeRoot = runtimeRoot;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -138,7 +143,7 @@ public sealed class SearchService
 
     private sealed record CacheEntry(DateTime FileStamp, CodeIndex Index)
     {
-        public DateTime LastUsedUtc { get; set; } = DateTime.UtcNow;
+        public required DateTime LastUsedUtc { get; set; }
     }
 
     public async Task<IReadOnlyList<SearchHit>> SearchAsync(
@@ -565,7 +570,11 @@ public sealed class SearchService
         }
 
         var index = CodeIndex.Load(indexPath);
-        _cache[indexPath] = new CacheEntry(File.GetLastWriteTimeUtc(indexPath), index);
+        _cache[indexPath] = new CacheEntry(File.GetLastWriteTimeUtc(indexPath), index)
+        {
+            LastUsedUtc = NowUtc,
+        };
+        EnsureEvictionScheduled();
         return index;
     }
 
@@ -586,24 +595,77 @@ public sealed class SearchService
             return null;
         }
 
-        cached.LastUsedUtc = DateTime.UtcNow;
+        cached.LastUsedUtc = NowUtc;
         return cached.Index;
     }
 
+    private DateTime NowUtc => _timeProvider.GetUtcNow().UtcDateTime;
+
     /// <summary>
     /// Drops indexes untouched for longer than <see cref="IdleTimeout"/>. Called on every load
-    /// rather than from a timer: a server with no traffic has nothing to evict anyway, and a
-    /// timer would keep an otherwise idle process waking up.
+    /// and from the eviction timer: load-only eviction meant the last search of a session left
+    /// its ~700MB index in memory for as long as the window stayed open, because the request
+    /// that would have evicted it never came (#201). The old "a server with no traffic has
+    /// nothing to evict" reasoning had it backwards — no traffic is exactly when the previously
+    /// loaded index sits here unused.
     /// </summary>
     private void EvictIdle()
     {
-        var cutoff = DateTime.UtcNow - IdleTimeout;
+        var cutoff = NowUtc - IdleTimeout;
         foreach (var (path, entry) in _cache)
         {
             if (entry.LastUsedUtc < cutoff)
             {
                 _cache.TryRemove(path, out _);
             }
+        }
+    }
+
+    /// <summary>
+    /// Starts the eviction timer when something is actually cached, and lets it stop itself
+    /// once the cache is empty — an idle process with nothing loaded gets zero wake-ups. The
+    /// timer only removes cache entries; the aggressive working-set trim stays with the
+    /// explicit <see cref="UnloadAll"/>, so a background tick never causes a latency spike.
+    /// </summary>
+    private void EnsureEvictionScheduled()
+    {
+        var period = IdleTimeout > TimeSpan.Zero
+            ? IdleTimeout
+            : TimeSpan.FromMilliseconds(1);
+        lock (_timerGate)
+        {
+            _evictionTimer ??= _timeProvider.CreateTimer(
+                _ => EvictOnTimer(),
+                null,
+                period,
+                period);
+        }
+    }
+
+    private void EvictOnTimer()
+    {
+        EvictIdle();
+        if (!_cache.IsEmpty)
+        {
+            return;
+        }
+
+        lock (_timerGate)
+        {
+            if (_cache.IsEmpty)
+            {
+                _evictionTimer?.Dispose();
+                _evictionTimer = null;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_timerGate)
+        {
+            _evictionTimer?.Dispose();
+            _evictionTimer = null;
         }
     }
 
