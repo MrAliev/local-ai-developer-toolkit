@@ -26,9 +26,30 @@ public sealed record AgentConfigurationPlan(
 
 internal static class AgentConfigurationFileOperations
 {
+    // throwOnInvalidBytes: a config that is not valid UTF-8 (another encoding, or a
+    // corrupted file) must refuse the plan up front. The lenient default would decode it
+    // with U+FFFD replacement characters, the rewrite would silently re-encode those, and
+    // apply would corrupt the parts of the user's file the installer promised to preserve
+    // byte-for-byte (#209/m2).
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
     public static string DecodeUtf8(byte[] bytes)
     {
-        var text = Encoding.UTF8.GetString(bytes);
+        string text;
+        try
+        {
+            text = StrictUtf8.GetString(bytes);
+        }
+        catch (DecoderFallbackException error)
+        {
+            throw new InvalidOperationException(
+                "The existing configuration file is not valid UTF-8; refusing to rewrite " +
+                "it. Fix or remove the file and run the installer again.",
+                error);
+        }
+
         return text.Length > 0 && text[0] == '\uFEFF'
             ? text[1..]
             : text;

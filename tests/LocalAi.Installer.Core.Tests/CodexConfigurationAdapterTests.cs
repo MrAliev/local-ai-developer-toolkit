@@ -358,7 +358,7 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
     [InlineData("[mcp_servers]\ncodesearch = { command = \"old\", args = [] }\n")]
     [InlineData("mcp_servers.codesearch.command = \"old\"\n")]
     [InlineData("not valid toml = [\n")]
-    [InlineData("approval_policy = \"never\n")]
+    [InlineData("[mcp_servers.codesearch]\ncommand = \"x\"\nargs = []\ntimeout = 1.5\n")]
     public void Unknown_or_malformed_toml_blocks_writes(string config)
     {
         var path = Path.Combine(home, ".codex", "config.toml");
@@ -369,6 +369,69 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
             Adapter().Preview(AgentIntegrationChoice.McpOnly));
 
         Assert.Contains("TOML", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// #209/m1: valid TOML the installer does not manage used to refuse the whole install
+    /// because the validator policed every line of the user's file against the few
+    /// constructs it understood. Foreign sections are preserved byte-for-byte, so they
+    /// need tolerance, not policing.
+    /// </summary>
+    [Theory]
+    [InlineData("[profiles.fast]\ntemperature = 0.7\n", "temperature = 0.7")]
+    [InlineData("[history]\nsince = 2026-08-31T12:00:00Z\n", "since = 2026-08-31T12:00:00Z")]
+    [InlineData(
+        "[limits]\nquota = { cpu = 2, memory = \"4g\" }\n",
+        "quota = { cpu = 2, memory = \"4g\" }")]
+    [InlineData("[sandbox]\nallow = [\n  \"read\",\n  \"write\",\n]\n", "  \"read\",")]
+    [InlineData("broken_but_not_ours = \"never\n", "broken_but_not_ours = \"never")]
+    public void Toml_the_installer_does_not_manage_is_tolerated_and_preserved(
+        string foreign,
+        string survivingLine)
+    {
+        var path = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, foreign, Encoding.UTF8);
+
+        var after = SinglePreview(
+            @".codex\config.toml",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterText;
+
+        Assert.Contains(survivingLine, after, StringComparison.Ordinal);
+        Assert.Contains("[mcp_servers.codesearch]", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_multiline_string_is_refused_because_it_can_spoof_a_managed_header()
+    {
+        var path = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(
+            path,
+            "[notes]\ntext = \"\"\"\n[mcp_servers.codesearch]\n\"\"\"\n",
+            Encoding.UTF8);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            Adapter().Preview(AgentIntegrationChoice.McpOnly));
+
+        Assert.Contains("multiline", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// #209/m2: bytes that are not valid UTF-8 used to decode into U+FFFD replacement
+    /// characters, and apply would re-encode those over the user's original bytes.
+    /// </summary>
+    [Fact]
+    public void A_config_that_is_not_valid_utf8_is_refused_before_any_plan_exists()
+    {
+        var path = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, [0x5B, 0x6E, 0x5D, 0x0A, 0xC3, 0x28]);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            Adapter().Preview(AgentIntegrationChoice.McpOnly));
+
+        Assert.Contains("UTF-8", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

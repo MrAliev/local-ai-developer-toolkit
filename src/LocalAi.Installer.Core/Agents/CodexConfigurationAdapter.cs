@@ -213,11 +213,40 @@ public sealed class CodexConfigurationAdapter(
         "args = [" + string.Join(", ", registration.Arguments.Select(TomlString)) + "]\n" +
         DefaultApprovalKey + " = " + TomlString(DefaultApprovalValue);
 
+    /// <summary>
+    /// Validates what the line-oriented rewriter actually depends on, and nothing else.
+    ///
+    /// The previous shape validated every line of the whole user file against the handful
+    /// of constructs it happened to understand, so a valid float, datetime, inline table or
+    /// multiline array in a section this installer never touches refused the install
+    /// (#209/m1). Unrelated sections are preserved byte-for-byte, so they need no policing —
+    /// with one exception: a multiline string could contain a line that looks exactly like a
+    /// managed section header, and the rewriter would edit inside somebody's string. That
+    /// one construct is refused everywhere; strict per-line validation applies only inside
+    /// the managed sections the rewriter edits.
+    /// </summary>
     private static void ValidateToml(string toml)
     {
-        foreach (var line in toml.Replace("\r\n", "\n").Split('\n'))
+        if (toml.Contains("\"\"\"", StringComparison.Ordinal) ||
+            toml.Contains("'''", StringComparison.Ordinal))
         {
-            ValidateSupportedTomlLine(line);
+            throw new InvalidOperationException(
+                "Unsupported TOML MCP layout: multiline strings cannot be edited line by line.");
+        }
+
+        foreach (Match managed in Regex.Matches(
+                     toml,
+                     @"(?m)^[ \t]*\[mcp_servers\.(?:codesearch|locallm)(?:\.[A-Za-z0-9_.-]+)?\][ \t]*$"))
+        {
+            var sectionStart = managed.Index + managed.Length;
+            var next = Regex.Match(toml[sectionStart..], @"(?m)^\s*\[");
+            var section = next.Success
+                ? toml.Substring(sectionStart, next.Index)
+                : toml[sectionStart..];
+            foreach (var line in section.Replace("\r\n", "\n").Split('\n'))
+            {
+                ValidateSupportedTomlLine(line);
+            }
         }
 
         if (toml.Count(character => character == '[') != toml.Count(character => character == ']'))
