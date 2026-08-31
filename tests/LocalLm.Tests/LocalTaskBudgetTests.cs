@@ -46,7 +46,8 @@ public sealed class LocalTaskBudgetTests : IDisposable
         var path = Path.Combine(_work, "huge.txt");
         await File.WriteAllTextAsync(
             path,
-            new string('A', 720_000) + new string('B', 1_000));
+            new string('A', 720_000) + new string('B', 1_000),
+            TestContext.Current.CancellationToken);
         var client = new CapturingClient();
 
         var result = await new LocalTasks(client).AskAsync(
@@ -65,8 +66,14 @@ public sealed class LocalTaskBudgetTests : IDisposable
     {
         var first = Path.Combine(_work, "first.txt");
         var second = Path.Combine(_work, "second.txt");
-        await File.WriteAllTextAsync(first, new string('A', 720_100));
-        await File.WriteAllTextAsync(second, "SECOND-FILE-CONTENT");
+        await File.WriteAllTextAsync(
+            first,
+            new string('A', 720_100),
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            second,
+            "SECOND-FILE-CONTENT",
+            TestContext.Current.CancellationToken);
         var client = new CapturingClient();
 
         var result = await new LocalTasks(client).AskAsync(
@@ -108,7 +115,10 @@ public sealed class LocalTaskBudgetTests : IDisposable
     public async Task A_pixel_total_past_the_budget_refuses_at_the_metadata_pass()
     {
         var path = Path.Combine(_work, "vast.png");
-        await File.WriteAllBytesAsync(path, CraftPngHeader(30_000, 30_000));
+        await File.WriteAllBytesAsync(
+            path,
+            CraftPngHeader(30_000, 30_000),
+            TestContext.Current.CancellationToken);
         var tasks = new LocalTasks(new CapturingClient());
 
         var error = await Assert.ThrowsAsync<ArgumentException>(
