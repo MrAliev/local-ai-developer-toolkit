@@ -230,6 +230,17 @@ The installer is not Authenticode-signed, so Windows shows *"Windows protected y
 Choose **More info → Run anyway**. The SHA-256 of the file is printed in the release notes,
 so a download can be checked against it if it was passed on by someone else.
 
+The stronger check does not depend on the release page at all: publishing a release
+triggers a workflow that records every asset's digest in GitHub's attestation log, which
+the release page cannot rewrite. With the [GitHub CLI](https://cli.github.com/) installed:
+
+```powershell
+gh attestation verify LocalAi.Installer.exe --repo MrAliev/local-ai-developer-toolkit
+```
+
+A swapped or corrupted download fails this check even if the SHA-256 beside it was swapped
+to match.
+
 The wizard walks through what it finds on the machine, which prerequisites to install (Git,
 Ollama and the language indexers — all through winget, each one consented to individually),
 which release to install, which local models fit the graphics adapter, and which AI clients to

@@ -28,6 +28,10 @@ that signature before acting on anything the manifest says, then checks the pack
 against the SHA-256 recorded inside it. This is why releases can be downloaded anonymously over
 plain HTTPS: an anonymous download of a signed document is as trustworthy as an authenticated
 one. A manifest that fails verification is never retried through a second transport.
+Publishing a release additionally records every asset's digest in GitHub's attestation log
+(`gh attestation verify <file> --repo MrAliev/local-ai-developer-toolkit`), a channel the
+release page cannot rewrite — the check that covers the one artifact the embedded key cannot:
+the installer executable itself, until it carries an Authenticode signature.
 
 **Source-derived output is data, not instructions.** Everything CodeSearch returns from a
 repository — snippets, paths, symbol identifiers, line ranges — is wrapped in a nonce-bound
