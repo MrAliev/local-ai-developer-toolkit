@@ -177,13 +177,17 @@ public static class CodeSearchTools
         """)]
     public static string FindRelationships(
         SemanticNavigationGateway gateway,
+        [Description("Repository-relative source path.")]
         string path,
+        [Description("Zero-based line number.")]
         int line,
+        [Description("Zero-based UTF-16 column.")]
         int utf16Column,
         [Description("incoming or outgoing")]
         string direction = "outgoing",
         [Description("Optional: implementation, override, or type-definition")]
         string? kind = null,
+        [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
         try
@@ -242,8 +246,6 @@ public static class CodeSearchTools
         """)]
     public static async Task<string> LspOpenDocument(
         LanguageServerSessionManager sessions,
-        [Description("Repository root containing the document.")]
-        string root,
         [Description("Repository-relative document path.")]
         string path,
         [Description("LSP language id, for example typescript, python, html, or csharp.")]
@@ -251,11 +253,18 @@ public static class CodeSearchTools
         [Description("Monotonically increasing document version.")]
         int version,
         [Description("Complete current UTF-8 document text.")]
-        string text)
+        string text,
+        [Description("Repository root. Defaults to the repository containing the working directory.")]
+        string? root = null)
     {
         try
         {
-            await sessions.OpenOrUpdateAsync(root, path, languageId, version, text);
+            await sessions.OpenOrUpdateAsync(
+                RepoLocator.ResolveWorkingRoot(root),
+                path,
+                languageId,
+                version,
+                text);
             return $"LSP document open: {path} version {version} ({languageId}).";
         }
         catch (Exception exception)
@@ -268,14 +277,14 @@ public static class CodeSearchTools
     [Description("Closes an in-memory document and restores persistent SIDX navigation for it.")]
     public static async Task<string> LspCloseDocument(
         LanguageServerSessionManager sessions,
-        [Description("Repository root containing the document.")]
-        string root,
         [Description("Repository-relative document path.")]
-        string path)
+        string path,
+        [Description("Repository root. Defaults to the repository containing the working directory.")]
+        string? root = null)
     {
         try
         {
-            await sessions.CloseAsync(root, path);
+            await sessions.CloseAsync(RepoLocator.ResolveWorkingRoot(root), path);
             return $"LSP document closed: {path}.";
         }
         catch (Exception exception)
@@ -407,7 +416,9 @@ public static class CodeSearchTools
         SearchService service,
         [Description("Opaque chunk_id returned by search_code.")]
         string chunkId,
-        [Description("Repository root. Must resolve to the same exact snapshot as the chunk id.")]
+        [Description(
+            "Repository root. Defaults to the repository containing the working directory, " +
+            "and must resolve to the same exact snapshot as the chunk id.")]
         string? root = null,
         CancellationToken cancellationToken = default)
     {
