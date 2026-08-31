@@ -233,7 +233,7 @@ development activity, not a third way in: hand-made builds are never placed into
 runtime, and delivery goes change → release → installer only.
 
 Neither way asks you to obtain any key or certificate. The public key that decides what to
-trust ships embedded inside `LocalAi.Installer.exe`; the manifest is verified against it
+trust ships embedded in every binary this repository builds; the manifest is verified against it
 and the package against the SHA-256 recorded inside that manifest, whichever transport
 delivered them. The one file that embedded key cannot vouch for is the installer itself —
 which is what the two manual checks below are for, and both need nothing but the file.
@@ -459,9 +459,10 @@ through the other transport: a manifest that failed the embedded key is not a tr
 problem, and asking a second channel for the same document until one of them is believed is
 the shape of the attack this design refuses.
 
-What the transport never does is confer trust. The manifest is checked against the key
-embedded in the installer, and the package against the SHA-256 inside that manifest, whichever
-path fetched them. An anonymous download of a signed document is exactly as trustworthy as an
+What the transport never does is confer trust. The manifest is checked against the embedded
+key, and the package against the SHA-256 inside that manifest, whichever path fetched them —
+and by whichever component is asking: the installer, `localai update`, or the optional update
+check, which reads the manifest and installs nothing. An anonymous download of a signed document is exactly as trustworthy as an
 authenticated one.
 
 ## Build and test

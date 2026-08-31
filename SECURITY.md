@@ -22,10 +22,13 @@ Four of these are worth stating precisely, because they are what a report should
 against.
 
 **Releases are signed, transports are not trusted.** Every release manifest is signed with an
-ECDSA P-256 key whose public half is embedded in the installer binary
-(`src/LocalAi.Contracts/Releases/release-signing-public.spki.der`). The installer verifies
-that signature before acting on anything the manifest says, then checks the package archive
-against the SHA-256 recorded inside it. This is why releases can be downloaded anonymously over
+ECDSA P-256 key whose public half is embedded in every binary built from this repository
+(`src/LocalAi.Contracts/Releases/release-signing-public.spki.der`). Three things verify against
+it: the installer, before acting on anything a manifest says; `localai update`, which performs
+the same install from the command line; and the optional update check, which is off until
+somebody switches it on, fetches only the manifest and its signature, sends nothing about the
+machine, and installs nothing under any circumstance. Whoever verifies, the package archive is
+then checked against the SHA-256 recorded inside the manifest. This is why releases can be downloaded anonymously over
 plain HTTPS: an anonymous download of a signed document is as trustworthy as an authenticated
 one. A manifest that fails verification is never retried through a second transport.
 Publishing a release additionally records every asset's digest in GitHub's attestation log

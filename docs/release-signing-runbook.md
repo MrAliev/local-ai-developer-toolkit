@@ -8,9 +8,22 @@ it exists: keeping a copy, proving the copy works, and replacing the key on purp
 
 ## What actually depends on the key
 
-The trust anchor is the public key, embedded as a resource in `LocalAi.Installer.exe`
-(`ReleaseTrustAnchor`). It is used by the installer and by nothing else — an installed runtime
-does not carry it, and no background updater verifies against it.
+The trust anchor is the public key, embedded as a resource in `LocalAi.Contracts`
+(`ReleaseTrustAnchor`) and therefore carried by every component built from it — the installer,
+the CLI and the broker.
+
+Three things verify against it, all of them reading the same anchor:
+
+| Who | When | What a failure means |
+| --- | --- | --- |
+| The installer | Before fetching a package on a manifest's authority | The release is not installed |
+| `localai update` | The same check, from the command line | The update does not happen |
+| The broker's update check | Only when release lookups are switched on, at most once per interval | No update information — never an error, never an install |
+
+The broker's check downloads nothing but the manifest and its signature, and installs nothing
+under any circumstance; what it produces is a version number that a person may act on. That is
+precisely why it verifies: an unsigned answer would let whoever answered the request invent a
+version and send somebody looking for it.
 
 That shape decides how bad the failure modes are.
 
