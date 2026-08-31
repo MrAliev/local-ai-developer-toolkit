@@ -168,14 +168,27 @@ public sealed class RuntimeAcl
         return security;
     }
 
+    /// <summary>
+    /// Walks the runtime tree refusing every reparse point, fail-closed.
+    ///
+    /// A junction inside the runtime root — creatable by the same unprivileged user who owns
+    /// it — used to lead this walk outside the tree, and ApplyAndValidate then rewrote exact
+    /// ACLs over a directory tree that was never LocalAi's (#200). Attributes are read
+    /// without following the link, so the check sees the reparse point itself; a directory
+    /// is re-checked immediately before it is opened, because its attributes may have
+    /// changed since discovery. Refusing every reparse point is also what makes cycles
+    /// impossible: NTFS cannot form a directory cycle without one.
+    /// </summary>
     private static IEnumerable<string> EnumerateRuntimeTree(string runtimeRoot)
     {
+        RefuseReparsePoint(runtimeRoot);
         yield return runtimeRoot;
 
         var pending = new Stack<string>();
         pending.Push(runtimeRoot);
         while (pending.TryPop(out var directory))
         {
+            RefuseReparsePoint(directory);
             string[] entries;
             try
             {
@@ -188,14 +201,63 @@ public sealed class RuntimeAcl
 
             foreach (var entry in entries)
             {
+                FileAttributes attributes;
+                try
+                {
+                    attributes = File.GetAttributes(entry);
+                }
+                catch (FileNotFoundException)
+                {
+                    // The broker atomically moves jobs while this walks; a vanished entry has
+                    // no ACL left to repair.
+                    continue;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    continue;
+                }
+
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw ReparseRefusal(entry);
+                }
+
                 yield return entry;
-                if (Directory.Exists(entry))
+                if ((attributes & FileAttributes.Directory) != 0)
                 {
                     pending.Push(entry);
                 }
             }
         }
     }
+
+    private static void RefuseReparsePoint(string directory)
+    {
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(directory);
+        }
+        catch (FileNotFoundException)
+        {
+            return;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return;
+        }
+
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw ReparseRefusal(directory);
+        }
+    }
+
+    private static InvalidOperationException ReparseRefusal(string path) =>
+        new(
+            $"Runtime ACL refused a reparse point at '{path}': the runtime tree must not " +
+            "contain junctions or symlinks, because repairing ACLs through one would " +
+            "rewrite permissions outside the LocalAi runtime. Remove it and run again.");
 
     private static bool IsDisappearanceCandidate(Exception exception) =>
         exception is IOException or InvalidOperationException;
