@@ -41,6 +41,21 @@ public sealed class LocalTasks
     private const long MaxImageBytes = 30 * 1024 * 1024;
 
     /// <summary>
+    /// The aggregate bounds (#206). Per-item limits alone did not bound the call: many files
+    /// or images, each individually acceptable, were all materialized before any limit was
+    /// consulted, and one local MCP call could take the server down. The counts and totals
+    /// are checked against metadata before anything is read, and text is streamed into the
+    /// shared character budget rather than concatenated first.
+    /// </summary>
+    private const int MaxAskFiles = 64;
+
+    private const int MaxImageCount = 8;
+
+    private const long MaxTotalImageBytes = 60 * 1024 * 1024;
+
+    private const long MaxTotalImagePixels = 80_000_000;
+
+    /// <summary>
     /// Text sent to a local model in one call. Well inside these models' windows, and past this a
     /// single answer stops being trustworthy anyway.
     /// </summary>
@@ -82,11 +97,22 @@ public sealed class LocalTasks
             throw new ArgumentException("No image paths given.", nameof(paths));
         }
 
-        var images = new List<string>(paths.Count);
+        if (paths.Count > MaxImageCount)
+        {
+            throw new ArgumentException(
+                $"{paths.Count} images exceed the {MaxImageCount}-image limit for one call; " +
+                "split the request.",
+                nameof(paths));
+        }
+
         var wouldHaveCost = 0;
         long totalImagePixels = 0;
+        long totalImageBytes = 0;
         var described = new List<string>(paths.Count);
+        var fullPaths = new List<string>(paths.Count);
 
+        // Metadata first, bytes second (#206): every base64 string is held in memory at once,
+        // so the totals have to refuse the batch before the first file is materialized.
         foreach (var path in paths)
         {
             var full = Resolve(path);
@@ -101,11 +127,34 @@ public sealed class LocalTasks
                 throw new ArgumentException($"'{full}' is {length / 1024 / 1024}MB, past the {MaxImageBytes / 1024 / 1024}MB limit.");
             }
 
+            totalImageBytes = checked(totalImageBytes + length);
+            if (totalImageBytes > MaxTotalImageBytes)
+            {
+                throw new ArgumentException(
+                    $"The images together exceed the {MaxTotalImageBytes / 1024 / 1024}MB " +
+                    "total limit for one call; split the request.",
+                    nameof(paths));
+            }
+
             var info = ImageInfo.Read(full);
             wouldHaveCost += TokenEstimator.ForImage(info);
             totalImagePixels = checked(
                 totalImagePixels + (long)info.Width * info.Height);
+            if (totalImagePixels > MaxTotalImagePixels)
+            {
+                throw new ArgumentException(
+                    $"The images together exceed the {MaxTotalImagePixels:N0}-pixel " +
+                    "total limit for one call; split the request.",
+                    nameof(paths));
+            }
+
             described.Add($"{Path.GetFileName(full)} ({info.Width}x{info.Height})");
+            fullPaths.Add(full);
+        }
+
+        var images = new List<string>(fullPaths.Count);
+        foreach (var full in fullPaths)
+        {
             images.Add(Convert.ToBase64String(await File.ReadAllBytesAsync(full, ct)));
         }
 
@@ -233,23 +282,55 @@ public sealed class LocalTasks
                 $"Task profile '{profile}' is not a text-chat profile.");
         }
 
+        if (files.Count > MaxAskFiles)
+        {
+            throw new ArgumentException(
+                $"{files.Count} files exceed the {MaxAskFiles}-file limit for one call; " +
+                "split the request.",
+                nameof(files));
+        }
+
         var bundle = new StringBuilder();
         var wouldHaveCost = 0;
         var names = new List<string>();
+        var remaining = MaxPromptChars;
+        var omitted = 0;
 
         foreach (var path in files)
         {
             var full = Resolve(path);
-            var content = await File.ReadAllTextAsync(full, ct);
-            wouldHaveCost += TokenEstimator.ForText(content);
             names.Add(Path.GetFileName(full));
+            var header = $"--- FILE: {full} ---";
+            if (remaining <= header.Length + 2)
+            {
+                omitted++;
+                continue;
+            }
 
-            bundle.AppendLine($"--- FILE: {full} ---")
-                .AppendLine(content)
-                .AppendLine();
+            bundle.AppendLine(header);
+            remaining -= header.Length + 2;
+            // Streamed into the shared budget, never materialized whole first: reading every
+            // file and clamping the concatenation afterwards meant the limit bounded the
+            // prompt but not the peak memory (#206).
+            var (content, truncated) = await ReadBoundedTextAsync(full, remaining, ct);
+            wouldHaveCost += TokenEstimator.ForText(content);
+            remaining -= content.Length;
+            bundle.AppendLine(content);
+            if (truncated)
+            {
+                bundle.AppendLine("--- TRUNCATED: the shared input budget is exhausted ---");
+                remaining = 0;
+            }
+
+            bundle.AppendLine();
+            remaining = Math.Max(0, remaining - 2);
         }
 
         var body = Clamp(bundle.ToString());
+        var boundedNote = omitted > 0 || remaining == 0
+            ? $"; ввод усечён общим бюджетом {MaxPromptChars} символов" +
+              (omitted > 0 ? $", файлов пропущено: {omitted}" : string.Empty)
+            : string.Empty;
 
         var requestBody = files.Count == 0 ? prompt : $"{prompt}\n\n{body}";
         var result = await client.RoutedChatAsync(
@@ -273,9 +354,10 @@ public sealed class LocalTasks
             ct);
         var chosen = result.Receipt.Routing?.SelectedModel ?? result.Receipt.Model;
 
-        var detail = files.Count == 0
+        var detail = (files.Count == 0
             ? "выполнен запрос без файлов"
-            : $"обработано файлов: {files.Count} — {string.Join(", ", names.Take(5))}{(names.Count > 5 ? ", …" : string.Empty)}";
+            : $"обработано файлов: {files.Count} — {string.Join(", ", names.Take(5))}{(names.Count > 5 ? ", …" : string.Empty)}") +
+            boundedNote;
 
         return new LocalResult(
             result.Value,
@@ -525,6 +607,29 @@ public sealed class LocalTasks
     /// Keeps the head and the tail when a log is too long. The tail holds the failure and the
     /// summary; the head holds what was being built - cutting either one loses the diagnosis.
     /// </summary>
+    private static async Task<(string Content, bool Truncated)> ReadBoundedTextAsync(
+        string path,
+        int budget,
+        CancellationToken ct)
+    {
+        using var reader = new StreamReader(path);
+        var builder = new StringBuilder(Math.Min(budget, 64 * 1024));
+        var buffer = new char[64 * 1024];
+        while (builder.Length <= budget)
+        {
+            var slice = Math.Min(buffer.Length, budget + 1 - builder.Length);
+            var read = await reader.ReadAsync(buffer.AsMemory(0, slice), ct);
+            if (read == 0)
+            {
+                return (builder.ToString(), false);
+            }
+
+            builder.Append(buffer, 0, read);
+        }
+
+        return (builder.ToString(0, budget), true);
+    }
+
     private static string Clamp(string content)
     {
         if (content.Length <= MaxPromptChars)
