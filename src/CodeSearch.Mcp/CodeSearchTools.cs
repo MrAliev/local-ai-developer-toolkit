@@ -338,6 +338,14 @@ public static class CodeSearchTools
                   {IndexCommand(status.RepositoryRoot, DefaultModel)}
                 """;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The host cancelled the request: "Search failed: The operation was canceled"
+            // invites a retry nobody is waiting for, so cancellation surfaces as itself
+            // (#209/m3). The token filter keeps internally-timed-out operations — which
+            // also throw OperationCanceledException — on the readable-text path.
+            throw;
+        }
         catch (Exception ex)
         {
             return $"Search failed: {Describe(ex)}";
@@ -434,6 +442,10 @@ public static class CodeSearchTools
         catch (SearchChunkResolutionException ex)
         {
             return ex.Message;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

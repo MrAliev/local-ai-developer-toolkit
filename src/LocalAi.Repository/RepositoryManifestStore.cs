@@ -65,10 +65,27 @@ public sealed class RepositoryManifestStore
         var payload = JsonSerializer.SerializeToUtf8Bytes(
             document.Manifest,
             LocalAiJson.Strict);
-        var checksum = Convert.ToHexString(SHA256.HashData(payload));
-        if (!CryptographicOperations.FixedTimeEquals(
-                Convert.FromHexString(document.Checksum),
-                Convert.FromHexString(checksum)))
+        byte[] declared;
+        if (document.Checksum.Length != 64)
+        {
+            throw new InvalidDataException("Repository manifest checksum is malformed.");
+        }
+
+        try
+        {
+            declared = Convert.FromHexString(document.Checksum);
+        }
+        catch (FormatException error)
+        {
+            // A checksum that does not decode is the same category as one that does not
+            // match — a corrupt manifest, answered by rebuilding it — not a raw
+            // FormatException that reads as a bug in this code (#209/m7).
+            throw new InvalidDataException(
+                "Repository manifest checksum is malformed.",
+                error);
+        }
+
+        if (!CryptographicOperations.FixedTimeEquals(declared, SHA256.HashData(payload)))
         {
             throw new InvalidDataException("Repository manifest checksum does not match.");
         }

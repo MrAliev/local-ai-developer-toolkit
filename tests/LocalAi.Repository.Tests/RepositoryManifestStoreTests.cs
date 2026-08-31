@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using LocalAi.Contracts;
 using LocalAi.Repository;
 
@@ -44,6 +45,36 @@ public sealed class RepositoryManifestStoreTests : IDisposable
                 StringComparison.Ordinal));
 
         Assert.Throws<InvalidDataException>(() => store.Read());
+    }
+
+    /// <summary>
+    /// #209/m7: a checksum that does not decode used to escape as FormatException, which
+    /// reads as a bug in this code instead of the corruption category every caller of
+    /// Read() already handles.
+    /// </summary>
+    [Fact]
+    public void A_checksum_of_the_wrong_length_is_corruption_not_a_format_bug() =>
+        AssertMalformedChecksum("ZZ");
+
+    [Fact]
+    public void A_checksum_that_does_not_decode_is_corruption_not_a_format_bug() =>
+        AssertMalformedChecksum(new string('Z', 64));
+
+    private void AssertMalformedChecksum(string checksum)
+    {
+        var store = new RepositoryManifestStore(_root);
+        store.Save(Manifest());
+        var path = Path.Combine(_root, "manifest.json");
+        File.WriteAllText(
+            path,
+            Regex.Replace(
+                File.ReadAllText(path),
+                "(?i)(\"checksum\"\\s*:\\s*\")[0-9a-f]+(\")",
+                "${1}" + checksum + "${2}"));
+
+        var error = Assert.Throws<InvalidDataException>(() => store.Read());
+
+        Assert.Contains("malformed", error.Message, StringComparison.Ordinal);
     }
 
     public void Dispose()
