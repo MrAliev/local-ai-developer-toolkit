@@ -380,6 +380,17 @@
                                   IsChecked="{Binding Review.IsConfirmed, Mode=TwoWay}"
                                   Checked="OnReviewConfirmedChanged"
                                   Unchecked="OnReviewConfirmedChanged" />
+                        <!-- Opt-in, off unless ticked, with what it does stated beside it
+                             rather than in a document nobody opens. -->
+                        <Border BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="3"
+                                Padding="10,8" Margin="0,14,0,0">
+                            <StackPanel>
+                                <CheckBox Content="Check for new LocalAi releases (optional)"
+                                          IsChecked="{Binding Review.EnableUpdateCheck, Mode=TwoWay}" />
+                                <TextBlock Text="{Binding Review.UpdateCheckDisclosure, Mode=OneTime}"
+                                           Style="{StaticResource Muted}" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <!-- Progress -->

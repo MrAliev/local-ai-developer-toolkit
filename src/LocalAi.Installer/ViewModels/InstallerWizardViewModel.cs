@@ -583,6 +583,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // the one that used to poison every later installation on a clean machine.
             ApplyResidencyPolicy(report);
 
+            // Beside it, under the same rule and for the same reason.
+            ApplyUpdateCheckPolicy(report);
+
             // Beside the residency policy and for the same reason: after the package, so the
             // runtime directory exists with the permissions an installation gives it.
             await RecordOllamaLaunchPathAsync(report, token);
@@ -1121,6 +1124,66 @@ public sealed class InstallerWizardViewModel : ObservableObject
             JournalFail(residencyStep, exception.Message);
             AppendLog(report, $"Could not store the residency policy: {exception.Message}");
             hasRunError = true;
+        }
+    }
+
+    /// <summary>
+    /// Stores the answer to the update-check question, beside the residency policy and for the
+    /// same reasons: after the package, and only into an installation that exists.
+    ///
+    /// A failure here never fails the run. Not knowing whether a newer release exists is a
+    /// smaller problem than an installation reported as failed, and the setting can be changed
+    /// afterwards with one command — which the log names.
+    /// </summary>
+    private void ApplyUpdateCheckPolicy(StringBuilder report)
+    {
+        string? step = null;
+        try
+        {
+            var runtimeRoot = ModelResidencyPolicyStore.DefaultRuntimeRoot;
+            var policyPath = Path.Combine(runtimeRoot, UpdateCheckPolicy.FileName);
+            var prior = Directory.Exists(runtimeRoot) ? CaptureFileState(policyPath) : null;
+            if (prior is not null)
+            {
+                step = JournalBegin(
+                    InstallerRunEffectKind.ResidencyPolicy,
+                    "Update check policy (" + (review.EnableUpdateCheck ? "on" : "off") + ")");
+            }
+
+            var outcome = UpdateCheckPolicyWriter.Apply(runtimeRoot, review.EnableUpdateCheck);
+            if (outcome == ResidencyPolicyOutcome.SkippedWithoutInstallation)
+            {
+                AppendLog(
+                    report,
+                    "Update check: not stored, because LocalAi is not installed on this " +
+                    "computer. Nothing will be looked up. Set it later with " +
+                    "`localai policy set --update-check on`.");
+                return;
+            }
+
+            JournalComplete(
+                step,
+                $"Wrote {policyPath}.",
+                isReversible: true,
+                prior is { } captured
+                    ? new InstallerRunUndoData(Files: [BuildFileUndo(policyPath, captured)])
+                    : null);
+            AppendLog(
+                report,
+                review.EnableUpdateCheck
+                    ? "Update check: on. " + UpdateCheckPolicy.Disclosure
+                    : "Update check: off. Nothing about releases is looked up; turn it on " +
+                        "later with `localai policy set --update-check on`.");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            JournalFail(step, exception.Message);
+            AppendLog(
+                report,
+                $"Could not store the update check setting: {exception.Message}. The " +
+                "installation is unaffected; set it with `localai policy set --update-check " +
+                "on` if you want it.");
         }
     }
 

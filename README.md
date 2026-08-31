@@ -824,6 +824,41 @@ An NPU does not help here. Everything runs through Ollama, whose backends are CP
 ROCm, Metal and Vulkan; NPUs are driven by a separate stack (OpenVINO, DirectML, Windows ML),
 and the residency numbers this policy is built on do not map onto NPU memory.
 
+### Knowing a release exists, and taking it
+
+Nothing on a machine ever said "a newer release exists". Checking is opt-in, off until somebody
+says otherwise on the installer's review page or with one command:
+
+```powershell
+localai policy set --update-check on
+localai policy show
+```
+
+What that permits is one request per interval — a day by default, with a per-machine offset so a
+fleet installed from one image does not arrive in a spike — for the latest release manifest and
+its signature. Nothing about the machine is sent: no identifier, no account, no usage. The version
+inside the manifest is believed only after the signature verifies against the key embedded in this
+build, so whoever answers the request cannot invent one. Every failure — no network, a proxy
+rewriting the body, a signature that does not verify — records the same thing: no update
+information, never a banner urging action.
+
+The check runs on the broker's own loop, never on the job path, so no queued work waits on GitHub.
+What it learns is written to a small state file, and every surface answers from that file rather
+than the network: `localai doctor` prints an `update` line, and `index_status` carries one trailing
+line when a newer verified release exists and only then.
+
+Applying stays an explicit act:
+
+```powershell
+localai update            # refuses while the broker has queued jobs
+localai update --wait     # waits for them to finish first
+```
+
+It installs the newest signed release over the current one through the same machinery an
+installation uses — verified manifest, verified package, immutable version directory, atomic
+pointer swap — and touches nothing else. Prerequisites, models and client integrations stay as
+they are; the wizard is still where those are set up.
+
 ### Diagnostics and telemetry
 
 `localai doctor [--root <repo>]` runs the checks anyone verifying an installation performs by
