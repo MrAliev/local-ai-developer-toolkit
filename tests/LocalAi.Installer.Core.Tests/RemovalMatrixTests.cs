@@ -164,6 +164,7 @@ public sealed class RemovalMatrixTests
     [InlineData("src/LocalLm.Core/LogTriagePolicy.cs", "log-triage.json")]
     [InlineData("src/CodeSearch.Core/Semantics/LanguageServerPolicyStore.cs", "language-servers.json")]
     [InlineData("src/CodeSearch.Core/Semantics/SemanticIndexingPolicyStore.cs", "semantic-indexing.json")]
+    [InlineData("src/LocalAi.Contracts/UpdateCheckPolicy.cs", "update-check.json")]
     public void The_settings_file_names_match_the_stores_that_write_them(
         string sourcePath,
         string fileName)

@@ -93,6 +93,9 @@ public static class RemovalMatrix
         "log-triage.json",
         "language-servers.json",
         "semantic-indexing.json",
+        // Consent to look up releases is a decision the person made, so a reinstall honours it
+        // like any other setting. What that consent produced is transient and listed below.
+        "update-check.json",
     ]);
 
     /// <summary>The directory holding the release signing keys, relative to the runtime root.</summary>
@@ -243,5 +246,8 @@ public static class RemovalMatrix
         "broker.lock",
         "sequence.json",
         "shutdown.request",
+        // What the last update check learned. Rebuilt by the next one, and meaningless without
+        // the installation it describes.
+        "update-state.json",
     ];
 }

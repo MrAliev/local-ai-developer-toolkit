@@ -534,9 +534,12 @@ None of them requires a rebuild; some do not even require a restart.
 | Log triage profile | Contexts, fragments, overlap, characters-per-token estimate | Before every call |
 | Language servers | Enablement, executables, timeouts, message size limit | The next time a document is opened |
 | External indexers | Enablement, paths, arguments, parsing limits | On every synchronization |
+| Update check | Whether releases may be looked up, and how often. Off by default | The broker reads it at start: one already running keeps the previous policy |
 
 A corrupt policy file, or one of an unknown version, does **not** weaken the check: safe defaults
-apply. A parse error never turns into silent permission.
+apply. A parse error never turns into silent permission. The update check is the sharpest case of
+that rule — an unreadable `update-check.json` means *off*, because a file nobody can parse is not
+consent to talk to the network.
 
 ---
 
@@ -566,6 +569,8 @@ apply. A parse error never turns into silent permission.
 | `log-triage.json` | The log triage profile |
 | `language-servers.json` | Live language servers, off by default |
 | `semantic-indexing.json` | The external indexers for precise navigation |
+| `update-check.json` | Whether releases may be looked up, and how often. Off by default |
+| `update-state.json` | What the last look-up found; every surface answers from this file |
 | `telemetry\metrics` | Task records |
 
 Every path is relative to the LocalAi runtime directory in the user's local application data.
