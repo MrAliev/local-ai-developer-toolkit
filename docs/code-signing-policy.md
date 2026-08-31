@@ -55,8 +55,22 @@ its network use is downloading the release it verifies.
 
 Every change the wizard makes is listed on its review page before anything is applied,
 and each run writes a journal of intent and outcome to `%LOCALAPPDATA%\LocalAi-installer-logs`.
-A failed or cancelled run offers rollback of everything provably reversible. Removal:
-delete `%LOCALAPPDATA%\LocalAi`, remove the two MCP server registrations from the AI
-clients' configuration files, and remove the managed instruction block those files carry
-between its explicit markers; prerequisites installed through winget are removed through
-winget, and models through Ollama.
+A failed or cancelled run offers rollback of everything provably reversible.
+
+Removal is one action, not a checklist. The installation registers itself in **Apps &
+features**, where the entry runs a copy of this same installer in uninstall mode; the
+wizard is also reachable by starting the installer and choosing Remove. It opens on a
+matrix of what to take away — three presets, every row changeable on its own — and lists
+every removal on a review page before anything happens: the runtime root, the MCP server
+registrations in each client's configuration, the managed instruction block between its
+explicit markers, and the Git hook dispatchers of each connected repository, which are
+listed from the runtime's own manifests. The user's own text and anybody else's
+registrations survive untouched.
+
+Two things it will not do quietly. The release signing key directory is kept unless its
+own separate confirmation is given, because removing it makes an offline backup the only
+copy in existence. Prerequisites installed through winget and models pulled into Ollama
+are machine-wide and shared with other software, so the final page names the
+`winget uninstall` and `ollama rm` commands instead of running them. The journal
+directory `%LOCALAPPDATA%\LocalAi-installer-logs` also stays, and the uninstall run
+writes its own entry there.

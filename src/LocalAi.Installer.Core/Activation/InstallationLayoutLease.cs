@@ -738,7 +738,7 @@ public sealed class InstallationLayoutLease : IDisposable
         }
 
         var allowed = new HashSet<string>(
-            ["versions", "launcher", "current.json", "current.lock"],
+            BinNames,
             StringComparer.Ordinal);
         foreach (var entry in Directory.EnumerateFileSystemEntries(binRoot))
         {
@@ -749,11 +749,24 @@ public sealed class InstallationLayoutLease : IDisposable
         }
     }
 
+    /// <summary>
+    /// Everything the installer owns directly inside <c>bin</c>. "uninstall" is the copy of
+    /// the installer that Apps &amp; features points at: it lives in the tree it removes,
+    /// which is what lets it still exist when somebody wants to leave, long after the
+    /// downloaded installer has been cleared out of their downloads folder.
+    /// </summary>
+    private static readonly string[] BinNames =
+    [
+        "versions",
+        "launcher",
+        "uninstall",
+        "current.json",
+        "current.lock",
+    ];
+
     private static void ValidateBinShape(InstallationLayout layout)
     {
-        ValidateExactNames(
-            layout.BinRoot,
-            ["versions", "launcher", "current.json", "current.lock"]);
+        ValidateExactNames(layout.BinRoot, BinNames);
         ValidateDirectoryPath(layout.VersionsRoot);
         ValidateDirectoryPath(layout.LauncherDirectory);
         ValidateOptionalFile(layout.CurrentPointerPath);

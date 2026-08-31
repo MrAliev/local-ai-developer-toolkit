@@ -892,7 +892,15 @@ public sealed class LocalAiPackageInstaller
         ValidateAllowedNames(layout.Root, ["bin"]);
         ValidateAllowedNames(
             layout.BinRoot,
-            ["versions", "launcher", "installer-backups", "current.json", "current.lock"]);
+            [
+                "versions",
+                "launcher",
+                // The copy Apps & features points at, parked in the tree it removes.
+                "uninstall",
+                "installer-backups",
+                "current.json",
+                "current.lock",
+            ]);
         foreach (var versionDirectory in Directory.EnumerateDirectories(layout.VersionsRoot))
         {
             ValidateDirectory(versionDirectory);

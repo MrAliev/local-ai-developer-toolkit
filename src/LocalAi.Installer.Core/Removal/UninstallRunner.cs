@@ -16,7 +16,15 @@ public sealed record UninstallOutcome(
     IReadOnlyList<string> RemovedHooks,
     IReadOnlyList<UninstallFailure> Failures,
     bool ProcessesStopped,
-    bool RuntimeRootRemoved)
+    bool RuntimeRootRemoved,
+    bool AppsAndFeaturesEntryRemoved = false,
+
+    /// <summary>
+    /// The uninstaller could not delete its own running copy, so the operating system will do
+    /// it at the next restart. Reported rather than hidden: a folder that outlives an
+    /// uninstall by design is only reassuring if somebody said it would.
+    /// </summary>
+    bool UninstallerRemovalDeferred = false)
 {
     public bool Succeeded => Failures.Count == 0;
 }
@@ -47,9 +55,22 @@ public sealed class UninstallRunner(
     InstallationLayout layout,
     IProcessRunner processRunner,
     TimeSpan? stopTimeout = null,
-    Func<string, byte[]>? readBackOverride = null)
+    Func<string, byte[]>? readBackOverride = null,
+    string? registrySubKey = null,
+    string? selfDirectory = null,
+    Action<string>? removeUninstallerAfterExit = null)
 {
     private readonly TimeSpan stopTimeout = stopTimeout ?? TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Where this executable is running from. It matters because the uninstaller is normally a
+    /// copy parked inside the very tree it is deleting: Windows will not remove a running
+    /// executable, so that one directory is left until last and then handed to the operating
+    /// system. A test points this elsewhere to exercise both paths.
+    /// </summary>
+    private readonly string selfDirectory =
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(
+            selfDirectory ?? AppContext.BaseDirectory));
 
     public async Task<UninstallOutcome> ApplyAsync(
         UninstallPlan plan,
@@ -68,13 +89,64 @@ public sealed class UninstallRunner(
             cancellationToken);
         var hooks = RemoveHooks(plan, journal, failures, cancellationToken);
         var removed = RemovePaths(plan, journal, failures, cancellationToken);
+        var (unregistered, deferred) = RemoveRegistration(plan, journal, failures);
+        RemoveDirectoriesLeftEmptyByTheSweep(plan, removed);
         return new UninstallOutcome(
             removed,
             rewritten,
             hooks,
             failures,
             stopped,
-            RemoveEmptyRuntimeRoot(plan, failures));
+            RemoveEmptyRuntimeRoot(plan, failures),
+            unregistered,
+            deferred);
+    }
+
+    /// <summary>
+    /// Takes the Apps &amp; features entry out and then removes the uninstaller's own copy —
+    /// last of everything, because it is the file this process is running from. An entry that
+    /// was already gone is not a failure; a copy that cannot be deleted while it runs is
+    /// scheduled for the next restart and reported as such.
+    /// </summary>
+    private (bool Unregistered, bool Deferred) RemoveRegistration(
+        UninstallPlan plan,
+        InstallerRunJournal journal,
+        List<UninstallFailure> failures)
+    {
+        if (!plan.RemovesAppsAndFeaturesEntry || !OperatingSystem.IsWindows())
+        {
+            return (false, false);
+        }
+
+        var registration = new UninstallRegistration(
+            layout,
+            registrySubKey,
+            removeUninstallerAfterExit);
+        var step = journal.BeginStep(
+            InstallerRunEffectKind.RuntimeRemoval,
+            "Remove the Apps & features entry and " + registration.UninstallerDirectory);
+        try
+        {
+            var unregistered = registration.Unregister();
+            var removedNow = registration.RemoveUninstallerCopy();
+            journal.CompleteStep(
+                step,
+                removedNow
+                    ? "Removed."
+                    : "Entry removed; the uninstaller's own copy goes at the next restart.",
+                isReversible: false);
+            return (unregistered, !removedNow);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                System.Security.SecurityException)
+        {
+            journal.FailStep(step, exception.Message);
+            failures.Add(new UninstallFailure(
+                registration.UninstallerDirectory,
+                exception.Message));
+            return (false, false);
+        }
     }
 
     /// <summary>
@@ -270,13 +342,20 @@ public sealed class UninstallRunner(
     }
 
     /// <summary>
-    /// Deletes one entry, refusing to follow a junction out of the tree.
+    /// Deletes one entry, refusing to follow a junction out of the tree and stepping around
+    /// the directory this process is running from.
     ///
     /// A reparse point inside the runtime root is creatable by the same unprivileged user who
     /// owns it, and a recursive delete that followed one would take somebody else's directory
     /// with it. The link itself is removed; whatever it pointed at is not ours.
+    ///
+    /// The running directory is skipped rather than attempted, because it is normally
+    /// <c>bin\uninstall</c> — the copy Apps &amp; features started — and Windows refuses to
+    /// delete a running executable. Attempting it would turn the ordinary uninstall into a
+    /// reported failure over the one file that could not possibly go yet; it is removed at the
+    /// very end instead, or scheduled for the next restart.
     /// </summary>
-    private static void Delete(string path)
+    private void Delete(string path)
     {
         if (File.Exists(path))
         {
@@ -296,7 +375,74 @@ public sealed class UninstallRunner(
             return;
         }
 
-        directory.Delete(recursive: true);
+        if (!Contains(path, selfDirectory))
+        {
+            directory.Delete(recursive: true);
+            return;
+        }
+
+        foreach (var child in directory.EnumerateFileSystemInfos())
+        {
+            if (!string.Equals(
+                    Path.TrimEndingDirectorySeparator(child.FullName),
+                    selfDirectory,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                Delete(child.FullName);
+            }
+        }
+
+        // The directory itself only goes once its last child does, which for this branch is
+        // after the uninstaller's own copy has been dealt with.
+        if (!directory.EnumerateFileSystemInfos().Any())
+        {
+            directory.Delete(recursive: false);
+        }
+    }
+
+    /// <summary>Whether <paramref name="candidate"/> is that directory or lives inside it.</summary>
+    private static bool Contains(string directory, string candidate)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        return string.Equals(root, candidate, StringComparison.OrdinalIgnoreCase) ||
+            candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Removes the directories the sweep had to step around and has now emptied.
+    ///
+    /// <c>bin</c> is the case: it is on the removal list, but it holds the running
+    /// uninstaller, so the sweep takes everything else and leaves the shell behind. Once that
+    /// copy has gone, the empty shell is a leftover of the mechanism rather than anything the
+    /// person chose to keep. A directory that is still occupied — because the copy could only
+    /// be scheduled — is left alone; the tail process removes what it holds.
+    /// </summary>
+    private static void RemoveDirectoriesLeftEmptyByTheSweep(
+        UninstallPlan plan,
+        IReadOnlyList<string> removed)
+    {
+        foreach (var entry in plan.Paths.Where(path => path.IsDirectory))
+        {
+            if (!removed.Contains(entry.Path, StringComparer.OrdinalIgnoreCase) ||
+                !Directory.Exists(entry.Path))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(entry.Path).Any())
+                {
+                    Directory.Delete(entry.Path, recursive: false);
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                // Already reported if it mattered: this pass only tidies what the sweep
+                // deliberately left, and a shell it cannot remove changes nothing.
+            }
+        }
     }
 
     /// <summary>

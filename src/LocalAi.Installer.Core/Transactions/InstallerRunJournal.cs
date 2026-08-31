@@ -13,6 +13,9 @@ public enum InstallerRunEffectKind
     OllamaLaunchRecord,
     AgentConfiguration,
 
+    /// <summary>Writing the Apps &amp; features entry and the copy of the installer it points at.</summary>
+    UninstallRegistration,
+
     /// <summary>Asking the running tools, and the broker in particular, to finish and exit.</summary>
     ProcessStop,
 
