@@ -149,6 +149,11 @@ static async Task<int> RunAsync(string[] args)
         return PolicyCommand.Execute(args.AsSpan(1).ToArray());
     }
 
+    if (args is ["update", ..])
+    {
+        return await UpdateCommand.ExecuteAsync(args.AsSpan(1).ToArray());
+    }
+
     if (args is ["semantic", .. var semanticArguments])
     {
         return SemanticNavigationCommand.Execute(semanticArguments);

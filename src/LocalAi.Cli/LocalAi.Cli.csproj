@@ -9,6 +9,11 @@
     <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
     <ProjectReference Include="..\LocalAi.Broker.Client\LocalAi.Broker.Client.csproj" />
     <ProjectReference Include="..\LocalLm.Core\LocalLm.Core.csproj" />
+    <!-- `localai update` installs a release, and installing a release is exactly what this
+         project already does correctly: verified manifest, verified package, immutable version
+         directory, atomic pointer swap. A second implementation of that would be a second set
+         of those guarantees to keep. -->
+    <ProjectReference Include="..\LocalAi.Installer.Core\LocalAi.Installer.Core.csproj" />
   </ItemGroup>
   <Import Project="..\BrokerBinary.props" />
 
