@@ -42,15 +42,98 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
             "[mcp_servers.codesearch]\n" +
             "command = \"C:\\\\LocalAi\\\\bin\\\\launcher\\\\localai-launcher.exe\"\n" +
             "args = [\"run\", \"codesearch-mcp\"]\n" +
-            "default_tools_approval_mode = \"approve\"\n\n" +
+            "default_tools_approval_mode = \"prompt\"\n\n" +
             "[mcp_servers.locallm]\n" +
             "command = \"C:\\\\LocalAi\\\\bin\\\\launcher\\\\localai-launcher.exe\"\n" +
             "args = [\"run\", \"locallm-mcp\"]\n" +
-            "default_tools_approval_mode = \"approve\"\n\n" +
+            "default_tools_approval_mode = \"prompt\"\n\n" +
             ToolSections("codesearch", McpToolNames.CodeSearch) + "\n\n" +
             ToolSections("locallm", McpToolNames.LocalLm) + "\n",
             config.AfterText);
         Assert.Equal(ManagedInstructionBlock.Block + Environment.NewLine, instructions.AfterText);
+    }
+
+    /// <summary>
+    /// The upgrade path #208 chose: the managed sections rebuild to the approval matrix, and
+    /// only the literal approve an earlier installer wrote is the installer's to rebuild.
+    /// Everything else is the user's — deny survives, and a stricter-than-matrix prompt on a
+    /// read tool survives too, so a deviation towards stricter is permanent.
+    /// </summary>
+    [Fact]
+    public void An_upgrade_rebuilds_installer_written_approvals_and_keeps_the_users()
+    {
+        var configPath = Path.Combine(home, ".codex", "config.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(
+            configPath,
+            "[mcp_servers.codesearch]\n" +
+            "command = \"old\"\n" +
+            "args = [\"bad\"]\n" +
+            "default_tools_approval_mode = \"approve\"\n\n" +
+            "[mcp_servers.locallm]\n" +
+            "command = \"old\"\n" +
+            "args = [\"bad\"]\n" +
+            "default_tools_approval_mode = \"approve\"\n\n" +
+            "[mcp_servers.locallm.tools.local_models_sync]\n" +
+            "approval_mode = \"approve\"\n\n" +
+            "[mcp_servers.locallm.tools.local_model_feedback]\n" +
+            "approval_mode = \"deny\"\n\n" +
+            "[mcp_servers.codesearch.tools.search_code]\n" +
+            "approval_mode = \"prompt\"\n",
+            Encoding.UTF8);
+
+        var after = SinglePreview(
+            @".codex\config.toml",
+            Adapter().Preview(AgentIntegrationChoice.McpOnly)).AfterText;
+
+        Assert.DoesNotContain(
+            "default_tools_approval_mode = \"approve\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[mcp_servers.locallm.tools.local_models_sync]\n" +
+            "approval_mode = \"prompt\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[mcp_servers.locallm.tools.local_model_feedback]\n" +
+            "approval_mode = \"deny\"",
+            after,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[mcp_servers.codesearch.tools.search_code]\n" +
+            "approval_mode = \"prompt\"",
+            after,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The matrix itself: the two heavyweights prompt, the rest run, and a tool the matrix
+    /// has never heard of prompts — the fail-safe for a future release's tool.
+    /// </summary>
+    [Fact]
+    public void The_matrix_prompts_exactly_the_heavyweights_and_every_stranger()
+    {
+        Assert.Equal(
+            McpToolApproval.Prompt,
+            McpToolNames.ApprovalFor("locallm", "local_models_sync"));
+        Assert.Equal(
+            McpToolApproval.Prompt,
+            McpToolNames.ApprovalFor("locallm", "local_model_feedback"));
+        Assert.All(
+            McpToolNames.CodeSearch,
+            tool => Assert.Equal(
+                McpToolApproval.Approve,
+                McpToolNames.ApprovalFor("codesearch", tool)));
+        Assert.All(
+            McpToolNames.LocalLm.Except(
+                ["local_models_sync", "local_model_feedback"]),
+            tool => Assert.Equal(
+                McpToolApproval.Approve,
+                McpToolNames.ApprovalFor("locallm", tool)));
+        Assert.Equal(
+            McpToolApproval.Prompt,
+            McpToolNames.ApprovalFor("locallm", "some_future_tool"));
     }
 
     [Fact]
@@ -371,7 +454,11 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
         string.Join(
             "\n\n",
             tools.Select(tool =>
-                $"[mcp_servers.{server}.tools.{tool}]\napproval_mode = \"approve\""));
+                $"[mcp_servers.{server}.tools.{tool}]\napproval_mode = \"" +
+                (McpToolNames.ApprovalFor(server, tool) == McpToolApproval.Approve
+                    ? "approve"
+                    : "prompt") +
+                "\""));
 
     private CodexConfigurationAdapter Adapter(Func<string, byte[]>? readBackOverride = null) =>
         new(home, install, new FixedTimeProvider(now), readBackOverride);

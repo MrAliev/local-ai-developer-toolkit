@@ -330,20 +330,19 @@ block into that client's global instructions file — `~/.claude/CLAUDE.md` for 
 `~/.codex/AGENTS.md` for Codex. A detected client defaults to both; a client that was not
 found is left alone, and an explicit choice always wins.
 
-For Codex, each managed server also gets `default_tools_approval_mode = "approve"`, and every
-tool the two servers expose gets a `[mcp_servers.<server>.tools.<tool>]` row with the same
-value. `approve` is the value that skips the prompt — Codex maps it to "approval not required";
-the value that asks is `prompt`.
+For Codex, every tool the two servers expose gets a `[mcp_servers.<server>.tools.<tool>]` row
+from a per-tool approval matrix: reads and bounded local compute get `approve` — the value that
+skips the prompt — while the two heavyweights, `local_models_sync` (downloads models by the
+gigabyte) and `local_model_feedback` (changes persistent routing state), get `prompt`. The
+server default is `prompt`, so a tool added by a later release asks until that release
+classifies it in the matrix; the rows are what carry the approvals.
 
-Both are needed. Codex resolves a tool as per-tool override, then server default, then `auto`,
-and under `auto` a tool that declares no annotations is prompted for, which is every tool here.
-The server default covers tools added by a later release the moment they exist; the rows make
-the current set explicit.
-
-Only what is missing is written. An existing row or server default is left exactly as the user
-wrote it, including one that refuses the tool, because that is a decision to preserve rather
-than an omission to correct. The list is held to the servers by tests that reflect over their
-tool attributes, so a new tool cannot ship without its row.
+On upgrade the managed sections are rebuilt to the matrix, and only the literal `approve` an
+earlier installer wrote is the installer's to rebuild. Anything else in an approval slot is the
+user's own decision and survives — `deny` always, and a stricter-than-matrix `prompt` too — so
+a deviation towards stricter is permanent and a deviation towards looser does not outlive an
+upgrade. The matrix is held to the servers by tests that reflect over their tool attributes, so
+a new tool cannot ship without a classification.
 
 The block is repository-agnostic on purpose. Indexing stays opt-in per repository, so rather
 than assuming the repositories that happened to be set up on the machine it was installed on,

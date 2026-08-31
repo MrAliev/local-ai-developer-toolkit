@@ -18,35 +18,83 @@ public sealed record ClientToolRegistration(
 /// convention that holds the two together: <c>CodeSearch.Tests</c> and <c>LocalLm.Tests</c> each
 /// reflect over their own tool attributes and fail if this list disagrees.
 /// </summary>
+public enum McpToolApproval
+{
+    /// <summary>Runs without a prompt: reads, or bounded local compute with no persistent state.</summary>
+    Approve,
+
+    /// <summary>Asks first: network downloads, persistent state, and anything unclassified.</summary>
+    Prompt,
+}
+
+public sealed record McpToolPolicy(string Name, McpToolApproval Approval);
+
+/// <summary>
+/// Every tool each managed MCP server exposes, with the approval each one deserves.
+///
+/// Auto-approving the whole namespace was deliberate UX — the product exists so an agent can
+/// call search and the local helpers dozens of times without a prompt — but the list is not
+/// read-only, and the server-wide approve also pre-approved every future tool sight unseen
+/// (#208). The classification is least-privilege where it costs nothing: the two tools that
+/// download gigabytes or change persistent routing state prompt, everything that reads or
+/// runs bounded local compute does not, and a tool absent from this matrix both fails the
+/// inventory tests and — through the server default of prompt — asks at runtime until a
+/// release classifies it.
+/// </summary>
 public static class McpToolNames
 {
-    public static IReadOnlyList<string> CodeSearch { get; } =
+    public static IReadOnlyList<McpToolPolicy> CodeSearchPolicies { get; } =
     [
-        "search_code",
-        "index_status",
-        "index_refresh",
-        "index_unload",
-        "get_code_chunk",
-        "go_to_definition",
-        "find_references",
-        "find_implementations",
-        "find_relationships",
-        "lsp_open_document",
-        "lsp_close_document",
+        new("search_code", McpToolApproval.Approve),
+        new("index_status", McpToolApproval.Approve),
+        // Mutates the index, but bounded by construction: large work is refused inline and
+        // returned as a command instead, so what runs here is a post-commit delta.
+        new("index_refresh", McpToolApproval.Approve),
+        new("index_unload", McpToolApproval.Approve),
+        new("get_code_chunk", McpToolApproval.Approve),
+        new("go_to_definition", McpToolApproval.Approve),
+        new("find_references", McpToolApproval.Approve),
+        new("find_implementations", McpToolApproval.Approve),
+        new("find_relationships", McpToolApproval.Approve),
+        // Session-scoped, and inert until the user opts into live servers in their own
+        // settings file — that opt-in is the real approval.
+        new("lsp_open_document", McpToolApproval.Approve),
+        new("lsp_close_document", McpToolApproval.Approve),
     ];
 
-    public static IReadOnlyList<string> LocalLm { get; } =
+    public static IReadOnlyList<McpToolPolicy> LocalLmPolicies { get; } =
     [
-        "ask_local",
-        "translate_local",
-        "triage_log",
-        "read_image",
-        "local_models_status",
-        "local_models_sync",
-        "local_model_preflight",
-        "local_model_feedback",
-        "local_model_experiment_report",
+        new("ask_local", McpToolApproval.Approve),
+        new("translate_local", McpToolApproval.Approve),
+        new("triage_log", McpToolApproval.Approve),
+        new("read_image", McpToolApproval.Approve),
+        new("local_models_status", McpToolApproval.Approve),
+        // Downloads models by the gigabyte: the one network-and-disk heavyweight here.
+        new("local_models_sync", McpToolApproval.Prompt),
+        new("local_model_preflight", McpToolApproval.Approve),
+        // An owner's decision that changes persistent experiment and routing state.
+        new("local_model_feedback", McpToolApproval.Prompt),
+        new("local_model_experiment_report", McpToolApproval.Approve),
     ];
+
+    public static IReadOnlyList<string> CodeSearch { get; } =
+        CodeSearchPolicies.Select(policy => policy.Name).ToArray();
+
+    public static IReadOnlyList<string> LocalLm { get; } =
+        LocalLmPolicies.Select(policy => policy.Name).ToArray();
+
+    public static McpToolApproval ApprovalFor(string server, string tool)
+    {
+        var policies = server switch
+        {
+            "codesearch" => CodeSearchPolicies,
+            "locallm" => LocalLmPolicies,
+            _ => throw new ArgumentException($"Unknown managed server '{server}'.", nameof(server)),
+        };
+        return policies.SingleOrDefault(policy =>
+                string.Equals(policy.Name, tool, StringComparison.Ordinal))?.Approval
+            ?? McpToolApproval.Prompt;
+    }
 }
 
 public sealed record ClientRegistrationPlan(
@@ -120,5 +168,5 @@ public static class ClientCommandPlan
             registration.Arguments.Select(
                 argument => $"\"{EscapeToml(argument)}\"")) +
         "]\n" +
-        "default_tools_approval_mode = \"approve\"";
+        "default_tools_approval_mode = \"prompt\"";
 }

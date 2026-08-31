@@ -51,9 +51,12 @@ public sealed class CodexConfigurationAdapter(
     /// So only the command and its arguments are rewritten, inside the section that is already
     /// there, and everything else the user put in it survives untouched.
     ///
-    /// A tool that has no sub-table yet gets one. A tool that already has one is left exactly as
-    /// written — including a setting that refuses the tool, which is a decision to preserve rather
-    /// than an omission to correct.
+    /// A tool that has no sub-table yet gets one, with the approval the matrix assigns it. A
+    /// tool that already has one is rebuilt only when it still carries the literal
+    /// <c>approve</c> an earlier installer wrote — that value is the installer's to own, and
+    /// leaving it made an upgrade unable to ever tighten anything (#208). Any other value is
+    /// the user's decision: <c>deny</c> and <c>prompt</c> survive every rebuild, so a
+    /// deviation towards stricter is permanent and a deviation towards looser is not.
     /// </summary>
     private string UpdateToml(string before)
     {
@@ -61,29 +64,39 @@ public sealed class CodexConfigurationAdapter(
         var plan = ClientCommandPlan.Plan(installationDirectory);
         var updated = UpsertServer(before, "codesearch", plan.CodeSearch);
         updated = UpsertServer(updated, "locallm", plan.LocalLm);
-        updated = AddMissingToolSections(updated, "codesearch", plan.CodeSearch.Tools);
-        return AddMissingToolSections(updated, "locallm", plan.LocalLm.Tools);
+        updated = RebuildToolSections(updated, "codesearch", plan.CodeSearch.Tools);
+        return RebuildToolSections(updated, "locallm", plan.LocalLm.Tools);
     }
 
-    /// <summary>
-    /// Writes a sub-table for every tool that does not have one, and touches nothing else.
-    ///
-    /// Only absence is filled. Reading an existing entry and normalising it would overwrite a
-    /// user's own choice with the installer's, and the entry most worth not overwriting is the one
-    /// that says no.
-    /// </summary>
-    private static string AddMissingToolSections(
+    private static string RebuildToolSections(
         string toml,
         string server,
         IReadOnlyList<string> tools)
     {
-        var missing = tools
-            .Where(tool => !Regex.IsMatch(
+        var missing = new List<string>();
+        foreach (var tool in tools)
+        {
+            var header = Regex.Match(
                 toml,
                 @"(?m)^[ \t]*\[mcp_servers\." + Regex.Escape(server) +
-                @"\.tools\." + Regex.Escape(tool) + @"\][ \t]*$"))
-            .ToArray();
-        if (missing.Length == 0)
+                @"\.tools\." + Regex.Escape(tool) + @"\][ \t]*$");
+            if (!header.Success)
+            {
+                missing.Add(tool);
+                continue;
+            }
+
+            var bodyStart = header.Index + header.Length;
+            var next = Regex.Match(toml[bodyStart..], @"(?m)^[ \t]*\[");
+            var bodyEnd = next.Success ? bodyStart + next.Index : toml.Length;
+            var body = RebuildInstallerAssignment(
+                toml[bodyStart..bodyEnd],
+                "approval_mode",
+                ApprovalValue(server, tool));
+            toml = toml[..bodyStart] + body + toml[bodyEnd..];
+        }
+
+        if (missing.Count == 0)
         {
             return toml;
         }
@@ -92,9 +105,14 @@ public sealed class CodexConfigurationAdapter(
             "\n\n",
             missing.Select(tool =>
                 "[mcp_servers." + server + ".tools." + tool + "]\n" +
-                "approval_mode = \"approve\""));
+                "approval_mode = " + TomlString(ApprovalValue(server, tool))));
         return toml.TrimEnd() + "\n\n" + sections + "\n";
     }
+
+    private static string ApprovalValue(string server, string tool) =>
+        McpToolNames.ApprovalFor(server, tool) == McpToolApproval.Approve
+            ? "approve"
+            : "prompt";
 
     private static string UpsertServer(
         string toml,
@@ -121,10 +139,10 @@ public sealed class CodexConfigurationAdapter(
             "[" + string.Join(
                 ", ",
                 registration.Arguments.Select(TomlString)) + "]");
-        body = AddAssignmentIfAbsent(
+        body = RebuildInstallerAssignment(
             body,
             DefaultApprovalKey,
-            TomlString(ApprovalMode));
+            DefaultApprovalValue);
         return toml[..bodyStart] + body + toml[bodyEnd..];
     }
 
@@ -134,21 +152,48 @@ public sealed class CodexConfigurationAdapter(
     /// <c>destructive_hint.unwrap_or(true) || open_world_hint.unwrap_or(true)</c> — and none of
     /// these tools declares any, so the default is a prompt for each one.
     ///
-    /// Setting it here means a tool added by a later release is covered the moment it exists,
-    /// instead of waiting for the next install to write its row.
+    /// Setting it here means a tool added by a later release is covered the moment it exists.
+    /// The value is <c>prompt</c> on purpose (#208): a server-wide <c>approve</c> pre-approved
+    /// every future tool before anyone had assessed its side effects, which was stated as the
+    /// goal and was still the wrong goal. A new tool now asks until a release classifies it in
+    /// the matrix — the per-tool rows are what carry the approvals.
     /// </summary>
     private const string DefaultApprovalKey = "default_tools_approval_mode";
 
-    /// <summary>
-    /// <c>approve</c> is the value that skips the prompt: Codex maps it straight to "approval not
-    /// required". It is not "ask me to approve", which is <c>prompt</c>.
-    /// </summary>
-    private const string ApprovalMode = "approve";
+    private const string DefaultApprovalValue = "prompt";
 
-    private static string AddAssignmentIfAbsent(string body, string key, string value) =>
-        Regex.IsMatch(body, @"(?m)^[ \t]*" + Regex.Escape(key) + @"[ \t]*=")
-            ? body
-            : body.TrimEnd('\n') + "\n" + key + " = " + value + "\n";
+    /// <summary>
+    /// The one value the earlier installer ever wrote, and therefore the one value the
+    /// matrix may rebuild. Anything else in an approval slot is the user's own decision.
+    /// </summary>
+    private const string InstallerLegacyApproval = "approve";
+
+    /// <summary>
+    /// Sets <paramref name="key"/> when it is absent, and rewrites it when it still carries
+    /// the literal <c>approve</c> an earlier installer wrote. Every other current value is a
+    /// user decision and survives — which makes stricter-than-matrix permanent and
+    /// looser-than-matrix impossible to keep through an upgrade, deliberately.
+    /// </summary>
+    private static string RebuildInstallerAssignment(string body, string key, string value)
+    {
+        var assignment = Regex.Match(
+            body,
+            @"(?m)^[ \t]*" + Regex.Escape(key) + @"[ \t]*=[ \t]*(?<value>.*?)[ \t]*$");
+        if (!assignment.Success)
+        {
+            return body.TrimEnd('\n') + "\n" + key + " = " + TomlString(value) + "\n";
+        }
+
+        var current = assignment.Groups["value"].Value.Trim();
+        if (current != "\"" + InstallerLegacyApproval + "\"" &&
+            current != "'" + InstallerLegacyApproval + "'")
+        {
+            return body;
+        }
+
+        return body[..assignment.Index] + key + " = " + TomlString(value) +
+            body[(assignment.Index + assignment.Length)..];
+    }
 
     private static string ReplaceAssignment(string body, string key, string value)
     {
@@ -166,7 +211,7 @@ public sealed class CodexConfigurationAdapter(
         "[mcp_servers." + name + "]\n" +
         "command = " + TomlString(registration.Command) + "\n" +
         "args = [" + string.Join(", ", registration.Arguments.Select(TomlString)) + "]\n" +
-        DefaultApprovalKey + " = " + TomlString(ApprovalMode);
+        DefaultApprovalKey + " = " + TomlString(DefaultApprovalValue);
 
     private static void ValidateToml(string toml)
     {
