@@ -123,7 +123,11 @@ public sealed class UpdateCheckProbe : IDisposable
                 UpdateCheckStatus.Verified,
                 now,
                 manifest.ReleaseVersion,
-                ReleaseAssets.Release(tag, repository).ToString());
+                ReleaseAssets.Release(tag, repository).ToString(),
+                // Recorded beside the version because an installation made before the release
+                // version was written down knows only its own directory name, and two
+                // directory names still answer "is this a different release".
+                manifest.VersionDirectory);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

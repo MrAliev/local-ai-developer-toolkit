@@ -510,6 +510,12 @@ that change one at a time, every removal listed before anything happens, the bro
 finish before the root is touched, and the release signing key kept unless separately
 confirmed.
 
+A version directory is named after the commit it was built from, so the pointer alone cannot
+say which release is installed. `bin\installed-release.json` records that, beside the pointer
+rather than inside it — the pointer is written by the launcher under a compare-and-swap over
+its exact bytes. The record names the directory it describes, so a rollback performed without
+a manifest leaves a record that is detectably stale rather than a confidently wrong answer.
+
 Knowing that a release exists is opt-in and off by default. When it is switched on, the broker
 fetches the latest manifest and its signature at most once per interval — nothing about the
 machine is sent — and believes the version only after the signature verifies. What it learns
@@ -586,6 +592,7 @@ consent to talk to the network.
 | `semantic-indexing.json` | The external indexers for precise navigation |
 | `update-check.json` | Whether releases may be looked up, and how often. Off by default |
 | `update-state.json` | What the last look-up found; every surface answers from this file |
+| `bin\installed-release.json` | Which published release the active version directory came from |
 | `telemetry\metrics` | Task records |
 
 Every path is relative to the LocalAi runtime directory in the user's local application data.

@@ -1,5 +1,6 @@
 using LocalAi.Broker;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Models;
@@ -76,8 +77,8 @@ public static class UpdateCommand
             return Usage(error);
         }
 
-        var installed = InstalledVersion(runtimeRoot);
-        if (installed is null)
+        var installed = InstalledVersionReader.Read(runtimeRoot);
+        if (!installed.Exists)
         {
             error.WriteLine(
                 "There is no LocalAi installation at " + runtimeRoot + " to update. Run the " +
@@ -110,15 +111,16 @@ public static class UpdateCommand
         }
 
         var available = resolved.Manifest.ReleaseVersion;
-        if (!IsNewer(available, installed) && !force)
+        if (!force && IsCurrent(resolved.Manifest, installed))
         {
             output.WriteLine(
-                $"LocalAi {installed} is already the newest release ({available}).");
+                $"LocalAi {installed.DisplayName} is already the newest release ({available}).");
             Delete(working);
             return 0;
         }
 
-        output.WriteLine($"LocalAi {available} is available; this installation is {installed}.");
+        output.WriteLine(
+            $"LocalAi {available} is available; this installation is {installed.DisplayName}.");
         if (!await QueueIsQuietAsync(runtimeRoot, wait, output, error, cancellationToken)
             .ConfigureAwait(false))
         {
@@ -292,33 +294,25 @@ public static class UpdateCommand
         output.WriteLine($"  downloading: {percent}%");
     }
 
-    private static bool IsNewer(string available, string installed) =>
-        new UpdateCheckState(1, UpdateCheckStatus.Verified, null, available, null)
-            .IsNewerThan(installed);
-
-    private static string? InstalledVersion(string runtimeRoot)
-    {
-        try
-        {
-            var pointerPath = Path.Combine(runtimeRoot, "bin", "current.json");
-            if (!File.Exists(pointerPath))
-            {
-                return null;
-            }
-
-            using var document = System.Text.Json.JsonDocument.Parse(
-                File.ReadAllText(pointerPath));
-            return document.RootElement.TryGetProperty("version", out var version)
-                ? version.GetString()
-                : null;
-        }
-        catch (Exception exception) when (
-            exception is System.Text.Json.JsonException or IOException or
-                UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+    /// <summary>
+    /// Whether the resolved release is the one already installed.
+    ///
+    /// Asked through the same comparison every other surface uses, so this command cannot
+    /// drift back into comparing a release version against a commit id and concluding, as it
+    /// did, that there was nothing to do (#255). The manifest carries both halves, so the
+    /// fallback — same version directory — answers even on an installation that never
+    /// recorded which release it came from.
+    /// </summary>
+    private static bool IsCurrent(ReleaseManifest manifest, InstalledVersion installed) =>
+        UpdateComparison.Compare(
+            new UpdateCheckState(
+                1,
+                UpdateCheckStatus.Verified,
+                null,
+                manifest.ReleaseVersion,
+                null,
+                manifest.VersionDirectory),
+            installed) == UpdateAvailability.UpToDate;
 
     private static void Delete(string directory)
     {

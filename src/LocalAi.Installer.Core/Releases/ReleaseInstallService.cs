@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using LocalAi.Installer.Core.Abstractions;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Models;
@@ -127,6 +128,14 @@ public sealed class ReleaseInstallService(
             var modelReport = ReleaseModelInstallReport.NotRequested;
             var installed = result.Status is LocalAiPackageInstallStatus.Installed
                 or LocalAiPackageInstallStatus.AlreadyInstalled;
+            if (installed)
+            {
+                RecordInstalledRelease(
+                    result.VersionPath,
+                    result.Version,
+                    release.Manifest.ReleaseVersion);
+            }
+
             if (installed &&
                 models is { Mode: not ModelProvisioningMode.None } &&
                 OperatingSystem.IsWindows())
@@ -153,6 +162,42 @@ public sealed class ReleaseInstallService(
         finally
         {
             verified.TryCleanupAndDispose();
+        }
+    }
+
+    /// <summary>
+    /// Records which published release the activated directory came from.
+    ///
+    /// The pointer the launcher writes names a directory - a commit id - and nothing else on
+    /// the machine knew that "467ed5f0f9bf" was published as 0.1.51, so every comparison
+    /// against a newer release was a commit id against a version number and always concluded
+    /// there was nothing to do (#255).
+    ///
+    /// A failure here never fails an installation that has already succeeded. What is lost is
+    /// the ability to name the installed release until the next install writes it again, and
+    /// the surfaces that read it say "unknown" rather than guessing.
+    /// </summary>
+    private static void RecordInstalledRelease(
+        string versionPath,
+        string versionDirectory,
+        string releaseVersion)
+    {
+        try
+        {
+            // bin/versions/<directory> -> bin. Derived from the path that was just installed
+            // rather than from InstallationLayout, which is Windows-only and would make this
+            // whole method platform-bound for the sake of a value already in hand.
+            var binRoot = Path.GetDirectoryName(Path.GetDirectoryName(versionPath));
+            if (string.IsNullOrWhiteSpace(binRoot))
+            {
+                return;
+            }
+
+            new InstalledReleaseStore(binRoot).Write(versionDirectory, releaseVersion);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
         }
     }
 

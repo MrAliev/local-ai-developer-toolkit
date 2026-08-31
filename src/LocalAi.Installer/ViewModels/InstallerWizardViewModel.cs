@@ -1805,7 +1805,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         if (result.Installed)
         {
-            RegisterUninstallEntry(report, result.Version ?? resolved.Manifest.ReleaseVersion);
+            // The release version, not the version directory: Apps & features shows this
+            // to a person, and "467ed5f0f9bf" is a commit id rather than a version (#255).
+            RegisterUninstallEntry(report, resolved.Manifest.ReleaseVersion);
         }
 
         ReportModelOutcome(report, result.Models, selection);

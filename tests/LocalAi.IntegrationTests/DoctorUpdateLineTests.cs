@@ -1,6 +1,7 @@
 using System.Text;
 using LocalAi.Cli;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 
 namespace LocalAi.IntegrationTests;
 
@@ -15,6 +16,9 @@ namespace LocalAi.IntegrationTests;
 /// </summary>
 public sealed class DoctorUpdateLineTests : IDisposable
 {
+    private const string Directory50 = "be08af033a2a";
+    private const string Directory51 = "467ed5f0f9bf";
+
     private static readonly DateTimeOffset Checked =
         new(2026, 8, 31, 9, 30, 0, TimeSpan.Zero);
 
@@ -22,7 +26,7 @@ public sealed class DoctorUpdateLineTests : IDisposable
         Path.GetTempPath(),
         "localai-doctor-update-" + Guid.NewGuid().ToString("N"));
 
-    public DoctorUpdateLineTests() => Install("0.1.50");
+    public DoctorUpdateLineTests() => Install(Directory50, "0.1.50");
 
     public void Dispose()
     {
@@ -64,7 +68,7 @@ public sealed class DoctorUpdateLineTests : IDisposable
     public void Being_up_to_date_is_reported_as_ok()
     {
         Enable();
-        Learned("0.1.50");
+        Learned("0.1.50", Directory50);
 
         var check = Check();
 
@@ -76,7 +80,7 @@ public sealed class DoctorUpdateLineTests : IDisposable
     public void A_newer_release_is_a_warning_and_names_where_to_read_about_it()
     {
         Enable();
-        Learned("0.1.51");
+        Learned("0.1.51", Directory51);
 
         var report = DoctorCommand.Inspect(root);
         var check = report.Checks.Single(c => c.Name == "update");
@@ -126,17 +130,24 @@ public sealed class DoctorUpdateLineTests : IDisposable
         new UpdateCheckPolicyStore(root).Write(
             UpdateCheckPolicy.Default with { Enabled = true });
 
-    private void Learned(string version) =>
+    private void Learned(string version, string versionDirectory) =>
         new UpdateCheckStateStore(root).Write(new UpdateCheckState(
             1,
             UpdateCheckStatus.Verified,
             Checked,
             version,
-            "https://example.invalid/releases/tag/v" + version));
+            "https://example.invalid/releases/tag/v" + version,
+            versionDirectory));
 
-    private void Install(string version)
+    /// <summary>
+    /// An installation as LocalAiPackageInstaller leaves one: the pointer names the version
+    /// *directory*, and a separate record says which release that directory came from. The
+    /// earlier fixture put the release version in the pointer, which is why every one of these
+    /// tests passed while the product reported an available update as "up to date" (#255).
+    /// </summary>
+    private void Install(string directory, string release)
     {
-        var versionDirectory = Path.Combine(root, "bin", "versions", version);
+        var versionDirectory = Path.Combine(root, "bin", "versions", directory);
         Directory.CreateDirectory(versionDirectory);
         foreach (var file in LocalAiPackageLayout.RequiredFiles)
         {
@@ -147,10 +158,9 @@ public sealed class DoctorUpdateLineTests : IDisposable
         File.WriteAllText(
             Path.Combine(root, "bin", "launcher", LocalAiPackageLayout.StableLauncherFile),
             "binary");
-        File.WriteAllText(
+        File.WriteAllBytes(
             Path.Combine(root, "bin", "current.json"),
-            "{\"schemaVersion\":1,\"version\":\"" + version + "\"}",
-            // No byte order mark, which is how an installation writes this file.
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            CurrentPointerSnapshot.CreateCanonicalBytes(directory));
+        new InstalledReleaseStore(Path.Combine(root, "bin")).Write(directory, release);
     }
 }

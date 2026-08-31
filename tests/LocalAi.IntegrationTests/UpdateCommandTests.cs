@@ -1,6 +1,7 @@
 using System.Text;
 using LocalAi.Cli;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Releases;
 
 namespace LocalAi.IntegrationTests;
@@ -16,6 +17,9 @@ namespace LocalAi.IntegrationTests;
 /// </summary>
 public sealed class UpdateCommandTests : IDisposable
 {
+    private const string Directory50 = "be08af033a2a";
+    private const string Directory51 = "467ed5f0f9bf";
+
     private readonly string root = Path.Combine(
         Path.GetTempPath(),
         "localai-update-cmd-" + Guid.NewGuid().ToString("N"));
@@ -23,7 +27,7 @@ public sealed class UpdateCommandTests : IDisposable
     private readonly StringWriter output = new();
     private readonly StringWriter error = new();
 
-    public UpdateCommandTests() => Install("0.1.50");
+    public UpdateCommandTests() => Install(Directory50, "0.1.50");
 
     public void Dispose()
     {
@@ -42,7 +46,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public async Task An_installation_that_is_current_is_left_alone()
     {
-        var exit = await Run(new StubFeed("v0.1.50", "0.1.50"));
+        var exit = await Run(new StubFeed("v0.1.50", "0.1.50", Directory50));
 
         Assert.Equal(0, exit);
         Assert.Contains(
@@ -54,7 +58,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public async Task A_newer_release_is_taken_up_to_the_point_of_installing_it()
     {
-        var feed = new StubFeed("v0.1.51", "0.1.51")
+        var feed = new StubFeed("v0.1.51", "0.1.51", Directory51)
         {
             OnDownload = () => throw new ReleaseResolutionException("the package never arrived"),
         };
@@ -76,8 +80,8 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public async Task Being_on_0_1_9_counts_as_behind_0_1_10()
     {
-        Install("0.1.9");
-        var feed = new StubFeed("v0.1.10", "0.1.10")
+        Install(Directory50, "0.1.9");
+        var feed = new StubFeed("v0.1.10", "0.1.10", Directory51)
         {
             OnDownload = () => throw new ReleaseResolutionException("stopped here"),
         };
@@ -97,7 +101,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public async Task A_release_that_does_not_verify_is_refused()
     {
-        var feed = new StubFeed("v0.1.51", "0.1.51")
+        var feed = new StubFeed("v0.1.51", "0.1.51", Directory51)
         {
             OnResolve = () => throw new ReleaseResolutionException(
                 "The manifest for release 'v0.1.51' failed verification and will not be used."),
@@ -114,7 +118,7 @@ public sealed class UpdateCommandTests : IDisposable
     {
         Directory.Delete(Path.Combine(root, "bin"), recursive: true);
 
-        var exit = await Run(new StubFeed("v0.1.51", "0.1.51"));
+        var exit = await Run(new StubFeed("v0.1.51", "0.1.51", Directory51));
 
         Assert.Equal(1, exit);
         Assert.Contains("no LocalAi installation", error.ToString(), StringComparison.Ordinal);
@@ -130,7 +134,7 @@ public sealed class UpdateCommandTests : IDisposable
     {
         Queue(2);
 
-        var exit = await Run(new StubFeed("v0.1.51", "0.1.51"));
+        var exit = await Run(new StubFeed("v0.1.51", "0.1.51", Directory51));
 
         Assert.Equal(2, exit);
         Assert.Contains("2 queued job(s)", error.ToString(), StringComparison.Ordinal);
@@ -140,7 +144,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public async Task An_unknown_option_changes_nothing()
     {
-        var exit = await Run(new StubFeed("v0.1.51", "0.1.51"), "--yes-please");
+        var exit = await Run(new StubFeed("v0.1.51", "0.1.51", Directory51), "--yes-please");
 
         Assert.Equal(2, exit);
         Assert.Contains("Unknown option '--yes-please'", error.ToString(), StringComparison.Ordinal);
@@ -149,7 +153,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public async Task The_help_says_what_is_not_touched()
     {
-        var exit = await Run(new StubFeed("v0.1.50", "0.1.50"), "--help");
+        var exit = await Run(new StubFeed("v0.1.50", "0.1.50", Directory50), "--help");
 
         Assert.Equal(2, exit);
         Assert.Contains("Prerequisites, models and client integrations are not touched",
@@ -183,21 +187,26 @@ public sealed class UpdateCommandTests : IDisposable
         }
     }
 
-    private void Install(string version)
+    /// <summary>
+    /// The pointer names a version directory, as LocalAiPackageInstaller writes it, and a
+    /// separate record says which release that directory came from (#255).
+    /// </summary>
+    private void Install(string directory, string release)
     {
-        var pointer = Path.Combine(root, "bin", "current.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(pointer)!);
-        File.WriteAllText(
-            pointer,
-            "{\"schemaVersion\":1,\"version\":\"" + version + "\"}",
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        var binRoot = Path.Combine(root, "bin");
+        Directory.CreateDirectory(binRoot);
+        File.WriteAllBytes(
+            Path.Combine(binRoot, "current.json"),
+            CurrentPointerSnapshot.CreateCanonicalBytes(directory));
+        new InstalledReleaseStore(binRoot).Write(directory, release);
     }
 
     /// <summary>
     /// A feed that answers with a manifest and nothing else. Everything past the manifest is
     /// ReleaseInstallService's, and these tests stop where its own do begin.
     /// </summary>
-    private sealed class StubFeed(string tag, string version) : IReleaseFeed
+    private sealed class StubFeed(string tag, string version, string versionDirectory)
+        : IReleaseFeed
     {
         public Action? OnResolve { get; init; }
 
@@ -217,7 +226,7 @@ public sealed class UpdateCommandTests : IDisposable
             var manifest = new ReleaseManifest(
                 1,
                 version,
-                version,
+                versionDirectory,
                 "signed-7",
                 BrokerCompatibilityContract.ProtocolVersion,
                 BrokerCompatibilityContract.BuildCompatibilityId,
