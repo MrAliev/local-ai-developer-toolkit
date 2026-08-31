@@ -64,6 +64,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private int progress;
     private string progressText = "Ready";
     private string? runLogMessage;
+    private string? unexpectedError;
     private EnvironmentDiagnosis? environmentDiagnosis;
     private CatalogRecommendation lastRecommendation = CatalogRecommendation.Empty;
     private string? resolvedTag;
@@ -91,12 +92,19 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         BackCommand = new RelayCommand(() => MovePrevious(), () => CanMovePrevious);
         NextCommand = new RelayCommand(() => MoveNext(), () => CanMoveNext);
-        InstallCommand = new AsyncRelayCommand(() => RunAsync(), () => CanRun);
+        InstallCommand = new AsyncRelayCommand(
+            () => RunAsync(),
+            () => CanRun,
+            ReportUnexpectedError);
         CancelCommand = new RelayCommand(Cancel, () => CanCancel);
-        RollbackCommand = new AsyncRelayCommand(() => RollbackThisRunAsync(), () => CanRollback);
+        RollbackCommand = new AsyncRelayCommand(
+            () => RollbackThisRunAsync(),
+            () => CanRollback,
+            ReportUnexpectedError);
         RollbackPreviousRunCommand = new AsyncRelayCommand(
             () => RollbackPreviousRunAsync(),
-            () => HasInterruptedRun && !isRunning);
+            () => HasInterruptedRun && !isRunning,
+            ReportUnexpectedError);
 
         // Relaxing the residency policy immediately widens what the models page can offer,
         // so the two pages stay consistent instead of contradicting each other.
@@ -237,6 +245,23 @@ public sealed class InstallerWizardViewModel : ObservableObject
         journal.Snapshot.HasReversibleWork;
 
     public bool HasInterruptedRun => interruptedJournal is not null;
+
+    public string? UnexpectedError => unexpectedError;
+
+    public bool HasUnexpectedError => unexpectedError is not null;
+
+    /// <summary>
+    /// The sink for exceptions that would otherwise escape an async void entry point — a
+    /// command's Execute, or a window event handler — and kill the installer with no
+    /// explanation (#209/m4). The wizard stays alive and shows what happened instead; each
+    /// new report replaces the previous one.
+    /// </summary>
+    public void ReportUnexpectedError(Exception exception)
+    {
+        unexpectedError = $"Unexpected error: {exception.GetType().Name}: {exception.Message}";
+        OnPropertyChanged(nameof(UnexpectedError));
+        OnPropertyChanged(nameof(HasUnexpectedError));
+    }
 
     public string? InterruptedRunNotice => interruptedRunNotice;
 

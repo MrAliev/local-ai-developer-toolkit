@@ -29,8 +29,16 @@ public sealed class RelayCommand(Action execute, Func<bool>? canExecute = null) 
 /// <summary>
 /// Async command that refuses re-entry while running, so a second click on Install cannot
 /// start a second transaction.
+///
+/// Execute is async void — the ICommand contract leaves no other shape — so an exception
+/// escaping it lands on the dispatcher and kills the whole installer (#209/m4). A command
+/// constructed with an error sink routes the exception there instead; without a sink the
+/// old crash behavior stands, because silently swallowing would be worse.
 /// </summary>
-public sealed class AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null)
+public sealed class AsyncRelayCommand(
+    Func<Task> execute,
+    Func<bool>? canExecute = null,
+    Action<Exception>? onError = null)
     : ICommand
 {
     private readonly Func<Task> execute =
@@ -55,6 +63,10 @@ public sealed class AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute
         try
         {
             await execute();
+        }
+        catch (Exception exception) when (onError is not null)
+        {
+            onError(exception);
         }
         finally
         {
