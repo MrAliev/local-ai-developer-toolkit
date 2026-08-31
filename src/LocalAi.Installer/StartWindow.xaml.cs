@@ -28,7 +28,9 @@ public partial class StartWindow : Window
 
         Open(choice switch
         {
-            StartChoice.Install or StartChoice.UpdateOrRepair => new MainWindow(),
+            // The errand travels with the window: an update that asks every question an
+            // install asks is a wizard that did not hear the answer already given (#257).
+            StartChoice.Install or StartChoice.UpdateOrRepair => new MainWindow(choice),
             // The removal half opens on the reinstall-friendly row and offers the install half
             // when it finishes; two deliberate wizards, because the install has prerequisites
             // and a release choice of its own to confirm.

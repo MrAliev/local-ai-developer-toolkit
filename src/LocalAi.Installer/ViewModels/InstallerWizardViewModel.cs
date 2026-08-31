@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Agents;
@@ -34,6 +35,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
         (InstallerPage.Progress, "Install"),
         (InstallerPage.Finish, "Finished"),
     ];
+
+    /// <summary>
+    /// What the start screen was asked for. Until now the wizard could not tell an install
+    /// from an update — StartWindow opened the same MainWindow for both — so it introduced
+    /// itself as an installation, asked every question an installation asks, and left the
+    /// person who had chosen "Update or repair" to work out that it had heard them (#257).
+    /// </summary>
+    public StartChoice Mode { get; }
 
     private readonly DiagnosePageViewModel diagnose = new();
     private readonly DependenciesPageViewModel dependencies = new();
@@ -80,8 +89,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private InstallerRunJournal? interruptedJournal;
     private string? interruptedRunNotice;
 
-    public InstallerWizardViewModel()
+    public InstallerWizardViewModel(StartChoice mode = StartChoice.Install)
     {
+        Mode = mode;
         var runner = new SystemProcessRunner();
         processRunner = runner;
         // Kept, not just handed to the detector: the detector's answer may have come from a
@@ -178,6 +188,48 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
             currentPage = value;
             RefreshAll();
+        }
+    }
+
+    /// <summary>
+    /// What this run is, in the title bar. An update that calls itself "LocalAi Setup" is the
+    /// same wizard as an install, which is exactly the impression that has to stop.
+    /// </summary>
+    public string WindowTitle => Mode switch
+    {
+        StartChoice.UpdateOrRepair => "LocalAi — Update or repair",
+        StartChoice.CleanReinstall => "LocalAi — Reinstall",
+        _ => "LocalAi Setup",
+    };
+
+    /// <summary>
+    /// The version line under the product name in the step rail, on every page.
+    ///
+    /// It is the one place a version is a question rather than a fact, which is the point:
+    /// the wizard used to ask for it again on a page of its own, two pages after the start
+    /// screen had already settled what the run was for.
+    /// </summary>
+    public string VersionContext
+    {
+        get
+        {
+            var installed = InstalledVersionReader
+                .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
+                .DisplayName;
+            var resolved = package.Resolved?.Manifest.ReleaseVersion;
+            if (installed is null)
+            {
+                return resolved is null ? "installing" : "installing " + resolved;
+            }
+
+            if (resolved is null)
+            {
+                return installed + " → checking…";
+            }
+
+            return string.Equals(installed, resolved, StringComparison.OrdinalIgnoreCase)
+                ? installed + " → " + resolved + " (repair)"
+                : installed + " → " + resolved;
         }
     }
 
@@ -1349,6 +1401,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(StepTitle));
         OnPropertyChanged(nameof(StepDescription));
         OnPropertyChanged(nameof(StepStatus));
+        OnPropertyChanged(nameof(VersionContext));
         OnPropertyChanged(nameof(StepList));
         OnPropertyChanged(nameof(CurrentPageIndex));
         OnPropertyChanged(nameof(CanMovePrevious));

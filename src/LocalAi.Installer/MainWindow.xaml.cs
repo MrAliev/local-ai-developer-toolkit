@@ -10,10 +10,11 @@ namespace LocalAi.Installer;
 /// </summary>
 public partial class MainWindow : Window
 {
-    private readonly InstallerWizardViewModel viewModel = new() { EnableDependencyActions = true };
+    private readonly InstallerWizardViewModel viewModel;
 
-    public MainWindow()
+    public MainWindow(StartChoice mode = StartChoice.Install)
     {
+        viewModel = new InstallerWizardViewModel(mode) { EnableDependencyActions = true };
         InitializeComponent();
         DataContext = viewModel;
         viewModel.CloseRequested += (_, _) => Close();

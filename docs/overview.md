@@ -503,7 +503,10 @@ package against the SHA-256 inside the manifest.
 
 The same executable is also the uninstaller, the updater and the repair tool, so starting it
 asks which of those this run is and offers only what the machine allows, naming the reason for
-the rest. An installation registers itself in Apps & features, whose entry runs a copy of the
+the rest. That answer travels with the window: the title bar names the errand, and the step
+rail carries a version line on every page — `installing 0.1.51`, `0.1.50 → 0.1.51`, or
+`0.1.50 → 0.1.50 (repair)`. It is the one place a version is a question; everywhere else the
+wizard states it. An installation registers itself in Apps & features, whose entry runs a copy of the
 installer parked inside the runtime root — so removal is still reachable long after the
 downloaded file is gone. Removal is a matrix rather than one hammer: three presets over rows
 that change one at a time, every removal listed before anything happens, the broker asked to
