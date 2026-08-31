@@ -15,6 +15,28 @@
     <ProjectReference Include="..\..\src\CodeSearch.Mcp\CodeSearch.Mcp.csproj" />
     <ProjectReference Include="..\..\src\LocalAi.Broker.Client\LocalAi.Broker.Client.csproj" />
     <ProjectReference Include="..\..\src\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+    <!--
+      The child process the RunProcessToCompletionAsync tests start. Referenced so its
+      executable lands beside theirs; nothing in these tests calls into it as a library.
+    -->
+    <ProjectReference Include="..\Fixtures\ProcessFixture\ProcessFixture.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!--
+      The tests run the fixture out of its own output directory rather than a copy beside
+      them, because an apphost needs its runtimeconfig.json next to it and a ProjectReference
+      copies the executable without it. The reference above is what guarantees it has been
+      built.
+    -->
+    <ProcessFixtureExecutable>$(MSBuildThisFileDirectory)..\Fixtures\ProcessFixture\bin\$(Configuration)\net10.0\ProcessFixture.exe</ProcessFixtureExecutable>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>ProcessFixtureExecutable</_Parameter1>
+      <_Parameter2>$(ProcessFixtureExecutable)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>
