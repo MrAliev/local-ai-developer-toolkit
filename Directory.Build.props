@@ -5,7 +5,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!--
+      The gate of #209/m5. The whole tree builds with zero warnings — that is the
+      baseline — and this keeps it there: a new warning fails the build, locally and in
+      CI alike, instead of scrolling past. Widening the analyzer set is a separate,
+      deliberate step; this only forbids regressing below what the tree already achieves.
+    -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!--
       The fallback for a local build, and deliberately not a number that could ever be a release.
       A real-looking version here is the trap: this said 0.1.22 through six releases, so 0.1.29

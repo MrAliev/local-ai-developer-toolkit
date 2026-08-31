@@ -25,15 +25,22 @@ public sealed class RepositorySyncGateTests : IDisposable
     {
         var repositoryId = Guid.NewGuid().ToString("N");
 
-        var first = RepositorySyncGate.TryAcquire(repositoryId, TimeSpan.Zero);
+        var first = RepositorySyncGate.TryAcquire(
+            repositoryId,
+            TimeSpan.Zero,
+            TestContext.Current.CancellationToken);
         Assert.NotNull(first);
         Assert.Null(RepositorySyncGate.TryAcquire(
             repositoryId,
-            TimeSpan.FromMilliseconds(50)));
+            TimeSpan.FromMilliseconds(50),
+            TestContext.Current.CancellationToken));
 
         first.Dispose();
 
-        using var third = RepositorySyncGate.TryAcquire(repositoryId, TimeSpan.Zero);
+        using var third = RepositorySyncGate.TryAcquire(
+            repositoryId,
+            TimeSpan.Zero,
+            TestContext.Current.CancellationToken);
         Assert.NotNull(third);
     }
 
@@ -41,7 +48,10 @@ public sealed class RepositorySyncGateTests : IDisposable
     public void Cancelling_the_wait_propagates_instead_of_reporting_busy()
     {
         var repositoryId = Guid.NewGuid().ToString("N");
-        using var held = RepositorySyncGate.TryAcquire(repositoryId, TimeSpan.Zero);
+        using var held = RepositorySyncGate.TryAcquire(
+            repositoryId,
+            TimeSpan.Zero,
+            TestContext.Current.CancellationToken);
         Assert.NotNull(held);
         // The budget is deliberately far beyond the test: cancellation is the only way the
         // wait can end, so the outcome is deterministic on a machine of any speed.
@@ -65,7 +75,10 @@ public sealed class RepositorySyncGateTests : IDisposable
         var repository = CreateCommittedRepository();
         var runtime = Path.Combine(_root, "runtime");
         var identity = RuntimeIndexLayout.Inspect(repository, runtime);
-        using var held = RepositorySyncGate.TryAcquire(identity.RepositoryId, TimeSpan.Zero);
+        using var held = RepositorySyncGate.TryAcquire(
+            identity.RepositoryId,
+            TimeSpan.Zero,
+            TestContext.Current.CancellationToken);
         Assert.NotNull(held);
 
         var error = await Assert.ThrowsAsync<RepositorySyncBusyException>(

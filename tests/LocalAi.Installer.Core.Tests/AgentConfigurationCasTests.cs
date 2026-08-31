@@ -24,7 +24,10 @@ public sealed class AgentConfigurationCasTests : IDisposable
     public async Task A_write_landing_between_check_and_swap_survives_and_the_apply_refuses()
     {
         var path = Path.Combine(_root, "config.toml");
-        await File.WriteAllBytesAsync(path, Bytes("original"));
+        await File.WriteAllBytesAsync(
+            path,
+            Bytes("original"),
+            TestContext.Current.CancellationToken);
         var plan = Plan(AgentConfigurationFileOperations.FilePlan(
             path,
             Bytes("original"),
@@ -68,7 +71,10 @@ public sealed class AgentConfigurationCasTests : IDisposable
     {
         var first = Path.Combine(_root, "first.md");
         var second = Path.Combine(_root, "second.md");
-        await File.WriteAllBytesAsync(second, Bytes("what is really on disk"));
+        await File.WriteAllBytesAsync(
+            second,
+            Bytes("what is really on disk"),
+            TestContext.Current.CancellationToken);
         var plan = Plan(
             AgentConfigurationFileOperations.FilePlan(
                 first,
@@ -112,7 +118,10 @@ public sealed class AgentConfigurationCasTests : IDisposable
     {
         var first = Path.Combine(_root, "first.md");
         var second = Path.Combine(_root, "second.md");
-        await File.WriteAllBytesAsync(second, Bytes("what is really on disk"));
+        await File.WriteAllBytesAsync(
+            second,
+            Bytes("what is really on disk"),
+            TestContext.Current.CancellationToken);
         var plan = Plan(
             AgentConfigurationFileOperations.FilePlan(
                 first,
