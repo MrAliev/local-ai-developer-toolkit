@@ -251,6 +251,39 @@ public sealed class InstallerRunJournal : IDisposable
     }
 
     /// <summary>
+    /// Whether some other run is happening right now, in this window or another one.
+    ///
+    /// The same live lock that stops a rollback from racing an install answers this: a wizard
+    /// about to remove the runtime has to know that another one is halfway through writing it,
+    /// and the two must not be allowed to meet in the middle. Asked before anything is
+    /// planned, and answered by a file handle the operating system releases the instant its
+    /// process dies rather than by a heuristic about elapsed time.
+    /// </summary>
+    public static bool IsRunActive(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        if (!Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        try
+        {
+            return Directory
+                .EnumerateFiles(directory, FilePrefix + "*.json" + LiveLockSuffix)
+                .Any(lockPath => IsRunAlive(
+                    lockPath[..^LiveLockSuffix.Length]));
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // An unreadable log directory says nothing about whether a run is happening, and
+            // refusing on it would block the wizard over a permissions problem elsewhere.
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Whether the run that owns this journal still holds its live lock. The probe is the
     /// open itself: an unshared handle refuses a second open for as long as its process
     /// lives, and the operating system releases it the moment that process dies — a

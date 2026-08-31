@@ -162,9 +162,11 @@ public sealed record AgentOption(string Agent, AgentChoice Choice)
 }
 
 /// <summary>
-/// One entry in the orientation pane on the left of the wizard.
+/// One entry in the orientation pane on the left of the wizard. It carries no page of its
+/// own: the pane renders a title and a state, and both wizards — installation and removal —
+/// have their own page enumerations to keep track of where they are.
 /// </summary>
-public sealed record WizardStep(InstallerPage Page, string Title, bool IsCurrent, bool IsDone);
+public sealed record WizardStep(string Title, bool IsCurrent, bool IsDone);
 
 public static class InstallerCulture
 {

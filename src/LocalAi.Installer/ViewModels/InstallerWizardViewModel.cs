@@ -1201,7 +1201,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
         for (var index = 0; index < Steps.Count; index++)
         {
             StepList.Add(new WizardStep(
-                Steps[index].Page,
                 Steps[index].Title,
                 index == current,
                 index < current));

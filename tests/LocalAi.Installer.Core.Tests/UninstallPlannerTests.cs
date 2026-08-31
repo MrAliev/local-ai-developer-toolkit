@@ -1,3 +1,4 @@
+using LocalAi.TestFixtures;
 using LocalAi.Installer.Core.Agents;
 using LocalAi.Installer.Core.Removal;
 

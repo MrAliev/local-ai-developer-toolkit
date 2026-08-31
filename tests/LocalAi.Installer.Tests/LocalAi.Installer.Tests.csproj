@@ -15,4 +15,9 @@
     <ProjectReference Include="..\..\src\LocalAi.Installer\LocalAi.Installer.csproj" />
     <ProjectReference Include="..\..\src\LocalAi.Installer.Core\LocalAi.Installer.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The same installed machine the removal core tests work over, so the wizard is
+         exercised against the computer those tests describe rather than a second sketch. -->
+    <Compile Include="..\Shared\RemovalFixture.cs" Link="RemovalFixture.cs" />
+  </ItemGroup>
 </Project>

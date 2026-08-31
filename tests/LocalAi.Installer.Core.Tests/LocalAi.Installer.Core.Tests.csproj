@@ -40,6 +40,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Shared\FixturePrerequisite.cs" Link="FixturePrerequisite.cs" />
+    <!-- The installed machine both the removal planner tests and the wizard's tests work
+         over. Shared so the two describe the same computer rather than two similar ones. -->
+    <Compile Include="..\Shared\RemovalFixture.cs" Link="RemovalFixture.cs" />
   </ItemGroup>
 
 </Project>
