@@ -674,17 +674,64 @@ public static class CodeSearchTools
         start.ArgumentList.Add("sync");
         start.ArgumentList.Add("--root");
         start.ArgumentList.Add(resolvedRoot);
-        using var process = Process.Start(start)
-            ?? throw new InvalidOperationException("Could not start LocalAi CLI.");
-        var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        if (process.ExitCode != 0)
+        var (exitCode, output, error) = await RunProcessToCompletionAsync(
+            start,
+            cancellationToken);
+        if (exitCode != 0)
         {
-            return $"LocalAi sync failed with {process.ExitCode}: {(await stderr).Trim()}";
+            return $"LocalAi sync failed with {exitCode}: {error.Trim()}";
         }
 
-        return (await stdout).Trim();
+        return output.Trim();
+    }
+
+    /// <summary>
+    /// Runs a redirected child process to completion, owning its whole lifetime.
+    ///
+    /// Cancelling the call must cancel the work, not orphan it: a sync left running keeps
+    /// writing the shared index, and the retry the caller sends next races it (#198). On
+    /// cancellation the entire process tree is killed — sync spawns children of its own —
+    /// and both pipe readers are still awaited: they deliberately do not take the caller's
+    /// token, because the kill is what completes them, abandoned redirected pipes deadlock
+    /// a child that fills them, and unobserved tasks hide their failures.
+    /// </summary>
+    internal static async Task<(int ExitCode, string Output, string Error)>
+        RunProcessToCompletionAsync(
+            ProcessStartInfo start,
+            CancellationToken cancellationToken)
+    {
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException($"Could not start '{start.FileName}'.");
+        var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
+            throw;
+        }
+
+        return (process.ExitCode, await stdout, await stderr);
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or
+            System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+        }
     }
 
     private static string IndexCommand(string root, string model) =>
