@@ -26,11 +26,17 @@ public partial class App : Application
             string.Equals(argument, "/uninstall", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(argument, "-uninstall", StringComparison.OrdinalIgnoreCase)) ?? false;
 
+    /// <summary>
+    /// Apps &amp; features asks for removal directly, so that argument goes straight to the
+    /// uninstall wizard. Started with no argument — from Explorer, or from a download — the
+    /// same executable asks what the person came to do, because it is equally the installer,
+    /// the updater, the repair tool and the uninstaller.
+    /// </summary>
     private void OnStartup(object sender, StartupEventArgs e)
     {
         Window window = IsUninstallRequested(e.Args)
             ? new UninstallWindow()
-            : new MainWindow();
+            : new StartWindow();
         MainWindow = window;
         window.Show();
     }

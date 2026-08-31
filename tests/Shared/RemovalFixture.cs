@@ -30,6 +30,9 @@ internal sealed class RemovalFixture : IDisposable
 
     public const string CodexInstructionsPreamble = "# Codex house rules\n\nAlways run the tests.\n";
 
+    /// <summary>The version the current-version pointer names, and the one on disk.</summary>
+    public const string InstalledVersion = "0.1.50";
+
     private readonly Dictionary<string, string?> hooksPaths =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -125,8 +128,18 @@ internal sealed class RemovalFixture : IDisposable
 
     private void Populate()
     {
-        WriteFile(Path.Combine(Runtime, "bin", "current.json"), "{\"schemaVersion\":1,\"version\":\"0.1.50\"}");
-        WriteFile(Path.Combine(Runtime, "bin", "versions", "0.1.50", "localai.exe"), "binary");
+        WriteFile(
+            Path.Combine(Runtime, "bin", "current.json"),
+            "{\"schemaVersion\":1,\"version\":\"" + InstalledVersion + "\"}");
+        // Every file a version directory must hold, so an inspector reading this machine
+        // recognises the installation rather than calling it broken.
+        foreach (var required in LocalAiPackageLayout.RequiredFiles)
+        {
+            WriteFile(
+                Path.Combine(Runtime, "bin", "versions", InstalledVersion, required),
+                "binary");
+        }
+
         WriteFile(LauncherPath, "binary");
         WriteFile(Path.Combine(Runtime, "installer", "backups", "launcher-1", "localai-launcher.exe"), "binary");
         foreach (var name in RemovalMatrix.SettingsFileNames)

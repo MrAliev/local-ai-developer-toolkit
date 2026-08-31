@@ -247,12 +247,91 @@ public sealed class UninstallWizardViewModelTests : IDisposable
         Assert.False(wizard.CanMoveNext);
     }
 
+    /// <summary>
+    /// The removal half of a clean reinstall: it opens on the row that keeps what an hour of
+    /// embedding built, and the page's own radio buttons agree with the boxes underneath them.
+    /// </summary>
+    [Fact]
+    public async Task A_clean_reinstall_opens_on_the_reinstall_friendly_row()
+    {
+        var wizard = await Wizard(
+            preset: RemovalPreset.ReinstallFriendly,
+            offersInstallAfterwards: true);
+
+        Assert.Equal(RemovalPreset.ReinstallFriendly, wizard.SelectedPreset);
+        Assert.True(wizard.Presets
+            .Single(preset => preset.Preset == RemovalPreset.ReinstallFriendly).IsSelected);
+        Assert.False(wizard.Presets
+            .Single(preset => preset.Preset == RemovalPreset.FullUninstall).IsSelected);
+        Assert.True(Row(wizard, RemovalItem.Binaries).IsSelected);
+        Assert.False(Row(wizard, RemovalItem.RepositoryIndexes).IsSelected);
+    }
+
+    /// <summary>
+    /// The install half is offered when the removal half has finished and succeeded, never
+    /// before and never after a failure: inviting somebody to install over a removal that
+    /// stopped halfway is how a machine ends up in a state neither wizard describes.
+    /// </summary>
+    [Fact]
+    public async Task The_install_half_is_offered_only_after_a_removal_that_worked()
+    {
+        var wizard = await Wizard(
+            preset: RemovalPreset.ReinstallFriendly,
+            offersInstallAfterwards: true);
+        Assert.False(wizard.CanContinueToInstall);
+
+        await wizard.MoveNextAsync(TestContext.Current.CancellationToken);
+        wizard.IsConfirmed = true;
+        Assert.False(wizard.CanContinueToInstall);
+
+        Assert.True(await wizard.RunAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(wizard.CanContinueToInstall);
+        Assert.Contains("Continue to install", wizard.StepDescription, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(Path.Combine(machine.Runtime, "repositories")));
+    }
+
+    [Fact]
+    public async Task An_ordinary_removal_never_offers_to_install_again()
+    {
+        var wizard = await Wizard();
+        await wizard.MoveNextAsync(TestContext.Current.CancellationToken);
+        wizard.IsConfirmed = true;
+
+        Assert.True(await wizard.RunAsync(TestContext.Current.CancellationToken));
+
+        Assert.False(wizard.OffersInstallAfterwards);
+        Assert.False(wizard.CanContinueToInstall);
+    }
+
+    [Fact]
+    public async Task A_removal_that_failed_does_not_invite_an_install_over_it()
+    {
+        var held = Path.Combine(machine.Runtime, "jobs", "job.json");
+        using var handle = new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.None);
+        var wizard = await Wizard(
+            preset: RemovalPreset.ReinstallFriendly,
+            offersInstallAfterwards: true);
+        await wizard.MoveNextAsync(TestContext.Current.CancellationToken);
+        wizard.IsConfirmed = true;
+
+        Assert.False(await wizard.RunAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(wizard.HasRunError);
+        Assert.False(wizard.CanContinueToInstall);
+    }
+
     private static RemovalRow Row(UninstallWizardViewModel wizard, RemovalItem item) =>
         wizard.Rows.Single(row => row.Item == item);
 
-    private async Task<UninstallWizardViewModel> Wizard(IProcessRunner? processRunner = null)
+    private async Task<UninstallWizardViewModel> Wizard(
+        IProcessRunner? processRunner = null,
+        RemovalPreset preset = RemovalPreset.FullUninstall,
+        bool offersInstallAfterwards = false)
     {
         var wizard = new UninstallWizardViewModel(
+            preset,
+            offersInstallAfterwards,
             machine.Layout,
             machine.Home,
             processRunner ?? new StubProcessRunner(),

@@ -73,9 +73,25 @@ public sealed class RepositoryRow(
             : dispatcherCount + " hook(s) installed";
 }
 
-public sealed record UninstallPresetOption(RemovalPreset Preset)
+public sealed class UninstallPresetOption(RemovalPreset preset) : ObservableObject
 {
+    private bool isSelected;
+
+    public RemovalPreset Preset { get; } = preset;
+
     public string Title => RemovalMatrix.Title(Preset);
 
     public string Description => RemovalMatrix.Description(Preset);
+
+    /// <summary>
+    /// Which preset the page is on. Bound rather than left to the radio buttons' own state,
+    /// because the wizard can be opened on a preset — a clean reinstall arrives on the
+    /// reinstall-friendly one — and a page whose buttons disagree with its own checkboxes
+    /// tells the person something untrue about what is about to happen.
+    /// </summary>
+    public bool IsSelected
+    {
+        get => isSelected;
+        set => SetProperty(ref isSelected, value);
+    }
 }

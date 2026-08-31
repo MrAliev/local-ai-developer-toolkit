@@ -111,6 +111,7 @@
                                 <DataTemplate>
                                     <RadioButton GroupName="Preset" Margin="0,0,0,8"
                                                  Tag="{Binding Preset}"
+                                                 IsChecked="{Binding IsSelected, Mode=OneWay}"
                                                  Checked="OnPresetChecked">
                                         <StackPanel>
                                             <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
@@ -237,6 +238,12 @@
                         <TextBox Text="{Binding Report, Mode=OneWay}"
                                  IsReadOnly="True" TextWrapping="Wrap" Height="220"
                                  VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
+                        <!-- The install half of a clean reinstall, offered only once the
+                             removal half has finished and only when it succeeded. -->
+                        <Button Content="Continue to install"
+                                Command="{Binding ContinueToInstallCommand}"
+                                HorizontalAlignment="Left" Margin="0,10,0,0" Padding="12,4"
+                                Visibility="{Binding CanContinueToInstall, Converter={StaticResource BoolToVisibility}}" />
                     </StackPanel>
                 </Grid>
             </ScrollViewer>
