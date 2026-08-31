@@ -1,4 +1,5 @@
 using System.Text;
+using LocalAi.Repository;
 
 namespace LocalAi.Cli;
 
@@ -10,72 +11,15 @@ public sealed record HookInstallResult(
 
 public static class HookInstaller
 {
-    private const string ExcludeHeader = "# LocalAi managed Git hooks";
-
-    private static readonly string[] Events =
-    [
-        "post-commit",
-        "post-merge",
-        "post-rewrite",
-        "post-checkout"
-    ];
-
-    /// <summary>
-    /// Where Git will actually look for hooks in this repository.
-    /// </summary>
-    /// <remarks>
-    /// Writing to <c>$GIT_DIR/hooks</c> unconditionally is wrong for any repository that sets
-    /// <c>core.hooksPath</c>, which is most front-end ones: husky, lefthook and simple-git-hooks
-    /// all set it. Git then never looks at <c>$GIT_DIR/hooks</c>, so the dispatchers install
-    /// successfully and never run again, and the index falls behind HEAD with nothing to say so.
-    /// </remarks>
+    /// <inheritdoc cref="GitHookLayout.ResolveHooksDirectory"/>
     public static string ResolveHooksDirectory(
         string commonDirectory,
         string? configuredHooksPath,
-        string? workingTreeRoot)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(commonDirectory);
-        var common = Path.GetFullPath(commonDirectory);
-        if (string.IsNullOrWhiteSpace(configuredHooksPath))
-        {
-            return Path.Combine(common, "hooks");
-        }
-
-        // Git resolves a relative core.hooksPath against the directory a hook runs in, which is
-        // the top of the working tree. A bare repository has none, and then the common directory
-        // is the only thing left to resolve against.
-        var configured = configuredHooksPath.Trim();
-        var resolved = Path.IsPathRooted(configured)
-            ? Path.GetFullPath(configured)
-            : Path.GetFullPath(Path.Combine(
-                string.IsNullOrWhiteSpace(workingTreeRoot) ? common : workingTreeRoot,
-                configured));
-
-        // husky points core.hooksPath at `.husky/_`, a directory it rewrites from scratch on
-        // every `husky` run — so an npm install would silently delete anything left there. Its
-        // shims run `.husky/<hook>` instead, which husky never overwrites, and which every
-        // installed shim already delegates to whether or not that file exists yet.
-        return IsHuskyRunnerDirectory(resolved)
-            ? Path.GetDirectoryName(resolved.TrimEnd(
-                Path.DirectorySeparatorChar,
-                Path.AltDirectorySeparatorChar))!
-            : resolved;
-    }
-
-    private static bool IsHuskyRunnerDirectory(string directory)
-    {
-        var trimmed = directory.TrimEnd(
-            Path.DirectorySeparatorChar,
-            Path.AltDirectorySeparatorChar);
-        if (!string.Equals(Path.GetFileName(trimmed), "_", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return Path.GetDirectoryName(trimmed) is { Length: > 0 } &&
-               (File.Exists(Path.Combine(trimmed, "h")) ||
-                File.Exists(Path.Combine(trimmed, "husky.sh")));
-    }
+        string? workingTreeRoot) =>
+        GitHookLayout.ResolveHooksDirectory(
+            commonDirectory,
+            configuredHooksPath,
+            workingTreeRoot);
 
     public static HookInstallResult Install(
         string commonDirectory,
@@ -115,14 +59,11 @@ public static class HookInstaller
         var installed = new List<string>();
         var chained = new List<string>();
 
-        foreach (var hookEvent in Events)
+        foreach (var hookEvent in GitHookLayout.Events)
         {
             var hookPath = Path.Combine(hooksRoot, hookEvent);
-            var previousPath = hookPath + ".pre-localai";
-            if (File.Exists(hookPath) &&
-                !File.ReadAllText(hookPath).Contains(
-                    "# LocalAi managed dispatcher",
-                    StringComparison.Ordinal))
+            var previousPath = hookPath + GitHookLayout.ChainedSuffix;
+            if (File.Exists(hookPath) && !GitHookLayout.IsManagedDispatcher(hookPath))
             {
                 if (File.Exists(previousPath))
                 {
@@ -141,7 +82,7 @@ public static class HookInstaller
                 : string.Empty;
             var script =
                 "#!/bin/sh\n" +
-                "# LocalAi managed dispatcher\n" +
+                GitHookLayout.DispatcherMarker + "\n" +
                 previous +
                 $"{commandPrefix} hook {hookEvent} " +
                 "--root \"$(git rev-parse --show-toplevel)\"\n";
@@ -152,31 +93,16 @@ public static class HookInstaller
             installed.Add(hookPath);
         }
 
-        // `$GIT_DIR/hooks` sits under the working tree by path but is no part of it, so only a
-        // hooks directory outside the Git directory can turn up in `git status`.
-        var insideWorkingTree =
-            IsInside(hooksRoot, workingTreeRoot) &&
-            !IsInside(hooksRoot, commonDirectory);
+        var insideWorkingTree = GitHookLayout.IsInsideWorkingTree(
+            hooksRoot,
+            commonDirectory,
+            workingTreeRoot);
         if (insideWorkingTree)
         {
             Exclude(commonDirectory, workingTreeRoot!, installed);
         }
 
         return new HookInstallResult(installed, chained, hooksRoot, insideWorkingTree);
-    }
-
-    private static bool IsInside(string path, string? container)
-    {
-        if (string.IsNullOrWhiteSpace(container))
-        {
-            return false;
-        }
-
-        var root = Path.GetFullPath(container)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return Path.GetFullPath(path).StartsWith(
-            root + Path.DirectorySeparatorChar,
-            StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -192,11 +118,7 @@ public static class HookInstaller
         string workingTreeRoot,
         IReadOnlyList<string> installed)
     {
-        var root = Path.GetFullPath(workingTreeRoot);
-        var patterns = installed
-            .Select(path => "/" + Path.GetRelativePath(root, path).Replace('\\', '/'))
-            .SelectMany(pattern => new[] { pattern, pattern + ".pre-localai" })
-            .ToArray();
+        var patterns = GitHookLayout.ExcludePatterns(workingTreeRoot, installed);
         var excludePath = Path.Combine(
             Path.GetFullPath(commonDirectory),
             "info",
@@ -218,9 +140,9 @@ public static class HookInstaller
             lines.Add(string.Empty);
         }
 
-        if (!lines.Contains(ExcludeHeader, StringComparer.Ordinal))
+        if (!lines.Contains(GitHookLayout.ExcludeHeader, StringComparer.Ordinal))
         {
-            lines.Add(ExcludeHeader);
+            lines.Add(GitHookLayout.ExcludeHeader);
         }
 
         lines.AddRange(missing);

@@ -8,6 +8,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
+    <!-- The repository manifests and the Git hook layout, used to list what an uninstall would
+         take out. A library, so it is referenced as one; the executables below are not. -->
+    <ProjectReference Include="..\LocalAi.Repository\LocalAi.Repository.csproj" />
     <!-- Tasks 6/8 must add clean library adapters before Installer.Core consumes these project types. -->
     <ProjectReference Include="..\LocalAi.Launcher\LocalAi.Launcher.csproj"
                       ReferenceOutputAssembly="false"

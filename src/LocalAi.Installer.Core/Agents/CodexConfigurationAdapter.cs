@@ -36,8 +36,78 @@ public sealed class CodexConfigurationAdapter(
         return new("Codex", files, BuildPreview(files));
     }
 
+    /// <summary>
+    /// What disconnecting this client would change: both managed server sections go, together
+    /// with the per-tool sub-tables underneath them, and the managed instructions block goes
+    /// with them.
+    ///
+    /// The sub-tables are removed here precisely because the installer created them. They hold
+    /// approvals for tools that will not exist on this machine any more, and leaving
+    /// <c>[mcp_servers.codesearch.tools.search_code]</c> behind would leave Codex carrying
+    /// settings for a server it can no longer start. Sections belonging to anybody else are
+    /// untouched, as are the parts of the file between them.
+    /// </summary>
+    public AgentConfigurationPlan PreviewRemoval()
+    {
+        var files = new List<AgentConfigurationFilePlan>();
+        var path = Path.Combine(homeDirectory, ".codex", "config.toml");
+        var before = ReadExisting(path);
+        if (before.Length > 0)
+        {
+            var after = RemoveManagedSections(
+                AgentConfigurationFileOperations.DecodeUtf8(before));
+            if (!before.SequenceEqual(Encoding.UTF8.GetBytes(after)))
+            {
+                files.Add(AgentConfigurationFileOperations.FilePlan(
+                    path,
+                    before,
+                    after,
+                    timeProvider.GetUtcNow()));
+            }
+        }
+
+        RemoveInstructions(files, Path.Combine(homeDirectory, ".codex", "AGENTS.md"));
+        return new("Codex", files, BuildPreview(files));
+    }
+
     public Task ApplyAsync(AgentConfigurationPlan plan, CancellationToken cancellationToken) =>
         AgentConfigurationFileOperations.ApplyAsync(plan, readBack, cancellationToken);
+
+    /// <summary>
+    /// Cuts each managed table out whole, from its header to the start of the next table.
+    ///
+    /// A section's body runs to the next header, so removing that span takes the sub-tables
+    /// with it only if they are removed by the same rule — which is why the pattern matches
+    /// <c>[mcp_servers.codesearch]</c> and <c>[mcp_servers.codesearch.tools.*]</c> alike, and
+    /// why the spans are cut from the end backwards: an earlier cut would move every later
+    /// offset. Multiline strings are refused for the same reason the rewrite refuses them,
+    /// because a line inside one can look exactly like a header.
+    /// </summary>
+    private static string RemoveManagedSections(string before)
+    {
+        if (before.Contains("\"\"\"", StringComparison.Ordinal) ||
+            before.Contains("'''", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Unsupported TOML MCP layout: multiline strings cannot be edited line by line.");
+        }
+
+        var headers = Regex.Matches(
+                before,
+                @"(?m)^[ \t]*\[mcp_servers\.(?:codesearch|locallm)(?:\.[^\]\r\n]+)?\][ \t]*$")
+            .Cast<Match>()
+            .ToArray();
+        var updated = before;
+        foreach (var header in headers.Reverse())
+        {
+            var bodyStart = header.Index + header.Length;
+            var next = Regex.Match(updated[bodyStart..], @"(?m)^[ \t]*\[");
+            var end = next.Success ? bodyStart + next.Index : updated.Length;
+            updated = updated[..header.Index] + updated[end..];
+        }
+
+        return updated;
+    }
 
     /// <summary>
     /// Updates the two managed servers in place rather than replacing them.
@@ -394,6 +464,22 @@ public sealed class CodexConfigurationAdapter(
     {
         var before = ReadExisting(path);
         var updated = ManagedInstructionBlock.Upsert(AgentConfigurationFileOperations.DecodeUtf8(before));
+        if (updated.Changed)
+        {
+            files.Add(AgentConfigurationFileOperations.FilePlan(path, before, updated.Content, timeProvider.GetUtcNow()));
+        }
+    }
+
+    private void RemoveInstructions(List<AgentConfigurationFilePlan> files, string path)
+    {
+        var before = ReadExisting(path);
+        if (before.Length == 0)
+        {
+            return;
+        }
+
+        var updated = ManagedInstructionBlock.Remove(
+            AgentConfigurationFileOperations.DecodeUtf8(before));
         if (updated.Changed)
         {
             files.Add(AgentConfigurationFileOperations.FilePlan(path, before, updated.Content, timeProvider.GetUtcNow()));
