@@ -165,6 +165,13 @@ internal static class BrokerProgram
                 drain,
                 backendReachable,
                 shutdown.Token);
+            // Off the job path on purpose: this is the only long-lived process, so the update
+            // check runs here — but on its own loop, so nothing queued ever waits on GitHub.
+            // It does nothing at all until somebody switches it on, and it reads that consent
+            // on every pass rather than capturing it here.
+            using var updateProbe = new UpdateCheckProbe();
+            var updates = new UpdateCheckService(runtimeRoot, updateProbe.CheckAsync)
+                .RunAsync(shutdown.Token);
             try
             {
                 await host.RunAsync(shutdown.Token, () => drain.Requested);
@@ -176,6 +183,7 @@ internal static class BrokerProgram
             {
                 shutdown.Cancel();
                 await ObserveCancellationAsync(heartbeat);
+                await ObserveCancellationAsync(updates);
             }
 
             return 0;
