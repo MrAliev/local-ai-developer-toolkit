@@ -50,13 +50,17 @@ ships `lib/tsserver.js`, so a 5.x installation is what works.
 
 ## LocalLm — 9 tools
 
-The `locallm` server. Every model call goes through the shared broker.
+The `locallm` server. Every model call goes through the shared broker. The four content
+tools — `read_image`, `triage_log`, `ask_local`, `translate_local` — return their
+model-derived answer inside nonce-bound `<untrusted-content>` markers, with the notice line
+outside: a local model read files, logs or images, and its answer is data exactly as a
+CodeSearch snippet is.
 
 | Tool | Purpose | The constraint that matters |
 | --- | --- | --- |
-| `read_image` | An image on disk turned into text: screenshot, PDF page, scan, diagram. | Saves nothing for an image already pasted into the conversation. |
+| `read_image` | An image on disk turned into text: screenshot, PDF page, scan, diagram. | Saves nothing for an image already pasted into the conversation. At most 8 images per call, 60 MB and 80 megapixels in total. |
 | `triage_log` | Machine output of any length, supplied as a file or direct text: what failed and why. | Probes the largest full-VRAM context, then streams and reduces bounded fragments sequentially. |
-| `ask_local` | A mechanical task over known files: list, summarise, extract. | Not for architecture or subtle bug analysis. |
+| `ask_local` | A mechanical task over known files: list, summarise, extract. | Not for architecture or subtle bug analysis. At most 64 files sharing a ~720K-character budget; overflow is cut at a visible `TRUNCATED` marker and named in the notice. |
 | `translate_local` | Translation with structural validation. | Attributes the model actually used. |
 | `local_models_status` | Installed and resident models, recommended missing ones, experiment state. | — |
 | `local_model_preflight` | Loads one model and context with no task content. | Returns full-VRAM residency proof. |

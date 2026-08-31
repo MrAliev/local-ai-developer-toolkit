@@ -88,7 +88,9 @@ same thing at the same time pay for one piece of work, not two.
 **Quarantine instead of corruption.** A task record that cannot be read or parsed is neither
 deleted nor repaired in place: it moves to quarantine and the queue carries on. One broken
 record therefore does not stop the pipeline and remains available for inspection. Diagnostics
-report the quarantine count.
+report the quarantine count. The quarantine itself is bounded like everything else the runtime
+produces — by age, entry count and total size — with a grace period a fresh record cannot be
+deleted inside, so there is always time to look at what just went wrong.
 
 **The archive is a handover, not a journal.** The client collects a response on its next poll,
 so the response body is short-lived: a minimum protection period applies first, then age and
@@ -213,7 +215,10 @@ every worktree share one repository identity and one index.
 
 The shared Git hooks — after a commit, a merge, a history rewrite and a branch switch — trigger
 synchronization: a small delta is computed immediately, a large one is queued. The hook itself
-never talks to a model. Installing the hooks is an explicit, consented operation.
+never talks to a model. Installing the hooks is an explicit, consented operation. Two
+synchronizations of the same repository do not interleave: the second one waits briefly and
+then exits with a named "repository busy" outcome before touching any shared state, instead of
+stamping its failure over the other run's story.
 
 They are installed where git actually looks. Usually that is `$GIT_DIR/hooks`, but when the
 repository sets `core.hooksPath` — and husky, lefthook and simple-git-hooks all set it, husky
@@ -342,9 +347,13 @@ How it actually works:
 | Marker symmetry | The opening and closing markers carry the same nonce, so a "closing" tag cannot be planted in the source |
 | What stays outside | Only what is trusted: the index summary, diagnostics, validation errors |
 
-**Six tools use the boundary**: search, chunk retrieval, go-to-definition, find references,
-find implementations and find relationships. Paths, symbol identifiers and ranges were written
-by whoever wrote the repository, so they are data as much as a snippet is.
+**Ten tools use the boundary.** On the `codesearch` server: search, chunk retrieval,
+go-to-definition, find references, find implementations and find relationships — paths, symbol
+identifiers and ranges were written by whoever wrote the repository, so they are data as much
+as a snippet is. On the `locallm` server: `read_image`, `triage_log`, `ask_local` and
+`translate_local` — a local model read files, logs or images, and a weak model can repeat or
+amplify an instruction planted in them, so its answer arrives inside the same boundary while
+the notice line stays outside as this process's own words.
 
 ### 6.2 The result identifier
 
@@ -368,7 +377,7 @@ an ordinal out of range is rejected rather than resolved against a different sna
 | Immutable versions | A published version directory is never rewritten; rollback is the activation of a previously verified directory |
 | Atomic switching | Activation requires naming the pointer being replaced, so a concurrent activation cannot be silently overwritten |
 | Graceful stop | The broker is asked to finish: it notices the request on its per-second heartbeat, stops taking new work and finishes what it has. Only what has not left by the deadline is killed |
-| Growth limits | Index generations, installed versions, backups, the task archive, response bodies and telemetry are all bounded |
+| Growth limits | Index generations, installed versions, backups, the task archive, response bodies, the quarantine and telemetry are all bounded |
 
 One subtlety about retention: the minimum lifetime of a response body protects correctness
 rather than disk — a response younger than that is deleted by nothing, and a manually configured
