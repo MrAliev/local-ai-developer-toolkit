@@ -226,6 +226,23 @@ run it. Nothing else is needed first: no GitHub account, no sign-in, no clone of
 repository. Windows 10 or 11 on x64 is the only requirement the wizard refuses to proceed
 without.
 
+There are exactly two supported ways to install: **online** — the wizard downloads the
+manifest, the signature and the package from the release itself — and **from a folder**,
+for a machine with no route to GitHub, described below. Building from source is a
+development activity, not a third way in: hand-made builds are never placed into the
+runtime, and delivery goes change → release → installer only.
+
+Neither way asks you to obtain any key or certificate. The public key that decides what to
+trust ships embedded inside `LocalAi.Installer.exe`; the manifest is verified against it
+and the package against the SHA-256 recorded inside that manifest, whichever transport
+delivered them. The one file that embedded key cannot vouch for is the installer itself —
+which is what the two manual checks below are for, and both need nothing but the file.
+
+When the anonymous download fails — a fork kept private, a network that blocks the release
+host but not the API — the installer falls back to the GitHub CLI and reuses the sign-in
+already established on the machine with `gh auth login`. It never asks for, stores or even
+sees a token, and the verification is identical on either transport.
+
 The installer is not Authenticode-signed, so Windows shows *"Windows protected your PC"*.
 Choose **More info → Run anyway**. The SHA-256 of the file is printed in the release notes,
 so a download can be checked against it if it was passed on by someone else.
@@ -448,7 +465,13 @@ dotnet test LocalAi.slnx --configuration Release
 
 ## Publishing executables
 
-Publish only the executable projects that are needed:
+Everything from here to the end of the release sections is for developing and releasing
+this repository — installing a release needs none of it.
+
+Publish only the executable projects that are needed. This first, framework-dependent form
+is for local development; a release ships the self-contained form below it, because the
+package layout has no room for dependency assemblies and the verifier refuses anything
+else:
 
 ```powershell
 dotnet publish src/CodeSearch.Cli/CodeSearch.Cli.csproj --configuration Release --output publish/CodeSearch.Cli
@@ -512,6 +535,12 @@ them — note filenames, the publish script, the manifest's version directory, t
 the same value, compared rather than retyped.
 
 ### Signing a release manifest
+
+Everything in this section is the machinery behind `release --publish` above: for a real
+release it runs as that one command, and by hand it exists for the runbook's restore check
+and for understanding what is being trusted. The one thing that is done by hand, once, is
+creating a key pair — and only a fork needs to: this repository's releases are signed with
+its own key, whose public half is already committed as the trust anchor.
 
 An installed machine never needs a system-wide .NET runtime. Every component — the broker
 included — ships as a self-contained executable, and the broker is started as

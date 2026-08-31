@@ -56,7 +56,9 @@ failed.
 
 - **The SmartScreen prompt.** `LocalAi.Installer.exe` is not Authenticode-signed, so Windows
   shows "Windows protected your PC". This is expected, and the SHA-256 of each installer is
-  published in its release notes so a download can be checked.
+  published in its release notes so a download can be checked — and
+  `gh attestation verify` checks it against GitHub's attestation log, which the release
+  page cannot rewrite.
 - **Model output.** Local models are weaker than cloud ones and can be wrong. The tooling says
   so; a wrong answer is a limitation, not a security flaw.
 - **Anything requiring an attacker to already be the signed-in user** on the machine, with the
