@@ -42,6 +42,24 @@ recording the reason a thing is the way it is — usually the failure that made 
 
 ## Documentation
 
+**Every pull request that changes `src/` updates the documentation, or says why it does not.**
+The documents here describe the current state of the product, so a change to the product
+usually makes at least one of them inaccurate — and the moment to notice that is while the
+change is being made, not a release later when somebody plans a key rotation around a sentence
+that stopped being true.
+
+CI enforces the rule the only way a rule can be enforced without judging prose: a pull request
+touching `src/` and nothing under `docs/`, `README*.md`, `SECURITY*.md` or `CONTRIBUTING*.md`
+fails unless its body carries a line of its own saying otherwise —
+
+```
+Docs: none — internal refactor, no described behaviour changed
+```
+
+That line is not a formality. Writing it takes ten seconds and is exactly the thought the rule
+exists to force: "the documentation was considered and needs nothing" and "the documentation
+was forgotten" are indistinguishable from the outside, and only one of them is acceptable.
+
 Every document exists twice: `name.md` in English and `name.ru.md` in Russian, each linking
 to the other in its opening lines. A document in one language only is an unfinished document.
 

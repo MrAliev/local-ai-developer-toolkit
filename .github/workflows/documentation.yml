@@ -1,0 +1,100 @@
+name: Documentation
+
+# A rule nothing checks decays quietly, and this repository has already paid for that once:
+# thirty-eight documents kept a translation nobody could reach until a test started failing
+# the build over it. This is the same idea applied one level up — the documents describe the
+# current state of the product, so a change to the product that leaves them alone is either
+# an omission or a decision, and the two must be told apart while the change is being made
+# rather than a release later.
+#
+# It is deliberately not a judgement about quality. Nothing here can tell a good paragraph
+# from a bad one; what it can do is refuse to let "the documentation was not considered" and
+# "the documentation needed nothing" look identical.
+
+on:
+  pull_request:
+
+concurrency:
+  group: documentation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  documentation-considered:
+    # Linux, unlike the build: this job reads a list of file names and never runs the product,
+    # so the Windows runner the rest of CI needs would buy nothing here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The comparison needs both sides, so the shallow clone the build uses will not do.
+          fetch-depth: 0
+
+      - name: Documentation was considered
+        shell: bash
+        env:
+          # Through the environment rather than inlined: a pull request body is text somebody
+          # else wrote, and pasting it into a script is how that text becomes commands.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags --depth=200 origin "$BASE_REF"
+          changed=$(git diff --name-only "origin/$BASE_REF...HEAD")
+
+          if [ -z "$changed" ]; then
+            echo "No files changed; nothing to hold to the rule."
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "$changed" | sed 's/^/  /'
+
+          # Only product code counts as "something a reader might need told about". A pull
+          # request that touches nothing but tests, CI or the documents themselves has already
+          # satisfied the rule by construction.
+          product=$(echo "$changed" | grep -E '^src/' || true)
+          docs=$(echo "$changed" | grep -E '(^docs/|(^|/)README(\.ru)?\.md$|(^|/)SECURITY(\.ru)?\.md$|(^|/)CONTRIBUTING(\.ru)?\.md$)' || true)
+
+          if [ -z "$product" ]; then
+            echo "No source changes: the documentation rule does not apply."
+            exit 0
+          fi
+
+          if [ -n "$docs" ]; then
+            echo "Documentation changed alongside the source. Rule satisfied."
+            exit 0
+          fi
+
+          # The escape hatch is deliberately a sentence, not a label: writing why the documents
+          # need nothing takes ten seconds and is exactly the thought the rule exists to force.
+          if printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*Docs:[[:space:]]*(none|not needed|n/a)\b'; then
+            echo "The pull request states why no documentation change was needed. Rule satisfied."
+            exit 0
+          fi
+
+          cat >&2 <<'MESSAGE'
+
+          This pull request changes src/ and no documentation.
+
+          The documents in this repository describe the current state of the product, so a
+          change to the product usually changes at least one of them. Do one of:
+
+            * update what the change made inaccurate — docs/, README.md, SECURITY.md and
+              their .ru.md pairs all count; or
+
+            * say in the pull request body why nothing needed updating, on a line of its own:
+
+                Docs: none — internal refactor, no described behaviour changed
+
+          The second option is not a formality. It is the difference between "the
+          documentation was considered and needs nothing" and "the documentation was
+          forgotten", which are indistinguishable from the outside.
+
+          MESSAGE
+          exit 1
