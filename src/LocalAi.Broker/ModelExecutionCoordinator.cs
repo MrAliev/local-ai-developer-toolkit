@@ -36,6 +36,7 @@ public sealed class ModelExecutionCoordinator
     private readonly Func<LocalJobRequest, CancellationToken, Task<BrokerExecutionResult>> _execute;
     private readonly Func<ModelSelection, BrokerExecutionResult, ModelValidationResult> _validate;
     private readonly TimeProvider _timeProvider;
+    private readonly Action<string>? _diagnostic;
     private ModelResidencyProof? _warmProof;
 
     public ModelExecutionCoordinator(
@@ -45,7 +46,8 @@ public sealed class ModelExecutionCoordinator
         ModelTelemetryStore telemetry,
         Func<LocalJobRequest, CancellationToken, Task<BrokerExecutionResult>> execute,
         Func<ModelSelection, BrokerExecutionResult, ModelValidationResult>? validate = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Action<string>? diagnostic = null)
     {
         _router = router ?? throw new ArgumentNullException(nameof(router));
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
@@ -54,6 +56,7 @@ public sealed class ModelExecutionCoordinator
         _execute = execute ?? throw new ArgumentNullException(nameof(execute));
         _validate = validate ?? ((_, _) => ModelValidationResult.Pass("none"));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _diagnostic = diagnostic;
     }
 
     public async Task<BrokerExecutionResult> ExecuteAsync(
@@ -277,31 +280,21 @@ public sealed class ModelExecutionCoordinator
         catch (Exception executionException)
         {
             var failedAt = _timeProvider.GetUtcNow();
-            try
-            {
-                await AppendTelemetryAsync(
-                    original,
-                    selection,
-                    workload,
-                    wasCold,
-                    "execution:fail",
-                    ModelExecutionOutcome.TechnicalFailure,
-                    loadStarted,
-                    loadCompleted,
-                    executionStarted,
-                    failedAt,
-                    gross,
-                    verification,
-                    net,
-                    cancellationToken);
-            }
-            catch (Exception telemetryException)
-            {
-                throw new ModelAttemptExecutionException(
-                    new AggregateException(
-                        executionException,
-                        telemetryException));
-            }
+            await TryAppendTelemetryAsync(
+                original,
+                selection,
+                workload,
+                wasCold,
+                "execution:fail",
+                ModelExecutionOutcome.TechnicalFailure,
+                loadStarted,
+                loadCompleted,
+                executionStarted,
+                failedAt,
+                gross,
+                verification,
+                net,
+                cancellationToken);
 
             throw new ModelAttemptExecutionException(executionException);
         }
@@ -320,7 +313,7 @@ public sealed class ModelExecutionCoordinator
             net,
             selection.IsExperimentalAttempt);
         var result = raw with { Routing = routing };
-        await AppendTelemetryAsync(
+        await TryAppendTelemetryAsync(
             original,
             selection,
             workload,
@@ -336,6 +329,63 @@ public sealed class ModelExecutionCoordinator
             net,
             cancellationToken);
         return new AttemptResult(result, validation);
+    }
+
+    /// <summary>
+    /// Telemetry is measurement, not the answer. A metrics directory that stopped accepting
+    /// writes used to turn a finished correct answer into a failed job on the success path,
+    /// and on the failure path it was aggregated into the attempt exception — classified as
+    /// a technical model failure and answered with a second expensive execution whose real
+    /// cause was a disk, not the model (#202). An I/O failure here is now a named diagnostic
+    /// and nothing else; cancellation keeps its meaning. Experiment state is unaffected — it
+    /// is routing state, recorded elsewhere, and stays mandatory.
+    /// </summary>
+    private async Task TryAppendTelemetryAsync(
+        LocalJobRequest original,
+        ModelSelection selection,
+        LocalWorkloadMetadata workload,
+        bool wasCold,
+        string validatorResult,
+        ModelExecutionOutcome outcome,
+        DateTimeOffset loadStarted,
+        DateTimeOffset loadCompleted,
+        DateTimeOffset executionStarted,
+        DateTimeOffset executionCompleted,
+        long gross,
+        long verification,
+        long net,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await AppendTelemetryAsync(
+                original,
+                selection,
+                workload,
+                wasCold,
+                validatorResult,
+                outcome,
+                loadStarted,
+                loadCompleted,
+                executionStarted,
+                executionCompleted,
+                gross,
+                verification,
+                net,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            _diagnostic?.Invoke(
+                $"telemetry record for job {original.JobId:N} was not written " +
+                $"({exception.GetType().Name}: {exception.Message}); " +
+                "the job outcome is unaffected.");
+        }
     }
 
     private async Task AppendTelemetryAsync(
