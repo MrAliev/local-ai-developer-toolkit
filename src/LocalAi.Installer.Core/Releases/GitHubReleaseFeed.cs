@@ -31,10 +31,12 @@ public sealed class GitHubReleaseFeed(
     string? repository = null,
     string? gitHubCliPath = null) : IReleaseFeed
 {
-    public const string DefaultRepository = "MrAliev/local-ai-developer-toolkit";
-    public const string ManifestAsset = "release-manifest.json";
-    public const string SignatureAsset = "release-manifest.sig";
-    public const string PackageAsset = "localai-package.zip";
+    // Kept as names here because every call site in this project reads them from this class;
+    // what they are is decided once, in the contract the runtime reads them from too.
+    public const string DefaultRepository = ReleaseAssets.DefaultRepository;
+    public const string ManifestAsset = ReleaseAssets.ManifestAsset;
+    public const string SignatureAsset = ReleaseAssets.SignatureAsset;
+    public const string PackageAsset = ReleaseAssets.PackageAsset;
 
     private static readonly TimeSpan DocumentTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan PackageTimeout = TimeSpan.FromMinutes(30);
