@@ -301,7 +301,8 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
             "api/embed",
             body,
             [input],
-            cancellationToken);
+            cancellationToken,
+            maximumResponseBytes: EmbedResponseCeilingBytes);
         var response = document.RootElement.Deserialize<EmbedResponse>(
             ExternalResponseJson);
         if (response?.Embeddings is not [var embedding] ||
@@ -387,6 +388,73 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         }
     }
 
+    /// <summary>
+    /// Counts what the JSON parser actually consumes and refuses past the ceiling, because a
+    /// chunked response carries no Content-Length to refuse early (#205).
+    /// </summary>
+    private sealed class BoundedReadStream(
+        Stream inner,
+        long limit,
+        string relativePath) : Stream
+    {
+        private long _consumed;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            Count(inner.Read(buffer, offset, count));
+
+        public override int Read(Span<byte> buffer) => Count(inner.Read(buffer));
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default) =>
+            Count(await inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false));
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        private int Count(int read)
+        {
+            _consumed += read;
+            if (_consumed > limit)
+            {
+                throw new InvalidDataException(
+                    $"Ollama's response for '{relativePath}' exceeded the {limit}-byte limit.");
+            }
+
+            return read;
+        }
+    }
+
     private async Task<BrokerExecutionResult> ExecuteEmbedAsync(
         EmbedJobPayload payload,
         CancellationToken cancellationToken)
@@ -403,7 +471,8 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
             "api/embed",
             body,
             payload.Inputs,
-            cancellationToken);
+            cancellationToken,
+            maximumResponseBytes: EmbedResponseCeilingBytes);
         EmbedResponse response;
         try
         {
@@ -515,12 +584,27 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         }
     }
 
+    /// <summary>
+    /// The success-body ceiling (#205). The error path always had a bounded reader; success
+    /// content went straight into the JSON parser with no size check and an infinite client
+    /// timeout, so a misconfigured or misbehaving endpoint could feed the broker an
+    /// arbitrarily large body and take the whole single queue down with it. 64MB covers any
+    /// chat or status response with orders of magnitude to spare; the embedding call sites
+    /// pass their own larger ceiling, because a legitimate batch of 4096-dimension vectors
+    /// is the one big body this transport produces. Stall detection stays with the job
+    /// watchdog, which already probes and fails an attempt on confirmed unresponsiveness.
+    /// </summary>
+    private const long DefaultResponseCeilingBytes = 64L * 1024 * 1024;
+
+    internal const long EmbedResponseCeilingBytes = 512L * 1024 * 1024;
+
     private async Task<JsonDocument> SendAsync(
         HttpMethod method,
         string relativePath,
         string? body,
         IReadOnlyList<string> sensitiveValues,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long maximumResponseBytes = DefaultResponseCeilingBytes)
     {
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
@@ -541,12 +625,24 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
                     cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
+                    if (response.Content.Headers.ContentLength is { } declared &&
+                        declared > maximumResponseBytes)
+                    {
+                        throw new InvalidDataException(
+                            $"Ollama declared a {declared}-byte response for " +
+                            $"'{relativePath}', past the {maximumResponseBytes}-byte limit.");
+                    }
+
                     try
                     {
                         await using var stream = await response.Content.ReadAsStreamAsync(
                             cancellationToken);
-                        return await JsonDocument.ParseAsync(
+                        await using var bounded = new BoundedReadStream(
                             stream,
+                            maximumResponseBytes,
+                            relativePath);
+                        return await JsonDocument.ParseAsync(
+                            bounded,
                             cancellationToken: cancellationToken);
                     }
                     catch (JsonException exception)
