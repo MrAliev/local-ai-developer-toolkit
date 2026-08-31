@@ -5,7 +5,7 @@ using LocalAi.Installer.Core.Agents;
 using LocalAi.Installer.Core.Removal;
 using LocalAi.Repository;
 
-namespace LocalAi.Installer.Core.Tests;
+namespace LocalAi.TestFixtures;
 
 /// <summary>
 /// A machine LocalAi has been installed on: a populated runtime root, two configured clients,
@@ -69,14 +69,19 @@ internal sealed class RemovalFixture : IDisposable
 
     public InstallationLayout Layout => InstallationLayout.FromLocalAppData(LocalAppData);
 
+    /// <summary>
+    /// Stands in for `git config --get core.hooksPath`. Real Git is not run here: these
+    /// repositories are directory trees rather than clones, and what the tests are about is
+    /// where the answer sends the search, not how Git produces it.
+    /// </summary>
+    public Func<string, CancellationToken, Task<string?>> HooksPathReader =>
+        (workingDirectory, _) => Task.FromResult(
+            hooksPaths.GetValueOrDefault(Path.GetFullPath(workingDirectory)));
+
     public Task<UninstallPlan> PlanAsync(
         RemovalSelection selection,
         CancellationToken cancellationToken) =>
-        new UninstallPlanner(
-                Layout,
-                Home,
-                (workingDirectory, _) => Task.FromResult(
-                    hooksPaths.GetValueOrDefault(Path.GetFullPath(workingDirectory))))
+        new UninstallPlanner(Layout, Home, HooksPathReader)
             .PlanAsync(selection, cancellationToken);
 
     public static AgentConfigurationFilePlan PlannedFile(
