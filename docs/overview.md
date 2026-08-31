@@ -158,7 +158,7 @@ order. `localai telemetry` shows how often that happens on a given machine.
 
 ### 4.1 What ends up in the index at all
 
-Only allowed extensions are indexed — around forty: sources (C#, TypeScript/JavaScript, Python,
+Only allowed extensions are indexed — around fifty: sources (C#, TypeScript/JavaScript, Python,
 Go, Java, Kotlin, Rust, Ruby, PHP, C/C++), markup and templates (XAML, XML, Razor, CSHTML, HTML,
 CSS/SCSS/LESS), queries and schemas (SQL, GraphQL, Proto), documentation (Markdown, TXT,
 AsciiDoc), configuration (YAML, TOML, INI, JSON), scripts (PowerShell, Bash), infrastructure

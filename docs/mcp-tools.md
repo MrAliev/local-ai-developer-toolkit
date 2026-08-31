@@ -69,9 +69,7 @@ CodeSearch snippet is.
 | `local_model_feedback` | The owner's decision: `Promote`, `ContinueExperiment`, `FallbackOnly`, `Disable`. | — |
 
 `triage_log` reads its tuning profile before every invocation from
-`%LOCALAPPDATA%\LocalAi\log-triage.json` on Windows or
-`$XDG_DATA_HOME/LocalAi/log-triage.json` (normally `~/.local/share/LocalAi/log-triage.json`) on
-Linux/macOS. The optional JSON fields are `maximumContextTokens`, `reservedContextTokens`,
+`%LOCALAPPDATA%\LocalAi\log-triage.json`. The optional JSON fields are `maximumContextTokens`, `reservedContextTokens`,
 `charactersPerToken`, `maximumFragmentCharacters`, `maximumOverlapCharacters`,
 `maximumPartialSummaryCharacters`, and `promptOverheadCharacters`, plus `schemaVersion: 1`.
 Missing, malformed, and unsupported-version files use safe defaults. Changes apply to the next

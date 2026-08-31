@@ -158,7 +158,7 @@ MCP-серверов в Codex и Claude указывает на launcher.
 
 ### 4.1 Что вообще попадает в индекс
 
-Индексируются только разрешённые расширения — около сорока: исходники (C#, TypeScript/JavaScript,
+Индексируются только разрешённые расширения — около пятидесяти: исходники (C#, TypeScript/JavaScript,
 Python, Go, Java, Kotlin, Rust, Ruby, PHP, C/C++), разметка и шаблоны (XAML, XML, Razor, CSHTML,
 HTML, CSS/SCSS/LESS), запросы и схемы (SQL, GraphQL, Proto), документация (Markdown, TXT, AsciiDoc),
 конфигурация (YAML, TOML, INI, JSON), скрипты (PowerShell, Bash), инфраструктура (Terraform, Bicep) и
