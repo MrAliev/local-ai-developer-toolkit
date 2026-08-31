@@ -495,9 +495,11 @@ placed into the runtime.
 
 Installation needs no GitHub account: releases are public, and the installer downloads the
 manifest, the signature and the package over plain HTTPS with no credentials. The GitHub CLI
-remains as a fallback — for a fork kept private, or a network where the release host is
-unreachable but the API is not. The checks are the same either way: the manifest is verified
-against the key embedded in the installer, the package against the SHA-256 inside the manifest.
+remains as an automatic fallback — for a fork kept private, or a network where the release
+host is unreachable but the API is not — and it reuses the sign-in already established with
+`gh auth login`: the installer never asks for, stores or sees a token. The checks are the
+same either way: the manifest is verified against the key embedded in the installer, the
+package against the SHA-256 inside the manifest.
 
 Each run writes a journal of its effects to `%LOCALAPPDATA%\LocalAi-installer-logs` — the
 intent before each effect, the outcome after — so a run killed mid-install still leaves a
