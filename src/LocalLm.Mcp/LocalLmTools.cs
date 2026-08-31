@@ -40,6 +40,7 @@ public static class LocalLmTools
         return await Run(
             () => tasks.ReadImageAsync(paths, question, profile, model, cancellationToken),
             "read_image:" + PrimarySource(paths),
+            cancellationToken,
             profile);
     }
 
@@ -72,7 +73,8 @@ public static class LocalLmTools
                 question,
                 model,
                 cancellationToken),
-            "triage_log:" + (path ?? "text"));
+            "triage_log:" + (path ?? "text"),
+            cancellationToken);
 
     [McpServerTool(Name = "ask_local")]
     [Description("""
@@ -104,7 +106,8 @@ public static class LocalLmTools
                 files ?? [],
                 model,
                 cancellationToken),
-            "ask_local:" + PrimarySource(files ?? []));
+            "ask_local:" + PrimarySource(files ?? []),
+            cancellationToken);
 
     [McpServerTool(Name = "translate_local")]
     [Description(
@@ -133,6 +136,10 @@ public static class LocalLmTools
                 cancellationToken);
             return result.Notice + "\n\n" +
                 UntrustedContent.Wrap(result.Answer, "translate_local");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -209,6 +216,7 @@ public static class LocalLmTools
     private static async Task<string> Run(
         Func<Task<LocalResult>> job,
         string origin,
+        CancellationToken cancellationToken,
         LocalTaskProfile? profile = null)
     {
         try
@@ -216,6 +224,15 @@ public static class LocalLmTools
             var result = await job();
             return result.Notice + "\n\n" +
                 UntrustedContent.Wrap(result.Answer, origin);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The host cancelled the call: rendering that as "Локальная модель не
+            // отработала" invites a retry nobody is waiting for, so cancellation must
+            // surface to the MCP host as itself (#209/m3). The filter checks the caller's
+            // token because an Ollama HTTP timeout is also an OperationCanceledException,
+            // and that one really is a failure worth a readable sentence.
+            throw;
         }
         catch (BrokerJobFailedException ex)
             when (profile is { } wanted &&
