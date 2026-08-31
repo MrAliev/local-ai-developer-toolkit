@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using LocalAi.Broker;
@@ -145,6 +146,109 @@ public sealed class RuntimeAclTests
 
         acl.Ensure(root.Path);
         acl.Ensure(root.Path);
+    }
+
+    /// <summary>
+    /// The blast-radius half of #200: a junction inside the runtime tree — creatable by the
+    /// same unprivileged user who owns the root — used to lead the ACL repair outside it.
+    /// The walk must refuse the reparse point by name and never touch what it points at.
+    /// </summary>
+    [Fact]
+    public void Ensure_refuses_a_junction_and_leaves_its_target_untouched()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        using var outside = new TemporaryRuntimeRoot();
+        File.WriteAllText(Path.Combine(outside.Path, "sentinel.txt"), "alive");
+        Directory.CreateDirectory(Path.Combine(root.Path, "jobs"));
+        var junction = Path.Combine(root.Path, "jobs", "detour");
+        CreateJunction(junction, outside.Path);
+        try
+        {
+            var error = Assert.Throws<InvalidOperationException>(
+                () => new RuntimeAcl().Ensure(root.Path));
+
+            Assert.Contains("reparse point", error.Message, StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(outside.Path, "sentinel.txt")));
+            // The external tree keeps its ordinary inherited ACL: the exact-ACL repair,
+            // which always protects what it touches, never followed the junction.
+            Assert.False(
+                new DirectoryInfo(outside.Path).GetAccessControl().AreAccessRulesProtected);
+        }
+        finally
+        {
+            RemoveJunction(junction);
+        }
+    }
+
+    /// <summary>
+    /// The cycle half of #200. NTFS cannot form a directory cycle without a reparse point,
+    /// so refusing every reparse point is also what keeps this walk finite.
+    /// </summary>
+    [Fact]
+    public void Ensure_refuses_a_junction_cycle()
+    {
+        using var root = new TemporaryRuntimeRoot();
+        Directory.CreateDirectory(Path.Combine(root.Path, "jobs"));
+        var junction = Path.Combine(root.Path, "jobs", "loop");
+        CreateJunction(junction, root.Path);
+        try
+        {
+            var error = Assert.Throws<InvalidOperationException>(
+                () => new RuntimeAcl().Ensure(root.Path));
+
+            Assert.Contains("reparse point", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            RemoveJunction(junction);
+        }
+    }
+
+    private static void CreateJunction(string link, string target)
+    {
+        // cmd's mklink /J: junction creation needs no privilege, unlike symlinks, which is
+        // exactly why the walk has to defend against it.
+        var start = new ProcessStartInfo("cmd.exe")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        start.ArgumentList.Add("/c");
+        start.ArgumentList.Add("mklink");
+        start.ArgumentList.Add("/J");
+        start.ArgumentList.Add(link);
+        start.ArgumentList.Add(target);
+        using var process = Process.Start(start)!;
+        process.WaitForExit();
+        Assert.True(
+            process.ExitCode == 0 && Directory.Exists(link),
+            $"Could not create a junction at '{link}': " + process.StandardError.ReadToEnd());
+    }
+
+    /// <summary>
+    /// Removes the link itself, never its target. cmd's rmdir deletes a junction without
+    /// recursing into it, which managed recursive deletion refuses to do here.
+    /// </summary>
+    private static void RemoveJunction(string link)
+    {
+        var start = new ProcessStartInfo("cmd.exe")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        start.ArgumentList.Add("/c");
+        start.ArgumentList.Add("rmdir");
+        start.ArgumentList.Add(link);
+        using var process = Process.Start(start)!;
+        process.WaitForExit();
+        Assert.False(
+            Directory.Exists(link),
+            $"Could not remove the junction at '{link}': " +
+            process.StandardError.ReadToEnd());
     }
 
     private static void ApplyRealAcl(
