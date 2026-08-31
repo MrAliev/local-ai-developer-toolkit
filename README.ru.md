@@ -511,6 +511,19 @@ $ec.Dispose()
 icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 ```
 
+Когда офлайн-копия сырого ключа сделана (см.
+[runbook подписи](docs/release-signing-runbook.ru.md)), заверните рабочую копию в DPAPI и
+позвольте signer'у уничтожить сырой файл:
+
+```powershell
+localai-release-signer protect-key
+```
+
+Подпись предпочитает `release-signing-private.pkcs8.dpapi`, сырой `.der` принимает только с
+предупреждением и отказывается трогать любой из них, пока ACL каталога с ключом даёт доступ
+кому-либо кроме SYSTEM, Administrators и текущего пользователя, — отказ называет лишнего
+обладателя доступа и команду `icacls`, которая это исправляет.
+
 Сначала соберите пакет. Верификатор сверяет состав архива с
 `LocalAiPackageLayout.PackageArtifactFiles` через `SetEquals`, поэтому в нём должно быть
 ровно шесть артефактов плюс `localai-package.json` — плоско и без единой лишней записи.

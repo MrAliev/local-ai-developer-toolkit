@@ -25,16 +25,25 @@ distribution channel. It is worth avoiding anyway, and worth *not being surprise
 
 ## Keep a copy
 
-The private key lives at:
+A freshly generated private key starts as:
 
 ```
 %LOCALAPPDATA%\LocalAi\release-signing\release-signing-private.pkcs8.der
 ```
 
-One machine, one copy, no history. Put a second copy somewhere that does not share a failure
-domain with that disk — a password manager attachment or an encrypted archive on separate media.
-Not the repository: `publish/` and the runtime are ignored precisely so key material never reaches
-git.
+Make the backup below **first**, then run `localai-release-signer protect-key`: it replaces
+the working copy with `release-signing-private.pkcs8.dpapi` — the same PKCS#8 wrapped with
+DPAPI, bound to this Windows account on this machine — and destroys the raw file. Signing
+prefers the wrapped copy and accepts a raw one only with a warning. It also refuses to
+touch the key while the directory's ACL grants access to anyone beyond SYSTEM,
+Administrators and the current user; the refusal names the offender and the `icacls`
+command that fixes it.
+
+One machine, one copy, no history. Put a second copy of the **raw PKCS#8** — never the
+`.dpapi` file, which does not unprotect anywhere else — somewhere that does not share a
+failure domain with that disk: a password manager attachment or an encrypted archive on
+separate media. Not the repository: `publish/` and the runtime are ignored precisely so key
+material never reaches git.
 
 ## Record the fingerprint out of band
 
@@ -69,7 +78,9 @@ dotnet run --project src/LocalAi.ReleaseSigner/LocalAi.ReleaseSigner.csproj -c R
 ```
 
 `--no-models` is what makes this a probe rather than a release: signing refuses to run without
-a model list unless the omission is stated, and this manifest is never published.
+a model list unless the omission is stated, and this manifest is never published. An explicit
+`--private-key` path ending in `.der` is read as raw PKCS#8, which is exactly what the backup
+holds — restoring never requires DPAPI-wrapping first.
 
 Signing validates the private key against the anchor the installer ships, so a copy that does not
 match fails here rather than on a user's machine. Delete `$restored` afterwards.
@@ -86,6 +97,8 @@ accepted that you do not.
    and why.
 5. Retire the old private key only once a release signed by the new one has been installed
    successfully.
+6. Back up the new raw key out of band, then run `protect-key` so the working copy is
+   DPAPI-wrapped again.
 
 The order matters in one place: step 3 and step 2 ship together, in the same installer. An
 installer carrying the new anchor cannot verify a package signed by the old key, and the reverse

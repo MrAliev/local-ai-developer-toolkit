@@ -524,6 +524,19 @@ $ec.Dispose()
 icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"
 ```
 
+Once the offline backup of the raw key exists (see the
+[signing runbook](docs/release-signing-runbook.md)), convert the working copy to a
+DPAPI-wrapped one and let the signer destroy the raw file:
+
+```powershell
+localai-release-signer protect-key
+```
+
+Signing prefers `release-signing-private.pkcs8.dpapi`, still accepts the raw `.der` with a
+warning, and refuses to touch either while the key directory's ACL grants access to anyone
+beyond SYSTEM, Administrators and the current user — the refusal names the offender and
+the `icacls` command that fixes it.
+
 Build the package first. The verifier compares the archive contents against
 `LocalAiPackageLayout.PackageArtifactFiles` with `SetEquals`, so it must hold exactly six
 artifacts plus `localai-package.json`, flat and with nothing extra. **That is why the

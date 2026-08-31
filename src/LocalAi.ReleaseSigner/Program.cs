@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using System.IO.Compression;
 using System.Numerics;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text.Json;
 using LocalAi.Contracts;
@@ -18,6 +19,9 @@ namespace LocalAi.ReleaseSigner;
 /// canonical form byte for byte, so producing it any other way invites a silent drift that
 /// only shows up as a failed installation.
 /// </summary>
+// Windows-only like every executable in this product: the key store below uses DPAPI and
+// NTFS ACLs, and the packages it signs only run here.
+[SupportedOSPlatform("windows")]
 internal static class Program
 {
     private static readonly BigInteger P256Order = BigInteger.Parse(
@@ -36,6 +40,10 @@ internal static class Program
                 "verify" => Verify(Args.Parse(args.Skip(1))),
                 "verify-package" => VerifyPackage(Args.Parse(args.Skip(1))).GetAwaiter().GetResult(),
                 "release" => Release(Args.Parse(args.Skip(1))).GetAwaiter().GetResult(),
+                "protect-key" => ReleaseSigningKeyStore.Protect(
+                    Args.Parse(args.Skip(1)).Optional("private-key"),
+                    ReleaseSigningKeyStore.DefaultDirectory,
+                    Console.Out),
                 _ => Usage(),
             };
         }
@@ -69,6 +77,8 @@ internal static class Program
 
               localai-release-signer release --version <1.2.3> [--publish] [--root <directory>]
 
+              localai-release-signer protect-key [--private-key <file>]
+
             Without --publish this scaffolds the release notes, checks them, and opens the pull
             request that carries them. With it, and only from the merged commit on main, it
             builds, signs, verifies that the manifest describes this release, and then tags and
@@ -80,8 +90,14 @@ internal static class Program
             only models the signed manifest names, so `sign` demands that list explicitly:
             pass --models, or --no-models to publish a release that installs none on purpose.
 
-            The private key defaults to
-            %LOCALAPPDATA%\LocalAi\release-signing\release-signing-private.pkcs8.der.
+            `protect-key` replaces the raw private key working copy with a DPAPI-wrapped one
+            bound to this Windows account and machine, and deletes the raw file. The offline
+            backup stays raw PKCS#8 — DPAPI blobs do not travel.
+
+            The private key defaults to %LOCALAPPDATA%\LocalAi\release-signing\, preferring
+            release-signing-private.pkcs8.dpapi and falling back to the raw .pkcs8.der with a
+            warning. Signing refuses to run while that directory's ACL grants access beyond
+            SYSTEM, Administrators and the current user.
             The public key defaults to the key embedded in the installer build.
             """);
         return 2;
@@ -350,12 +366,11 @@ internal static class Program
         return signature;
     }
 
-    private static ECDsa LoadPrivateKey(string? path)
-    {
-        var key = ECDsa.Create();
-        key.ImportPkcs8PrivateKey(File.ReadAllBytes(path ?? DefaultPrivateKeyPath()), out _);
-        return key;
-    }
+    private static ECDsa LoadPrivateKey(string? path) =>
+        ReleaseSigningKeyStore.Load(
+            path,
+            ReleaseSigningKeyStore.DefaultDirectory,
+            Console.Out);
 
     /// <summary>
     /// Defaults to the key embedded in the installer, so signing fails here if the private
@@ -391,13 +406,6 @@ internal static class Program
 
         return true;
     }
-
-    private static string DefaultPrivateKeyPath() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalAi",
-            "release-signing",
-            "release-signing-private.pkcs8.der");
 
     private static async Task<int> Release(Args args)
     {
