@@ -258,6 +258,11 @@ gh attestation verify LocalAi.Installer.exe --repo MrAliev/local-ai-developer-to
 A swapped or corrupted download fails this check even if the SHA-256 beside it was swapped
 to match.
 
+The project's [code signing policy](docs/code-signing-policy.md) describes what will be
+Authenticode-signed, by whom and from what source once the application to the SignPath
+Foundation open source program completes — at which point the SmartScreen prompt above
+goes away.
+
 The wizard walks through what it finds on the machine, which prerequisites to install (Git,
 Ollama and the language indexers — all through winget, each one consented to individually),
 which release to install, which local models fit the graphics adapter, and which AI clients to
