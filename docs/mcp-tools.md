@@ -13,6 +13,11 @@ The list is held by `McpToolInventoryTests` in `tests/CodeSearch.Tests`.
 The `codesearch` server. The embedding model is recorded in the index header and cannot be
 overridden per query.
 
+Every tool here takes an optional `root`, and omitting it resolves to the repository containing
+the working directory. That is one rule for the whole server, held by `McpRootParameterTests`:
+the two LSP tools once required it, so a caller who left it out exactly as they may everywhere
+else got a bare protocol error naming nothing.
+
 | Tool | Purpose | The constraint that matters |
 | --- | --- | --- |
 | `search_code` | Semantic and literal search over indexed chunks. The first step for "where does X live". | C#, TypeScript and Python are chunked by symbol; every other language, and every region no definition covers, by a 60-line window with 12 lines of overlap. Every hit is wrapped in `<untrusted-content>`. |
