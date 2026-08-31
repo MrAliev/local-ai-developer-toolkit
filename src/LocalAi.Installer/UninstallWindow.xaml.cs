@@ -11,13 +11,23 @@ namespace LocalAi.Installer;
 /// </summary>
 public partial class UninstallWindow : Window
 {
-    private readonly UninstallWizardViewModel viewModel = new();
+    private readonly UninstallWizardViewModel viewModel;
 
-    public UninstallWindow()
+    public UninstallWindow(
+        RemovalPreset preset = RemovalPreset.FullUninstall,
+        bool offersInstallAfterwards = false)
     {
+        viewModel = new UninstallWizardViewModel(preset, offersInstallAfterwards);
         InitializeComponent();
         DataContext = viewModel;
         viewModel.CloseRequested += (_, _) => Close();
+        viewModel.InstallRequested += (_, _) =>
+        {
+            var installer = new MainWindow();
+            Application.Current.MainWindow = installer;
+            installer.Show();
+            Close();
+        };
     }
 
     // async void, so an escaping exception would land on the dispatcher and kill the wizard;

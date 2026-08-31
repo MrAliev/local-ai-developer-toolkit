@@ -54,16 +54,22 @@ public sealed class UninstallWizardViewModel : ObservableObject
     private CancellationTokenSource? runCancellation;
 
     /// <summary>
-    /// The parameters exist so tests can point the wizard at a machine of their own making;
-    /// left alone it works on this computer. <paramref name="readHooksPath"/> is how a
-    /// repository's <c>core.hooksPath</c> is discovered — Git, unless a test says otherwise.
+    /// <paramml name="preset"/> is where the page opens: a clean reinstall arrives here on the
+    /// reinstall-friendly row, a removal on the full one. The rest exist so tests can point
+    /// the wizard at a machine of their own making; left alone it works on this computer.
+    /// <paramref name="readHooksPath"/> is how a repository's <c>core.hooksPath</c> is
+    /// discovered — Git, unless a test says otherwise.
     /// </summary>
     public UninstallWizardViewModel(
+        RemovalPreset preset = RemovalPreset.FullUninstall,
+        bool offersInstallAfterwards = false,
         InstallationLayout? layout = null,
         string? homeDirectory = null,
         IProcessRunner? processRunner = null,
         Func<string, CancellationToken, Task<string?>>? readHooksPath = null)
     {
+        selectedPreset = preset;
+        OffersInstallAfterwards = offersInstallAfterwards;
         this.layout = layout ?? InstallationLayout.CreateDefault();
         this.homeDirectory = homeDirectory ??
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -76,6 +82,9 @@ public sealed class UninstallWizardViewModel : ObservableObject
         }
 
         ApplyPreset(selectedPreset);
+        ContinueToInstallCommand = new RelayCommand(
+            () => InstallRequested?.Invoke(this, EventArgs.Empty),
+            () => CanContinueToInstall);
         BackCommand = new RelayCommand(() => MovePrevious(), () => CanMovePrevious);
         NextCommand = new AsyncRelayCommand(
             () => MoveNextAsync(),
@@ -89,6 +98,14 @@ public sealed class UninstallWizardViewModel : ObservableObject
     }
 
     public event EventHandler? CloseRequested;
+
+    /// <summary>
+    /// Raised when the person asks to carry on into an installation after a clean reinstall's
+    /// removal half. Two deliberate wizards rather than one chained run: the install has its
+    /// own prerequisites, its own release choice and its own review page, and starting it
+    /// automatically would apply all of that without anybody confirming it.
+    /// </summary>
+    public event EventHandler? InstallRequested;
 
     /// <summary>
     /// Where the journal is written: outside the runtime root, so the record of what this run
@@ -115,6 +132,19 @@ public sealed class UninstallWizardViewModel : ObservableObject
     public AsyncRelayCommand UninstallCommand { get; }
 
     public RelayCommand CancelCommand { get; }
+
+    public RelayCommand ContinueToInstallCommand { get; }
+
+    /// <summary>Whether this run is the removal half of a clean reinstall.</summary>
+    public bool OffersInstallAfterwards { get; }
+
+    /// <summary>
+    /// The install half is offered once the removal half has actually finished, and only when
+    /// it succeeded: inviting somebody to install over a removal that failed halfway is how a
+    /// machine ends up in a state neither wizard describes.
+    /// </summary>
+    public bool CanContinueToInstall =>
+        OffersInstallAfterwards && IsFinishPage && !isRunning && !hasRunError;
 
     public UninstallPage CurrentPage
     {
@@ -232,7 +262,10 @@ public sealed class UninstallWizardViewModel : ObservableObject
         UninstallPage.Progress => "Applying the selected removals.",
         _ => hasRunError
             ? "Some things could not be removed. The report below says which, and why."
-            : "Everything selected was removed.",
+            : OffersInstallAfterwards
+                ? "Everything selected was removed. Continue to install to put LocalAi back, " +
+                    "or close: the indexes and settings you kept are waiting either way."
+                : "Everything selected was removed.",
     };
 
     public bool CanMovePrevious =>
@@ -455,6 +488,11 @@ public sealed class UninstallWizardViewModel : ObservableObject
 
     private void ApplyPreset(RemovalPreset preset)
     {
+        foreach (var option in Presets)
+        {
+            option.IsSelected = option.Preset == preset;
+        }
+
         var selection = RemovalSelection.FromPreset(preset);
         var undecided = selection.ItemsNeedingDecision.ToHashSet();
         foreach (var row in Rows)
@@ -578,6 +616,7 @@ public sealed class UninstallWizardViewModel : ObservableObject
                      nameof(CanRun), nameof(CanCancel), nameof(IsNextVisible),
                      nameof(IsUninstallVisible), nameof(CancelButtonText), nameof(Summary),
                      nameof(Report), nameof(BlockingNotice), nameof(IsBlocked),
+                     nameof(CanContinueToInstall),
                  })
         {
             OnPropertyChanged(name);
@@ -587,5 +626,6 @@ public sealed class UninstallWizardViewModel : ObservableObject
         NextCommand.RaiseCanExecuteChanged();
         UninstallCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
+        ContinueToInstallCommand.RaiseCanExecuteChanged();
     }
 }
