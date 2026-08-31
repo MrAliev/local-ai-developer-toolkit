@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
-using CodeSearch.Core.Security;
+using LocalAi.Contracts.Security;
 using CodeSearch.Core.Search;
 using CodeSearch.Core.Semantics;
 using CodeSearch.Mcp;
