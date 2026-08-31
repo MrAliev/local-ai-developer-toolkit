@@ -807,6 +807,10 @@ below.
 | `InstalledVersions` | 3 | version directories kept under `bin\versions` |
 | `LauncherBackups` | 3 | launcher backups kept under `installer\backups` |
 | `TelemetryRetentionDays` | 30 | age at which a job telemetry record under `telemetry\metrics` is deleted |
+| `QuarantineRetentionDays` | 14 | age at which a quarantined job record is deleted |
+| `QuarantineEntryLimit` | 200 | quarantined records kept, oldest deleted first |
+| `QuarantineBudgetBytes` | 256 MB | total quarantined bytes, oldest deleted first |
+| `QuarantineGraceHours` | 24 | floor: no quarantined record younger than this is ever dropped, so what just broke can still be inspected |
 
 The archive is a handover, not a record: a client collects its response on the next poll after
 the job turns terminal and never asks again, yet one embedding batch leaves megabytes of
