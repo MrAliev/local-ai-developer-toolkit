@@ -82,6 +82,11 @@
                 <TextBlock Text="{Binding StepTitle}" Style="{StaticResource PageTitle}" />
                 <TextBlock Text="{Binding StepDescription}" Style="{StaticResource Muted}" Margin="0,4,0,0" />
                 <TextBlock Text="{Binding StepStatus}" Style="{StaticResource Muted}" FontSize="11" Margin="0,6,0,0" />
+                <Border Background="#FDECEA" BorderBrush="#B3261E" BorderThickness="1" CornerRadius="3"
+                        Padding="8,6" Margin="0,8,0,0"
+                        Visibility="{Binding HasUnexpectedError, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="{Binding UnexpectedError}" Foreground="#B3261E" />
+                </Border>
             </StackPanel>
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">

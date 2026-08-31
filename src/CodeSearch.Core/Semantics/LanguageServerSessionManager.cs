@@ -44,10 +44,26 @@ public interface ILanguageServerClient : IAsyncDisposable
 /// </summary>
 public sealed class LanguageServerSessionManager : IAsyncDisposable
 {
+    private const int DocumentLockCount = 32;
+
     private readonly Func<string, string, ILanguageServerClient> _clientFactory;
     private readonly ConcurrentDictionary<SessionKey, Session> _sessions =
         new(SessionKeyEqualityComparer.Instance);
     private readonly ConcurrentDictionary<string, Session> _documents = new(PathComparer);
+
+    /// <summary>
+    /// Striped per-document locks for the open/remap/close sequence (#209/m6): two
+    /// concurrent opens of the same document under different language IDs used to
+    /// interleave between reading _documents, closing in the old session and opening in
+    /// the new one, leaving the document open — orphaned — in a session the map no longer
+    /// points at. Striping bounds the memory an unbounded per-path map would leak; a
+    /// collision only serializes two unrelated documents, never deadlocks, because
+    /// nothing holds two stripes at once. The semaphores are intentionally never
+    /// disposed: SemaphoreSlim without AvailableWaitHandle holds no kernel object.
+    /// </summary>
+    private readonly SemaphoreSlim[] _documentLocks =
+        [.. Enumerable.Range(0, DocumentLockCount).Select(_ => new SemaphoreSlim(1, 1))];
+
     private int _disposed;
 
     public LanguageServerSessionManager(
@@ -82,13 +98,25 @@ public sealed class LanguageServerSessionManager : IAsyncDisposable
                 value.LanguageId,
                 () => _clientFactory(value.WorkspaceRoot, value.LanguageId)));
 
-        if (_documents.TryGetValue(fullPath, out var previous) && previous != session)
+        var gate = DocumentLock(fullPath);
+        await gate.WaitAsync(cancellationToken);
+        try
         {
-            await previous.CloseAsync(fullPath, cancellationToken);
-        }
+            if (_documents.TryGetValue(fullPath, out var previous) && previous != session)
+            {
+                await previous.CloseAsync(fullPath, cancellationToken);
+                // Dropped before the new open, so a failure below leaves the map truthful
+                // — closed everywhere — rather than pointing at the old session.
+                _documents.TryRemove(fullPath, out _);
+            }
 
-        await session.OpenOrUpdateAsync(fullPath, version, text, cancellationToken);
-        _documents[fullPath] = session;
+            await session.OpenOrUpdateAsync(fullPath, version, text, cancellationToken);
+            _documents[fullPath] = session;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public Task<IReadOnlyList<LspLocation>> GoToDefinitionAsync(
@@ -156,9 +184,18 @@ public sealed class LanguageServerSessionManager : IAsyncDisposable
     {
         ThrowIfDisposed();
         var fullPath = ResolveDocument(NormalizeRoot(workspaceRoot), documentPath);
-        if (_documents.TryRemove(fullPath, out var session))
+        var gate = DocumentLock(fullPath);
+        await gate.WaitAsync(cancellationToken);
+        try
         {
-            await session.CloseAsync(fullPath, cancellationToken);
+            if (_documents.TryRemove(fullPath, out var session))
+            {
+                await session.CloseAsync(fullPath, cancellationToken);
+            }
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 
@@ -201,6 +238,9 @@ public sealed class LanguageServerSessionManager : IAsyncDisposable
 
         return await query(session, fullPath, line, utf16Column, cancellationToken);
     }
+
+    private SemaphoreSlim DocumentLock(string fullPath) =>
+        _documentLocks[(PathComparer.GetHashCode(fullPath) & int.MaxValue) % DocumentLockCount];
 
     private void ThrowIfDisposed() =>
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);

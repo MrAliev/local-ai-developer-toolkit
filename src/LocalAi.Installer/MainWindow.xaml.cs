@@ -19,8 +19,19 @@ public partial class MainWindow : Window
         viewModel.CloseRequested += (_, _) => Close();
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e) =>
-        await viewModel.InitializeAsync();
+    // Both async void handlers route unexpected exceptions into the view model's error
+    // state: escaping ones would land on the dispatcher and kill the installer (#209/m4).
+    private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await viewModel.InitializeAsync();
+        }
+        catch (Exception exception)
+        {
+            viewModel.ReportUnexpectedError(exception);
+        }
+    }
 
     private void OnDependencyConsentChanged(object sender, RoutedEventArgs e)
     {
@@ -33,8 +44,17 @@ public partial class MainWindow : Window
         viewModel.RefreshNavigationState();
     }
 
-    private async void OnPackageCheckRelease(object sender, RoutedEventArgs e) =>
-        await viewModel.ResolvePackageAsync();
+    private async void OnPackageCheckRelease(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await viewModel.ResolvePackageAsync();
+        }
+        catch (Exception exception)
+        {
+            viewModel.ReportUnexpectedError(exception);
+        }
+    }
 
     private void OnAgentChoiceChanged(object sender, SelectionChangedEventArgs e)
     {

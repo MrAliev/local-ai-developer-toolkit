@@ -80,6 +80,50 @@ public class LanguageServerSessionManagerTests
         Assert.Single(clients["html"].Opened);
     }
 
+    /// <summary>
+    /// #209/m6: two concurrent opens of the same document under different language IDs
+    /// used to interleave between reading the document map, closing in the old session
+    /// and opening in the new one — leaving the document open, orphaned, in a session the
+    /// map no longer points at. The first open is parked inside its DidOpen on purpose,
+    /// which is exactly the window the interleaving needed; with the per-document critical
+    /// section the second open waits it out instead.
+    /// </summary>
+    [Fact]
+    public async Task ConcurrentLanguageSwitchCannotOrphanTheDocumentInTheOldSession()
+    {
+        var firstOpenEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstOpen = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var clients = new Dictionary<string, FakeClient>(StringComparer.Ordinal);
+        await using var manager = new LanguageServerSessionManager((_, language) =>
+            clients[language] = new FakeClient
+            {
+                OpenBarrier = language == "plaintext"
+                    ? _ =>
+                    {
+                        firstOpenEntered.TrySetResult();
+                        return releaseFirstOpen.Task;
+                    }
+                    : null,
+            });
+        var root = TempRoot();
+
+        var first = manager.OpenOrUpdateAsync(root, "view.txt", "plaintext", 1, "first", Ct);
+        await firstOpenEntered.Task;
+        var second = manager.OpenOrUpdateAsync(root, "view.txt", "html", 1, "<p>2</p>", Ct);
+        releaseFirstOpen.TrySetResult();
+        await Task.WhenAll(first, second);
+
+        // The old session was told to close — that is the orphan the race used to leave.
+        Assert.Single(clients["plaintext"].Closed);
+        Assert.Single(clients["html"].Opened);
+
+        // And the map points at the session that actually holds the document.
+        await manager.CloseAsync(root, "view.txt", Ct);
+        Assert.Single(clients["html"].Closed);
+    }
+
     [Fact]
     public async Task CloseAndDisposeNotifyTheOwningServers()
     {
@@ -151,6 +195,7 @@ public class LanguageServerSessionManagerTests
         public bool LastIncludeDefinition { get; private set; }
         public bool Disposed { get; private set; }
         public Exception? DefinitionFailure { get; init; }
+        public Func<LspTextDocument, Task>? OpenBarrier { get; init; }
 
         public Task InitializeAsync(string workspaceRoot, CancellationToken cancellationToken)
         {
@@ -161,7 +206,7 @@ public class LanguageServerSessionManagerTests
         public Task DidOpenAsync(LspTextDocument document, CancellationToken cancellationToken)
         {
             Opened.Add(document);
-            return Task.CompletedTask;
+            return OpenBarrier?.Invoke(document) ?? Task.CompletedTask;
         }
 
         public Task DidChangeAsync(LspTextDocument document, CancellationToken cancellationToken)
