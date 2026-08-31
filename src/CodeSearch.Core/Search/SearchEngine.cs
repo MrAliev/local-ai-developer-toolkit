@@ -381,7 +381,7 @@ public static class SearchEngine
     {
         var hits = new List<SearchHit>(options.TopK);
         var perFile = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var fileCache = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        var fileCache = new Dictionary<string, CachedSource>(StringComparer.OrdinalIgnoreCase);
         var rrf = new Dictionary<int, double>();
 
         var position = 0;
@@ -419,7 +419,13 @@ public static class SearchEngine
                 vectorScores.GetValueOrDefault(chunkIndex),
                 lexicalScores.GetValueOrDefault(chunkIndex),
                 rrf[chunkIndex],
-                Snippet(root, relPath, chunk, options.SnippetLines, fileCache),
+                Snippet(
+                    root,
+                    relPath,
+                    chunk,
+                    options.SnippetLines,
+                    fileCache,
+                    index.FileHashAt(chunkIndex)),
                 new SearchChunkId(
                     index.RepositoryId,
                     index.GenerationId,
@@ -431,48 +437,75 @@ public static class SearchEngine
         return hits;
     }
 
+    internal const string SnapshotChangedSnippet =
+        "(snapshot_changed - the file on disk no longer matches this hit's snapshot; " +
+        "run sync and search again)";
+
+    private sealed record CachedSource(string[] Lines, byte[]? CanonicalHash);
+
     /// <summary>
-    /// Snippets are read from the working tree, never stored in the index. That keeps the index to
-    /// vectors plus metadata, and means shown code always matches the file on disk even when the
-    /// index itself has drifted behind HEAD.
+    /// Snippets are read from the working tree, never stored in the index — but only while
+    /// the file still matches the snapshot the hit describes. Serving a drifted file used to
+    /// dress snapshot-A metadata, rank and chunk_id in snapshot-B text (#197), and the very
+    /// next step of the workflow — get_code_chunk — correctly fail-closes on that same
+    /// identity, so one workflow contradicted itself. A drifted hit now keeps its honest
+    /// metadata and carries the named snapshot_changed marker instead of a snippet.
+    ///
+    /// An all-zero recorded hash means "not recorded" — hand-built legacy indexes — and
+    /// keeps the old read-what-is-there behaviour.
     /// </summary>
     private static string Snippet(
-        string root, string relPath, ChunkMeta chunk, int maxLines, Dictionary<string, string[]> cache)
+        string root,
+        string relPath,
+        ChunkMeta chunk,
+        int maxLines,
+        Dictionary<string, CachedSource> cache,
+        ReadOnlySpan<byte> indexedHash)
     {
-        if (!cache.TryGetValue(relPath, out var lines))
+        if (!cache.TryGetValue(relPath, out var source))
         {
-            if (!SafeSourcePath.TryResolveFile(
+            string[] lines = [];
+            byte[]? canonicalHash = null;
+            if (SafeSourcePath.TryResolveFile(
                     root,
                     relPath,
                     out var fullPath,
                     out _))
             {
-                lines = [];
-            }
-            else
-            {
                 try
                 {
-                    lines = SourceLines.Split(File.ReadAllText(fullPath));
+                    var text = File.ReadAllText(fullPath);
+                    lines = SourceLines.Split(text);
+                    canonicalHash = CanonicalIndexText.Hash(text);
                 }
                 catch (Exception ex) when (
                     ex is IOException or UnauthorizedAccessException)
                 {
                     lines = [];
+                    canonicalHash = null;
                 }
             }
 
-            cache[relPath] = lines;
+            source = new CachedSource(lines, canonicalHash);
+            cache[relPath] = source;
         }
 
-        if (lines.Length == 0 || chunk.StartLine > lines.Length)
+        if (indexedHash.IndexOfAnyExcept((byte)0) >= 0 &&
+            (source.CanonicalHash is null ||
+             !source.CanonicalHash.AsSpan().SequenceEqual(indexedHash)))
+        {
+            return SnapshotChangedSnippet;
+        }
+
+        var sourceLines = source.Lines;
+        if (sourceLines.Length == 0 || chunk.StartLine > sourceLines.Length)
         {
             return "(file changed since indexing - snippet unavailable)";
         }
 
         var start = Math.Max(0, chunk.StartLine - 1);
-        var end = Math.Min(lines.Length, Math.Min(chunk.EndLine, start + maxLines));
-        var body = string.Join("\n", lines[start..end]);
+        var end = Math.Min(sourceLines.Length, Math.Min(chunk.EndLine, start + maxLines));
+        var body = string.Join("\n", sourceLines[start..end]);
 
         return end < chunk.EndLine ? body + "\n    ..." : body;
     }
