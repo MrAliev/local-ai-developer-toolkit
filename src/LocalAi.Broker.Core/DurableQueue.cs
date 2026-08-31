@@ -687,17 +687,69 @@ public sealed class DurableQueue : ISelectableBrokerQueue
                 reclaimed += length;
             }
 
+            var quarantineDeleted = 0;
+            foreach (var directory in QuarantinePlan(now))
+            {
+                var bytes = DirectoryBytes(directory);
+                if (!dryRun)
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+
+                quarantineDeleted++;
+                reclaimed += bytes;
+            }
+
             if (!dryRun)
             {
                 WriteLastSweep(now);
             }
-            return new RetentionSweepResult(deleted, dropped, reclaimed);
+            return new RetentionSweepResult(deleted, dropped, reclaimed, quarantineDeleted);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
                 DirectoryNotFoundException)
         {
             return RetentionSweepResult.Empty;
+        }
+    }
+
+    private IReadOnlyList<string> QuarantinePlan(DateTimeOffset now)
+    {
+        if (!Directory.Exists(_quarantineRoot))
+        {
+            return [];
+        }
+
+        var snapshots = new List<QuarantinedJobSnapshot>();
+        foreach (var directory in Directory.EnumerateDirectories(_quarantineRoot))
+        {
+            var marker = new FileInfo(Path.Combine(directory, QuarantineMarkerFileName));
+            var quarantinedAt = marker.Exists
+                ? (DateTimeOffset)marker.LastWriteTimeUtc
+                : new DirectoryInfo(directory).LastWriteTimeUtc;
+            snapshots.Add(new QuarantinedJobSnapshot(
+                directory,
+                quarantinedAt,
+                DirectoryBytes(directory)));
+        }
+
+        return QuarantineRetention.Plan(snapshots, _retention, now);
+    }
+
+    private static long DirectoryBytes(string directory)
+    {
+        try
+        {
+            return new DirectoryInfo(directory)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Sum(file => file.Length);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                DirectoryNotFoundException)
+        {
+            return 0;
         }
     }
 
@@ -807,12 +859,28 @@ public sealed class DurableQueue : ISelectableBrokerQueue
         Directory.Move(activeDirectory, destination);
     }
 
+    public const string QuarantineMarkerFileName = "quarantined.marker";
+
     private void Quarantine(string directory)
     {
         var destination = Path.Combine(
             _quarantineRoot,
             Path.GetFileName(directory) + "." + Guid.NewGuid().ToString("N"));
         Directory.Move(directory, destination);
+        try
+        {
+            // The moment of quarantining, for the retention grace (#204): the directory's own
+            // timestamps travel with the rename and describe the job, not the move. An entry
+            // without a marker is aged by its directory instead - older, so more expendable.
+            File.WriteAllText(
+                Path.Combine(destination, QuarantineMarkerFileName),
+                _timeProvider.GetUtcNow().ToString("O"));
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // The quarantine itself succeeded; the marker only tunes retention.
+        }
     }
 
     private static void ValidateCrossFile(
@@ -983,7 +1051,8 @@ public sealed record EnqueueResult(Guid JobId, long Sequence, bool JoinedExistin
 public sealed record RetentionSweepResult(
     int JobsDeleted,
     int ResponsesDropped,
-    long BytesReclaimed)
+    long BytesReclaimed,
+    int QuarantineDeleted = 0)
 {
     public static RetentionSweepResult Empty { get; } = new(0, 0, 0);
 }

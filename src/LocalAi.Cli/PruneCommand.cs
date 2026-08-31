@@ -48,6 +48,10 @@ public static class PruneCommand
             $"archive: {archive.JobsDeleted} job(s) removed, " +
             $"{archive.ResponsesDropped} response bod(ies) dropped, " +
             $"{Megabytes(archive.BytesReclaimed)}");
+        if (archive.QuarantineDeleted > 0)
+        {
+            lines.Add($"quarantine: {archive.QuarantineDeleted} entr(ies) removed");
+        }
 
         foreach (var repository in Repositories(runtimeRoot))
         {

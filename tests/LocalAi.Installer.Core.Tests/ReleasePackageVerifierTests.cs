@@ -61,6 +61,57 @@ public sealed class ReleasePackageVerifierTests : IDisposable
             ".package.zip")));
     }
 
+    /// <summary>
+    /// The staging cleanup a successful install owes (#204): Dispose closes handles, and
+    /// every success used to leave the full unpacked package under the temp root forever.
+    /// </summary>
+    [Fact]
+    public async Task Cleanup_and_dispose_removes_the_staging_root_after_success()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var verified = await CreateVerifier(key, package).VerifyAsync(
+            json,
+            Sign(key, json),
+            StagingPath(),
+            TestContext.Current.CancellationToken);
+        var staging = verified.DiagnosticStagingRoot;
+        Assert.True(Directory.Exists(staging));
+
+        Assert.True(verified.TryCleanupAndDispose());
+
+        Assert.False(Directory.Exists(staging));
+    }
+
+    /// <summary>
+    /// Cleanup owns the root, not the world: a plain foreign file inside the ACL-protected
+    /// staging goes with it, but a directory — something the staging never contains, and
+    /// whose contents nobody validated — means the root is left for a human, with the
+    /// handles closed either way.
+    /// </summary>
+    [Fact]
+    public async Task A_foreign_directory_in_staging_leaves_the_root_for_a_human()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var package = CreatePackage();
+        var manifest = CreateManifest(package);
+        var json = ReleaseManifestVerifier.CreateCanonicalUnsignedPayload(manifest);
+        var verified = await CreateVerifier(key, package).VerifyAsync(
+            json,
+            Sign(key, json),
+            StagingPath(),
+            TestContext.Current.CancellationToken);
+        var staging = verified.DiagnosticStagingRoot;
+        Directory.CreateDirectory(Path.Combine(staging, "foreign"));
+
+        Assert.False(verified.TryCleanupAndDispose());
+
+        Assert.True(Directory.Exists(staging));
+        Assert.True(Directory.Exists(Path.Combine(staging, "foreign")));
+    }
+
     [Fact]
     public async Task Verified_package_locks_every_approved_file_until_disposed()
     {
