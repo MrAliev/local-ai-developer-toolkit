@@ -1,5 +1,6 @@
-﻿using LocalAi.Installer.Core.Releases;
+using LocalAi.Installer.Core.Releases;
 using LocalAi.Installer.ViewModels;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Tests;
 

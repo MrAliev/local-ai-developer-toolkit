@@ -1,12 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <!-- Public half of the release signing pair. Safe to commit; the private half never
-         leaves the machine that publishes releases. -->
-    <EmbeddedResource Include="Releases\release-signing-public.spki.der"
-                      LogicalName="LocalAi.release-signing-public.spki.der" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\LocalAi.Contracts\LocalAi.Contracts.csproj" />
     <!-- The repository manifests and the Git hook layout, used to list what an uninstall would
          take out. A library, so it is referenced as one; the executables below are not. -->

@@ -1,5 +1,6 @@
 using LocalAi.Installer.Core.Abstractions;
 using System.Text.Json;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Core.Releases;
 

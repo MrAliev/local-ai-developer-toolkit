@@ -638,7 +638,7 @@ localai-release-signer verify-package `
 (`ReleaseTrustAnchor`), а не файлом рядом с утилитой. Поэтому подпись ключом, которому
 выпущенный установщик не доверяет, падает сразу, а не на машине пользователя. При провале
 проверки на диск не пишется ничего. Публичную половину держите в репозитории по пути
-`src/LocalAi.Installer.Core/Releases/release-signing-public.spki.der`, приватная не должна
+`src/LocalAi.Contracts/Releases/release-signing-public.spki.der`, приватная не должна
 попадать в репозиторий никогда.
 
 Публикуйте `release-manifest.json` и `release-manifest.sig` ассетами релиза рядом с

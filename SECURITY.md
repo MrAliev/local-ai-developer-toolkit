@@ -23,7 +23,7 @@ against.
 
 **Releases are signed, transports are not trusted.** Every release manifest is signed with an
 ECDSA P-256 key whose public half is embedded in the installer binary
-(`src/LocalAi.Installer.Core/Releases/release-signing-public.spki.der`). The installer verifies
+(`src/LocalAi.Contracts/Releases/release-signing-public.spki.der`). The installer verifies
 that signature before acting on anything the manifest says, then checks the package archive
 against the SHA-256 recorded inside it. This is why releases can be downloaded anonymously over
 plain HTTPS: an anonymous download of a signed document is as trustworthy as an authenticated

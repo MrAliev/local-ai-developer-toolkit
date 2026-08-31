@@ -1,82 +1,18 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Core.Releases;
 
-public sealed record ManifestModel
-{
-    public ManifestModel(
-        string name,
-        int contextTokens,
-        long downloadSize,
-        long estimatedVramBytes)
-    {
-        Name = name;
-        ContextTokens = contextTokens;
-        DownloadSize = downloadSize;
-        EstimatedVramBytes = estimatedVramBytes;
-    }
-
-    public string Name { get; }
-
-    public int ContextTokens { get; }
-
-    public long DownloadSize { get; }
-
-    public long EstimatedVramBytes { get; }
-}
-
-public sealed record ReleaseManifest
-{
-    public ReleaseManifest(
-        int schemaVersion,
-        string releaseVersion,
-        string versionDirectory,
-        string modelCatalogVersion,
-        int protocolVersion,
-        string buildCompatibilityId,
-        Uri packageUri,
-        long packageSize,
-        string packageSha256,
-        bool requiresAuthenticode,
-        IReadOnlyList<ManifestModel> models)
-    {
-        SchemaVersion = schemaVersion;
-        ReleaseVersion = releaseVersion;
-        VersionDirectory = versionDirectory;
-        ModelCatalogVersion = modelCatalogVersion;
-        ProtocolVersion = protocolVersion;
-        BuildCompatibilityId = buildCompatibilityId;
-        PackageUri = packageUri;
-        PackageSize = packageSize;
-        PackageSha256 = packageSha256;
-        RequiresAuthenticode = requiresAuthenticode;
-        Models = new ReadOnlyCollection<ManifestModel>(models.ToArray());
-    }
-
-    public int SchemaVersion { get; }
-
-    public string ReleaseVersion { get; }
-
-    public string VersionDirectory { get; }
-
-    public string ModelCatalogVersion { get; }
-
-    public int ProtocolVersion { get; }
-
-    public string BuildCompatibilityId { get; }
-
-    public Uri PackageUri { get; }
-
-    public long PackageSize { get; }
-
-    public string PackageSha256 { get; }
-
-    public bool RequiresAuthenticode { get; }
-
-    public IReadOnlyList<ManifestModel> Models { get; }
-}
-
+/// <summary>
+/// A downloaded release whose manifest and files have both been verified, held open on the
+/// staging root that owns them.
+///
+/// It stays here rather than beside the manifest format because it is not a format: it is a
+/// lease on files this process has staged, and only the thing that installs a release has any
+/// use for that. What the runtime needs to know about a release is the manifest, which is a
+/// document; what the installer needs is this, which is a resource.
+/// </summary>
 public sealed class VerifiedPackage : IDisposable
 {
     private readonly object gate = new();
@@ -396,12 +332,4 @@ public sealed class VerifiedPackageFile
     public long Length { get; }
 
     public string Sha256 { get; }
-}
-
-public sealed class ReleaseVerificationException : Exception
-{
-    public ReleaseVerificationException(string message)
-        : base(message)
-    {
-    }
 }

@@ -5,9 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using LocalAi.Contracts;
 
-namespace LocalAi.Installer.Core.Releases;
+namespace LocalAi.Contracts;
 
 public sealed partial class ReleaseManifestVerifier : IDisposable
 {

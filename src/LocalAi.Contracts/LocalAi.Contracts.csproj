@@ -6,6 +6,12 @@
     <EmbeddedResource Include="..\..\model-routing.json"
                       Link="model-routing.json"
                       LogicalName="LocalAi.model-routing.json" />
+    <!-- Public half of the release signing pair, beside the manifest format it verifies.
+         Safe to commit; the private half never leaves the machine that publishes releases.
+         Here rather than in the installer because the runtime needs the same trust anchor to
+         tell a real release announcement from whoever answered the request. -->
+    <EmbeddedResource Include="Releases\release-signing-public.spki.der"
+                      LogicalName="LocalAi.release-signing-public.spki.der" />
   </ItemGroup>
 
 </Project>

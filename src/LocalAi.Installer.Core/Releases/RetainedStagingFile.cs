@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Core.Releases;
 
