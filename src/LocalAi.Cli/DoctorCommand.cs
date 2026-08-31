@@ -247,6 +247,85 @@ public static class DoctorCommand
             policy => policy.Enabled
                 ? $"enabled for {string.Join(", ", policy.Languages.Where(l => l.Value.Enabled).Select(l => l.Key))}"
                 : "disabled");
+
+        yield return CheckUpdates(root);
+    }
+
+    /// <summary>
+    /// What the last update check found, read from the state file the broker writes.
+    ///
+    /// Never a network call: `doctor` is a question about this machine, and a diagnostic that
+    /// quietly reached the internet would be a second, unthrottled caller of the thing the
+    /// policy exists to ration. A newer release is a warning rather than a failure — an
+    /// installation a version behind is working perfectly well, and a diagnostic that exits
+    /// non-zero for it teaches whoever wired it into a script to ignore the exit code.
+    /// </summary>
+    private static DoctorCheck CheckUpdates(string root)
+    {
+        var policy = new UpdateCheckPolicyStore(root).Read();
+        if (!policy.Enabled)
+        {
+            return new DoctorCheck(
+                "update",
+                DoctorStatus.Ok,
+                "check disabled; run `localai policy set --update-check on` to look for " +
+                "releases");
+        }
+
+        var state = new UpdateCheckStateStore(root).Read();
+        var installed = InstalledVersion(root);
+        return state.Status switch
+        {
+            UpdateCheckStatus.Verified when state.IsNewerThan(installed) => new DoctorCheck(
+                "update",
+                DoctorStatus.Warning,
+                $"{state.LatestVersion} is available; this installation is {installed}. " +
+                state.ReleaseUrl),
+            UpdateCheckStatus.Verified => new DoctorCheck(
+                "update",
+                DoctorStatus.Ok,
+                $"up to date at {installed} " +
+                $"(checked {state.CheckedAtUtc:yyyy-MM-dd HH:mm} UTC)"),
+            UpdateCheckStatus.Unavailable => new DoctorCheck(
+                "update",
+                DoctorStatus.Ok,
+                "unknown; the last check produced nothing to believe " +
+                $"(tried {state.CheckedAtUtc:yyyy-MM-dd HH:mm} UTC)"),
+            _ => new DoctorCheck(
+                "update",
+                DoctorStatus.Ok,
+                "unknown; nothing has been checked yet"),
+        };
+    }
+
+    /// <summary>
+    /// The version the pointer names, or null. Read here rather than taken from the version
+    /// check above so that a broken pointer produces one failure — that check's — rather than
+    /// two saying the same thing.
+    /// </summary>
+    private static string? InstalledVersion(string root)
+    {
+        try
+        {
+            var pointerPath = Path.Combine(root, "bin", "current.json");
+            if (!File.Exists(pointerPath))
+            {
+                return null;
+            }
+
+            // Read as text, not as bytes: a pointer written with a byte order mark is still a
+            // valid document to every other reader of this file, and a version line that went
+            // blank over one would be a puzzle with no clue in it.
+            using var document = JsonDocument.Parse(File.ReadAllText(pointerPath));
+            return document.RootElement.TryGetProperty("version", out var version)
+                ? version.GetString()
+                : null;
+        }
+        catch (Exception exception) when (
+            exception is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
