@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace CodeSearch.Core.Security;
+namespace LocalAi.Contracts.Security;
 
 public interface IUntrustedContentNonceSource
 {
