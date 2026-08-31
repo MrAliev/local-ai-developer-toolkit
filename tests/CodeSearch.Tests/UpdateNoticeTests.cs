@@ -1,6 +1,7 @@
 using System.Text;
 using CodeSearch.Mcp;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 
 namespace CodeSearch.Tests;
 
@@ -14,6 +15,9 @@ namespace CodeSearch.Tests;
 /// </summary>
 public sealed class UpdateNoticeTests : IDisposable
 {
+    private const string Directory50 = "be08af033a2a";
+    private const string Directory51 = "467ed5f0f9bf";
+
     private static readonly DateTimeOffset Checked =
         new(2026, 8, 31, 9, 30, 0, TimeSpan.Zero);
 
@@ -21,7 +25,7 @@ public sealed class UpdateNoticeTests : IDisposable
         Path.GetTempPath(),
         "codesearch-update-notice-" + Guid.NewGuid().ToString("N"));
 
-    public UpdateNoticeTests() => Install("0.1.50");
+    public UpdateNoticeTests() => Install(Directory50, "0.1.50");
 
     public void Dispose()
     {
@@ -39,7 +43,7 @@ public sealed class UpdateNoticeTests : IDisposable
     public void A_newer_verified_release_is_announced_once_with_where_to_read_about_it()
     {
         Enable();
-        Learned("0.1.51");
+        Learned("0.1.51", Directory51);
 
         var notice = UpdateNotice.ForStatus(root);
 
@@ -53,7 +57,7 @@ public sealed class UpdateNoticeTests : IDisposable
     [Fact]
     public void A_machine_that_never_opted_in_is_told_nothing()
     {
-        Learned("0.1.51");
+        Learned("0.1.51", Directory51);
 
         Assert.Equal(string.Empty, UpdateNotice.ForStatus(root));
     }
@@ -62,7 +66,7 @@ public sealed class UpdateNoticeTests : IDisposable
     public void An_installation_that_is_current_is_told_nothing()
     {
         Enable();
-        Learned("0.1.50");
+        Learned("0.1.50", Directory50);
 
         Assert.Equal(string.Empty, UpdateNotice.ForStatus(root));
     }
@@ -92,9 +96,9 @@ public sealed class UpdateNoticeTests : IDisposable
     [Fact]
     public void The_comparison_is_by_version_not_by_text()
     {
-        Install("0.1.9");
+        Install(Directory50, "0.1.9");
         Enable();
-        Learned("0.1.10");
+        Learned("0.1.10", Directory51);
 
         Assert.Contains("0.1.10 is available", UpdateNotice.ForStatus(root), StringComparison.Ordinal);
     }
@@ -115,10 +119,10 @@ public sealed class UpdateNoticeTests : IDisposable
     public void A_version_pointer_with_a_byte_order_mark_still_reads()
     {
         Enable();
-        Learned("0.1.51");
+        Learned("0.1.51", Directory51);
         File.WriteAllText(
             Path.Combine(root, "bin", "current.json"),
-            """{"schemaVersion":1,"version":"0.1.50"}""",
+            """{"schemaVersion":1,"version":"be08af033a2a"}""",
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
         Assert.Contains(
@@ -131,20 +135,26 @@ public sealed class UpdateNoticeTests : IDisposable
         new UpdateCheckPolicyStore(root).Write(
             UpdateCheckPolicy.Default with { Enabled = true });
 
-    private void Learned(string version) =>
+    private void Learned(string version, string versionDirectory) =>
         new UpdateCheckStateStore(root).Write(new UpdateCheckState(
             1,
             UpdateCheckStatus.Verified,
             Checked,
             version,
-            "https://example.invalid/releases/tag/v" + version));
+            "https://example.invalid/releases/tag/v" + version,
+            versionDirectory));
 
-    private void Install(string version)
+    /// <summary>
+    /// The pointer names a version directory, and a separate record says which release it came
+    /// from — the shape an installation actually has (#255).
+    /// </summary>
+    private void Install(string directory, string release)
     {
-        Directory.CreateDirectory(Path.Combine(root, "bin"));
-        File.WriteAllText(
-            Path.Combine(root, "bin", "current.json"),
-            "{\"schemaVersion\":1,\"version\":\"" + version + "\"}",
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        var binRoot = Path.Combine(root, "bin");
+        Directory.CreateDirectory(binRoot);
+        File.WriteAllBytes(
+            Path.Combine(binRoot, "current.json"),
+            CurrentPointerSnapshot.CreateCanonicalBytes(directory));
+        new InstalledReleaseStore(binRoot).Write(directory, release);
     }
 }

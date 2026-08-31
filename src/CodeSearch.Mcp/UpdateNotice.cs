@@ -1,5 +1,6 @@
 using System.Text.Json;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Activation;
 
 namespace CodeSearch.Mcp;
 
@@ -33,10 +34,10 @@ public static class UpdateNotice
             }
 
             var state = new UpdateCheckStateStore(root).Read();
-            var installed = InstalledVersion(root);
-            return state.IsNewerThan(installed)
+            var installed = InstalledVersionReader.Read(root);
+            return UpdateComparison.Compare(state, installed) == UpdateAvailability.Available
                 ? $"\nUpdate:     LocalAi {state.LatestVersion} is available " +
-                    $"(this installation is {installed}). {state.ReleaseUrl}"
+                    $"(this installation is {installed.DisplayName}). {state.ReleaseUrl}"
                 : string.Empty;
         }
         catch (Exception exception) when (
@@ -46,21 +47,5 @@ public static class UpdateNotice
             // A status that cannot read a small optional file still answers what it was asked.
             return string.Empty;
         }
-    }
-
-    private static string? InstalledVersion(string runtimeRoot)
-    {
-        var pointerPath = Path.Combine(runtimeRoot, "bin", "current.json");
-        if (!File.Exists(pointerPath))
-        {
-            return null;
-        }
-
-        // As text rather than as bytes, so a pointer carrying a byte order mark reads the same
-        // as one without: every other reader of this file already tolerates it.
-        using var document = JsonDocument.Parse(File.ReadAllText(pointerPath));
-        return document.RootElement.TryGetProperty("version", out var version)
-            ? version.GetString()
-            : null;
     }
 }

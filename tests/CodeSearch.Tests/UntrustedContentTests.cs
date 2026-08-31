@@ -373,11 +373,18 @@ public sealed class UntrustedContentMcpTests : IDisposable
             UpdateCheckStatus.Verified,
             DateTimeOffset.UtcNow,
             "99.0.0",
-            "https://example.invalid/releases/tag/v99.0.0"));
-        Directory.CreateDirectory(Path.Combine(_runtimeRoot, "bin"));
-        File.WriteAllText(
-            Path.Combine(_runtimeRoot, "bin", "current.json"),
-            """{"schemaVersion":1,"version":"0.1.50"}""");
+            "https://example.invalid/releases/tag/v99.0.0",
+            "ffffffffffff"));
+        // The pointer names a version directory, as an installation writes it, and the record
+        // beside it says which release that directory came from.
+        var binRoot = Path.Combine(_runtimeRoot, "bin");
+        Directory.CreateDirectory(binRoot);
+        File.WriteAllBytes(
+            Path.Combine(binRoot, "current.json"),
+            LocalAi.Contracts.Activation.CurrentPointerSnapshot.CreateCanonicalBytes(
+                "be08af033a2a"));
+        new LocalAi.Contracts.Activation.InstalledReleaseStore(binRoot)
+            .Write("be08af033a2a", "0.1.50");
 
         var status = CodeSearchTools.IndexStatus(_service, _root);
 

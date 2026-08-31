@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using LocalAi.Contracts.Activation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -36,7 +37,14 @@ public sealed record UpdateCheckState(
     UpdateCheckStatus Status,
     DateTimeOffset? CheckedAtUtc,
     string? LatestVersion,
-    string? ReleaseUrl)
+    string? ReleaseUrl,
+    /// <summary>
+    /// The manifest's version directory for that release. Recorded because an installation
+    /// made before the release version was written down knows only its own directory name,
+    /// and comparing two directory names still answers "is this a different release" — which
+    /// is the question the surfaces actually ask.
+    /// </summary>
+    string? LatestVersionDirectory = null)
 {
     public const string FileName = "update-state.json";
 
@@ -190,4 +198,68 @@ public static class UpdateCheckSchedule
         var value = BitConverter.ToUInt32(hash, 0);
         return value / (double)uint.MaxValue;
     }
+}
+
+/// <summary>
+/// Whether a newer release exists, as far as this machine can tell.
+/// </summary>
+public enum UpdateAvailability
+{
+    /// <summary>Nothing verified, or nothing on this machine to compare against.</summary>
+    Unknown,
+
+    UpToDate,
+
+    Available,
+}
+
+/// <summary>
+/// The one comparison every surface uses.
+///
+/// It exists because there were three of them, each reading the version pointer itself and
+/// each comparing a commit id against a release version — so `doctor` reported "up to date"
+/// while `policy show`, reading the same file, named a newer release (#255).
+/// </summary>
+public static class UpdateComparison
+{
+    public static UpdateAvailability Compare(UpdateCheckState state, InstalledVersion installed)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(installed);
+        if (state.Status != UpdateCheckStatus.Verified || !installed.Exists)
+        {
+            return UpdateAvailability.Unknown;
+        }
+
+        // The precise answer, when this installation recorded which release it came from.
+        if (state.IsNewerThan(installed.ReleaseVersion))
+        {
+            return UpdateAvailability.Available;
+        }
+
+        if (installed.ReleaseVersion is not null &&
+            state.LatestVersion is not null &&
+            Comparable(installed.ReleaseVersion) &&
+            Comparable(state.LatestVersion))
+        {
+            return UpdateAvailability.UpToDate;
+        }
+
+        // The fallback: an installation that predates the record still knows its directory,
+        // and a manifest naming a different one is a different release. "Different" is not
+        // "newer", which is why the surfaces word this case as a release being available
+        // rather than as being behind.
+        if (state.LatestVersionDirectory is { Length: > 0 } latestDirectory &&
+            installed.VersionDirectory is { Length: > 0 } installedDirectory)
+        {
+            return string.Equals(latestDirectory, installedDirectory, StringComparison.Ordinal)
+                ? UpdateAvailability.UpToDate
+                : UpdateAvailability.Available;
+        }
+
+        return UpdateAvailability.Unknown;
+    }
+
+    private static bool Comparable(string value) =>
+        Version.TryParse(value.Trim().TrimStart('v', 'V'), out _);
 }

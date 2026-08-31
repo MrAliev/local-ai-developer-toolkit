@@ -273,24 +273,34 @@ public static class DoctorCommand
         }
 
         var state = new UpdateCheckStateStore(root).Read();
-        var installed = InstalledVersion(root);
-        return state.Status switch
+        var installed = InstalledVersionReader.Read(root);
+        return UpdateComparison.Compare(state, installed) switch
         {
-            UpdateCheckStatus.Verified when state.IsNewerThan(installed) => new DoctorCheck(
+            UpdateAvailability.Available => new DoctorCheck(
                 "update",
                 DoctorStatus.Warning,
-                $"{state.LatestVersion} is available; this installation is {installed}. " +
-                state.ReleaseUrl),
-            UpdateCheckStatus.Verified => new DoctorCheck(
+                $"{state.LatestVersion} is available; this installation is " +
+                $"{installed.DisplayName}. {state.ReleaseUrl}"),
+            UpdateAvailability.UpToDate => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                $"up to date at {installed} " +
+                $"up to date at {installed.DisplayName} " +
                 $"(checked {state.CheckedAtUtc:yyyy-MM-dd HH:mm} UTC)"),
-            UpdateCheckStatus.Unavailable => new DoctorCheck(
+            _ when state.Status == UpdateCheckStatus.Unavailable => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
                 "unknown; the last check produced nothing to believe " +
                 $"(tried {state.CheckedAtUtc:yyyy-MM-dd HH:mm} UTC)"),
+            // Verified, but nothing here can be compared against it: an installation made
+            // before the release version was recorded knows only its directory name. Said
+            // plainly, because answering "up to date" from a comparison that failed is the
+            // defect this check was rewritten for.
+            _ when state.Status == UpdateCheckStatus.Verified => new DoctorCheck(
+                "update",
+                DoctorStatus.Ok,
+                $"latest verified release is {state.LatestVersion}; this installation does " +
+                "not record which release it came from, so the two cannot be compared. The " +
+                "next install or update records it."),
             _ => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
@@ -298,49 +308,6 @@ public static class DoctorCommand
         };
     }
 
-    /// <summary>
-    /// The version the pointer names, or null. Read here rather than taken from the version
-    /// check above so that a broken pointer produces one failure — that check's — rather than
-    /// two saying the same thing.
-    /// </summary>
-    private static string? InstalledVersion(string root)
-    {
-        try
-        {
-            var pointerPath = Path.Combine(root, "bin", "current.json");
-            if (!File.Exists(pointerPath))
-            {
-                return null;
-            }
-
-            // Read as text, not as bytes: a pointer written with a byte order mark is still a
-            // valid document to every other reader of this file, and a version line that went
-            // blank over one would be a puzzle with no clue in it.
-            using var document = JsonDocument.Parse(File.ReadAllText(pointerPath));
-            return document.RootElement.TryGetProperty("version", out var version)
-                ? version.GetString()
-                : null;
-        }
-        catch (Exception exception) when (
-            exception is JsonException or IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Reports the policy that is actually in effect, and where it came from.
-    ///
-    /// It first tried to catch the silent fallback — a policy file that stopped parsing and was
-    /// replaced by the defaults without saying so — by noticing that a configured file read back
-    /// as the defaults. That cannot work, and produced a false alarm on the first real
-    /// installation it saw: a file may legitimately hold exactly the default values, and this
-    /// one did. A diagnostic that cries wolf is worse than one check short, because it teaches
-    /// its reader to skim.
-    ///
-    /// Catching that properly needs the stores to distinguish "absent" from "unreadable" instead
-    /// of collapsing both into the defaults, which is a change to them and not to this command.
-    /// </summary>
     private static DoctorCheck PolicyCheck<T>(
         string name,
         string path,
