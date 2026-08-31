@@ -340,14 +340,93 @@ public sealed class ModelExecutionCoordinatorTests : IDisposable
     private ModelExecutionCoordinator Create(
         IModelRuntime runtime,
         Func<LocalJobRequest, CancellationToken, Task<BrokerExecutionResult>> execute,
-        Func<ModelSelection, BrokerExecutionResult, ModelValidationResult>? validate = null) =>
+        Func<ModelSelection, BrokerExecutionResult, ModelValidationResult>? validate = null,
+        Action<string>? diagnostic = null) =>
         new(
             new ModelRouter(ModelRoutingCatalog.LoadEmbedded()),
             runtime,
             new ExperimentStateStore(_root),
             new ModelTelemetryStore(_root),
             execute,
-            validate);
+            validate,
+            diagnostic: diagnostic);
+
+    /// <summary>
+    /// Makes every telemetry write fail with IOException: the store's metrics directory is
+    /// root\telemetry\metrics, and a file sitting where the telemetry directory should be
+    /// defeats Directory.CreateDirectory deterministically. Experiment state is unaffected —
+    /// it lives under root\experiments.
+    /// </summary>
+    private void BreakTelemetry()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(Path.Combine(_root, "telemetry"), "in the way");
+    }
+
+    /// <summary>
+    /// Telemetry is measurement, not the answer (#202). A metrics directory that stopped
+    /// accepting writes used to turn a finished correct answer into a failed job.
+    /// </summary>
+    [Fact]
+    public async Task A_broken_telemetry_directory_does_not_take_the_answer_with_it()
+    {
+        BreakTelemetry();
+        var diagnostics = new List<string>();
+        var coordinator = Create(
+            new FakeRuntime(),
+            (_, _) => Task.FromResult(Result("translated")),
+            diagnostic: diagnostics.Add);
+
+        var result = await coordinator.ExecuteAsync(
+            RoutedRequest(),
+            Availability(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("translategemma:12b", result.Routing!.SelectedModel);
+        Assert.False(result.Routing.UsedFallback);
+        Assert.Contains(
+            diagnostics,
+            message => message.Contains("telemetry record", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The other half of #202: a telemetry failure recorded next to a model failure used to
+    /// be aggregated into the attempt exception, and the extra fallback that followed was
+    /// caused by a disk, not by the model. The fallback the model failure itself defines
+    /// must run — exactly once — and nothing more.
+    /// </summary>
+    [Fact]
+    public async Task A_telemetry_failure_after_a_model_failure_stays_a_model_failure()
+    {
+        BreakTelemetry();
+        var diagnostics = new List<string>();
+        var executedModels = new List<string>();
+        var coordinator = Create(
+            new FakeRuntime(),
+            (request, _) =>
+            {
+                var model = Assert.IsType<ChatJobPayload>(request.Payload).Model!;
+                executedModels.Add(model);
+                return model == "translategemma:12b"
+                    ? Task.FromException<BrokerExecutionResult>(
+                        new IOException("model execution failed"))
+                    : Task.FromResult(Result("translated"));
+            },
+            diagnostic: diagnostics.Add);
+
+        var result = await coordinator.ExecuteAsync(
+            RoutedRequest(),
+            Availability(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(["translategemma:12b", "qwen3.5:9b"], executedModels);
+        Assert.Equal("qwen3.5:9b", result.Routing!.SelectedModel);
+        Assert.True(result.Routing.UsedFallback);
+        Assert.Equal(
+            ModelExecutionOutcome.TechnicalFailure,
+            result.Routing.ExperimentalOutcome);
+        Assert.Equal(2, diagnostics.Count);
+    }
 
     private static LocalJobRequest RoutedRequest(
         string key = "translate",

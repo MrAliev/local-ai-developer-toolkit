@@ -77,7 +77,8 @@ internal static class BrokerProgram
                 runtime,
                 experiments,
                 telemetry,
-                transport.ExecuteAsync);
+                transport.ExecuteAsync,
+                diagnostic: message => Console.Error.WriteLine("LocalAi broker: " + message));
             var control = new ModelControlService(
                 catalog,
                 transport,
