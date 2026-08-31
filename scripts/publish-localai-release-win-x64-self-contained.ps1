@@ -43,6 +43,27 @@ Set-Location $Root
 # just reported seven successful publishes.
 [System.Environment]::CurrentDirectory = $Root
 
+# PublishRoot is deleted recursively further down. Deleting the raw parameter first meant a
+# mistyped value - 'C:\', '..', a wrong variable - could take an arbitrary tree with it (#196),
+# because canonicalization and the per-project containment check both ran only after that
+# first Remove-Item. The fence: resolve against the repository root, then accept only the
+# repository's own 'publish' subtree, and never follow a reparse point into somewhere else.
+$AllowedPublishRoot = Join-Path $Root "publish"
+$ResolvedPublishRoot = [System.IO.Path]::GetFullPath($PublishRoot, $Root).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar)
+$AllowedPrefix = $AllowedPublishRoot + [System.IO.Path]::DirectorySeparatorChar
+if (-not ($ResolvedPublishRoot.Equals($AllowedPublishRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $ResolvedPublishRoot.StartsWith($AllowedPrefix, [System.StringComparison]::OrdinalIgnoreCase))) {
+    throw "PublishRoot must be '$AllowedPublishRoot' or a directory inside it; got '$ResolvedPublishRoot'."
+}
+
+$existingPublishRoot = Get-Item -LiteralPath $ResolvedPublishRoot -ErrorAction SilentlyContinue
+if ($null -ne $existingPublishRoot -and
+    ($existingPublishRoot.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+    throw "PublishRoot must not be a reparse point; got '$ResolvedPublishRoot'."
+}
+
 if ([string]::IsNullOrWhiteSpace($PackageUri)) {
     $PackageUri = "https://github.com/MrAliev/local-ai-developer-toolkit/releases/download/" +
         "$ReleaseVersion/localai-package.zip"
@@ -94,13 +115,10 @@ $projects = @(
     "src/LocalAi.Installer/LocalAi.Installer.csproj"
 )
 
-if (Test-Path $PublishRoot) {
-    Remove-Item -Recurse -Force $PublishRoot
+if (Test-Path -LiteralPath $ResolvedPublishRoot) {
+    Remove-Item -LiteralPath $ResolvedPublishRoot -Recurse -Force
 }
-New-Item -ItemType Directory -Force -Path $PublishRoot | Out-Null
-$ResolvedPublishRoot = [System.IO.Path]::GetFullPath($PublishRoot).TrimEnd(
-    [System.IO.Path]::DirectorySeparatorChar,
-    [System.IO.Path]::AltDirectorySeparatorChar)
+New-Item -ItemType Directory -Force -Path $ResolvedPublishRoot | Out-Null
 
 function Invoke-SafePublish {
     param(
@@ -166,12 +184,12 @@ function Invoke-SafePublish {
 
 foreach ($project in $projects) {
     $name = [System.IO.Path]::GetFileNameWithoutExtension($project)
-    $out = Join-Path $PublishRoot $name
+    $out = Join-Path $ResolvedPublishRoot $name
     Invoke-SafePublish -ProjectName $name -ProjectPath $project -OutputPath $out -MaxAttempts $MaxAttempts -RetryDelaySeconds $RetryDelaySeconds
 }
 
-$artifacts = Join-Path $PublishRoot "artifacts"
-$release = Join-Path $PublishRoot "release"
+$artifacts = Join-Path $ResolvedPublishRoot "artifacts"
+$release = Join-Path $ResolvedPublishRoot "release"
 New-Item -ItemType Directory -Force -Path $artifacts, $release | Out-Null
 $artifactMap = [ordered]@{
     "localai.exe"          = "LocalAi.Cli/localai.exe"
@@ -182,7 +200,7 @@ $artifactMap = [ordered]@{
     "localai-launcher.exe" = "LocalAi.Launcher/localai-launcher.exe"
 }
 foreach ($entry in $artifactMap.GetEnumerator()) {
-    $source = Join-Path $PublishRoot $entry.Value
+    $source = Join-Path $ResolvedPublishRoot $entry.Value
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
         throw "Required release artifact is missing: $source"
     }
