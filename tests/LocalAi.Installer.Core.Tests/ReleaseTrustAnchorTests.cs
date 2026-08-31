@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using LocalAi.Installer.Core.Releases;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Core.Tests;
 

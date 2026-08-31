@@ -5,6 +5,7 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Core.Releases;
 

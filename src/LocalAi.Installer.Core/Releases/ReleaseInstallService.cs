@@ -3,6 +3,7 @@ using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Models;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Core.Releases;
 

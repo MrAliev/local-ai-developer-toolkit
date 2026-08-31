@@ -1,3 +1,4 @@
+using LocalAi.Contracts;
 namespace LocalAi.Installer.Core.Releases;
 
 /// <summary>

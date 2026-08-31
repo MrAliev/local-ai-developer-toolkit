@@ -1,6 +1,7 @@
 using LocalAi.Installer.Core.Releases;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using LocalAi.Contracts;
 
 namespace LocalAi.ReleaseSigner;
 

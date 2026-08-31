@@ -1,13 +1,18 @@
 using System.Reflection;
 
-namespace LocalAi.Installer.Core.Releases;
+namespace LocalAi.Contracts;
 
 /// <summary>
-/// The single release signing key this installer trusts.
+/// The single release signing key this product trusts.
 ///
 /// The key is embedded rather than read from disk so that a release cannot be verified
-/// against a key an attacker dropped next to the executable, and so that the installer
+/// against a key an attacker dropped next to the executable, and so that every component
 /// stays self-contained on a machine that has never seen this repository.
+///
+/// It lives beside the manifest format rather than inside the installer because installing a
+/// release is not the only thing that has to tell a real one from whoever answered the
+/// request: the runtime asks the same question when it looks up whether a newer release
+/// exists, and two copies of a trust anchor is one more than a product can have.
 /// </summary>
 public static class ReleaseTrustAnchor
 {

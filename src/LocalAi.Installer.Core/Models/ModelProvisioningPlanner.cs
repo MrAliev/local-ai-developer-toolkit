@@ -1,6 +1,7 @@
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Planning;
 using LocalAi.Installer.Core.Releases;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Core.Models;
 
