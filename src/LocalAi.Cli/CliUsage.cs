@@ -24,6 +24,7 @@ internal static class CliUsage
         ModelStatus + " | " + ModelPull + " | " + ModelPreflight + " | " +
         "localai repo status [--root dir | git-common-dir] | " +
         "localai policy <show|set> [options] | " +
+        "localai update [--wait] [--force] | " +
         "localai semantic <operation> [--request file] | localai bootstrap --dry-run | " +
         "localai sync [--root dir] [--base-only] [--require-semantics] | " + Hook + " | " +
         "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +

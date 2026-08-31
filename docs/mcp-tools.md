@@ -110,7 +110,9 @@ Read-only, and it starts nothing — including the broker. The exit code is non-
 real fault: a stopped broker is a note, because it starts on demand.
 
 It also carries an `update` line: whether release lookups are switched on, and what the last one
-found. Read from the state file, never from the network — a diagnostic that quietly called GitHub
+found. `localai update` is what acts on it — one command that installs the newest signed release
+over this one, refusing while the broker has queued work unless asked to `--wait`. Prerequisites,
+models and client integrations are the installer's business and are not touched. Read from the state file, never from the network — a diagnostic that quietly called GitHub
 would be a second, unthrottled caller of the thing the policy exists to ration. A newer release is
 a warning rather than a failure, for the same reason a stopped broker is a note.
 
