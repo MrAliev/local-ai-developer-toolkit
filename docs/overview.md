@@ -557,6 +557,11 @@ None of them requires a rebuild; some do not even require a restart.
 | External indexers | Enablement, paths, arguments, parsing limits | On every synchronization |
 | Update check | Whether releases may be looked up, and how often. Off by default | The broker reads it at start: one already running keeps the previous policy |
 
+The wizard reads these files before it offers them, so a run that does not visit a settings page
+writes back what the machine already had. Where a run does change one, the review page says so —
+`Update check: off (currently on - this run changes it)` — because listing the value about to be
+written reads as *what will be configured* rather than *what is being replaced*.
+
 A corrupt policy file, or one of an unknown version, does **not** weaken the check: safe defaults
 apply. A parse error never turns into silent permission. The update check is the sharpest case of
 that rule — an unreadable `update-check.json` means *off*, because a file nobody can parse is not
