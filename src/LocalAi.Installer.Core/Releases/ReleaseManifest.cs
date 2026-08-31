@@ -183,6 +183,64 @@ public sealed class VerifiedPackage : IDisposable
         }
     }
 
+    /// <summary>
+    /// Dispose plus the staging cleanup a successful install owes (#204): the verifier
+    /// cleans up on failure, but every success used to leave a full unpacked copy of the
+    /// package under the temp root forever, because Dispose only closes handles. The lease's
+    /// own Cleanup revalidates ownership first and deletes nothing it cannot prove safe:
+    /// a directory or reparse point inside — something a staging never contains — leaves
+    /// the root in place for a human, and this returns false, with the handles closed
+    /// either way. Success of the install never depends on this succeeding.
+    /// </summary>
+    public bool TryCleanupAndDispose()
+    {
+        lock (gate)
+        {
+            var files = retainedFiles;
+            var lease = stagingLease;
+            retainedFiles = null;
+            stagingLease = null;
+            if (files is null)
+            {
+                return true;
+            }
+
+            try
+            {
+                foreach (var file in files)
+                {
+                    file.Dispose();
+                }
+            }
+            catch
+            {
+                lease?.Dispose();
+                throw;
+            }
+
+            if (lease is null)
+            {
+                return true;
+            }
+
+            try
+            {
+                lease.Cleanup();
+                return true;
+            }
+            catch (Exception exception) when (
+                exception is ReleaseVerificationException or InvalidOperationException or
+                    IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+            finally
+            {
+                lease.Dispose();
+            }
+        }
+    }
+
     private void RevalidateCore()
     {
         var lease = stagingLease!;

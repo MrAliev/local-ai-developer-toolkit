@@ -27,7 +27,15 @@ public sealed record RuntimeRetentionPolicy(
     int LauncherBackups,
     int SweepIntervalSeconds,
     int MaximumActionsPerSweep,
-    int TelemetryRetentionDays = 30)
+    int TelemetryRetentionDays = 30,
+    // Quarantined jobs used to be the one artifact no bound covered (#204): a corrupt job
+    // moved wholesale - prompts, source text, images included - and stayed forever. The
+    // grace is hours, not minutes, because a quarantined entry exists to be investigated;
+    // nothing may delete one younger than that, whatever the other bounds say.
+    int QuarantineRetentionDays = 14,
+    int QuarantineEntryLimit = 200,
+    long QuarantineBudgetBytes = 256L * 1024 * 1024,
+    int QuarantineGraceHours = 24)
 {
     public const string FileName = "retention.json";
 
@@ -81,6 +89,10 @@ public sealed record RuntimeRetentionPolicy(
         SweepIntervalSeconds = Math.Clamp(SweepIntervalSeconds, 5, 86400),
         MaximumActionsPerSweep = Math.Clamp(MaximumActionsPerSweep, 1, 100000),
         TelemetryRetentionDays = Math.Clamp(TelemetryRetentionDays, 1, 3650),
+        QuarantineRetentionDays = Math.Clamp(QuarantineRetentionDays, 1, 3650),
+        QuarantineEntryLimit = Math.Max(QuarantineEntryLimit, 8),
+        QuarantineBudgetBytes = Math.Max(QuarantineBudgetBytes, 16L * 1024 * 1024),
+        QuarantineGraceHours = Math.Clamp(QuarantineGraceHours, 1, 168),
     };
 
     [JsonIgnore]
@@ -97,6 +109,12 @@ public sealed record RuntimeRetentionPolicy(
 
     [JsonIgnore]
     public TimeSpan SweepInterval => TimeSpan.FromSeconds(SweepIntervalSeconds);
+
+    [JsonIgnore]
+    public TimeSpan QuarantineRetention => TimeSpan.FromDays(QuarantineRetentionDays);
+
+    [JsonIgnore]
+    public TimeSpan QuarantineGrace => TimeSpan.FromHours(QuarantineGraceHours);
 }
 
 /// <summary>

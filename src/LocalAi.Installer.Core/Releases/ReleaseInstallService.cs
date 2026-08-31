@@ -98,51 +98,61 @@ public sealed class ReleaseInstallService(
             .VerifyAsync(release.ManifestJson, release.Signature, stagingRoot, cancellationToken)
             .ConfigureAwait(false);
 
-        var installer = new LocalAiPackageInstaller(
-            processRunner,
-            new ExistingLocalAiInspector(fileSystemProbe),
-            ActivationTimeout);
-
-        var result = await installer
-            .InstallAsync(verified, InstallationLayout.CreateDefault(), cancellationToken)
-            .ConfigureAwait(false);
-
-        // Told to the caller here, between activation and the model pulls, so a run journal
-        // can record the activation as done the moment it is. Journalling it only after the
-        // models meant a process killed mid-pull left the activation - the one reversible
-        // effect of this call - recorded as "state unknown".
-        activated?.Invoke(new ReleaseInstallResult(
-            result.Status,
-            result.Version,
-            result.PriorVersion,
-            result.VersionPath,
-            result.Reason));
-
-        var modelReport = ReleaseModelInstallReport.NotRequested;
-        var installed = result.Status is LocalAiPackageInstallStatus.Installed
-            or LocalAiPackageInstallStatus.AlreadyInstalled;
-        if (installed &&
-            models is { Mode: not ModelProvisioningMode.None } &&
-            OperatingSystem.IsWindows())
+        // Ownership is explicit to the end of the flow (#204): the verifier cleans staging
+        // up on a failed verification, but a successful install used to leave the whole
+        // unpacked package behind because nothing here ever disposed what it was handed.
+        try
         {
-            // Only after activation: the model work runs through the launcher this package
-            // just published, and the broker installer checks it against the verified files.
-            modelReport = await ProvisionModelsAsync(
-                    verified,
-                    models,
-                    gpu ?? new GpuSnapshot(ObservationState.Unavailable, [], "No adapter information was collected."),
-                    modelProgress,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
+            var installer = new LocalAiPackageInstaller(
+                processRunner,
+                new ExistingLocalAiInspector(fileSystemProbe),
+                ActivationTimeout);
 
-        return new ReleaseInstallResult(
-            result.Status,
-            result.Version,
-            result.PriorVersion,
-            result.VersionPath,
-            result.Reason,
-            modelReport);
+            var result = await installer
+                .InstallAsync(verified, InstallationLayout.CreateDefault(), cancellationToken)
+                .ConfigureAwait(false);
+
+            // Told to the caller here, between activation and the model pulls, so a run journal
+            // can record the activation as done the moment it is. Journalling it only after the
+            // models meant a process killed mid-pull left the activation - the one reversible
+            // effect of this call - recorded as "state unknown".
+            activated?.Invoke(new ReleaseInstallResult(
+                result.Status,
+                result.Version,
+                result.PriorVersion,
+                result.VersionPath,
+                result.Reason));
+
+            var modelReport = ReleaseModelInstallReport.NotRequested;
+            var installed = result.Status is LocalAiPackageInstallStatus.Installed
+                or LocalAiPackageInstallStatus.AlreadyInstalled;
+            if (installed &&
+                models is { Mode: not ModelProvisioningMode.None } &&
+                OperatingSystem.IsWindows())
+            {
+                // Only after activation: the model work runs through the launcher this package
+                // just published, and the broker installer checks it against the verified files.
+                modelReport = await ProvisionModelsAsync(
+                        verified,
+                        models,
+                        gpu ?? new GpuSnapshot(ObservationState.Unavailable, [], "No adapter information was collected."),
+                        modelProgress,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            return new ReleaseInstallResult(
+                result.Status,
+                result.Version,
+                result.PriorVersion,
+                result.VersionPath,
+                result.Reason,
+                modelReport);
+        }
+        finally
+        {
+            verified.TryCleanupAndDispose();
+        }
     }
 
     [SupportedOSPlatform("windows")]
