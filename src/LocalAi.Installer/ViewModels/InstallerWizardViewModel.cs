@@ -48,6 +48,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
         new(new WindowsWingetExecutableTrust());
     private readonly ModelsPageViewModel models = new();
     private readonly ResidencyPageViewModel residency = new();
+
+    /// <summary>What the machine had before this run, so the review can say what changes.</summary>
+    private ModelResidencyPolicy? storedResidency;
+
+    private bool? storedUpdateCheck;
     private readonly AgentIntegrationPageViewModel agents = new();
     private readonly ReviewApplyPageViewModel review = new();
     private readonly FinishPageViewModel finish = new();
@@ -312,8 +317,45 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
 
         LoadInterruptedRunJournal();
+        SeedSettingsFromInstallation();
         await RefreshEnvironmentDiagnosticsAsync(cancellationToken);
         hasInitialized = true;
+    }
+
+    /// <summary>
+    /// Starts the two settings pages from what this machine already has, rather than from the
+    /// defaults a blank machine would get.
+    ///
+    /// The wizard used to write both policies from its own defaults at the end of every run
+    /// without ever reading them, so an update silently turned a relaxed residency back to
+    /// strict and an enabled update check back off (#256). The review page listed the value it
+    /// was about to write, which reads as "what will be configured" rather than "what is being
+    /// replaced" — the letter of informed consent without its spirit.
+    ///
+    /// Only a file that parses seeds anything. A corrupt update-check policy still means off:
+    /// that rule is what stops an unreadable file from becoming permission to use the network.
+    /// </summary>
+    private void SeedSettingsFromInstallation()
+    {
+        try
+        {
+            var runtimeRoot = ModelResidencyPolicyStore.DefaultRuntimeRoot;
+            if (!Directory.Exists(runtimeRoot))
+            {
+                return;
+            }
+
+            storedResidency = new ModelResidencyPolicyStore(runtimeRoot).Read().ModelResidency;
+            residency.Policy = storedResidency.Value;
+
+            storedUpdateCheck = new UpdateCheckPolicyStore(runtimeRoot).Read().Enabled;
+            review.EnableUpdateCheck = storedUpdateCheck.Value;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // An unreadable installation seeds nothing and the pages keep their safe defaults.
+        }
     }
 
     /// <summary>
@@ -1227,14 +1269,43 @@ public sealed class InstallerWizardViewModel : ObservableObject
         return 0;
     }
 
+    /// <summary>
+    /// Says when this run replaces a setting the machine already had.
+    ///
+    /// "Model residency: RequireFullVram" reads as what will be configured. On a machine that
+    /// chose AllowCpu it is also a silent reversal, and the page that promises to list every
+    /// effect has to say which of the two it is (#256).
+    /// </summary>
+    private string StoredResidencyNote() =>
+        storedResidency is { } stored && stored != residency.Policy
+            ? $" (currently {stored} - this run changes it)"
+            : string.Empty;
+
+    /// <summary>
+    /// The update check is a stored setting too, so a run that turns it off says so rather
+    /// than leaving the change to be discovered later.
+    /// </summary>
+    private string UpdateCheckReviewLine()
+    {
+        var wanted = review.EnableUpdateCheck ? "on" : "off";
+        if (storedUpdateCheck is { } stored && stored != review.EnableUpdateCheck)
+        {
+            return $"Update check: {wanted} (currently {(stored ? "on" : "off")} - this run " +
+                "changes it)";
+        }
+
+        return "Update check: " + wanted;
+    }
+
     private string BuildReview()
     {
         var builder = new StringBuilder();
         builder.AppendLine(package.ReviewText);
         builder.AppendLine(dependencies.ReviewText);
         builder.AppendLine(models.ReviewText);
-        builder.AppendLine(residency.ReviewText);
+        builder.AppendLine(residency.ReviewText + StoredResidencyNote());
         builder.AppendLine(agents.ReviewText);
+        builder.AppendLine(UpdateCheckReviewLine());
         if (residency.HasWarning)
         {
             builder.AppendLine();
