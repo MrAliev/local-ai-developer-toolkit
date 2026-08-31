@@ -73,6 +73,116 @@ public class SearchServiceCacheTests : IDisposable
         Assert.Contains("codesearch index", ex.Message);
     }
 
+    /// <summary>
+    /// The defect #201 exists for: eviction used to run only inside Load, so the last search
+    /// of a session left its index in memory for as long as the window stayed open — the
+    /// request that would have evicted it never came. Time alone must be enough.
+    /// </summary>
+    [Fact]
+    public void DropsAnIdleIndexWithoutWaitingForTheNextRequest()
+    {
+        var time = new FakeTime();
+        using var service = new SearchService(timeProvider: time)
+        {
+            IdleTimeout = TimeSpan.FromMinutes(10),
+        };
+        service.Load(_indexPath);
+        Assert.Single(service.Loaded());
+
+        time.Advance(TimeSpan.FromMinutes(21));
+
+        Assert.Empty(service.Loaded());
+    }
+
+    [Fact]
+    public void AFreshlyUsedIndexSurvivesTheEvictionTick()
+    {
+        var time = new FakeTime();
+        using var service = new SearchService(timeProvider: time)
+        {
+            IdleTimeout = TimeSpan.FromMinutes(10),
+        };
+        service.Load(_indexPath);
+        time.Advance(TimeSpan.FromMinutes(6));
+        service.Load(_indexPath);
+
+        time.Advance(TimeSpan.FromMinutes(6));
+
+        Assert.Single(service.Loaded());
+    }
+
+    private sealed class FakeTime : TimeProvider
+    {
+        private readonly List<FakeTimer> _timers = [];
+        private DateTimeOffset _now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            var timer = new FakeTimer(callback, state, _now + dueTime, period);
+            lock (_timers)
+            {
+                _timers.Add(timer);
+            }
+
+            return timer;
+        }
+
+        public void Advance(TimeSpan by)
+        {
+            _now += by;
+            List<FakeTimer> timers;
+            lock (_timers)
+            {
+                timers = [.. _timers];
+            }
+
+            foreach (var timer in timers)
+            {
+                timer.FireDue(_now);
+            }
+        }
+
+        private sealed class FakeTimer(
+            TimerCallback callback,
+            object? state,
+            DateTimeOffset due,
+            TimeSpan period) : ITimer
+        {
+            private DateTimeOffset _due = due;
+            private bool _disposed;
+
+            public void FireDue(DateTimeOffset now)
+            {
+                while (!_disposed && _due <= now)
+                {
+                    callback(state);
+                    if (period <= TimeSpan.Zero)
+                    {
+                        return;
+                    }
+
+                    _due += period;
+                }
+            }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => !_disposed;
+
+            public void Dispose() => _disposed = true;
+
+            public ValueTask DisposeAsync()
+            {
+                _disposed = true;
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
     private static CodeIndex BuildIndex() => new()
     {
         Dim = 4,
