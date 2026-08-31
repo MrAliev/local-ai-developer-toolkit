@@ -1,0 +1,38 @@
+# The independent-channel half of #210/R1. The manifest inside a release is ECDSA-signed
+# and the installer verifies it — but the installer executable itself is the trust root a
+# first download has, and the SHA-256 published beside it lives in the same channel it
+# would be guarding. This workflow freezes the digest of every published asset in GitHub's
+# attestation log (Sigstore-backed) the moment the release is published: a later swap of
+# an asset on the release page fails `gh attestation verify` against a log the release
+# page cannot rewrite. It narrows the exposure to the moments between upload and this run;
+# closing it completely is what Authenticode signing is for, and that half of #210 stays
+# open until a certificate exists.
+name: Attest release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download the published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir assets
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" --dir assets
+          ls -l assets
+
+      - name: Attest every asset
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: assets/*
