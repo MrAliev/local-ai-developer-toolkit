@@ -25,14 +25,7 @@ public static class ManagedInstructionBlock
     public static ManagedInstructionBlockResult Upsert(string? content)
     {
         content ??= string.Empty;
-        var beginIndexes = AllIndexesOf(content, BeginMarker);
-        var endIndexes = AllIndexesOf(content, EndMarker);
-        if (beginIndexes.Count > 1 || endIndexes.Count > 1 ||
-            beginIndexes.Count != endIndexes.Count ||
-            (beginIndexes.Count == 1 && beginIndexes[0] > endIndexes[0]))
-        {
-            throw new InvalidOperationException("Malformed managed instruction markers.");
-        }
+        var (beginIndexes, endIndexes) = Locate(content);
 
         string updated;
         if (beginIndexes.Count == 0)
@@ -50,6 +43,62 @@ public static class ManagedInstructionBlock
         }
 
         return new(!string.Equals(content, updated, StringComparison.Ordinal), updated);
+    }
+
+    /// <summary>
+    /// Takes the managed block back out, and nothing else.
+    ///
+    /// This is what an uninstall owes the user: the file is theirs, the block was ours, and
+    /// every character they wrote around it comes back untouched. The one line ending
+    /// <see cref="Upsert"/> added after the block is taken with it; the separator it may have
+    /// inserted before the block is not, because a line ending immediately before the block
+    /// cannot be told apart from one the person typed, and handing back a file shorter than
+    /// they wrote it is the worse of the two mistakes. A file that never carried a block is
+    /// reported unchanged rather than rewritten.
+    /// </summary>
+    public static ManagedInstructionBlockResult Remove(string? content)
+    {
+        content ??= string.Empty;
+        var (beginIndexes, endIndexes) = Locate(content);
+        if (beginIndexes.Count == 0)
+        {
+            return new(false, content);
+        }
+
+        var begin = beginIndexes[0];
+        var end = endIndexes[0] + EndMarker.Length;
+        var updated = content[..begin] + StripOneLineEnding(content[end..]);
+        return new(!string.Equals(content, updated, StringComparison.Ordinal), updated);
+    }
+
+    private static string StripOneLineEnding(string tail)
+    {
+        if (tail.StartsWith("\r\n", StringComparison.Ordinal))
+        {
+            return tail[2..];
+        }
+
+        return tail.Length > 0 && tail[0] is '\n' or '\r' ? tail[1..] : tail;
+    }
+
+    /// <summary>
+    /// The one pair of markers, or nothing. Anything else — two blocks, a begin without an
+    /// end, an end before its begin — is refused rather than guessed at: both the upsert and
+    /// the removal rewrite whatever sits between the markers, and guessing which pair was
+    /// meant would edit text nobody asked us to touch.
+    /// </summary>
+    private static (List<int> Begin, List<int> End) Locate(string content)
+    {
+        var beginIndexes = AllIndexesOf(content, BeginMarker);
+        var endIndexes = AllIndexesOf(content, EndMarker);
+        if (beginIndexes.Count > 1 || endIndexes.Count > 1 ||
+            beginIndexes.Count != endIndexes.Count ||
+            (beginIndexes.Count == 1 && beginIndexes[0] > endIndexes[0]))
+        {
+            throw new InvalidOperationException("Malformed managed instruction markers.");
+        }
+
+        return (beginIndexes, endIndexes);
     }
 
     private static string BuildBlock() =>

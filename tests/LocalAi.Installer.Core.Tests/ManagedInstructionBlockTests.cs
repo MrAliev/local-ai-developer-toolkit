@@ -89,4 +89,77 @@ public sealed class ManagedInstructionBlockTests
 
         Assert.Contains("managed instruction", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// An uninstall gives the file back as it was found: what upsert appended, remove takes
+    /// away, down to the line ending it inserted after the block.
+    /// </summary>
+    [Theory]
+    [InlineData("Keep this guidance.\r\n")]
+    [InlineData("")]
+    [InlineData("Header\n\nA paragraph.\n\nAnother.\n")]
+    public void Removing_the_block_undoes_adding_it(string original)
+    {
+        var withBlock = ManagedInstructionBlock.Upsert(original);
+
+        var removed = ManagedInstructionBlock.Remove(withBlock.Content);
+
+        Assert.True(removed.Changed);
+        Assert.Equal(original, removed.Content);
+    }
+
+    /// <summary>
+    /// The one asymmetry, and it is deliberate. Appending to a file that did not end in a
+    /// newline required inserting one to separate the block from the last line; removal leaves
+    /// it, because a line ending immediately before the block is indistinguishable from one the
+    /// person typed — and returning a file one byte shorter than they wrote it is the worse of
+    /// the two mistakes. Every character they wrote survives either way.
+    /// </summary>
+    [Fact]
+    public void A_file_that_ended_mid_line_keeps_the_separator_the_block_needed()
+    {
+        const string original = "Keep this guidance without a trailing newline.";
+
+        var removed = ManagedInstructionBlock.Remove(
+            ManagedInstructionBlock.Upsert(original).Content);
+
+        Assert.Equal(original + Environment.NewLine, removed.Content);
+        Assert.StartsWith(original, removed.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Text_on_both_sides_of_the_block_survives()
+    {
+        var content =
+            "# Mine\n\nBefore.\n" +
+            ManagedInstructionBlock.Block + "\n" +
+            "After.\n";
+
+        var removed = ManagedInstructionBlock.Remove(content);
+
+        Assert.Equal("# Mine\n\nBefore.\nAfter.\n", removed.Content);
+    }
+
+    [Fact]
+    public void A_file_that_never_carried_the_block_is_left_exactly_as_it_is()
+    {
+        const string content = "Nothing of ours here.\n";
+
+        var removed = ManagedInstructionBlock.Remove(content);
+
+        Assert.False(removed.Changed);
+        Assert.Equal(content, removed.Content);
+    }
+
+    [Theory]
+    [InlineData("a\n<!-- BEGIN LOCALAI MANAGED INSTRUCTIONS -->\nb\n<!-- BEGIN LOCALAI MANAGED INSTRUCTIONS -->\nc\n<!-- END LOCALAI MANAGED INSTRUCTIONS -->")]
+    [InlineData("a\n<!-- BEGIN LOCALAI MANAGED INSTRUCTIONS -->\nb")]
+    [InlineData("a\n<!-- END LOCALAI MANAGED INSTRUCTIONS -->\nb")]
+    public void Removal_refuses_the_same_malformed_markers_the_upsert_does(string content)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ManagedInstructionBlock.Remove(content));
+
+        Assert.Contains("managed instruction", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

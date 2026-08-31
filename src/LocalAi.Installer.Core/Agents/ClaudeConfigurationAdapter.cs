@@ -37,8 +37,95 @@ public sealed class ClaudeConfigurationAdapter(
         return new("Claude", files, BuildPreview(files));
     }
 
+    /// <summary>
+    /// What disconnecting this client would change: the two managed server registrations go,
+    /// and so does the managed instructions block.
+    ///
+    /// A file that does not exist is not created to be emptied — there is nothing of ours in it
+    /// — and everything the user put in the files that do exist survives, because the same
+    /// text-preserving rewrites the install uses are what take our entries back out. The plan
+    /// is applied through <see cref="ApplyAsync"/> exactly like an installation's, so removal
+    /// gets the same backups, the same read-back, and the same refusal on a concurrent edit.
+    /// </summary>
+    public AgentConfigurationPlan PreviewRemoval()
+    {
+        var files = new List<AgentConfigurationFilePlan>();
+        var path = Path.Combine(homeDirectory, ".claude.json");
+        var before = ReadExisting(path);
+        if (before.Length > 0)
+        {
+            var after = RemoveManagedServers(AgentConfigurationFileOperations.DecodeUtf8(before));
+            if (!before.SequenceEqual(Encoding.UTF8.GetBytes(after)))
+            {
+                files.Add(AgentConfigurationFileOperations.FilePlan(
+                    path,
+                    before,
+                    after,
+                    timeProvider.GetUtcNow()));
+            }
+        }
+
+        RemoveInstructions(files, Path.Combine(homeDirectory, ".claude", "CLAUDE.md"));
+        return new("Claude", files, BuildPreview(files));
+    }
+
     public Task ApplyAsync(AgentConfigurationPlan plan, CancellationToken cancellationToken) =>
         AgentConfigurationFileOperations.ApplyAsync(plan, readBack, cancellationToken);
+
+    private static string RemoveManagedServers(string before)
+    {
+        if (string.IsNullOrWhiteSpace(before))
+        {
+            return before;
+        }
+
+        JsonObject root;
+        try
+        {
+            root = JsonNode.Parse(before) as JsonObject
+                ?? throw new InvalidOperationException("Unsupported Claude MCP JSON layout.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException("Malformed Claude MCP JSON layout.", exception);
+        }
+
+        if (root["mcpServers"] is null)
+        {
+            return before;
+        }
+
+        if (root["mcpServers"] is not JsonObject servers)
+        {
+            throw new InvalidOperationException("Unsupported Claude MCP JSON layout.");
+        }
+
+        if (servers["codesearch"] is null && servers["locallm"] is null)
+        {
+            return before;
+        }
+
+        var rootStart = NextNonWhitespace(before, 0);
+        if (rootStart < 0 || before[rootStart] != '{')
+        {
+            throw new InvalidOperationException("Unsupported Claude MCP JSON layout.");
+        }
+
+        var rootEnd = FindMatching(before, rootStart, '{', '}');
+        var property = FindTopLevelProperty(before, rootStart + 1, rootEnd, "mcpServers");
+        var colon = property < 0 ? -1 : before.IndexOf(':', property + "\"mcpServers\"".Length);
+        var objectStart = colon < 0 ? -1 : NextNonWhitespace(before, colon + 1);
+        if (objectStart < 0 || objectStart >= before.Length || before[objectStart] != '{')
+        {
+            throw new InvalidOperationException("Unsupported Claude MCP JSON layout.");
+        }
+
+        var objectEnd = FindMatching(before, objectStart, '{', '}');
+        var bodyStart = objectStart + 1;
+        var body = RemoveProperty(before[bodyStart..objectEnd], "codesearch");
+        body = RemoveProperty(body, "locallm");
+        return before[..bodyStart] + body + before[objectEnd..];
+    }
 
     private string UpdateJson(string before)
     {
@@ -417,6 +504,22 @@ public sealed class ClaudeConfigurationAdapter(
     {
         var before = ReadExisting(path);
         var updated = ManagedInstructionBlock.Upsert(AgentConfigurationFileOperations.DecodeUtf8(before));
+        if (updated.Changed)
+        {
+            files.Add(AgentConfigurationFileOperations.FilePlan(path, before, updated.Content, timeProvider.GetUtcNow()));
+        }
+    }
+
+    private void RemoveInstructions(List<AgentConfigurationFilePlan> files, string path)
+    {
+        var before = ReadExisting(path);
+        if (before.Length == 0)
+        {
+            return;
+        }
+
+        var updated = ManagedInstructionBlock.Remove(
+            AgentConfigurationFileOperations.DecodeUtf8(before));
         if (updated.Changed)
         {
             files.Add(AgentConfigurationFileOperations.FilePlan(path, before, updated.Content, timeProvider.GetUtcNow()));
