@@ -19,15 +19,25 @@ public sealed class UninstallRunnerTests : IDisposable
         "LocalAi.RemovalJournals",
         Guid.NewGuid().ToString("N"));
 
+    /// <summary>
+    /// A key of this test's own, so nothing here reads or removes the real Apps &amp; features
+    /// entry of a machine that genuinely has LocalAi installed.
+    /// </summary>
+    private readonly string registrySubKey =
+        @"Software\LocalAi.Tests\" + Guid.NewGuid().ToString("N") + @"\Uninstall\LocalAi";
+
     public void Dispose()
     {
         machine.Dispose();
         try
         {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(
+                @"Software\LocalAi.Tests\" + registrySubKey.Split('\\')[2],
+                throwOnMissingSubKey: false);
             Directory.Delete(journalDirectory, recursive: true);
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException)
+            exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
         }
     }
@@ -294,22 +304,120 @@ public sealed class UninstallRunnerTests : IDisposable
         }
     }
 
-    private Task<UninstallPlan> Plan(RemovalSelection selection) =>
-        machine.PlanAsync(selection, TestContext.Current.CancellationToken);
+    /// <summary>
+    /// Removal has to take the Apps &amp; features entry with it: one that outlives the
+    /// installation offers to uninstall something that is not there.
+    /// </summary>
+    [Fact]
+    public async Task The_apps_and_features_entry_goes_with_the_binaries()
+    {
+        var registration = new UninstallRegistration(machine.Layout, registrySubKey, _ => { });
+        registration.Register(RemovalFixture.InstalledVersion, machine.LauncherPath);
+        var plan = await Plan(
+            RemovalSelection.FromPreset(RemovalPreset.FullUninstall),
+            registrySubKey);
+        Assert.True(plan.RemovesAppsAndFeaturesEntry);
+        Assert.Contains("Apps & features entry", plan.PreviewText, StringComparison.Ordinal);
+
+        var outcome = await Apply(plan);
+
+        Assert.True(outcome.AppsAndFeaturesEntryRemoved);
+        Assert.False(outcome.UninstallerRemovalDeferred);
+        Assert.Null(registration.Read());
+        Assert.False(Directory.Exists(registration.UninstallerDirectory));
+    }
+
+    [Fact]
+    public async Task Disconnecting_clients_leaves_the_entry_where_it_is()
+    {
+        var registration = new UninstallRegistration(machine.Layout, registrySubKey, _ => { });
+        registration.Register(RemovalFixture.InstalledVersion, machine.LauncherPath);
+
+        var plan = await Plan(
+            RemovalSelection.FromPreset(RemovalPreset.DisconnectClients),
+            registrySubKey);
+        await Apply(plan);
+
+        Assert.False(plan.RemovesAppsAndFeaturesEntry);
+        Assert.NotNull(registration.Read());
+    }
+
+    /// <summary>
+    /// The ordinary uninstall: Apps &amp; features started the copy inside the tree being
+    /// deleted. Sweeping the runtime root must step around that one directory instead of
+    /// reporting a failure over the file it is running from, and remove it at the very end.
+    /// </summary>
+    [Fact]
+    public async Task The_directory_the_uninstaller_runs_from_is_swept_around_and_taken_last()
+    {
+        var registration = new UninstallRegistration(machine.Layout, registrySubKey, _ => { });
+        registration.Register(RemovalFixture.InstalledVersion, machine.LauncherPath);
+        var plan = await Plan(
+            RemovalSelection.FromPreset(RemovalPreset.FullUninstall),
+            registrySubKey);
+
+        var outcome = await Apply(plan, selfDirectory: registration.UninstallerDirectory);
+
+        Assert.True(outcome.Succeeded);
+        Assert.False(Directory.Exists(Path.Combine(machine.Runtime, "bin")));
+        Assert.False(Directory.Exists(registration.UninstallerDirectory));
+    }
+
+    [Fact]
+    public async Task A_copy_that_cannot_go_yet_is_reported_rather_than_failed()
+    {
+        var deferred = new List<string>();
+        var registration = new UninstallRegistration(machine.Layout, registrySubKey, _ => { });
+        registration.Register(RemovalFixture.InstalledVersion, machine.LauncherPath);
+        var plan = await Plan(
+            RemovalSelection.FromPreset(RemovalPreset.FullUninstall),
+            registrySubKey);
+        using var running = new FileStream(
+            registration.UninstallerPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+
+        var outcome = await Apply(
+            plan,
+            selfDirectory: registration.UninstallerDirectory,
+            removeUninstallerAfterExit: deferred.Add);
+
+        Assert.True(outcome.Succeeded);
+        Assert.True(outcome.UninstallerRemovalDeferred);
+        Assert.Equal([registration.UninstallerDirectory], deferred);
+        Assert.Null(registration.Read());
+    }
+
+    private Task<UninstallPlan> Plan(
+        RemovalSelection selection,
+        string? registrySubKey = null) =>
+        machine.PlanAsync(selection, TestContext.Current.CancellationToken, registrySubKey);
 
     private async Task<UninstallOutcome> Apply(
         UninstallPlan plan,
-        RecordingProcessRunner? runner = null)
+        RecordingProcessRunner? runner = null,
+        string? selfDirectory = null,
+        Action<string>? removeUninstallerAfterExit = null)
     {
         using var journal = InstallerRunJournal.Start(journalDirectory);
-        return await Runner(runner ?? new RecordingProcessRunner()).ApplyAsync(
-            plan,
-            journal,
-            TestContext.Current.CancellationToken);
+        return await Runner(
+                runner ?? new RecordingProcessRunner(),
+                selfDirectory,
+                removeUninstallerAfterExit)
+            .ApplyAsync(plan, journal, TestContext.Current.CancellationToken);
     }
 
-    private UninstallRunner Runner(IProcessRunner runner) =>
-        new(machine.Layout, runner);
+    private UninstallRunner Runner(
+        IProcessRunner runner,
+        string? selfDirectory = null,
+        Action<string>? removeUninstallerAfterExit = null) =>
+        new(
+            machine.Layout,
+            runner,
+            registrySubKey: registrySubKey,
+            selfDirectory: selfDirectory,
+            removeUninstallerAfterExit: removeUninstallerAfterExit ?? (_ => { }));
 
     /// <summary>
     /// Stands in for the launcher. <paramref name="onCall"/> runs at the moment the stop is

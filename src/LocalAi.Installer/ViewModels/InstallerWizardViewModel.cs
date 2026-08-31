@@ -10,6 +10,7 @@ using LocalAi.Installer.Core.Dependencies;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Models;
 using LocalAi.Installer.Core.Releases;
+using LocalAi.Installer.Core.Removal;
 using LocalAi.Installer.Core.Transactions;
 
 namespace LocalAi.Installer.ViewModels;
@@ -1543,6 +1544,60 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Registers this installation in Apps &amp; features, and parks the copy of the installer
+    /// the entry points at inside the runtime root.
+    ///
+    /// Right after the package, because both the version it reports and the size it estimates
+    /// are read from what was just installed. An upgrade rewrites the same entry, so
+    /// DisplayVersion follows the installation instead of naming whichever release first
+    /// created it.
+    ///
+    /// A failure here does not fail the installation: LocalAi works perfectly well without a
+    /// line in a list. It is said out loud, though, together with how to remove it by hand,
+    /// because an uninstaller nobody can find is the problem this whole feature exists for.
+    /// </summary>
+    private void RegisterUninstallEntry(StringBuilder report, string version)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var step = JournalBegin(
+            InstallerRunEffectKind.UninstallRegistration,
+            "Apps & features entry for LocalAi " + version);
+        try
+        {
+            var registration = new UninstallRegistration(InstallationLayout.CreateDefault());
+            var entry = registration.Register(
+                version,
+                Environment.ProcessPath ??
+                    throw new InvalidOperationException(
+                        "The running installer has no path to copy."));
+            AppendLog(
+                report,
+                $"Apps & features: listed as \"{entry.DisplayName}\" {entry.DisplayVersion}. " +
+                $"Removal runs {registration.UninstallerPath}.");
+            JournalComplete(
+                step,
+                "Registered under HKCU; removed again by the uninstaller.",
+                isReversible: false);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                System.Security.SecurityException or InvalidOperationException or
+                InstallationLayoutException)
+        {
+            JournalFail(step, exception.Message);
+            AppendLog(
+                report,
+                "Apps & features: could not register this installation " +
+                $"({exception.Message}). LocalAi is installed and works; to remove it later, " +
+                "run this installer again and choose Remove.");
+        }
+    }
+
     private async Task InstallPackageAsync(
         StringBuilder report,
         CancellationToken cancellationToken)
@@ -1683,6 +1738,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
         if (!result.Installed)
         {
             hasRunError = true;
+        }
+
+        if (result.Installed)
+        {
+            RegisterUninstallEntry(report, result.Version ?? resolved.Manifest.ReleaseVersion);
         }
 
         ReportModelOutcome(report, result.Models, selection);

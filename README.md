@@ -435,6 +435,18 @@ machine software, pulled models live in Ollama's store, and a first installation
 holds runtime data as soon as the broker runs. A successful run writes the journal and
 nothing else; rollback is a recovery, not an uninstaller.
 
+**A way out that is easy to find.** The installer is also the uninstaller, the updater and
+the repair tool, so starting it asks which of those this run is — and offers only what the
+machine actually allows, saying why for the rest. An installation registers itself in Apps
+&amp; features, whose entry runs a copy of the installer parked inside the runtime root, so
+removal is still there long after the downloaded file has been cleared away. Removal itself
+is a matrix rather than one hammer: three presets — full uninstall, disconnect clients,
+reinstall-friendly — over rows you can change one at a time, with every removal listed on a
+review page first. The broker is asked to finish before the root is touched, the signing key
+directory needs its own separate confirmation, and what an uninstall deliberately leaves —
+winget prerequisites, Ollama models, the installer journal — is named with the commands to
+deal with it by hand.
+
 **No account, no sign-in.** Releases are public, so the installer downloads the manifest, its
 signature and the package over plain HTTPS with no credentials of any kind. A GitHub account
 is not needed to install this, and the GitHub CLI is listed as an optional prerequisite

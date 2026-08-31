@@ -83,9 +83,22 @@ internal sealed class RemovalFixture : IDisposable
 
     public Task<UninstallPlan> PlanAsync(
         RemovalSelection selection,
-        CancellationToken cancellationToken) =>
-        new UninstallPlanner(Layout, Home, HooksPathReader)
+        CancellationToken cancellationToken,
+        string? registrySubKey = null) =>
+        new UninstallPlanner(
+                Layout,
+                Home,
+                HooksPathReader,
+                registrySubKey: registrySubKey ?? UnusedRegistrySubKey)
             .PlanAsync(selection, cancellationToken);
+
+    /// <summary>
+    /// A key nothing writes, so a planner built by a test never reads the machine's real
+    /// Apps &amp; features entry — including the one a developer running these tests may have
+    /// installed for themselves.
+    /// </summary>
+    public const string UnusedRegistrySubKey =
+        @"Software\LocalAi.Tests\no-entry-here\Uninstall\LocalAi";
 
     public static AgentConfigurationFilePlan PlannedFile(
         UninstallPlan plan,

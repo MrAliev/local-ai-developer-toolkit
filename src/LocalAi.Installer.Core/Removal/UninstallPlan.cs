@@ -52,12 +52,14 @@ public sealed record UninstallPlan(
     IReadOnlyList<string> RetainedPaths,
     IReadOnlyList<AgentConfigurationPlan> AgentConfigurations,
     IReadOnlyList<HookRemovalEntry> Hooks,
-    IReadOnlyList<RetainedNotice> Retained)
+    IReadOnlyList<RetainedNotice> Retained,
+    bool RemovesAppsAndFeaturesEntry = false)
 {
     public bool HasWork =>
         Paths.Count > 0 ||
         AgentConfigurations.Any(plan => plan.HasChanges) ||
-        Hooks.Any(hook => hook.HasWork);
+        Hooks.Any(hook => hook.HasWork) ||
+        RemovesAppsAndFeaturesEntry;
 
     /// <summary>
     /// Whether the runtime root would be left with nothing in it.
@@ -82,7 +84,8 @@ public sealed record UninstallPlan(
                 var paths = Paths.Where(path => path.Item == item).ToArray();
                 var agents = AgentPlansFor(item);
                 var hooks = item == RemovalItem.GitHooks ? Hooks : [];
-                if (paths.Length == 0 && agents.Length == 0 && hooks.Count == 0)
+                var registration = item == RemovalItem.Binaries && RemovesAppsAndFeaturesEntry;
+                if (paths.Length == 0 && agents.Length == 0 && hooks.Count == 0 && !registration)
                 {
                     continue;
                 }
@@ -91,6 +94,15 @@ public sealed record UninstallPlan(
                 foreach (var path in paths)
                 {
                     text.AppendLine("  remove " + path.Path + (path.IsDirectory ? "\\" : string.Empty));
+                }
+
+                if (registration)
+                {
+                    // The entry is what made this removable from Apps & features in the first
+                    // place, and the copy it points at is this very executable — so it is named
+                    // here, and it goes last.
+                    text.AppendLine(
+                        "  remove the Apps & features entry, and the uninstaller's own copy last");
                 }
 
                 foreach (var file in agents.SelectMany(plan => plan.Files))

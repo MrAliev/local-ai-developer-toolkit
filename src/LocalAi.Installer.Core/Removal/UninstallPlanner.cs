@@ -24,12 +24,18 @@ public sealed class UninstallPlanner
     private readonly string homeDirectory;
     private readonly Func<string, CancellationToken, Task<string?>> readHooksPath;
     private readonly TimeProvider timeProvider;
+    private readonly string? registrySubKey;
 
+    /// <summary>
+    /// <paramref name="registrySubKey"/> names the Apps &amp; features entry to look for.
+    /// Tests point it at a key of their own so they never read or write the real one.
+    /// </summary>
     public UninstallPlanner(
         InstallationLayout layout,
         string homeDirectory,
         Func<string, CancellationToken, Task<string?>>? readHooksPath = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        string? registrySubKey = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
@@ -37,6 +43,7 @@ public sealed class UninstallPlanner
         this.homeDirectory = homeDirectory;
         this.readHooksPath = readHooksPath ?? ReadHooksPathWithGit;
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.registrySubKey = registrySubKey;
     }
 
     public async Task<UninstallPlan> PlanAsync(
@@ -53,8 +60,19 @@ public sealed class UninstallPlanner
             retained,
             PlanAgentConfigurations(selection),
             hooks,
-            Retained(selection, hooks));
+            Retained(selection, hooks),
+            PlansAppsAndFeaturesRemoval(selection));
     }
+
+    /// <summary>
+    /// Whether there is an Apps &amp; features entry to take out. It goes with the binaries:
+    /// an entry offering to uninstall an installation whose binaries are gone is an entry
+    /// pointing at nothing, and one kept beside a runtime that stays is still true.
+    /// </summary>
+    private bool PlansAppsAndFeaturesRemoval(RemovalSelection selection) =>
+        selection.Includes(RemovalItem.Binaries) &&
+        OperatingSystem.IsWindows() &&
+        new UninstallRegistration(layout, registrySubKey).Read() is not null;
 
     /// <summary>
     /// Every top-level entry of the runtime root, split into what this selection takes and
