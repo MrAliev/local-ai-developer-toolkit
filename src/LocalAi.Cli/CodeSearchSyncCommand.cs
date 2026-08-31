@@ -348,7 +348,18 @@ public static class CodeSearchSyncCommand
 
                 if (builtOverlay)
                 {
-                    overlaysBuilt++;
+                    if (DiscardDriftedOverlay(
+                            identity,
+                            overlayPath,
+                            semanticOverlayPath,
+                            runtimeRoot))
+                    {
+                        worktreesSkipped++;
+                    }
+                    else
+                    {
+                        overlaysBuilt++;
+                    }
                 }
             }
 
@@ -412,6 +423,66 @@ public static class CodeSearchSyncCommand
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// The identity check overlays owe their name to (#197).
+    ///
+    /// The base generation is immune to edits during its build: it reads a materialized
+    /// CommitSnapshot, never the live worktree. Overlays are the opposite — they read the
+    /// working tree for minutes and land at final paths derived from the identity captured
+    /// before the build, dirty hash included. An edit landing mid-build produced a mixed
+    /// overlay whose name promised an exact snapshot: the moment the worktree returned to
+    /// that state, search answered confidently with content the state never contained.
+    ///
+    /// Re-inspecting after the build and discarding on drift closes that at the cost of an
+    /// honest retry — the next sync, which the edit's own hook already scheduled, rebuilds
+    /// from the new state. A worktree that vanished mid-build counts as drifted: its
+    /// artifacts are unnamed-state artifacts either way.
+    /// </summary>
+    internal static bool DiscardDriftedOverlay(
+        WorkingIndexIdentity captured,
+        string overlayPath,
+        string semanticOverlayPath,
+        string? runtimeRoot)
+    {
+        var drifted = false;
+        try
+        {
+            var live = RuntimeIndexLayout.Inspect(captured.WorkingRoot, runtimeRoot);
+            drifted =
+                !string.Equals(live.HeadCommit, captured.HeadCommit, StringComparison.Ordinal) ||
+                !string.Equals(live.HeadTree, captured.HeadTree, StringComparison.Ordinal) ||
+                !string.Equals(live.DirtyHash, captured.DirtyHash, StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            drifted = true;
+        }
+
+        if (!drifted)
+        {
+            return false;
+        }
+
+        foreach (var artifact in new[]
+                 {
+                     overlayPath,
+                     semanticOverlayPath,
+                     overlayPath + ".embedding-checkpoint",
+                 })
+        {
+            if (File.Exists(artifact))
+            {
+                File.Delete(artifact);
+            }
+        }
+
+        Console.Error.WriteLine(
+            $"Worktree {captured.WorkingRoot} changed while its overlay was building; " +
+            "the overlay was discarded and the next sync rebuilds it from the new state.");
+        return true;
     }
 
     /// <summary>
