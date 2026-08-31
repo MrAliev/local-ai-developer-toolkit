@@ -83,9 +83,23 @@ public sealed class RunProcessToCompletionTests : IDisposable
             TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(pidPath))
             {
-                var text = await File.ReadAllTextAsync(
-                    pidPath,
-                    TestContext.Current.CancellationToken);
+                string text;
+                try
+                {
+                    text = await File.ReadAllTextAsync(
+                        pidPath,
+                        TestContext.Current.CancellationToken);
+                }
+                catch (IOException)
+                {
+                    // The child can still hold the file open for its write when the poll
+                    // lands between creation and close; a sharing violation here is the
+                    // same "not written yet" condition this loop already waits out, not a
+                    // failure. Seen as a one-off on a CI runner where exactly that
+                    // interleaving happened.
+                    text = string.Empty;
+                }
+
                 if (int.TryParse(text, out var pid))
                 {
                     return pid;
