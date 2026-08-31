@@ -24,6 +24,30 @@ public sealed record AgentConfigurationPlan(
     public bool HasChanges => Files.Count > 0;
 }
 
+/// <summary>
+/// Applies a plan without needing the adapter that produced it.
+///
+/// Installation always has the adapter to hand, because it just used it to build the plan.
+/// Removal does not: the uninstall runner is handed plans for whichever clients were selected
+/// and has no business knowing which class made each one. Both go through the same
+/// compare-and-swap, so a removal gets the backups, the read-back and the refusal on a
+/// concurrent edit that installation has.
+/// </summary>
+public static class AgentConfigurationApply
+{
+    public static Task ApplyAsync(
+        AgentConfigurationPlan plan,
+        CancellationToken cancellationToken,
+        Func<string, byte[]>? readBack = null)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return AgentConfigurationFileOperations.ApplyAsync(
+            plan,
+            readBack ?? File.ReadAllBytes,
+            cancellationToken);
+    }
+}
+
 internal static class AgentConfigurationFileOperations
 {
     // throwOnInvalidBytes: a config that is not valid UTF-8 (another encoding, or a

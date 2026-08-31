@@ -12,6 +12,15 @@ public enum InstallerRunEffectKind
     ResidencyPolicy,
     OllamaLaunchRecord,
     AgentConfiguration,
+
+    /// <summary>Asking the running tools, and the broker in particular, to finish and exit.</summary>
+    ProcessStop,
+
+    /// <summary>Deleting one top-level path of the runtime root.</summary>
+    RuntimeRemoval,
+
+    /// <summary>Taking the managed dispatchers out of one repository.</summary>
+    GitHookRemoval,
 }
 
 public enum InstallerRunStepStatus
