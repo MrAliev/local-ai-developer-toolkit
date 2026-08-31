@@ -60,7 +60,10 @@ failed.
 
 ## Keys
 
-The private signing key exists on one machine and has never been in this repository. If you
-believe it has been compromised, say so in the advisory: the rotation procedure is documented
-in [docs/release-signing-runbook.md](docs/release-signing-runbook.md), and it deliberately
+The private signing key exists on one machine and has never been in this repository. Its
+working copy is DPAPI-wrapped and bound to that machine's signing account, and the signer
+refuses to use it while the key directory's ACL grants access beyond SYSTEM, Administrators
+and that account. If you believe it has been compromised, say so in the advisory: the
+rotation procedure is documented in
+[docs/release-signing-runbook.md](docs/release-signing-runbook.md), and it deliberately
 requires a release signed with the new key before the old one is retired.

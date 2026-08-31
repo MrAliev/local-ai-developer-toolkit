@@ -10,4 +10,8 @@
     <ProjectReference Include="..\LocalAi.Installer.Core\LocalAi.Installer.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
+  </ItemGroup>
+
 </Project>
