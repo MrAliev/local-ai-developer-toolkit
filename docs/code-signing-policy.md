@@ -51,6 +51,14 @@ holds prompts, file contents, paths or secrets — the full statement is in
 [developer overview](overview.md). The installer collects nothing and phones nowhere;
 its network use is downloading the release it verifies.
 
+The runtime makes one network request of its own, and only after being asked to: an
+optional update check, off until it is switched on with `localai policy set --update-check on`
+or the checkbox on the installer's review page. It fetches the latest release manifest and
+its signature — the same two public documents an installation downloads — and sends nothing
+about the machine: no identifier, no account, no usage. The version inside is believed only
+after the signature verifies against the embedded release key, and nothing is ever installed
+without `localai update` being run.
+
 ## What the installer does to a machine
 
 Every change the wizard makes is listed on its review page before anything is applied,

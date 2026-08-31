@@ -373,7 +373,7 @@ an ordinal out of range is rejected rather than resolved against a different sna
 | One transport | The only path to the models is the broker; the agent-facing Ollama endpoint is unsupported |
 | Runtime permissions | Directories are brought to their expected shape and validated in a single pass. Separate passes left a race window: Claude and Codex running concurrently hit a spurious permission failure |
 | Protocol cleanliness | The MCP servers reserve standard output for the protocol |
-| Release signature | The public key is embedded in the installer binary rather than sitting in a file beside it: a package signed with someone else's key cannot be substituted |
+| Release signature | The public key is embedded in the binaries rather than sitting in a file beside them: a package signed with someone else's key cannot be substituted |
 | Immutable versions | A published version directory is never rewritten; rollback is the activation of a previously verified directory |
 | Atomic switching | Activation requires naming the pointer being replaced, so a concurrent activation cannot be silently overwritten |
 | Graceful stop | The broker is asked to finish: it notices the request on its per-second heartbeat, stops taking new work and finishes what it has. Only what has not left by the deadline is killed |
@@ -498,8 +498,23 @@ manifest, the signature and the package over plain HTTPS with no credentials. Th
 remains as an automatic fallback — for a fork kept private, or a network where the release
 host is unreachable but the API is not — and it reuses the sign-in already established with
 `gh auth login`: the installer never asks for, stores or sees a token. The checks are the
-same either way: the manifest is verified against the key embedded in the installer, the
+same either way: the manifest is verified against the key embedded in the build, the
 package against the SHA-256 inside the manifest.
+
+The same executable is also the uninstaller, the updater and the repair tool, so starting it
+asks which of those this run is and offers only what the machine allows, naming the reason for
+the rest. An installation registers itself in Apps & features, whose entry runs a copy of the
+installer parked inside the runtime root — so removal is still reachable long after the
+downloaded file is gone. Removal is a matrix rather than one hammer: three presets over rows
+that change one at a time, every removal listed before anything happens, the broker asked to
+finish before the root is touched, and the release signing key kept unless separately
+confirmed.
+
+Knowing that a release exists is opt-in and off by default. When it is switched on, the broker
+fetches the latest manifest and its signature at most once per interval — nothing about the
+machine is sent — and believes the version only after the signature verifies. What it learns
+goes into a state file that `localai doctor` and `index_status` read; nothing installs until
+`localai update` is run, which refuses while the broker has queued jobs unless asked to wait.
 
 Each run writes a journal of its effects to `%LOCALAPPDATA%\LocalAi-installer-logs` — the
 intent before each effect, the outcome after — so a run killed mid-install still leaves a
