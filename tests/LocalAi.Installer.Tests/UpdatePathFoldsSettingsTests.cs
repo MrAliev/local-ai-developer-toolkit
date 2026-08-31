@@ -28,9 +28,10 @@ public sealed class UpdatePathFoldsSettingsTests
         var wizard = new InstallerWizardViewModel(StartChoice.UpdateOrRepair);
 
         Assert.True(wizard.AreSettingsFolded);
-        // Diagnose, Package, Confirm, Progress, Finish.
-        Assert.Equal(5, wizard.StepList.Count);
-        Assert.Contains("Step 1 of 5", wizard.StepStatus, StringComparison.Ordinal);
+        // Diagnose, Confirm, Progress, Finish. The release follows from the errand, so the
+        // package page is folded with the rest and resolved while the check runs.
+        Assert.Equal(4, wizard.StepList.Count);
+        Assert.Contains("Step 1 of 4", wizard.StepStatus, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -46,17 +47,17 @@ public sealed class UpdatePathFoldsSettingsTests
     }
 
     [Fact]
-    public void Next_on_an_update_goes_straight_from_the_check_to_the_package()
+    public void Next_on_an_update_goes_from_the_check_straight_to_the_review()
     {
         var wizard = Checked(StartChoice.UpdateOrRepair);
 
         Assert.True(wizard.MoveNext());
 
-        Assert.Equal(InstallerPage.Package, wizard.CurrentPage);
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
     }
 
     [Fact]
-    public void Back_from_the_package_returns_to_the_check_rather_than_a_folded_page()
+    public void Back_from_the_review_returns_to_the_check_rather_than_a_folded_page()
     {
         var wizard = Checked(StartChoice.UpdateOrRepair);
         wizard.MoveNext();
@@ -100,6 +101,7 @@ public sealed class UpdatePathFoldsSettingsTests
     /// wizard would be applying an effect it never listed.
     /// </summary>
     [Theory]
+    [InlineData("LocalAi package:")]
     [InlineData("Dependencies:")]
     [InlineData("Models:")]
     [InlineData("Model residency:")]
@@ -109,6 +111,22 @@ public sealed class UpdatePathFoldsSettingsTests
         var wizard = new InstallerWizardViewModel(StartChoice.UpdateOrRepair);
 
         Assert.Contains(expected, wizard.ReviewText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// When nothing resolved, the warning has to name a route that exists. On this path the
+    /// package step is folded away, so telling somebody to "go back" to it would send them
+    /// looking for a page the rail does not show.
+    /// </summary>
+    [Fact]
+    public void An_unresolved_release_points_at_a_route_this_path_actually_has()
+    {
+        var folded = new InstallerWizardViewModel(StartChoice.UpdateOrRepair).ReviewText;
+        var full = new InstallerWizardViewModel(StartChoice.Install).ReviewText;
+
+        Assert.Contains("Change these settings", folded, StringComparison.Ordinal);
+        Assert.DoesNotContain("Go back to the LocalAi package step", folded, StringComparison.Ordinal);
+        Assert.Contains("Go back to the LocalAi package step", full, StringComparison.Ordinal);
     }
 
     /// <summary>

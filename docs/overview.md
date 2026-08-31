@@ -505,7 +505,9 @@ The same executable is also the uninstaller, the updater and the repair tool, so
 asks which of those this run is and offers only what the machine allows, naming the reason for
 the rest. An update also stops re-asking what it already has: prerequisites that are installed, models
 that are pulled, the residency policy read from disk and the client registrations that exist
-are folded away, so the rail shows five steps rather than nine and the counter says so. Their
+are folded away, so the rail shows four steps rather than nine and the counter says so. The
+release is folded with them — the errand settled which one it is, so resolving it is work
+rather than a question, and it happens behind the system check instead of behind a button. Their
 values still appear on the review page — a folded page must never become an unlisted effect —
 and one button there brings all four back for the run where a carried-forward answer is wrong.
 

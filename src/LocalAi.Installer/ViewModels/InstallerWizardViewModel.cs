@@ -71,6 +71,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         new HashSet<InstallerPage>
         {
             InstallerPage.Dependencies,
+            InstallerPage.Package,
             InstallerPage.Models,
             InstallerPage.Residency,
             InstallerPage.Agents,
@@ -429,6 +430,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
         LoadInterruptedRunJournal();
         SeedSettingsFromInstallation();
         await RefreshEnvironmentDiagnosticsAsync(cancellationToken);
+        if (AreSettingsFolded)
+        {
+            // The errand settled which release this is, so resolving it is work rather than a
+            // question. It happens here, behind the check already running, instead of behind a
+            // "Check release" button on a page an update no longer shows.
+            await ResolvePackageAsync(cancellationToken);
+        }
+
         hasInitialized = true;
     }
 
@@ -1440,8 +1449,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
             builder.AppendLine(
                 "Warning: no release has been verified, so LocalAi itself will not be " +
                 "installed and the client applications will be left unconfigured. Only the " +
-                "prerequisites above will be applied. Go back to the LocalAi package step to " +
-                "check a release first.");
+                "prerequisites above will be applied. " +
+                (AreSettingsFolded
+                    // The package step is folded away on this path, so naming it alone
+                    // would send somebody looking for a page that is not in the rail.
+                    ? "Use \"Change these settings\" below to choose a release and check "
+                        + "it."
+                    : "Go back to the LocalAi package step to check a release first."));
         }
 
         return builder.ToString().Trim();
