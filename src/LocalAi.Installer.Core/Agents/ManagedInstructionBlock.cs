@@ -264,18 +264,18 @@ public static class ManagedInstructionBlock
 
         ### Reporting
 
-        After every local tool call, say which tool and model ran, how long it took by your
-        own reckoning — no tool reports its elapsed time — and the cloud tokens avoided. One
-        line:
+        After every local tool call, say which tool and model ran, how long it took, and the
+        cloud tokens avoided. One line:
 
-        > Locally: `search_code` (Ollama, <model>), about 6s. Saved roughly ~25-30K cloud tokens.
+        > Locally: `search_code` (Ollama, <model>), 6.2s. Saved roughly ~25-30K cloud tokens.
 
-        LocalLm tools compute their own saving and return it in a line of their own; take the
-        number from there instead of inventing one, and note that they answer in Russian
-        whatever language you are working in. Below about five hundred tokens they say so
-        plainly rather than giving a band. For `search_code` estimate it from the files that
-        would otherwise have been read whole, as a range. A local call reported vaguely cannot
-        be told from one that never happened.
+        Every one of those comes from the tool, not from you. LocalLm returns a line carrying
+        model, duration and saving — in Russian whatever language you work in, and saying so
+        plainly below about five hundred tokens rather than giving a band. `search_code` prints
+        its time in the header above the hits; its saving is the one figure you estimate, from
+        the files that would otherwise have been read whole, as a range. Where a wait is named
+        apart from the work — `6.1s (в очереди 4.1s)` — carry both. A local call reported
+        vaguely cannot be told from one that never happened.
 
         After CodeSearch work, name `index_unload` so the user can free the cached index at
         once — it leaves the on-disk index alone, and idle indexes are evicted anyway.

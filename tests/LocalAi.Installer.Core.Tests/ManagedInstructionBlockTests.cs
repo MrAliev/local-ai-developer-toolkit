@@ -91,7 +91,7 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("ask before switching")]
     // The report is a shape, not a sentiment: a local call reported vaguely cannot be told
     // from one that never happened.
-    [InlineData("estimate it from the files")]
+    [InlineData("the one figure you estimate")]
     // The first thing to check when the index lags HEAD, and the one people never think of.
     [InlineData("core.hooksPath")]
     [InlineData("git rev-parse --git-path hooks")]
