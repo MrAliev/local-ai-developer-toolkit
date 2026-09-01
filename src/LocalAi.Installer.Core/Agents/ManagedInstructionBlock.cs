@@ -111,6 +111,36 @@ public static class ManagedInstructionBlock
         Managed by the LocalAi installer. Anything between these markers is replaced on the
         next install; keep your own guidance outside them.
 
+        These rules are the same on every machine, which is what makes them worth stating
+        once. Whatever the user wrote outside the markers is theirs: it survives every
+        install byte for byte, and where it disagrees with anything below, it wins. Follow
+        their instruction and say which rule here it overrides, rather than quietly applying
+        both or silently preferring this block.
+
+        ### Reach for the local tool first
+
+        This machine was bought to take load off the cloud, and it does not take any off while
+        it is remembered every other time. Any "where does X live", "what does Y do", "is there
+        already something like Z" starts with `search_code`. Any image on disk is `read_image`.
+        Any machine output — a log, a trace, a dump — is `triage_log`. Any mechanical pass over
+        known files — list, summarise, collect TODOs, translate, check a convention — is
+        `ask_local`.
+
+        Two things stay in the cloud without asking, and both are narrow: reading a file
+        before editing it, and a literal sweep for one exact token whose target is already
+        known. "I think I know the file" is a guess, and checking it is what `search_code` is
+        for.
+
+        Go to a cloud tool instead of a local one only when the local one is genuinely
+        unavailable — the MCP server is down, the first generation is still building, the model
+        does not answer — or when its answer looks wrong. Say out loud which of those happened
+        and ask before switching. A silent fall back to text search is exactly how the machine
+        ends up idle.
+
+        When the local tooling cannot answer, offer the three ways forward rather than picking
+        one: diagnose or restart the MCP server, use the same LocalAi through the launcher CLI
+        on the shared broker, or continue without local models this once.
+
         ### Transport
 
         Use only the shared LocalAi FIFO broker for local-model work. Never access Ollama
@@ -139,6 +169,19 @@ public static class ManagedInstructionBlock
         A literal sweep for one exact token, once the target is already known, is still a job
         for grep. Reading a file before editing it is never delegated to anything.
 
+        Uncommitted work is not in the index yet. The Git hooks refresh it on commit, checkout
+        and merge; edits still sitting in the working tree are covered by a dirty overlay that
+        nothing builds on its own. So before searching a tree you have just edited, either
+        commit and let the hook finish, or build the overlay explicitly:
+
+        ```
+        localai-launcher.exe run localai sync --root <repository>
+        ```
+
+        Do not skip this and search anyway. `search_code` refuses rather than answering from a
+        stale or mixed index, and that refusal is the tool working correctly — the answer to it
+        is one of the two commands above, not a fall back to text search.
+
         ### Any repository, not just the ones already set up
 
         Indexing is opt-in per repository and costs two commands, so "this repository is new"
@@ -165,6 +208,16 @@ public static class ManagedInstructionBlock
         While a repository is still building its first generation the status is INITIALIZING.
         A partial index is not a fast index: do not answer from it, and say the repository is
         still indexing rather than quietly falling back to a text search.
+
+        Hooks are installed where Git actually looks. Usually that is `$GIT_DIR/hooks`, but a
+        repository can set `core.hooksPath` — husky, lefthook and simple-git-hooks all do, and
+        husky does it from `npm install`. An existing hook of the same name is never
+        overwritten: it is called first, and a non-zero exit from it stops the chain. If the
+        index lags HEAD for no visible reason, check where Git is looking before anything else:
+
+        ```
+        git rev-parse --git-path hooks
+        ```
 
         ### Images, logs, routine file work
 
@@ -199,9 +252,24 @@ public static class ManagedInstructionBlock
 
         After CodeSearch work, always include the exact `index_unload` tool name so the user
         can release cached index memory immediately; explain that it leaves the on-disk index
-        intact and that idle indexes are also evicted automatically. While an index is still
-        building, use `index_status` and report processed, total and remaining chunks together
-        with the current ETA instead of saying only that indexing is in progress.
+        intact and that idle indexes are also evicted automatically.
+
+        One line, in the reply, in this shape:
+
+        > Locally: `search_code` (Ollama, <model>). Saved roughly ~25-30K cloud tokens.
+
+        For `search_code` the estimate is yours to make: how many files would have been read
+        whole, their real size, about four characters per token for code and English, minus the
+        short query and the short result. Give it as a range and call it an estimate — there is
+        no live token counter, and false precision is worse than an honest range.
+
+        Indexing is reported while it runs, not summarised once it is over. Say so the moment
+        it starts — what is being indexed, how many files and chunks — and then at least once a
+        minute: processed, remaining, and the current ETA, from `index_status` while a first
+        generation is still building. Never filter the indexer's own progress out of a command's
+        output to keep a reply tidy: hidden indexing is indistinguishable from a hung machine,
+        and the person watching has no other way to tell the difference. Split the commands
+        instead.
         """;
 
     private static List<int> AllIndexesOf(string content, string marker)

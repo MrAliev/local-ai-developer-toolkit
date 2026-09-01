@@ -53,8 +53,36 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("full-VRAM, zero-offload")]
     [InlineData("estimated cloud tokens avoided")]
     [InlineData("exact `index_unload` tool name")]
-    [InlineData("processed, total and remaining chunks")]
+    // The wording moved from "processed, total and remaining chunks" when the paragraph
+    // gained the cadence: the volume is stated up front, the progress at least once a minute.
+    [InlineData("how many files and chunks")]
+    [InlineData("processed, remaining")]
+    [InlineData("at least once a")]
     [InlineData("current ETA")]
+    // Hidden indexing is indistinguishable from a hung machine, and the person watching has
+    // no other way to tell the two apart.
+    [InlineData("Never filter the indexer")]
+    // Surviving an install and outranking the block are different promises, and only the
+    // first is mechanical. Without the second, an assistant reading both a user's rule and
+    // this block has no rule for the conflict and follows whichever it read last.
+    [InlineData("same on every machine")]
+    [InlineData("it wins")]
+    // The index covers commits. Edits still in the working tree need an overlay that nothing
+    // builds on its own, and without this the refusal reads as a broken tool rather than a
+    // missing step — which is how a text search gets reached for instead.
+    [InlineData("Uncommitted work is not in the index yet")]
+    // Leaving the local tool is a decision with a reason, not a silent fallback. Without this
+    // the machine sits idle while an assistant greps, and nobody is told it happened.
+    [InlineData("Reach for the local tool first")]
+    [InlineData("ask before switching")]
+    [InlineData("offer the three ways forward")]
+    // The report is a shape, not a sentiment: a local call reported vaguely is one the reader
+    // cannot tell from a call that never happened.
+    [InlineData("Saved roughly")]
+    [InlineData("four characters per token")]
+    // The first thing to check when the index lags HEAD, and the one people never think of.
+    [InlineData("core.hooksPath")]
+    [InlineData("git rev-parse --git-path hooks")]
     // Indexing is opt-in per repository, so an assistant that does not know how to connect
     // one is limited to whatever was set up before it arrived.
     // With --root, because the block is read by agents that are not standing in the repository
