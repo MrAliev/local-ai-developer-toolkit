@@ -327,6 +327,62 @@ public sealed class UninstallRunnerTests : IDisposable
         Assert.False(Directory.Exists(registration.UninstallerDirectory));
     }
 
+    /// <summary>
+    /// A reinstall leaves the entry alone, and this is the case that matters most.
+    ///
+    /// The reinstall-friendly preset removes the binaries, so the entry used to go with them
+    /// and be written back by the installation half — churn on the good path, and a hazard on
+    /// the rest. A removal launched from Apps &amp; features runs out of the uninstaller's own
+    /// copy, so deleting that copy falls to a retry loop that keeps trying for a minute after
+    /// the process exits: long enough to delete the copy the installation half has by then
+    /// written, leaving an entry pointing at nothing and no way to uninstall. It is also
+    /// simply true throughout — this run ends with LocalAi installed.
+    /// </summary>
+    [Fact]
+    public async Task A_reinstall_never_unregisters_what_it_is_about_to_register_again()
+    {
+        var registration = new UninstallRegistration(machine.Layout, registrySubKey, _ => { });
+        registration.Register(RemovalFixture.InstalledVersion, machine.LauncherPath);
+        var selection = RemovalSelection.FromPreset(RemovalPreset.ReinstallFriendly);
+        Assert.True(selection.Includes(RemovalItem.Binaries));
+
+        var plan = await machine.PlanAsync(
+            selection,
+            TestContext.Current.CancellationToken,
+            registrySubKey,
+            installationFollows: true);
+
+        Assert.False(plan.RemovesAppsAndFeaturesEntry);
+        Assert.DoesNotContain("Apps & features entry", plan.PreviewText, StringComparison.Ordinal);
+
+        var outcome = await Apply(plan);
+
+        Assert.False(outcome.AppsAndFeaturesEntryRemoved);
+        Assert.NotNull(registration.Read());
+        // The parked copy still goes: it lives inside the bin root, which this selection
+        // removes whole. What must not happen is the deferred variety — the retry loop that
+        // outlives this process and would delete whatever is at that path a minute from now,
+        // by which time the installation half has written its own copy there.
+        Assert.False(outcome.UninstallerRemovalDeferred);
+    }
+
+    /// <summary>
+    /// The same selection with nothing following still takes the entry: an entry beside an
+    /// installation whose binaries are gone offers to uninstall what is not there.
+    /// </summary>
+    [Fact]
+    public async Task The_same_removal_alone_still_takes_the_entry()
+    {
+        var registration = new UninstallRegistration(machine.Layout, registrySubKey, _ => { });
+        registration.Register(RemovalFixture.InstalledVersion, machine.LauncherPath);
+
+        var plan = await Plan(
+            RemovalSelection.FromPreset(RemovalPreset.ReinstallFriendly),
+            registrySubKey);
+
+        Assert.True(plan.RemovesAppsAndFeaturesEntry);
+    }
+
     [Fact]
     public async Task Disconnecting_clients_leaves_the_entry_where_it_is()
     {

@@ -68,15 +68,26 @@ public sealed class UninstallPlanner
             PlanAgentConfigurations(selection),
             hooks,
             Retained(selection, hooks, installationFollows),
-            PlansAppsAndFeaturesRemoval(selection));
+            PlansAppsAndFeaturesRemoval(selection, installationFollows));
     }
 
     /// <summary>
     /// Whether there is an Apps &amp; features entry to take out. It goes with the binaries:
     /// an entry offering to uninstall an installation whose binaries are gone is an entry
     /// pointing at nothing, and one kept beside a runtime that stays is still true.
+    ///
+    /// Never when an installation follows. The entry would be unregistered and registered
+    /// again inside one run, which is churn on the best path and a hazard on the rest: the
+    /// uninstaller's own copy is what runs a removal launched from Apps &amp; features, so
+    /// deleting it falls to <see cref="UninstallRegistration.RemoveAfterExit"/>, which retries
+    /// for a minute after this process exits — long enough to delete the copy the installation
+    /// half has by then written, leaving an entry pointing at nothing and no way to uninstall.
+    /// The entry is also still true throughout: this run ends with LocalAi installed.
     /// </summary>
-    private bool PlansAppsAndFeaturesRemoval(RemovalSelection selection) =>
+    private bool PlansAppsAndFeaturesRemoval(
+        RemovalSelection selection,
+        bool installationFollows) =>
+        !installationFollows &&
         selection.Includes(RemovalItem.Binaries) &&
         OperatingSystem.IsWindows() &&
         new UninstallRegistration(layout, registrySubKey).Read() is not null;
