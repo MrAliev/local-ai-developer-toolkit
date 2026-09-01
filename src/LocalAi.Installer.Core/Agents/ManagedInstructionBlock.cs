@@ -133,37 +133,44 @@ public static class ManagedInstructionBlock
 
         Then offer the ways forward rather than picking one: diagnose or restart the MCP
         server, repair the index the way `Finding code` describes below, or continue without
-        local models this once. With the server down, `localai semantic definition`,
-        `references`, `implementations` and `relationships` still answer: they read the
-        published index by position and need no model at all. Searching by meaning does need
-        one — the query has to be embedded — so it has no command-line form, and a broken
-        index is repaired rather than worked around.
+        local models this once. A dead MCP server is not the end of local search: the same
+        installation carries a command line for it, and it reaches the same broker.
+
+        ```
+        localai-launcher.exe run codesearch search --query "<what you are looking for>"
+        ```
+
+        `localai semantic definition`, `references`, `implementations` and `relationships`
+        answer too, and those need no model at all — they read the published index by
+        position.
 
         ### Transport
 
-        Use only the shared LocalAi FIFO broker for local-model work. Never access Ollama
+        Use only the shared LocalAi broker for local-model work. Never access Ollama
         directly — no `localhost:11434`, no `ollama` binary from a launcher. CodeSearch,
-        LocalLm, delegation wrappers and Git hooks share that single queue, which is what keeps
-        ordering, deduplication, leases, heartbeat and recovery correct when several clients
-        run at once.
+        LocalLm, the command-line tools and the Git hooks share that single queue, which is
+        what keeps ordering, deduplication, leases, heartbeat and recovery correct when
+        several clients run at once. Work is taken in turn within a priority band.
 
-        Require full-VRAM, zero-offload validation. A model that spills into system memory
-        does not fail; it just becomes several times slower and says nothing about it. Relax
-        that on purpose or not at all: `localai policy set --residency AllowPartialOffload`
-        or `AllowCpu`, and expect degraded answers to be labelled as such.
+        Full-VRAM, zero-offload validation is the default, and under it a model that will
+        not fit is refused rather than run slowly. Relax that on purpose or not at all:
+        `localai policy set --residency AllowPartialOffload` or `AllowCpu`. Nothing marks the
+        answers that come back from a relaxed policy, so whoever relaxes it is the one who has
+        to remember.
 
         ### Finding code
 
         Begin every "where does X live", "what handles Y", "is there already something like
         Z" with `search_code` from the `codesearch` MCP server rather than a text search. It
         matches by meaning and by exact symbol name, and costs a fraction of reading the
-        candidate files. C# is always chunked by symbol, and TypeScript and Python are too
-        wherever the semantic index has definitions for the file, so a hit there names the
-        type, member or definition it came from. Everything else is chunked by a sliding
-        window over lines — other languages, files the semantic index did not cover, and any
-        region no definition covers, such as imports or the gap between two functions — where
-        a hit names the file and its line range instead. `index_status` says whether the index is behind HEAD, and
-        `index_refresh` brings it level again — see below for when that is needed.
+        candidate files. C# is always chunked by symbol; so is any file the semantic index
+        found definitions in, which in practice means TypeScript, JavaScript and Python where
+        their indexers ran. A hit there names the type, member or definition it came from.
+        Everything else is chunked by a sliding window over lines — files no indexer covered,
+        and any region no definition covers, such as imports or the gap between two functions
+        — where a hit names the file and its line range instead. `index_status` says whether
+        the index is behind HEAD, and `index_refresh` brings it level again — see below for
+        when that is needed.
 
         A literal sweep for one exact token, once the target is already known, is still a job
         for grep. Reading a file before editing it is never delegated to anything.
@@ -222,10 +229,11 @@ public static class ManagedInstructionBlock
         than quietly falling back to a text search.
 
         Hooks are installed where Git actually looks. Usually that is `$GIT_DIR/hooks`, but a
-        repository can set `core.hooksPath` — husky, lefthook and simple-git-hooks all do, and
-        husky does it from `npm install`. An existing hook of the same name is never
-        overwritten: it is called first, and a non-zero exit from it stops the chain. If the
-        index lags HEAD for no visible reason, check where Git is looking before anything else:
+        repository can set `core.hooksPath`, and some JavaScript hook managers do — husky
+        among them, which LocalAi knows how to step around. A hook somebody else wrote is
+        never overwritten: it is called first, and a non-zero exit from it stops the chain.
+        Only a dispatcher LocalAi installed earlier is replaced. If the index lags HEAD for no
+        visible reason, check where Git is looking before anything else:
 
         ```
         git rev-parse --git-path hooks
@@ -235,7 +243,7 @@ public static class ManagedInstructionBlock
 
         | Tool | What it is for |
         | --- | --- |
-        | `read_image` | any image on disk: screenshot, scanned page, diagram, photographed table |
+        | `read_image` | an image on disk: png, jpg, jpeg, bmp, gif, webp — anything else is refused |
         | `triage_log` | machine output of any length, supplied as a file or direct text; it probes real VRAM capacity and processes bounded fragments sequentially |
         | `ask_local` | mechanical work over known files: list, summarise, extract TODOs, check a convention |
         | `translate_local` | translating text, with the model named in what it returns |
@@ -256,16 +264,18 @@ public static class ManagedInstructionBlock
 
         ### Reporting
 
-        After every local tool call, say which tool and model ran, roughly how long it took,
-        and the cloud tokens avoided — always as a range, because there is no counter to read.
-        One line:
+        After every local tool call, say which tool and model ran, how long it took by your
+        own reckoning — no tool reports its elapsed time — and the cloud tokens avoided. One
+        line:
 
-        > Locally: `search_code` (Ollama, <model>), 6s. Saved roughly ~25-30K cloud tokens.
+        > Locally: `search_code` (Ollama, <model>), about 6s. Saved roughly ~25-30K cloud tokens.
 
-        LocalLm tools compute their own saving and return it; take the number from there
-        instead of inventing one. For `search_code` estimate it from the files that would
-        otherwise have been read whole. A local call reported vaguely cannot be told from one
-        that never happened.
+        LocalLm tools compute their own saving and return it in a line of their own; take the
+        number from there instead of inventing one, and note that they answer in Russian
+        whatever language you are working in. Below about five hundred tokens they say so
+        plainly rather than giving a band. For `search_code` estimate it from the files that
+        would otherwise have been read whole, as a range. A local call reported vaguely cannot
+        be told from one that never happened.
 
         After CodeSearch work, name `index_unload` so the user can free the cached index at
         once — it leaves the on-disk index alone, and idle indexes are evicted anyway.
@@ -274,10 +284,11 @@ public static class ManagedInstructionBlock
         indexed the moment it starts, and never filter the indexer's own progress away to keep
         a reply tidy: hidden indexing is indistinguishable from a hung machine.
 
-        `index_status` prints the phase and, while embedding, processed and total chunks with
-        an ETA; every other phase prints `not counted in this phase`. The phase name is what
-        says whether work is still running, so report both rather than converting them into a
-        claim they do not make. On a long build check back rather than going quiet.
+        `index_status` prints the phase when there is one, and while embedding it adds
+        processed and total chunks with an ETA; the other phases print `not counted in this
+        phase`. The phase name is what says whether work is still running, so report what is
+        there rather than converting it into a claim it does not make. On a long build check
+        back rather than going quiet.
         """;
 
     private static List<int> AllIndexesOf(string content, string marker)

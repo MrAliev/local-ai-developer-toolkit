@@ -97,8 +97,10 @@ live token counter here. Zero is a correct answer: a job too small to save anyth
 - **A literal sweep for one exact token** once the target is known: that is a job for `rg`.
 - **Judgement.** A local 9–27B model is good at "list" and "summarise"; verify anything a decision
   depends on.
-- **Answering from a partial index.** While a repository is still building, the state is
-  `INITIALIZING`, and that is said plainly rather than replaced by a quiet text search.
+- **Answering from a partial index.** `repo status` answers `CONFIGURED` from the moment a
+  repository is connected, including while its first generation is still being built, so
+  connected is not ready. `index_status` is what says whether it is, and a repository still
+  indexing is described plainly rather than replaced by a quiet text search.
 
 ## Checking an installation
 
