@@ -463,7 +463,10 @@ public sealed class CodexConfigurationAdapter(
     private void AddInstructions(List<AgentConfigurationFilePlan> files, string path)
     {
         var before = ReadExisting(path);
-        var updated = ManagedInstructionBlock.Upsert(AgentConfigurationFileOperations.DecodeUtf8(before));
+        var updated = ManagedInstructionBlock.Upsert(
+            AgentConfigurationFileOperations.DecodeUtf8(before),
+            // Both halves inline: there is nothing on this side to import or invoke.
+            ManagedInstructionBlock.CodexBlock);
         if (updated.Changed)
         {
             files.Add(AgentConfigurationFileOperations.FilePlan(path, before, updated.Content, timeProvider.GetUtcNow()));

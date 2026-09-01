@@ -32,6 +32,10 @@ public sealed class ClaudeConfigurationAdapter(
         if (choice is AgentIntegrationChoice.InstructionsOnly or AgentIntegrationChoice.McpAndInstructions)
         {
             AddInstructions(files, Path.Combine(homeDirectory, ".claude", "CLAUDE.md"));
+            // In the same plan as the core, deliberately: a plan is applied or rolled
+            // back whole, and the state worth preventing is a CLAUDE.md pointing at a
+            // skill whose write failed.
+            AddSkill(files, Path.Combine(homeDirectory, ManagedInstructionBlock.SkillRelativePath));
         }
 
         return new("Claude", files, BuildPreview(files));
@@ -66,6 +70,7 @@ public sealed class ClaudeConfigurationAdapter(
         }
 
         RemoveInstructions(files, Path.Combine(homeDirectory, ".claude", "CLAUDE.md"));
+        RemoveSkill(files, Path.Combine(homeDirectory, ManagedInstructionBlock.SkillRelativePath));
         return new("Claude", files, BuildPreview(files));
     }
 
@@ -508,6 +513,50 @@ public sealed class ClaudeConfigurationAdapter(
         {
             files.Add(AgentConfigurationFileOperations.FilePlan(path, before, updated.Content, timeProvider.GetUtcNow()));
         }
+    }
+
+    /// <summary>
+    /// The reference material, written where Claude discovers a personal skill. The
+    /// directory name is what names the command, so the frontmatter carries only a
+    /// description — which is also the one part of it that stays in context whether or
+    /// not the skill is ever invoked.
+    /// </summary>
+    private void AddSkill(List<AgentConfigurationFilePlan> files, string path)
+    {
+        var before = ReadExisting(path);
+        var after = ManagedInstructionBlock.SkillFile();
+        if (!before.SequenceEqual(Encoding.UTF8.GetBytes(after)))
+        {
+            files.Add(AgentConfigurationFileOperations.FilePlan(
+                path,
+                before,
+                after,
+                timeProvider.GetUtcNow()));
+        }
+    }
+
+    /// <summary>
+    /// The skill file goes only while it is still the file this installer wrote. Somebody who
+    /// edited it keeps their edit: destroying it would be worse than leaving a file they can be
+    /// told about, and being told is what the retained notice is for.
+    ///
+    /// The comparison is against the current version's text, so a skill written by an older
+    /// LocalAi and never refreshed is retained rather than deleted. That is a real limit, and
+    /// the alternative — a table of every text ever shipped — buys less than it costs.
+    /// </summary>
+    private void RemoveSkill(List<AgentConfigurationFilePlan> files, string path)
+    {
+        var before = ReadExisting(path);
+        if (before.Length == 0 ||
+            !before.SequenceEqual(Encoding.UTF8.GetBytes(ManagedInstructionBlock.SkillFile())))
+        {
+            return;
+        }
+
+        files.Add(AgentConfigurationFileOperations.DeletePlan(
+            path,
+            before,
+            timeProvider.GetUtcNow()));
     }
 
     private void RemoveInstructions(List<AgentConfigurationFilePlan> files, string path)

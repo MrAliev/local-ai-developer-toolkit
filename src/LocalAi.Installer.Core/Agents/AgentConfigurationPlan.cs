@@ -10,7 +10,11 @@ public sealed record AgentConfigurationFilePlan(
     byte[] AfterBytes,
     string ExpectedSha256,
     string AfterSha256,
-    string BackupPath)
+    string BackupPath,
+    // Set when the file goes rather than changes. Writing no bytes is not the same thing: it
+    // leaves a zero-byte file behind, which is what this model could express before and is
+    // indistinguishable on disk from a file somebody emptied on purpose.
+    bool Deletes = false)
 {
     public string BeforeText => AgentConfigurationFileOperations.DecodeUtf8(BeforeBytes);
     public string AfterText => AgentConfigurationFileOperations.DecodeUtf8(AfterBytes);
@@ -79,6 +83,24 @@ internal static class AgentConfigurationFileOperations
             : text;
     }
 
+    /// <summary>
+    /// A plan that removes a file rather than rewriting it. The after-state is genuinely empty,
+    /// so a rollback restores the file the same way it restores an edit — by hash, from the
+    /// backup the apply moved it into.
+    /// </summary>
+    public static AgentConfigurationFilePlan DeletePlan(
+        string path,
+        byte[] before,
+        DateTimeOffset now) =>
+        new(
+            path,
+            before.ToArray(),
+            [],
+            Sha256(before),
+            Sha256([]),
+            path + "." + now.UtcDateTime.ToString("yyyyMMdd-HHmmss") + ".bak",
+            Deletes: true);
+
     public static AgentConfigurationFilePlan FilePlan(
         string path,
         byte[] before,
@@ -127,6 +149,21 @@ internal static class AgentConfigurationFileOperations
                 if (!string.Equals(Sha256(current), file.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException("Refusing to apply agent configuration because the file changed concurrently.");
+                }
+
+                if (file.Deletes)
+                {
+                    // Through the backup, so the rollback below restores it the same way it
+                    // restores an edit: the file is moved aside rather than unlinked.
+                    if (File.Exists(file.Path))
+                    {
+                        Directory.CreateDirectory(
+                            System.IO.Path.GetDirectoryName(file.BackupPath)!);
+                        File.Move(file.Path, file.BackupPath, overwrite: true);
+                        applied.Add(file);
+                    }
+
+                    continue;
                 }
 
                 Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file.Path)!);

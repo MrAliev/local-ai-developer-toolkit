@@ -10,6 +10,45 @@ public sealed class ClaudeConfigurationAdapterTests : IDisposable
     private readonly string install = @"C:\LocalAi\bin";
     private readonly DateTimeOffset now = new(2026, 7, 31, 10, 11, 12, TimeSpan.Zero);
 
+    /// <summary>
+    /// The instructions are two files now: a core that has to be in context on every session,
+    /// and a skill Claude loads when it needs the reference. They go into the SAME plan on
+    /// purpose — a plan is applied or rolled back whole, and the one state worth preventing is
+    /// a CLAUDE.md pointing at a skill whose write failed.
+    /// </summary>
+    [Fact]
+    public void Instructions_are_planned_as_the_core_and_the_skill_together()
+    {
+        Directory.CreateDirectory(home);
+
+        var plan = Adapter().Preview(AgentIntegrationChoice.InstructionsOnly);
+
+        var core = SinglePreview(Path.Combine(".claude", "CLAUDE.md"), plan);
+        var skill = SinglePreview(
+            Path.Combine(".claude", "skills", "localai", "SKILL.md"),
+            plan);
+        Assert.Contains("LocalAi local models", core.AfterText, StringComparison.Ordinal);
+        Assert.Contains("description:", skill.AfterText, StringComparison.Ordinal);
+        Assert.Contains("core.hooksPath", skill.AfterText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The reference material is what moved, so the core must no longer carry it — otherwise
+    /// the split cost a file and saved nothing.
+    /// </summary>
+    [Fact]
+    public void The_core_no_longer_carries_what_moved_into_the_skill()
+    {
+        Directory.CreateDirectory(home);
+
+        var core = SinglePreview(
+            Path.Combine(".claude", "CLAUDE.md"),
+            Adapter().Preview(AgentIntegrationChoice.InstructionsOnly)).AfterText;
+
+        Assert.DoesNotContain("core.hooksPath", core, StringComparison.Ordinal);
+        Assert.DoesNotContain("localai hooks install --root", core, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Preview_for_supported_json_preserves_unrelated_values_and_mutates_only_managed_servers()
     {

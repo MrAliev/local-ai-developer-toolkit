@@ -244,7 +244,7 @@ internal sealed class RemovalFixture : IDisposable
             "default_tools_approval_mode = \"prompt\"\n");
         WriteFile(
             Path.Combine(Home, ".codex", "AGENTS.md"),
-            CodexInstructionsPreamble + ManagedInstructionBlock.Block + "\n");
+            CodexInstructionsPreamble + ManagedInstructionBlock.CodexBlock + "\n");
     }
 
     private void WriteManifest(
