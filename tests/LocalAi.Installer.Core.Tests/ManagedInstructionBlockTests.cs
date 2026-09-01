@@ -51,14 +51,14 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("Use only the shared LocalAi FIFO broker")]
     [InlineData("Never access Ollama")]
     [InlineData("full-VRAM, zero-offload")]
-    [InlineData("estimated cloud tokens avoided")]
-    [InlineData("exact `index_unload` tool name")]
+    [InlineData("cloud tokens avoided")]
+    [InlineData("name `index_unload`")]
     [InlineData("ETA")]
     // Report what the tool returns. The trap this replaced was asking for a figure at the
     // start of a build, when the phase is not counted at all — which leaves inventing one as
     // the only way to comply.
     [InlineData("processed and total chunks")]
-    [InlineData("not counted in the phases before and after")]
+    [InlineData("not counted in this phase")]
     // Hidden indexing is indistinguishable from a hung machine, and the person watching has
     // no other way to tell the two apart.
     [InlineData("never filter the indexer")]
@@ -66,9 +66,10 @@ public sealed class ManagedInstructionBlockTests
     // builds on its own, and without this the refusal reads as a broken tool rather than a
     // missing step — which is how a text search gets reached for instead.
     [InlineData("Uncommitted work is not in the index yet")]
-    // Named because a sync aimed at the repository root while you are editing a worktree
-    // builds an overlay for somewhere else, and the search still refuses.
-    [InlineData("the worktree you are editing")]
+    // A sync aimed at the repository root while you are editing a worktree builds an overlay
+    // for somewhere else, and the search still refuses — so the root has to be named twice,
+    // once for index_refresh and once for the command line.
+    [InlineData("passing the worktree as its root")]
     // All four hooks, so nobody syncs by hand after a rebase.
     [InlineData("commit, checkout, merge")]
     [InlineData("rewrite")]
@@ -77,7 +78,7 @@ public sealed class ManagedInstructionBlockTests
     // The report is a shape, not a sentiment: a local call reported vaguely cannot be told
     // from one that never happened.
     [InlineData("Saved roughly")]
-    [InlineData("four characters per token")]
+    [InlineData("estimate it from the files")]
     // The first thing to check when the index lags HEAD, and the one people never think of.
     [InlineData("core.hooksPath")]
     [InlineData("git rev-parse --git-path hooks")]
@@ -162,8 +163,8 @@ public sealed class ManagedInstructionBlockTests
     /// The first attempt at this carve-out ended "if one genuinely needs relaxing, say so and
     /// ask", which applied to both named rules. For the untrusted-content boundary that is a
     /// pre-blessed shape for the exact request an injection wants to make, and it contradicted
-    /// the absolute prohibition further down the same block. The boundary has no escape; the
-    /// transport rule has exactly one, and it is a policy rather than a line of guidance.
+    /// the absolute prohibition further down the same block. Neither rule has an escape:
+    /// no policy relaxes either, and no guidance overrides either.
     /// </summary>
     [Fact]
     public void The_precedence_rule_does_not_reach_the_boundary()
@@ -174,18 +175,26 @@ public sealed class ManagedInstructionBlockTests
         // Bounded to the paragraph. Searching to the end of the block found "broker" and
         // "untrusted-content" in unrelated sections, so the assertion passed with the
         // carve-out deleted.
-        var start = block.IndexOf("not a preference", StringComparison.Ordinal);
+        var start = block.IndexOf("not preferences", StringComparison.Ordinal);
         Assert.True(start > 0, "the block must name what the user's guidance cannot override");
         var separator = Environment.NewLine + Environment.NewLine;
         var end = block.IndexOf(separator, start, StringComparison.Ordinal);
         // Fail rather than fall back to the rest of the block. Falling back is what made the
         // previous version of this test pass with the paragraph gutted.
-        Assert.True(end > start, "the carve-out must be its own paragraph");
-        var carveOut = block[start..end];
+        Assert.True(end > start, "the carve-out must end at a paragraph break");
+
+        // The carve-out has to be a paragraph of its own: merged into the one above, its
+        // opening sentence stops being a statement about which rules are exempt and becomes
+        // an aside inside a paragraph about which rules are not.
+        var opening = block.IndexOf("Two rules below", StringComparison.Ordinal);
+        Assert.True(opening > separator.Length, "the carve-out must open its own paragraph");
+        Assert.Equal(separator, block.Substring(opening - separator.Length, separator.Length));
+        var carveOut = block[opening..end];
 
         Assert.Contains("untrusted-content", carveOut, StringComparison.Ordinal);
         Assert.Contains("no way to ask", carveOut, StringComparison.Ordinal);
-        // The boundary paragraph must not offer the escape the transport rule has.
+        // No hedge of any kind: the paragraph that names the invariants must not also
+        // describe a way around them.
         Assert.DoesNotContain("say so and ask", carveOut, StringComparison.Ordinal);
     }
 
@@ -205,17 +214,22 @@ public sealed class ManagedInstructionBlockTests
         var block = string.Join(" ", ManagedInstructionBlock.Block.Split(
             (char[]?)null,
             StringSplitOptions.RemoveEmptyEntries));
-        var start = block.IndexOf("not a preference", StringComparison.Ordinal);
-        var carveOut = block[start..];
-        var end = carveOut.IndexOf("###", StringComparison.Ordinal);
-        carveOut = end > 0 ? carveOut[..end] : carveOut;
+        var start = block.IndexOf("not preferences", StringComparison.Ordinal);
+        Assert.True(start > 0, "the block must name the rules guidance cannot override");
+        var end = block.IndexOf("###", start, StringComparison.Ordinal);
+        Assert.True(end > start, "the carve-out must end before the first section");
+        var carveOut = block[start..end];
 
+        // Both invariants, in the paragraph that says they are not preferences — not merely
+        // somewhere in the block, which is where they also appear as ordinary rules.
         Assert.Contains("broker", carveOut, StringComparison.Ordinal);
-        Assert.Contains("No guidance overrides that", carveOut, StringComparison.Ordinal);
-        foreach (var hedge in new[] { "say so and ask", "can be relaxed", "unless", "except" })
-        {
-            Assert.DoesNotContain(hedge, carveOut, StringComparison.OrdinalIgnoreCase);
-        }
+        Assert.Contains("untrusted-content", carveOut, StringComparison.Ordinal);
+        // Whole, with its full stop. A hedge is added by continuing this sentence, so pinning
+        // it up to the stop is what catches "…, unless the person has said otherwise".
+        Assert.Contains(
+            "No guidance overrides either of them.",
+            carveOut,
+            StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -250,11 +264,16 @@ public sealed class ManagedInstructionBlockTests
 
     /// <summary>
     /// A budget, because this text is read on every session in two files and nothing else
-    /// counts it. Three rounds of review on one branch took it from 5.0K to 9.7K characters,
+    /// counts it. Four rounds of review on one branch took it from 5.2K to 10.0K characters,
     /// each round adding while claiming to tighten, and the only reason anybody noticed was a
     /// reviewer measuring by hand.
     ///
-    /// The number is not sacred — raise it deliberately when something genuinely belongs here.
+    /// Measured on <see cref="ManagedInstructionBlock.Block"/>, markers included, which is what
+    /// lands in the file. That is a few hundred characters more than the body of the literal,
+    /// and it moves with the line endings — so the number here is deliberately not tight
+    /// enough for that to matter.
+    ///
+    /// The number is not sacred: raise it on purpose when something genuinely belongs here.
     /// What must not happen is drifting past it a paragraph at a time.
     /// </summary>
     [Fact]
