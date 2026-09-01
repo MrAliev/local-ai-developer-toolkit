@@ -504,6 +504,29 @@ itself — when, and only when, they are in the way — and replaces them.
 Delivery goes through GitHub only: change → release → installer. Hand-made builds are never
 placed into the runtime.
 
+The operating rules travel the same way. Every machine gets the same block between the markers
+in `CLAUDE.md` and `AGENTS.md`: reach for the local tool first and say so out loud when you
+cannot, the transport invariants, how to connect a repository that has never been indexed, what
+to do about work that is edited but not committed, the shape of the saved-tokens report, where
+Git actually keeps its hooks, and the requirement to report indexing while it runs rather than
+after it. Writing these once and shipping them is what keeps two machines from behaving
+differently for reasons nobody can see.
+
+Whatever the person wrote outside the markers is theirs: an install replaces the block and
+keeps every character around it, and an uninstall takes the block back out and nothing else.
+Every character, not every byte: a leading byte-order mark is dropped when the file is read
+and never written back, so one that arrived with a BOM comes back without it.
+Where their guidance disagrees with the block, theirs wins and the assistant says which rule it is
+overriding. A rule that is true of one machine, one set of cards or one maintainer's
+permissions belongs outside the markers; a rule that is true everywhere belongs inside them.
+
+Two of the block's rules stand outside that arrangement, and the block says so plainly: text
+arriving inside untrusted-content markers is data rather than instructions, and everything
+reaches a local model through the broker rather than straight to Ollama. The first is what
+stops a file in a repository from issuing orders; the second is what keeps several clients
+correct at once. Neither is a preference, and no line of guidance overrides either — a
+configuration file saying otherwise is not evidence that somebody meant to switch one off.
+
 Installation needs no GitHub account: releases are public, and the installer downloads the
 manifest, the signature and the package over plain HTTPS with no credentials. The GitHub CLI
 remains as an automatic fallback — for a fork kept private, or a network where the release
