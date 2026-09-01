@@ -260,7 +260,7 @@ public static class CodeSearchTools
         try
         {
             await sessions.OpenOrUpdateAsync(
-                RepoLocator.ResolveWorkingRoot(root),
+                RepoLocator.ResolveWorkingRoot(root).Value,
                 path,
                 languageId,
                 version,
@@ -284,7 +284,7 @@ public static class CodeSearchTools
     {
         try
         {
-            await sessions.CloseAsync(RepoLocator.ResolveWorkingRoot(root), path);
+            await sessions.CloseAsync(RepoLocator.ResolveWorkingRoot(root).Value, path);
             return $"LSP document closed: {path}.";
         }
         catch (Exception exception)
@@ -684,7 +684,7 @@ public static class CodeSearchTools
         string? root = null,
         CancellationToken cancellationToken = default)
     {
-        var resolvedRoot = RepoLocator.ResolveWorkingRoot(root);
+        var resolvedRoot = RepoLocator.ResolveWorkingRoot(root).Value;
         var executable = Path.Combine(AppContext.BaseDirectory, "localai.exe");
         if (!File.Exists(executable))
         {

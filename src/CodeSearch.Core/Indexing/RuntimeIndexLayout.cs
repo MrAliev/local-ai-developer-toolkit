@@ -36,35 +36,34 @@ public static class RuntimeIndexLayout
         string workingRoot,
         string? runtimeRoot = null)
     {
-        workingRoot = RepoLocator.ResolveWorkingRoot(workingRoot);
-        var repositoryRoot = RepoLocator.ResolveRoot(workingRoot);
+        var root = RepoLocator.ResolveWorkingRoot(workingRoot);
+        var repositoryRoot = RepoLocator.ResolveRoot(root.Value);
         var commonDirectory = RepoLocator.GitOutputOrThrow(
-            workingRoot,
+            root.Value,
             "rev-parse --path-format=absolute --git-common-dir",
             "The git common directory");
         var identity = RepositoryIdentity.FromCommonDirectory(commonDirectory);
-        var repositoryRuntimeRoot = Path.Combine(
-            string.IsNullOrWhiteSpace(runtimeRoot) ? DefaultRuntimeRoot : runtimeRoot,
-            "repositories",
-            identity.Id);
+        var repositoryRuntimeRoot = FsPath
+            .From(string.IsNullOrWhiteSpace(runtimeRoot) ? DefaultRuntimeRoot : runtimeRoot)
+            .Combine("repositories", identity.Id);
         var head = RepoLocator.GitOutputOrThrow(
-            workingRoot,
+            root.Value,
             "rev-parse HEAD",
             "Git HEAD");
         var tree = RepoLocator.GitOutputOrThrow(
-            workingRoot,
+            root.Value,
             "rev-parse HEAD^{tree}",
             "The git HEAD tree");
-        var dirtyPaths = GetDirtyPaths(workingRoot);
+        var dirtyPaths = GetDirtyPaths(root.Value);
         var dirtyHash = dirtyPaths.Count == 0
             ? null
-            : DirtyCorpusPolicy.ComputeWorkingContentHash(workingRoot, dirtyPaths);
+            : DirtyCorpusPolicy.ComputeWorkingContentHash(root.Value, dirtyPaths);
 
         return new WorkingIndexIdentity(
-            workingRoot,
-            repositoryRoot,
+            root.Value,
+            repositoryRoot.Value,
             identity.Id,
-            repositoryRuntimeRoot,
+            repositoryRuntimeRoot.Value,
             head,
             tree,
             dirtyHash);
@@ -104,12 +103,12 @@ public static class RuntimeIndexLayout
 
     public static List<string> GetDirtyPaths(string workingRoot)
     {
-        workingRoot = RepoLocator.ResolveWorkingRoot(workingRoot);
+        var root = RepoLocator.ResolveWorkingRoot(workingRoot).Value;
         var changed = RepoLocator.GitOutputBytes(
-            workingRoot,
+            root,
             ["diff", "--name-only", "-z", "HEAD", "--"]);
         var untracked = RepoLocator.GitOutputBytes(
-            workingRoot,
+            root,
             ["ls-files", "--others", "--exclude-standard", "-z"]);
         return ParseNullPaths(changed)
             .Concat(ParseNullPaths(untracked))

@@ -54,7 +54,7 @@ catch (Exception ex)
 
 async Task<int> IndexAsync(Dictionary<string, string> opts)
 {
-    var root = RepoLocator.ResolveRoot(opts.GetValueOrDefault("root"));
+    var root = RepoLocator.ResolveRoot(opts.GetValueOrDefault("root")).Value;
     var indexPath = opts.GetValueOrDefault("index") ?? RepoLocator.IndexPathFor(root);
     var model = opts.GetValueOrDefault("model") ?? DefaultModel;
     var force = opts.ContainsKey("force");
@@ -79,9 +79,9 @@ async Task<int> IndexAsync(Dictionary<string, string> opts)
 
 async Task<int> OverlayAsync(Dictionary<string, string> opts)
 {
-    var workingRoot = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root"));
+    var workingRoot = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root")).Value;
     var basePath = opts.GetValueOrDefault("index")
-        ?? RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(opts.GetValueOrDefault("root")));
+        ?? RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(opts.GetValueOrDefault("root")).Value);
     var overlayPath = opts.GetValueOrDefault("overlay") ?? RepoLocator.OverlayPathFor(workingRoot);
 
     if (!File.Exists(basePath))
@@ -189,7 +189,7 @@ async Task<int> EvaluateAsync(Dictionary<string, string> opts)
     }
 
     var noFloor = opts.ContainsKey("no-floor");
-    var root = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root"));
+    var root = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root")).Value;
     var corpus = SearchEvaluationCorpus.Load(Path.GetFullPath(casesPath));
     SearchEvaluationCorpus.ValidateAgainstSource(corpus, root);
     var service = new SearchService
@@ -290,7 +290,7 @@ int Status(Dictionary<string, string> opts)
 
 int Scan(Dictionary<string, string> opts)
 {
-    var root = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root"));
+    var root = RepoLocator.ResolveWorkingRoot(opts.GetValueOrDefault("root")).Value;
     var files = FileScanner.Enumerate(root);
     Console.WriteLine($"Working root: {root}");
     Console.WriteLine($"Indexable files: {files.Count}");

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using LocalAi.Contracts;
 
 namespace CodeSearch.Core.Indexing;
 
@@ -13,18 +14,18 @@ public static class RepoLocator
     /// The checkout the caller is actually working in - a worktree resolves to ITSELF, not to the
     /// main repository. This is where code is read from and where that branch's overlay lives.
     /// </summary>
-    public static string ResolveWorkingRoot(string? candidate = null)
+    public static FsPath ResolveWorkingRoot(string? candidate = null)
     {
         var start = Normalize(candidate);
 
-        for (var dir = new DirectoryInfo(start); dir is not null; dir = dir.Parent)
+        for (var dir = new DirectoryInfo(start.Value); dir is not null; dir = dir.Parent)
         {
             // A linked worktree has .git as a FILE pointing at the main repo's gitdir; the main
             // checkout has it as a directory. Either one marks a working root.
             if (Directory.Exists(Path.Combine(dir.FullName, ".git")) ||
                 File.Exists(Path.Combine(dir.FullName, ".git")))
             {
-                return dir.FullName.TrimEnd(Path.DirectorySeparatorChar);
+                return FsPath.From(dir.FullName);
             }
         }
 
@@ -36,8 +37,12 @@ public static class RepoLocator
     /// worktree takes the overlay with it, so stale overlays cannot accumulate. Requires
     /// <c>.claude/</c> to be git-ignored, or a multi-megabyte binary lands in someone's commit.
     /// </summary>
+    public static string OverlayPathFor(FsPath workingRoot) =>
+        workingRoot.Combine(".claude", "codesearch", "overlay.cidx").Value;
+
+    /// <summary>For a working root still travelling as text; it is canonicalised on the way in.</summary>
     public static string OverlayPathFor(string workingRoot) =>
-        Path.Combine(workingRoot, ".claude", "codesearch", "overlay.cidx");
+        OverlayPathFor(FsPath.From(workingRoot));
 
     /// <summary>
     /// Resolves the repository root for <paramref name="candidate"/> (or the current directory).
@@ -46,25 +51,25 @@ public static class RepoLocator
     /// repository as a whole, and is what the single shared BASE index is keyed by. Per-branch
     /// differences live in overlays instead of in separate full indexes.
     /// </summary>
-    public static string ResolveRoot(string? candidate = null)
+    public static FsPath ResolveRoot(string? candidate = null)
     {
         var start = Normalize(candidate);
         var fromGit = TryGitCommonRoot(start);
         if (fromGit is not null)
         {
-            return fromGit;
+            return fromGit.Value;
         }
 
-        for (var dir = new DirectoryInfo(start); dir is not null; dir = dir.Parent)
+        for (var dir = new DirectoryInfo(start.Value); dir is not null; dir = dir.Parent)
         {
             if (Directory.Exists(Path.Combine(dir.FullName, ".git")) ||
                 File.Exists(Path.Combine(dir.FullName, ".git")))
             {
-                return dir.FullName.TrimEnd(Path.DirectorySeparatorChar);
+                return FsPath.From(dir.FullName);
             }
         }
 
-        return start.TrimEnd(Path.DirectorySeparatorChar);
+        return start;
     }
 
     /// <summary>
@@ -165,33 +170,30 @@ public static class RepoLocator
         }
     }
 
-    private static string Normalize(string? candidate)
+    private static FsPath Normalize(string? candidate)
     {
-        var start = string.IsNullOrWhiteSpace(candidate)
-            ? Environment.CurrentDirectory
-            : Path.GetFullPath(candidate);
+        var start = FsPath.From(
+            string.IsNullOrWhiteSpace(candidate) ? Environment.CurrentDirectory : candidate);
 
-        if (File.Exists(start))
-        {
-            start = Path.GetDirectoryName(start)!;
-        }
-
-        return start.TrimEnd(Path.DirectorySeparatorChar);
+        // A file names the directory holding it: every caller here is asking "which checkout is
+        // this in", and a path to a source file is a perfectly ordinary way to ask that.
+        return start.FileExists ? start.Parent ?? start : start;
     }
 
-    private static string? TryGitCommonRoot(string start)
+    private static FsPath? TryGitCommonRoot(FsPath start)
     {
         // --git-common-dir points at the MAIN repo's .git even when run from a linked worktree,
         // which is exactly the redirection we want.
-        var commonDir = RunGit(start, "rev-parse --path-format=absolute --git-common-dir");
+        var commonDir = RunGit(start.Value, "rev-parse --path-format=absolute --git-common-dir");
         if (string.IsNullOrWhiteSpace(commonDir))
         {
             return null;
         }
 
-        var gitDir = new DirectoryInfo(commonDir.Replace('/', Path.DirectorySeparatorChar));
-        var parent = gitDir.Parent;
-        return parent?.FullName.TrimEnd(Path.DirectorySeparatorChar);
+        // Git prints forward slashes here even on Windows. That used to be repaired by hand,
+        // one Replace at a time, in each place that read git output — and the place that forgot
+        // is how a live worktree came to hash to a key matching no directory.
+        return FsPath.From(commonDir).Parent;
     }
 
     /// <summary>
