@@ -360,6 +360,29 @@ public sealed class IndexBuilder(
             ? new Dictionary<string, IndexedFile>(StringComparer.OrdinalIgnoreCase)
             : index.Files.ToDictionary(f => f.RelPath, StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// How many files a build would have to re-read, without doing any of it.
+    ///
+    /// This is the only estimate available before the semantic phase, and the semantic phase is
+    /// the expensive thing to avoid: Roslyn loads the whole solution there. Chunk counts cannot
+    /// be had this early — C# is cut on the definitions that phase produces — so a caller that
+    /// wants to decline large work has to decide in files.
+    ///
+    /// Scanning and hashing is what it costs: seconds on a repository of a few thousand files,
+    /// and no model, no Roslyn, no subprocess.
+    /// </summary>
+    public static int CountChangedFiles(string root, string? againstIndexPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
+        var files = FileScanner.Enumerate(root);
+        var previous = againstIndexPath is not null && File.Exists(againstIndexPath)
+            ? BuildLookup(CodeIndex.Load(againstIndexPath, withVectors: false))
+            : [];
+        var (_, changed) = Partition(root, files, previous, out _);
+        return changed.Count;
+    }
+
     private static (List<string> Reused, List<string> Changed) Partition(
         string root,
         List<string> files,

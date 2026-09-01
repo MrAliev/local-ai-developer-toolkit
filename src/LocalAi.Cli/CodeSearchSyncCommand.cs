@@ -32,7 +32,10 @@ public sealed record CodeSearchSyncResult(
     bool GenerationChanged,
     // Reported rather than counted silently: fewer overlays than worktrees is otherwise
     // indistinguishable from a sync that decided they were all up to date.
-    int WorktreesSkipped = 0);
+    int WorktreesSkipped = 0,
+    // Non-null when the run refused rather than built: the work was over the caller's inline
+    // limit, and the number is the files it would have had to re-read.
+    int? RefusedFiles = null);
 
 public static class CodeSearchSyncCommand
 {
@@ -78,7 +81,8 @@ public static class CodeSearchSyncCommand
         CancellationToken cancellationToken = default,
         bool includeOverlays = true,
         string? runtimeRoot = null,
-        bool requireSemantics = false)
+        bool requireSemantics = false,
+        int? refuseInlineOverFiles = null)
     {
         var requested = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
         // The gate comes before the first write of any shared state — progress included.
@@ -104,6 +108,35 @@ public static class CodeSearchSyncCommand
             null,
             DateTimeOffset.UtcNow);
         progressStore.Save(lastProgress);
+
+        // Before the lease does any work, and long before the semantic phase: this is the only
+        // point where declining is free. Scanning and hashing the tree costs seconds and needs
+        // no model; everything after it — Roslyn loading the solution, the SCIP adapters, the
+        // embedding — is what a bounded caller cannot afford to have started.
+        //
+        // Counted in files because chunk counts do not exist yet: C# is cut on the definitions
+        // the semantic phase produces, so asking for them here would mean paying for it.
+        if (refuseInlineOverFiles is { } fileLimit)
+        {
+            var currentBase = new GenerationStore(requested.RepositoryRuntimeRoot).ReadCurrent();
+            var changedFiles = IndexBuilder.CountChangedFiles(
+                requested.WorkingRoot.Value,
+                currentBase is null
+                    ? null
+                    : new GenerationStore(requested.RepositoryRuntimeRoot)
+                        .IndexPath(currentBase.GenerationId));
+            if (changedFiles > fileLimit)
+            {
+                return new CodeSearchSyncResult(
+                    requested.RepositoryId,
+                    string.Empty,
+                    string.Empty,
+                    0,
+                    false,
+                    0,
+                    changedFiles);
+            }
+        }
 
         void ReportProgress(
             RepositoryIndexProgressPhase phase,

@@ -47,8 +47,11 @@ public static class McpToolNames
     [
         new("search_code", McpToolApproval.Approve),
         new("index_status", McpToolApproval.Approve),
-        // Mutates the index, but bounded by construction: large work is refused inline and
-        // returned as a command instead, so what runs here is a post-commit delta.
+        // Mutates the index, but the size of that work is bounded and the bound is enforced:
+        // the sync it shells out to refuses more chunks than CodeSearchTools'
+        // InlineRefreshChunkLimit before embedding anything and hands back a background
+        // command, so what can run inside a pre-approved call is a post-commit delta (#275).
+        // "Bounded by construction" was the untrue half — it was bounded by description only.
         new("index_refresh", McpToolApproval.Approve),
         new("index_unload", McpToolApproval.Approve),
         new("get_code_chunk", McpToolApproval.Approve),

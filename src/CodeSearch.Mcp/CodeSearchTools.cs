@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
@@ -20,7 +21,15 @@ public static class CodeSearchTools
     /// Above this many chunks, an inline refresh would run for minutes and blow the tool-call
     /// budget. A post-commit incremental refresh is far below it; a cold build is far above.
     /// </summary>
-    private const int InlineRefreshChunkLimit = 4000;
+    /// <summary>
+    /// How much a pre-approved call may take on, counted in files because that is the only
+    /// estimate available before the semantic phase — and the semantic phase, where Roslyn
+    /// loads the whole solution, is the expensive thing a bounded caller must not start.
+    ///
+    /// Two hundred is about a third of this repository and several times any ordinary commit's
+    /// delta, so a post-commit refresh passes and a cold build or a branch switch does not.
+    /// </summary>
+    private const int InlineRefreshFileLimit = 200;
 
     /// <summary>
     /// Only used when a repository has no index yet. Quality-first, and it fits a single 16GB
@@ -345,7 +354,7 @@ public static class CodeSearchTools
             return $"""
                 No index exists for {status.RepositoryRoot}.
                 Build it (runs for minutes on a large repository, so run it in the background):
-                  {IndexCommand(status.RepositoryRoot, DefaultModel)}
+                  {IndexCommand(status.RepositoryRoot)}
                 """;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -508,7 +517,7 @@ public static class CodeSearchTools
                 {progressText}
 
                 Build it with:
-                  {IndexCommand(status.RepositoryRoot, DefaultModel)}
+                  {IndexCommand(status.RepositoryRoot)}
                 """;
         }
 
@@ -675,8 +684,11 @@ public static class CodeSearchTools
     [Description("""
         Incrementally refreshes a repository's index: re-embeds only files whose content changed
         since the last build. Run it after committing, so search stops answering for code that no
-        longer looks like that. Refuses to run inline when the work is large (a cold build) and
-        returns the command to run in the background instead.
+        longer looks like that. The size of the work is bounded and the bound is enforced: a cold
+        build, or a branch switch that changes most of the tree, is refused before anything is
+        embedded, and the reply carries the command to run in the background instead. Relay that
+        command; the refusal is a decision, not a transient failure, so calling again changes
+        nothing.
         """)]
     public static async Task<string> IndexRefresh(
         SearchService service,
@@ -701,6 +713,8 @@ public static class CodeSearchTools
         start.ArgumentList.Add("sync");
         start.ArgumentList.Add("--root");
         start.ArgumentList.Add(resolvedRoot);
+        start.ArgumentList.Add(SyncRefusal.LimitFlag);
+        start.ArgumentList.Add(InlineRefreshFileLimit.ToString(CultureInfo.InvariantCulture));
         var (exitCode, output, error) = await RunProcessToCompletionAsync(
             start,
             cancellationToken);
@@ -709,7 +723,12 @@ public static class CodeSearchTools
             return $"LocalAi sync failed with {exitCode}: {error.Trim()}";
         }
 
-        return output.Trim();
+        return RefusalMessage(
+                resolvedRoot,
+                output,
+                IndexCommand(resolvedRoot),
+                InlineRefreshFileLimit)
+            ?? output.Trim();
     }
 
     /// <summary>
@@ -761,8 +780,57 @@ public static class CodeSearchTools
         }
     }
 
-    private static string IndexCommand(string root, string model) =>
-        $""""{Path.Combine(AppContext.BaseDirectory, "localai.exe")}" sync --root "{root}"""";
+    /// <summary>
+    /// The command to run a sync outside a tool call.
+    ///
+    /// The launcher, not the versioned executable beside this assembly: version directories are
+    /// replaced on every update, so a path printed today stops existing tomorrow. This is the
+    /// same reasoning that makes ClientCommandPlan register clients on the launcher. When the
+    /// launcher is not there — a build running out of its own output directory — the local
+    /// executable is the only honest answer.
+    /// </summary>
+    private static string IndexCommand(string root)
+    {
+        var launcher = Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "launcher",
+            "localai-launcher.exe");
+        return File.Exists(launcher)
+            ? $""""{Path.GetFullPath(launcher)}" run localai sync --root "{root}""""
+            : $""""{Path.Combine(AppContext.BaseDirectory, "localai.exe")}" sync --root "{root}"""";
+    }
+
+    /// <summary>
+    /// Reads a sync's output and, when it declined the work, says so in the terms a caller acts
+    /// on: how much work it was, and the command that does it outside a tool call.
+    ///
+    /// Null when the run did the work, so the ordinary reply passes through untouched.
+    /// </summary>
+    internal static string? RefusalMessage(
+        string root,
+        string syncOutput,
+        string command,
+        int limit)
+    {
+        if (SyncRefusal.Files(syncOutput) is not { } files)
+        {
+            return null;
+        }
+
+        return $"""
+            Repository: {root}
+            Status:     NOT REFRESHED - {files} files to re-read, over the inline limit of {limit}
+            Nothing was read, embedded or written: the refusal happens before the work starts.
+
+            A refresh this size runs for minutes, so it does not belong inside a tool call.
+            Run it in the background instead:
+              {command}
+
+            While it runs, index_status reports the sync phase, the rate in chunks/s and an ETA.
+            """;
+    }
 
     /// <summary>
     /// A duration a person reads rather than parses: tenths under ten seconds, whole seconds
