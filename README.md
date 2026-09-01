@@ -391,6 +391,15 @@ invariants: the shared broker only, never Ollama directly, full-VRAM validation.
 included because transport rules alone describe how a call must travel without saying when
 to make one.
 
+The two clients get different amounts of it. What has to be in context before a decision is
+taken stays in the block for both: the invariants, the routing, the read-only repository
+probe, and what to do when a local tool refuses. The reference material — the launcher
+commands that change the machine, where hooks live, how overlays are built — is a skill for
+Claude, written to `~/.claude/skills/localai/SKILL.md` and loaded when it is invoked rather
+than on every session. Codex has no import mechanism and no skills, so its block carries
+both halves inline. An import would not have helped either client: `CLAUDE.md` imports are
+expanded at launch, so they tidy a file without saving a token.
+
 **Models.** The wizard installs the models the machine can hold and skips the ones already
 present; the broker is asked what is installed rather than a list being assumed, and only
 missing models are pulled. Candidates come from the signed release manifest, never from the

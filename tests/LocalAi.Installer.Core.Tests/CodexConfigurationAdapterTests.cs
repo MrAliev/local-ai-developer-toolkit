@@ -30,6 +30,26 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
         Assert.Equal(choice != AgentIntegrationChoice.NoChange, plan.HasChanges);
     }
 
+    /// <summary>
+    /// Codex has no import mechanism and no skills, so it gets both halves inline — and must
+    /// not be told to invoke something that does not exist on its side.
+    /// </summary>
+    [Fact]
+    public void Codex_gets_the_reference_material_inline_rather_than_a_pointer_to_a_skill()
+    {
+        Directory.CreateDirectory(home);
+
+        var after = SinglePreview(Path.Combine(".codex", "AGENTS.md"),
+            Adapter().Preview(AgentIntegrationChoice.InstructionsOnly)).AfterText;
+        var flat = string.Join(" ", after.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries));
+
+        Assert.Contains("core.hooksPath", flat, StringComparison.Ordinal);
+        Assert.Contains("quote the refusal verbatim", flat, StringComparison.Ordinal);
+        Assert.DoesNotContain("Invoke it before", flat, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Preview_for_new_codex_files_is_exact_and_uses_client_command_plan()
     {
@@ -50,7 +70,10 @@ public sealed class CodexConfigurationAdapterTests : IDisposable
             ToolSections("codesearch", McpToolNames.CodeSearch) + "\n\n" +
             ToolSections("locallm", McpToolNames.LocalLm) + "\n",
             config.AfterText);
-        Assert.Equal(ManagedInstructionBlock.Block + Environment.NewLine, instructions.AfterText);
+        // Codex receives both halves inline, so its text is not the core Claude gets.
+        Assert.Equal(
+            ManagedInstructionBlock.CodexBlock + Environment.NewLine,
+            instructions.AfterText);
     }
 
     /// <summary>
