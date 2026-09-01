@@ -1,3 +1,6 @@
+using System.Text;
+using LocalAi.Contracts;
+using LocalAi.Installer.Core.Releases;
 using LocalAi.Installer.ViewModels;
 
 namespace LocalAi.Installer.Tests;
@@ -55,23 +58,383 @@ public sealed class WizardErrandTests
     }
 
     /// <summary>
-    /// The line is captured, not recomputed on every read.
+    /// The installed half is read once and never again — not on a page turn, not during the
+    /// run, not after it.
     ///
-    /// It is built from the installed version on disk, and a clean reinstall deletes that
-    /// pointer half way through its own run. Rebuilt each time, the rail would flip from
-    /// "0.1.50 → 0.1.51" to "installing 0.1.51" the moment the removal half succeeded —
-    /// erasing, mid-run, the only statement of what was there before.
+    /// It is a statement about what was here before, and an installation rewrites the version
+    /// pointer it comes from, so a second read answers a different question. The first attempt
+    /// at this froze the whole line instead, which fixed the finish page and left the install
+    /// path saying "checking…" forever.
     /// </summary>
-    [Theory]
-    [InlineData(StartChoice.Install)]
-    [InlineData(StartChoice.UpdateOrRepair)]
-    [InlineData(StartChoice.CleanReinstall)]
-    public void The_version_line_is_captured_rather_than_recomputed(StartChoice mode)
+    [Fact]
+    public void The_installed_half_is_read_once()
     {
-        var wizard = new InstallerWizardViewModel(mode);
+        var reads = 0;
+        var wizard = new InstallerWizardViewModel(
+            StartChoice.Install,
+            () =>
+            {
+                reads++;
+                return "0.1.50";
+            });
 
-        Assert.Same(wizard.VersionContext, wizard.VersionContext);
+        var first = wizard.VersionContext;
+        wizard.Diagnose.IsChecking = false;
+        wizard.Diagnose.SetResult(supported: true);
+        wizard.MoveNext();
+        var afterAPageTurn = wizard.VersionContext;
+
+        Assert.StartsWith("0.1.50", first, StringComparison.Ordinal);
+        Assert.StartsWith("0.1.50", afterAPageTurn, StringComparison.Ordinal);
+        Assert.Equal(1, reads);
     }
+
+    /// <summary>
+    /// The other half is not history: it is what this run is putting there, and on an
+    /// installation it is not known when the window opens. Three states, and the difference
+    /// between the first two is the whole point — a check nobody started reads the same as a
+    /// check still running only if the wizard cannot tell them apart.
+    /// </summary>
+    [Fact]
+    public void The_errand_half_says_which_of_the_three_it_is()
+    {
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null);
+
+        Assert.Equal("no release", wizard.VersionContext);
+
+        wizard.Package.BeginResolving();
+        Assert.Equal("checking…", wizard.VersionContext);
+
+        wizard.Package.ReportUnavailable("the feed could not be reached");
+        Assert.Equal("no release", wizard.VersionContext);
+    }
+
+    /// <summary>
+    /// Both halves together, on a machine that already has something. The arrow is what says
+    /// one version is being replaced by another; without a left half there is nothing to
+    /// replace and the line is just the release going in.
+    /// </summary>
+    [Fact]
+    public void The_arrow_appears_only_when_something_is_being_replaced()
+    {
+        Assert.Equal(
+            "no release",
+            new InstallerWizardViewModel(StartChoice.Install, () => null).VersionContext);
+        Assert.Equal(
+            "0.1.50 → no release",
+            new InstallerWizardViewModel(StartChoice.Install, () => "0.1.50").VersionContext);
+    }
+
+    /// <summary>
+    /// Once the run has started the line is stated, not re-read — including after it has
+    /// finished, which is where the first attempt at this let go: the guard was on
+    /// <c>isRunning</c>, and RunAsync clears that in its finally block before the refresh that
+    /// rebuilds the line. So the finish page rebuilt it out of the pointer the run had just
+    /// written, and "0.1.50 → 0.1.51" became "0.1.51 → 0.1.51 (repair)" at exactly the moment
+    /// somebody was reading the outcome.
+    /// </summary>
+    [Fact]
+    public async Task What_the_run_was_about_survives_the_run()
+    {
+        var installed = "0.1.50";
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => installed);
+        wizard.Diagnose.IsChecking = false;
+        wizard.Diagnose.SetResult(true);
+        foreach (var name in new[]
+                 {
+                     "Git", "Ollama", "GitHubCli", "DotNetSdk",
+                     "NodeJs", "ScipTypeScript", "Python", "ScipPython",
+                 })
+        {
+            wizard.Dependencies.SetInstalled(name, true);
+        }
+
+        for (var step = 0; step < 6; step++)
+        {
+            wizard.MoveNext();
+        }
+
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
+        var before = wizard.VersionContext;
+        Assert.StartsWith("0.1.50", before, StringComparison.Ordinal);
+
+        // A dry run: everything is present and no release was chosen, so nothing is installed.
+        // The disk moves under the wizard while it runs, the way a real install moves it by
+        // writing a new version pointer.
+        wizard.SetReviewConfirmed(true);
+        installed = "0.1.51";
+        Assert.True(await wizard.RunAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(InstallerPage.Finish, wizard.CurrentPage);
+        // The run wrote a new pointer; the left half still says what was here before it did.
+        Assert.StartsWith("0.1.50 →", wizard.VersionContext, StringComparison.Ordinal);
+        Assert.Equal(before, wizard.VersionContext);
+    }
+
+    /// <summary>
+    /// A verified release survives a re-check that fails, and the installation goes ahead.
+    ///
+    /// The run re-asks the feed immediately before installing, in case something was published
+    /// while the wizard sat open. An attempt to show "checking…" on the rail during that
+    /// re-check cleared the verified release first — so a transient network fault turned a
+    /// successful install into "no verified release was selected, so nothing was installed",
+    /// advice the reader had already followed.
+    ///
+    /// The first version of this test asserted against the page directly and never ran the
+    /// re-check at all, so restoring the defect left it green. It goes through the run now.
+    /// </summary>
+    [Fact]
+    public async Task A_re_check_that_fails_still_installs_what_was_verified()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.51") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+        await wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("0.1.51", wizard.Package.ResolvedTag);
+
+        // From here the feed is unreachable, exactly as a dropped connection would leave it.
+        feed.Throw = true;
+        var report = new StringBuilder();
+        await wizard.RefreshLatestBeforeInstallAsync(
+            report,
+            TestContext.Current.CancellationToken);
+
+        // What the install step reads two lines later must still be there.
+        Assert.NotNull(wizard.Package.Resolved);
+        Assert.Equal("0.1.51", wizard.Package.ResolvedTag);
+        Assert.False(wizard.Package.IsResolving);
+        Assert.Contains("continuing with 0.1.51", report.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A release published while the wizard sat open is adopted. The whole point of the
+    /// re-check, and nothing covered it — the scripted feed could not tell one requested tag
+    /// from another, so only the failure path was ever exercised.
+    /// </summary>
+    [Fact]
+    public async Task A_release_published_while_the_wizard_waited_is_picked_up()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.51") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+        await wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+
+        feed.NewestTag = "0.1.52";
+        feed.Release = Release("0.1.52");
+        var report = new StringBuilder();
+        await wizard.RefreshLatestBeforeInstallAsync(report, TestContext.Current.CancellationToken);
+
+        Assert.Equal("0.1.52", wizard.Package.ResolvedTag);
+        Assert.Contains("was published after", report.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And when that newer release will not verify, the run keeps the one it had — including
+    /// the tag it will download by. Assigning the tag before the manifest resolved left the
+    /// wizard fetching the newer asset and checking it against the older hash, so the install
+    /// died claiming corruption right after promising to continue with the older release.
+    /// </summary>
+    [Fact]
+    public async Task A_newer_release_that_will_not_verify_leaves_the_old_tag_alone()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.51") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+        await wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+
+        feed.NewestTag = "0.1.52";
+        feed.ThrowOnResolve = true;
+        var report = new StringBuilder();
+        await wizard.RefreshLatestBeforeInstallAsync(report, TestContext.Current.CancellationToken);
+
+        Assert.Equal("0.1.51", wizard.Package.ResolvedTag);
+        Assert.Contains("continuing with 0.1.51", report.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A hung connection is not a cancellation. HttpClient times out on its own and throws
+    /// TaskCanceledException, which is an OperationCanceledException — so filtering by type
+    /// let it escape, abandon the run as "cancelled by the user", and leave the rail saying
+    /// "checking…" for the rest of the session.
+    /// </summary>
+    [Fact]
+    public async Task A_timeout_is_reported_rather_than_taken_for_a_cancellation()
+    {
+        var feed = new ScriptedFeed { TimeOut = true };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+
+        await wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(wizard.Package.IsResolving);
+        Assert.Equal("no release", wizard.VersionContext);
+    }
+
+    /// <summary>
+    /// The release is resolved behind the first page, without anybody pressing "Check
+    /// release" — which is what lets the rail name it at all on an installation.
+    /// </summary>
+    [Fact]
+    public async Task Initialising_resolves_the_release_on_the_install_path()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.51") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+
+        await wizard.InitializeAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, feed.Resolves);
+        Assert.Equal("0.1.51", wizard.VersionContext);
+    }
+
+    /// <summary>
+    /// A resolve overtaken by a newer question must not answer it. The package page is on
+    /// screen during an installation and its tag box updates on every keystroke, so two
+    /// resolves can be in flight; the slower one arriving last would otherwise put a release
+    /// nobody asked for on screen, and install it.
+    /// </summary>
+    [Fact]
+    public async Task A_resolve_that_was_overtaken_does_not_answer()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.44") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+
+        // The first resolve is held mid-flight while the question changes under it.
+        feed.Gate = new TaskCompletionSource();
+        var first = wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+        wizard.Package.ReleaseVersion = "0.1.51";
+        feed.Gate.SetResult();
+        await first;
+
+        Assert.Null(wizard.Package.Resolved);
+        Assert.Equal("0.1.51", wizard.Package.ReleaseVersion);
+        Assert.Equal("no release", wizard.VersionContext);
+    }
+
+    private static string TempLog() => Path.Combine(
+        Path.GetTempPath(),
+        "LocalAi.VersionLine",
+        Guid.NewGuid().ToString("N"));
+
+    /// <summary>A wizard standing on the review page, with everything it needs already met.</summary>
+    private static async Task<InstallerWizardViewModel> Ready(IReleaseFeed feed)
+    {
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+        wizard.Diagnose.IsChecking = false;
+        wizard.Diagnose.SetResult(true);
+        foreach (var name in new[]
+                 {
+                     "Git", "Ollama", "GitHubCli", "DotNetSdk",
+                     "NodeJs", "ScipTypeScript", "Python", "ScipPython",
+                 })
+        {
+            wizard.Dependencies.SetInstalled(name, true);
+        }
+
+        for (var step = 0; step < 6; step++)
+        {
+            wizard.MoveNext();
+        }
+
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
+        await Task.CompletedTask;
+        return wizard;
+    }
+
+    /// <summary>A feed that answers what the test tells it to, and can be held or broken.</summary>
+    private sealed class ScriptedFeed : IReleaseFeed
+    {
+        public ResolvedRelease? Release { get; set; }
+
+        public bool Throw { get; set; }
+
+        /// <summary>A connection that hangs: HttpClient's own timeout, not a cancellation.</summary>
+        public bool TimeOut { get; set; }
+
+        public TaskCompletionSource? Gate { get; set; }
+
+        public int Resolves { get; private set; }
+
+        /// <summary>What "latest" resolves to, when the test wants it to differ.</summary>
+        public string? NewestTag { get; set; }
+
+        /// <summary>Thrown by ResolveAsync only, to model a manifest that will not verify.</summary>
+        public bool ThrowOnResolve { get; set; }
+
+        public async Task<string> ResolveTagAsync(string requestedTag, CancellationToken ct)
+        {
+            if (Gate is { } gate)
+            {
+                await gate.Task;
+            }
+
+            if (TimeOut)
+            {
+                throw new TaskCanceledException("The request was canceled due to a timeout.");
+            }
+
+            return Throw
+                ? throw new ReleaseResolutionException("the feed could not be reached")
+                : NewestTag ?? Release?.Manifest.ReleaseVersion ?? "0.0.0";
+        }
+
+        public async Task<ResolvedRelease> ResolveAsync(
+            string tag,
+            string workingDirectory,
+            CancellationToken ct)
+        {
+            Resolves++;
+            await Task.CompletedTask;
+            return Throw || ThrowOnResolve
+                ? throw new ReleaseResolutionException("the feed could not be reached")
+                : Release ?? throw new ReleaseResolutionException("no release");
+        }
+
+        /// <summary>
+        /// Never reached by these tests: the run stops before downloading, because nothing
+        /// here supplies a package to verify.
+        /// </summary>
+        public Task<string> DownloadPackageAsync(
+            string tag,
+            string workingDirectory,
+            IProgress<long>? bytesDownloaded,
+            CancellationToken ct) =>
+            throw new NotSupportedException("these tests never reach the download");
+    }
+
+    /// <summary>Built the way PackagePageViewModelTests builds one, so the shapes agree.</summary>
+    private static ResolvedRelease Release(string version) =>
+        new(
+            new ReleaseManifest(
+                schemaVersion: 1,
+                releaseVersion: version,
+                versionDirectory: "0123456789ab",
+                modelCatalogVersion: "1",
+                protocolVersion: 1,
+                buildCompatibilityId: "test",
+                packageUri: new Uri($"https://example.invalid/{version}/localai-package.zip"),
+                packageSize: 1024,
+                packageSha256: new string('a', 64),
+                requiresAuthenticode: false,
+                models: []),
+            [1],
+            [2]);
 
     /// <summary>
     /// The consent is worded for the run it consents to. "I have reviewed these settings" was

@@ -33,7 +33,10 @@ public sealed class PackagePageViewModel : ObservableObject
         set
         {
             SetProperty(ref releaseVersion, value);
-            // Editing the tag invalidates whatever was resolved for the previous one.
+            // Editing the tag invalidates whatever was resolved for the previous one, and
+            // abandons any resolve still running for it — otherwise the rail keeps saying a
+            // check is in flight for a question nobody is asking any more.
+            IsResolving = false;
             Resolved = null;
             ResolvedTag = null;
             OnPropertyChanged(nameof(ResolvedTag));
@@ -58,7 +61,9 @@ public sealed class PackagePageViewModel : ObservableObject
         set
         {
             SetProperty(ref sourceFolder, value ?? string.Empty);
-            // Changing where a release comes from invalidates whatever the last one resolved to.
+            // Changing where a release comes from invalidates whatever the last one resolved
+            // to, and abandons any resolve still running for the old source.
+            IsResolving = false;
             Resolved = null;
             ResolvedTag = null;
             OnPropertyChanged(nameof(ResolvedTag));
@@ -173,10 +178,39 @@ public sealed class PackagePageViewModel : ObservableObject
     /// looked, while still appearing to track the newest. "Latest" is a standing request, not a
     /// value to be resolved once and overwritten.
     /// </summary>
+    /// <summary>
+    /// Whether a release is being resolved right now.
+    ///
+    /// "Nobody has asked yet", "asking" and "asked and got nothing" were one state, so the
+    /// step rail could not tell a check in flight from a check that failed — and said
+    /// "checking…" forever on a path where nothing had asked.
+    /// </summary>
+    public bool IsResolving { get; private set; }
+
+    /// <summary>
+    /// Takes the flag down without saying anything else. For a resolve whose answer nobody
+    /// wants any more: the question moved on, so there is nothing to report, but the flag it
+    /// raised still has to come down or the rail keeps claiming a check is running.
+    /// </summary>
+    public void EndResolving() => IsResolving = false;
+
+    /// <summary>Says a resolve has started; every terminal outcome below clears it.</summary>
+    public void BeginResolving()
+    {
+        IsResolving = true;
+        Resolved = null;
+        ResolvedTag = null;
+        OnPropertyChanged(nameof(ResolvedTag));
+        OnPropertyChanged(nameof(WantsLatest));
+        StatusText = "Checking the release…";
+        State = PackageSourceState.NotChecked;
+    }
+
     public void SelectResolvedRelease(ResolvedRelease release, string tag)
     {
         ArgumentNullException.ThrowIfNull(release);
         ArgumentException.ThrowIfNullOrWhiteSpace(tag);
+        IsResolving = false;
         Resolved = release;
         ResolvedTag = tag;
         OnPropertyChanged(nameof(ResolvedTag));
@@ -192,6 +226,7 @@ public sealed class PackagePageViewModel : ObservableObject
 
     public void ReportIncompatible(string reason)
     {
+        IsResolving = false;
         Resolved = null;
         StatusText = reason;
         State = PackageSourceState.Incompatible;
@@ -199,6 +234,7 @@ public sealed class PackagePageViewModel : ObservableObject
 
     public void ReportUnavailable(string reason)
     {
+        IsResolving = false;
         Resolved = null;
         StatusText = reason;
         State = PackageSourceState.Unavailable;
@@ -206,6 +242,7 @@ public sealed class PackagePageViewModel : ObservableObject
 
     public void Reset()
     {
+        IsResolving = false;
         releaseVersion = LatestTag;
         Resolved = null;
         ResolvedTag = null;

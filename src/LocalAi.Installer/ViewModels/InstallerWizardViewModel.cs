@@ -155,8 +155,23 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     private bool? storedUpdateCheck;
 
-    /// <summary>The version line, read from disk once and then stated, not re-read.</summary>
-    private string? heldVersionContext;
+    /// <summary>
+    /// What was installed when this window opened. Held rather than re-read: null is a real
+    /// answer, so the flag beside it is what makes "read once" possible.
+    /// </summary>
+    private string? heldInstalledVersion;
+
+    private bool hasReadInstalledVersion;
+
+    /// <summary>
+    /// Which resolve is the current one. The question alone cannot tell two resolves of the
+    /// same question apart — the automatic one and the "Check release" button ask identically
+    /// — and the older one finishing last would otherwise overwrite the newer answer.
+    /// </summary>
+    private int resolveGeneration;
+
+
+    private readonly Func<string?> readInstalledVersion;
     private readonly AgentIntegrationPageViewModel agents = new();
     private readonly ReviewApplyPageViewModel review = new();
     private readonly FinishPageViewModel finish = new();
@@ -164,6 +179,15 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private readonly IProcessRunner processRunner;
 
     private readonly AnonymousReleaseFeed anonymousFeed = new();
+
+    /// <summary>
+    /// Supplied instead of the real feed by tests. The behaviours that hang off this — that a
+    /// verified release survives a re-check which fails, that a resolve runs behind the first
+    /// page without anybody pressing a button, and that a resolve overtaken by a newer
+    /// question does not answer it — cannot be observed without one, and the first of those
+    /// shipped broken because there was nothing to observe it with.
+    /// </summary>
+    private readonly IReleaseFeed? feedForTests;
     private CancellationTokenSource? runCancellation;
     private InstallerPage currentPage = InstallerPage.Diagnose;
     private bool isRunning;
@@ -184,8 +208,20 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private InstallerRunJournal? interruptedJournal;
     private string? interruptedRunNotice;
 
-    public InstallerWizardViewModel(StartChoice mode = StartChoice.Install)
+    /// <summary>
+    /// <paramref name="readInstalledVersion"/> is how the rail learns which version is on this
+    /// computer. Injectable because the property that matters — that the answer stops changing
+    /// once the run starts — cannot be observed without moving the disk underneath it.
+    /// </summary>
+    public InstallerWizardViewModel(
+        StartChoice mode = StartChoice.Install,
+        Func<string?>? readInstalledVersion = null,
+        IReleaseFeed? releaseFeed = null)
     {
+        feedForTests = releaseFeed;
+        this.readInstalledVersion = readInstalledVersion ?? (() => InstalledVersionReader
+            .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
+            .DisplayName);
         Mode = mode;
         var runner = new SystemProcessRunner();
         processRunner = runner;
@@ -334,43 +370,39 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// the wizard used to ask for it again on a page of its own, two pages after the start
     /// screen had already settled what the run was for.
     /// </summary>
-    public string VersionContext
-    {
-        get
-        {
-            // Captured, not recomputed. This reads the installed version from disk, and a
-            // reinstall deletes that pointer half way through its own run — leaving the line
-            // to flip from "0.1.50 → 0.1.51" to "installing 0.1.51" and erase the only
-            // statement of what was there.
-            heldVersionContext ??= BuildVersionContext();
-            return heldVersionContext;
-        }
-    }
+    /// <summary>
+    /// What this run is doing, on every page. Two halves under different rules: what was on
+    /// this computer before the run, and what the run is putting there.
+    /// </summary>
+    public string VersionContext => BuildVersionContext();
 
     private string BuildVersionContext()
     {
-        var installed = InstalledVersionReader
-            .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
-            .DisplayName;
-        var resolved = package.Resolved?.Manifest.ReleaseVersion;
-        if (installed is null)
+        // The left half is read once and never again. An installation writes the version
+        // pointer, so a later read answers a different question than the one this half asks —
+        // which is how the finish page turned "0.1.50 → 0.1.51" into "0.1.51 → 0.1.51
+        // (repair)" at the moment somebody was reading the outcome.
+        if (!hasReadInstalledVersion)
         {
-            return resolved is null ? "installing" : "installing " + resolved;
+            heldInstalledVersion = readInstalledVersion();
+            hasReadInstalledVersion = true;
         }
 
-        if (resolved is null)
+        // The right half is not history. It is the answer to what this run is doing, and on
+        // an installation it is not known when the window opens: the release resolves behind
+        // the first page, and a request left at "latest" is checked once more immediately
+        // before installing. So it moves until the run settles it.
+        var resolved = package.Resolved?.Manifest.ReleaseVersion
+            ?? (package.IsResolving ? "checking…" : "no release");
+
+        if (heldInstalledVersion is null)
         {
-            return installed + " → checking…";
+            return resolved;
         }
 
-        if (Mode == StartChoice.CleanReinstall)
-        {
-            return installed + " → " + resolved + " (reinstall)";
-        }
-
-        return string.Equals(installed, resolved, StringComparison.OrdinalIgnoreCase)
-            ? installed + " → " + resolved + " (repair)"
-            : installed + " → " + resolved;
+        return string.Equals(heldInstalledVersion, resolved, StringComparison.OrdinalIgnoreCase)
+            ? heldInstalledVersion + " → " + resolved + " (repair)"
+            : heldInstalledVersion + " → " + resolved;
     }
 
     public string StepTitle => CurrentPage switch
@@ -516,13 +548,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
         LoadInterruptedRunJournal();
         SeedSettingsFromInstallation();
         await RefreshEnvironmentDiagnosticsAsync(cancellationToken);
-        if (AreSettingsFolded)
-        {
-            // The errand settled which release this is, so resolving it is work rather than a
-            // question. It happens here, behind the check already running, instead of behind a
-            // "Check release" button on a page an update no longer shows.
-            await ResolvePackageAsync(cancellationToken);
-        }
+
+        // Behind the check already running, on every errand. A page whose one job is to name
+        // the release should open with the answer rather than with a button; and on the
+        // install path the run made this same call anyway, too late for the rail to say so.
+        await ResolvePackageAsync(cancellationToken);
 
         hasInitialized = true;
     }
@@ -1591,11 +1621,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(StepTitle));
         OnPropertyChanged(nameof(StepDescription));
         OnPropertyChanged(nameof(StepStatus));
-        if (!isRunning)
-        {
-            heldVersionContext = BuildVersionContext();
-        }
-
         OnPropertyChanged(nameof(VersionContext));
         OnPropertyChanged(nameof(AreSettingsFolded));
         OnPropertyChanged(nameof(IsReleaseFolded));
@@ -1803,13 +1828,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// something other than what the operator pointed at.
     /// </remarks>
     private IReleaseFeed CreateFeed() =>
-        string.IsNullOrWhiteSpace(package.SourceFolder)
+        feedForTests
+        ?? (string.IsNullOrWhiteSpace(package.SourceFolder)
             ? new FallbackReleaseFeed(
                 anonymousFeed,
                 GitHubCliPath is null
                     ? null
                     : new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath))
-            : new DirectoryReleaseFeed(package.SourceFolder);
+            : new DirectoryReleaseFeed(package.SourceFolder));
 
     private static DependencyDefinition? ResolveDependencyDefinition(string dependencyId) =>
         dependencyId switch
@@ -1844,7 +1870,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     public async Task ResolvePackageAsync(CancellationToken cancellationToken = default)
     {
-        package.ReportUnavailable("Checking the release...");
+        // The question this resolve is answering, captured whole. The package page is
+        // visible on an installation and its tag box updates on every keystroke, so the
+        // question can change while a resolve is in flight — by another resolve starting, or
+        // simply by the tag or the folder being edited. Comparing the question itself covers
+        // both; a counter only covered the first.
+        var asked = (package.ReleaseVersion, package.SourceFolder);
+        var mine = ++resolveGeneration;
+        package.BeginResolving();
         RefreshAll();
         try
         {
@@ -1852,18 +1885,46 @@ public sealed class InstallerWizardViewModel : ObservableObject
             package.InstalledVersionDirectory = InstalledVersionDirectory();
             // "latest" is not a tag GitHub knows; resolve it to the newest published one so
             // the field can keep its convenient default.
-            resolvedTag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
-            package.SelectResolvedRelease(
-                await feed.ResolveAsync(resolvedTag, WorkingDirectory, cancellationToken),
-                resolvedTag);
+            var tag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
+            var release = await feed.ResolveAsync(tag, WorkingDirectory, cancellationToken);
+            if (mine != resolveGeneration ||
+                asked != (package.ReleaseVersion, package.SourceFolder))
+            {
+                // The question changed while this was in flight — the person typed a
+                // different tag, or chose a folder. Answering the old one here would put a
+                // release on screen that nobody asked for and install it.
+                return;
+            }
+
+            resolvedTag = tag;
+            package.SelectResolvedRelease(release, tag);
         }
-        catch (ReleaseResolutionException exception)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            package.ReportUnavailable(exception.Message);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            package.ReportUnavailable($"The release could not be checked: {exception.Message}");
+            // The token, not the exception type: a black-holed connection times out inside
+            // HttpClient and arrives as TaskCanceledException, which is an
+            // OperationCanceledException and is not a cancellation at all. Filtering by type
+            // let it escape as "cancelled by the user", abandoning the run and leaving the
+            // rail saying "checking…" for the rest of the session.
+            //
+            // Reported even when the question has moved on: a stale answer must be silent,
+            // but a stale failure that escapes becomes an unexpected-error banner, which is
+            // louder than the fresh one it is not.
+            var stale = mine != resolveGeneration ||
+                asked != (package.ReleaseVersion, package.SourceFolder);
+            if (!stale)
+            {
+                package.ReportUnavailable(
+                    exception is ReleaseResolutionException
+                        ? exception.Message
+                        : $"The release could not be checked: {exception.Message}");
+            }
+            else
+            {
+                // Nothing to say about a question nobody is asking, but the flag it set has
+                // to come down or the rail keeps claiming a check is running.
+                package.EndResolving();
+            }
         }
 
         RefreshAll();
@@ -1898,7 +1959,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// says "latest", is the one outcome that word rules out. A specific tag is left alone: it
     /// was asked for by name.
     /// </summary>
-    private async Task RefreshLatestBeforeInstallAsync(
+    /// <summary>
+    /// Internal rather than private so a test can drive it: reaching it through RunAsync means
+    /// enabling the real dependency installation, and the behaviour it holds — that a verified
+    /// release survives a re-check the feed refuses — shipped broken for want of a test.
+    /// </summary>
+    internal async Task RefreshLatestBeforeInstallAsync(
         StringBuilder report,
         CancellationToken cancellationToken)
     {
@@ -1907,6 +1973,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return;
         }
 
+        // Deliberately not BeginResolving(): that clears the verified release, and this
+        // method's whole contract is that a feed which cannot be reached right now is a
+        // reason to install what was already checked rather than to abandon the run. Nobody
+        // is looking at the package page during a run, so there is nothing here to say
+        // "checking…" to — and the rail is better off naming the version being installed.
         try
         {
             var feed = CreateFeed();
@@ -1922,10 +1993,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 report,
                 $"LocalAi package: {newest} was published after this release was checked; " +
                 "resolving it instead.");
+            // Resolved first, then recorded: assigning the tag before this await left the
+            // wizard pointing at a release whose manifest had failed to verify, so the run
+            // downloaded that asset and checked it against the previous manifest's hash.
+            var release = await feed.ResolveAsync(newest, WorkingDirectory, cancellationToken);
             resolvedTag = newest;
-            package.SelectResolvedRelease(
-                await feed.ResolveAsync(newest, WorkingDirectory, cancellationToken),
-                newest);
+            package.SelectResolvedRelease(release, newest);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -1997,6 +2070,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         CancellationToken cancellationToken)
     {
         await RefreshLatestBeforeInstallAsync(report, cancellationToken);
+        // The version becomes known here on the install path, and the rail says what the run
+        // is doing — so it has to reach the progress page rather than waiting for the finish.
+        RefreshAll();
         if (package.Resolved is not { } resolved)
         {
             // Not a skip: installing the package is the entire point of this wizard. Returning

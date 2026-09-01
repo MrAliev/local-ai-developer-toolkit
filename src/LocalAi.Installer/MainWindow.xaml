@@ -70,7 +70,7 @@
                 <TextBlock Text="LocalAi" FontSize="15" FontWeight="Bold" />
                 <!-- The one place a version is a question. Every other page states it. -->
                 <TextBlock Text="{Binding VersionContext}" FontFamily="Consolas" FontSize="12"
-                           Foreground="#5A5A5A" Margin="0,2,0,16" />
+                           Foreground="#5A5A5A" Margin="0,2,0,16" TextWrapping="Wrap" />
                 <ItemsControl ItemsSource="{Binding StepList}"
                               ItemTemplate="{StaticResource StepTemplate}" />
             </StackPanel>
