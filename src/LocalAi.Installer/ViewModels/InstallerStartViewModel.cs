@@ -107,18 +107,6 @@ public sealed class InstallerStartViewModel : ObservableObject
     };
 
     /// <summary>
-    /// Said only in Russian, and only until the wizard is translated too. Somebody who picks
-    /// Русский has just been told the installer speaks Russian; finding out on the next window
-    /// that it does not — with no way back, because this window closes itself — reads as a
-    /// broken product. Deleting this line is part of finishing the translation.
-    /// </summary>
-    public string TranslationNotice => InstallerCulture.Pick(
-        string.Empty,
-        "Следующие окна пока на английском: перевод до них ещё не дошёл.");
-
-    public bool HasTranslationNotice => TranslationNotice.Length > 0;
-
-    /// <summary>
     /// Takes effect here, on this screen, rather than from the next window: the alternative is
     /// an installer whose first act after being told which language you read is to keep using
     /// the other one.
@@ -135,8 +123,6 @@ public sealed class InstallerStartViewModel : ObservableObject
 
         OnPropertyChanged(nameof(Headline));
         OnPropertyChanged(nameof(Detail));
-        OnPropertyChanged(nameof(TranslationNotice));
-        OnPropertyChanged(nameof(HasTranslationNotice));
         OnPropertyChanged(nameof(IsEnglish));
         OnPropertyChanged(nameof(IsRussian));
         OnPropertyChanged(nameof(ChooseText));

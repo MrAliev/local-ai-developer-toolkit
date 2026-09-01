@@ -171,14 +171,16 @@ public sealed class UninstallWizardViewModelTests : IDisposable
         Assert.False(missing.CanChoose);
         Assert.False(missing.IsSelected);
         Assert.Contains("skipped", missing.StateText, StringComparison.Ordinal);
+        // Counted after the label rather than through a "(s)" plural, which no translation
+        // survives and which read as "1 thing(s)" in English too.
         Assert.Contains(
-            "2 hook(s) installed",
+            "hooks installed: 2",
             wizard.Repositories.Single(repository => repository.RepositoryId == "plain").StateText,
             StringComparison.Ordinal);
         // Found where core.hooksPath sends the search rather than in $GIT_DIR/hooks: a wizard
         // that looked only in the default place would report this repository as clean.
         var husky = wizard.Repositories.Single(repository => repository.RepositoryId == "husky");
-        Assert.Contains("1 hook(s) installed", husky.StateText, StringComparison.Ordinal);
+        Assert.Contains("hooks installed: 1", husky.StateText, StringComparison.Ordinal);
         Assert.True(husky.IsSelected);
     }
 

@@ -66,24 +66,25 @@ public sealed class StartScreenSpeaksRussianTests : IDisposable
     }
 
     /// <summary>
-    /// The wizard that follows is still English. Saying so on the screen where the choice is
-    /// made is honest; letting somebody discover it on the next window, from which there is no
-    /// way back, is not.
+    /// The screen used to warn that the wizard behind it was still English. It is not, so the
+    /// line is gone — an installer announcing that it now works is noise on the one screen that
+    /// has to be readable at a glance.
     /// </summary>
     [Fact]
-    public void The_russian_screen_admits_the_wizard_is_not_translated_yet()
+    public void The_screen_no_longer_warns_about_an_untranslated_wizard()
     {
         InstallerCulture.Current = InstallerLanguage.Russian;
 
-        Assert.Contains("на английском", Start("0.1.51").TranslationNotice, StringComparison.Ordinal);
-    }
+        var wizard = new InstallerWizardViewModel();
 
-    [Fact]
-    public void The_english_screen_says_nothing_of_the_kind()
-    {
-        InstallerCulture.Current = InstallerLanguage.English;
-
-        Assert.Empty(Start("0.1.51").TranslationNotice);
+        Assert.Equal("Проверка системы", wizard.StepList[0].Title);
+        Assert.DoesNotContain(
+            "на английском",
+            string.Join(" ", typeof(InstallerStartViewModel)
+                .GetProperties()
+                .Where(property => property.PropertyType == typeof(string))
+                .Select(property => property.GetValue(Start("0.1.51")) as string ?? string.Empty)),
+            StringComparison.Ordinal);
     }
 
     /// <summary>

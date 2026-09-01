@@ -60,12 +60,6 @@
             <StackPanel Grid.Column="0">
                 <TextBlock Text="{Binding Headline}" TextWrapping="Wrap" Style="{StaticResource PageTitle}" />
                 <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Style="{StaticResource Muted}" Margin="0,6,0,0" />
-                <!-- Only while the wizard behind this screen is still English. Saying it here
-                     is honest; letting somebody find out on the next window, which cannot be
-                     navigated back from, is not. -->
-                <TextBlock Text="{Binding TranslationNotice}" TextWrapping="Wrap"
-                           Foreground="#8A5300" Margin="0,6,0,0"
-                           Visibility="{Binding HasTranslationNotice, Converter={StaticResource BoolToVisibility}}" />
             </StackPanel>
             <!-- Autonyms, never translated and never a flag: a flag is a country, and a Russian
                  speaker outside Russia is not served by one. The active language is plain rather

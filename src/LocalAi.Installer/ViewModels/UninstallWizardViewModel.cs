@@ -5,6 +5,7 @@ using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Activation;
 using LocalAi.Installer.Core.Removal;
 using LocalAi.Installer.Core.Transactions;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -22,12 +23,16 @@ namespace LocalAi.Installer.ViewModels;
 /// </summary>
 public sealed class UninstallWizardViewModel : ObservableObject
 {
-    private static readonly IReadOnlyList<(UninstallPage Page, string Title)> Steps =
+    /// <summary>
+    /// A method rather than a static field: a field reads its strings once per process, so a
+    /// language chosen after the first read would leave the rail in the other one.
+    /// </summary>
+    private static IReadOnlyList<(UninstallPage Page, string Title)> Steps =>
     [
-        (UninstallPage.Choose, "What to remove"),
-        (UninstallPage.Confirm, "Confirm"),
-        (UninstallPage.Progress, "Remove"),
-        (UninstallPage.Finish, "Finished"),
+        (UninstallPage.Choose, InstallerCulture.Pick("What to remove", "Что удалить")),
+        (UninstallPage.Confirm, InstallerCulture.Pick("Confirm", "Подтверждение")),
+        (UninstallPage.Progress, InstallerCulture.Pick("Remove", "Удаление")),
+        (UninstallPage.Finish, InstallerCulture.Pick("Finished", "Готово")),
     ];
 
     private readonly InstallationLayout layout;
@@ -258,35 +263,55 @@ public sealed class UninstallWizardViewModel : ObservableObject
 
     public bool IsFinishPage => CurrentPage == UninstallPage.Finish;
 
-    public string StepStatus => $"Step {StepIndex(CurrentPage) + 1} of {Steps.Count}";
+    public string StepStatus => string.Format(
+        InstallerCulture.Pick("Step {0} of {1}", "Шаг {0} из {1}"),
+        StepIndex(CurrentPage) + 1,
+        Steps.Count);
 
     public string StepTitle => CurrentPage switch
     {
-        UninstallPage.Choose => "What to remove",
-        UninstallPage.Confirm => "Ready to remove",
-        UninstallPage.Progress => "Removing",
-        _ => hasRunError ? "Removal not completed" : "Removal complete",
+        UninstallPage.Choose => InstallerCulture.Pick("What to remove", "Что удалить"),
+        UninstallPage.Confirm => InstallerCulture.Pick("Ready to remove", "Готово к удалению"),
+        UninstallPage.Progress => InstallerCulture.Pick("Removing", "Удаление"),
+        _ => hasRunError
+            ? InstallerCulture.Pick("Removal not completed", "Удаление не завершено")
+            : InstallerCulture.Pick("Removal complete", "Удаление завершено"),
     };
 
     public string StepDescription => CurrentPage switch
     {
-        UninstallPage.Choose =>
+        UninstallPage.Choose => InstallerCulture.Pick(
             "Start from one of the three presets and change any row you like. Nothing is " +
             "removed until you confirm it on the next page.",
-        UninstallPage.Confirm =>
+            "Начните с одного из трёх наборов и меняйте любые строки. " +
+            "Ничего не будет удалено, пока вы не подтвердите это на следующей " +
+            "странице."),
+        UninstallPage.Confirm => InstallerCulture.Pick(
             "Everything this will remove, and everything it will leave alone. To change " +
             "anything click Back; to apply it click Uninstall.",
-        UninstallPage.Progress => "Applying the selected removals.",
+            "Всё, что будет удалено, и всё, что останется. Чтобы что-то " +
+            "изменить, нажмите «Назад»; чтобы применить — «Удалить»."),
+        UninstallPage.Progress => InstallerCulture.Pick(
+            "Applying the selected removals.",
+            "Применяю выбранные удаления."),
         _ => hasRunError
-            ? "Some things could not be removed. The report below says which, and why."
+            ? InstallerCulture.Pick(
+                "Some things could not be removed. The report below says which, and why.",
+                "Часть удалить не удалось. Что именно и почему — в отчёте ниже.")
             : OffersInstallAfterwards
                 // Not "or close: either way". With the hook dispatchers now kept, stopping
                 // here leaves every connected repository failing its hooks until a launcher
                 // is back. Close is still on screen; this line stops calling it equivalent.
-                ? "Everything selected was removed. Continue to install to put LocalAi back: " +
-                    "the indexes and settings you kept are waiting, and the Git hooks in your " +
-                    "repositories will not work again until the launcher is back."
-                : "Everything selected was removed.",
+                ? InstallerCulture.Pick(
+                    "Everything selected was removed. Continue to install to put LocalAi " +
+                    "back: the indexes and settings you kept are waiting, and the Git hooks " +
+                    "in your repositories will not work again until the launcher is back.",
+                    "Всё выбранное удалено. Нажмите «Перейти к установке», чтобы " +
+                    "вернуть LocalAi: сохранённые индексы и настройки на месте, а хуки " +
+                    "Git в ваших репозиториях не заработают, пока launcher не вернётся.")
+                : InstallerCulture.Pick(
+                    "Everything selected was removed.",
+                    "Всё выбранное удалено."),
     };
 
     public bool CanMovePrevious =>
@@ -307,7 +332,9 @@ public sealed class UninstallWizardViewModel : ObservableObject
 
     public bool IsUninstallVisible => CurrentPage == UninstallPage.Confirm;
 
-    public string CancelButtonText => IsFinishPage ? "Close" : "Cancel";
+    public string CancelButtonText => IsFinishPage
+        ? InstallerCulture.Pick("Close", "Закрыть")
+        : InstallerCulture.Pick("Cancel", "Отмена");
 
     public int CurrentPageIndex => StepIndex(CurrentPage);
 
@@ -327,19 +354,24 @@ public sealed class UninstallWizardViewModel : ObservableObject
         {
             // The two must not meet in the middle: one wizard writing the runtime while
             // another removes it leaves a tree neither of them describes.
-            blockingNotice =
+            blockingNotice = InstallerCulture.Pick(
                 "Another LocalAi installer or uninstaller is running on this computer. " +
-                "Finish it first, then start this one again.";
+                "Finish it first, then start this one again.",
+                "На этом компьютере уже работает установщик или деинсталлятор " +
+                "LocalAi. Сначала завершите его, потом запустите этот заново.");
             RefreshAll();
             return;
         }
 
         if (!Directory.Exists(layout.Root))
         {
-            blockingNotice =
-                "There is no LocalAi installation at " + layout.Root + " to remove. " +
-                "Client registrations and Git hooks, if any are left, are listed by the " +
-                "documentation.";
+            blockingNotice = string.Format(
+                InstallerCulture.Pick(
+                    "There is no LocalAi installation at {0} to remove. Client registrations " +
+                    "and Git hooks, if any are left, are listed by the documentation.",
+                    "В {0} нет установки LocalAi, которую можно удалить. Регистрации " +
+                    "клиентов и хуки Git, если что-то осталось, перечислены в документации."),
+                layout.Root);
             RefreshAll();
             return;
         }
@@ -422,7 +454,9 @@ public sealed class UninstallWizardViewModel : ObservableObject
         isComplete = false;
         hasRunError = false;
         CurrentPage = UninstallPage.Progress;
-        SetProgress(0, "Asking LocalAi to stop…");
+        SetProgress(
+            0,
+            InstallerCulture.Pick("Asking LocalAi to stop…", "Прошу LocalAi остановиться…"));
 
         var log = new StringBuilder();
         InstallerRunJournal? journal = null;
@@ -443,7 +477,13 @@ public sealed class UninstallWizardViewModel : ObservableObject
                 : InstallerRunOutcome.Failed);
             summary = BuildSummary(outcome);
             report = BuildReport(plan, outcome, log);
-            SetProgress(100, outcome.Succeeded ? "Completed" : "Finished with problems");
+            SetProgress(
+                100,
+                outcome.Succeeded
+                    ? InstallerCulture.Pick("Completed", "Завершено")
+                    : InstallerCulture.Pick(
+                        "Finished with problems",
+                        "Завершено с проблемами"));
             CurrentPage = UninstallPage.Finish;
             return outcome.Succeeded;
         }
@@ -451,11 +491,13 @@ public sealed class UninstallWizardViewModel : ObservableObject
         {
             journal?.Finish(InstallerRunOutcome.Cancelled);
             hasRunError = true;
-            summary =
+            summary = InstallerCulture.Pick(
                 "Cancelled. Whatever had already been removed stays removed — the report " +
-                "below and the journal say what that was.";
+                "below and the journal say what that was.",
+                "Отменено. Всё, что уже было удалено, удалённым и осталось — " +
+                "что именно, скажут отчёт ниже и журнал.");
             report = log.ToString();
-            SetProgress(progress, "Cancelled");
+            SetProgress(progress, InstallerCulture.Pick("Cancelled", "Отменено"));
             CurrentPage = UninstallPage.Finish;
             return false;
         }
@@ -466,8 +508,8 @@ public sealed class UninstallWizardViewModel : ObservableObject
             journal?.Finish(InstallerRunOutcome.Failed);
             hasRunError = true;
             summary = refusal.Message;
-            report = "Nothing was removed.";
-            SetProgress(100, "Refused");
+            report = InstallerCulture.Pick("Nothing was removed.", "Ничего не удалено.");
+            SetProgress(100, InstallerCulture.Pick("Refused", "Отказано"));
             CurrentPage = UninstallPage.Finish;
             return false;
         }
@@ -475,9 +517,11 @@ public sealed class UninstallWizardViewModel : ObservableObject
         {
             journal?.Finish(InstallerRunOutcome.Failed);
             hasRunError = true;
-            summary = "Removal failed: " + exception.Message;
+            summary = string.Format(
+                InstallerCulture.Pick("Removal failed: {0}", "Удаление не удалось: {0}"),
+                exception.Message);
             report = log.ToString();
-            SetProgress(100, "Failed");
+            SetProgress(100, InstallerCulture.Pick("Failed", "Ошибка"));
             CurrentPage = UninstallPage.Finish;
             return false;
         }
@@ -492,7 +536,12 @@ public sealed class UninstallWizardViewModel : ObservableObject
 
     public void ReportUnexpectedError(Exception exception)
     {
-        unexpectedError = $"Unexpected error: {exception.GetType().Name}: {exception.Message}";
+        unexpectedError = string.Format(
+            InstallerCulture.Pick(
+                "Unexpected error: {0}: {1}",
+                "Непредвиденная ошибка: {0}: {1}"),
+            exception.GetType().Name,
+            exception.Message);
         OnPropertyChanged(nameof(UnexpectedError));
         OnPropertyChanged(nameof(HasUnexpectedError));
     }
@@ -515,15 +564,23 @@ public sealed class UninstallWizardViewModel : ObservableObject
             // Silent the moment one of them is ticked: the override was deliberate, and the
             // preview box below lists what it costs.
             return keepsClaude && keepsCodex && keepsHooks
-                ? "The Claude and Codex registrations and the Git hook dispatchers are left " +
-                    "exactly as they are — the installation that follows this removal " +
-                    "rewrites all three."
+                ? InstallerCulture.Pick(
+                    "The Claude and Codex registrations and the Git hook dispatchers are " +
+                    "left exactly as they are — the installation that follows this removal " +
+                    "rewrites all three.",
+                    "Регистрации Claude и Codex и диспетчеры хуков Git остаются ровно " +
+                    "как есть — установка, которая пойдёт следом, перепишет все три.")
                 : string.Empty;
         }
 
         return keepsClaude && keepsCodex
-            ? "The Claude and Codex registrations are left exactly as they are: this preset " +
-                "disconnects no clients. To remove them as well, go back and tick their rows."
+            ? InstallerCulture.Pick(
+                "The Claude and Codex registrations are left exactly as they are: this " +
+                "preset disconnects no clients. To remove them as well, go back and tick " +
+                "their rows.",
+                "Регистрации Claude и Codex остаются ровно как есть: этот набор не " +
+                "отключает ни одного клиента. Чтобы удалить и их, вернитесь назад " +
+                "и отметьте их строки.")
             : string.Empty;
     }
 
@@ -533,26 +590,43 @@ public sealed class UninstallWizardViewModel : ObservableObject
     {
         if (!outcome.Succeeded)
         {
-            return outcome.Failures.Count + " thing(s) could not be removed; " +
-                outcome.RemovedPaths.Count + " were. Nothing else was touched.";
+            // "1 thing(s)" was never good English either; counting after the label works
+            // in both languages and drops the plural hack.
+            return string.Format(
+                InstallerCulture.Pick(
+                    "Could not be removed: {0}; removed: {1}. Nothing else was touched.",
+                    "Не удалось удалить: {0}; удалено: {1}. Больше ничего не тронуто."),
+                outcome.Failures.Count,
+                outcome.RemovedPaths.Count);
         }
 
         var summary = new StringBuilder();
         summary.Append(outcome.RuntimeRootRemoved
-            ? "LocalAi was removed from this computer."
-            : outcome.RemovedPaths.Count + " path(s) removed from " + layout.Root + ".");
+            ? InstallerCulture.Pick(
+                "LocalAi was removed from this computer.",
+                "LocalAi удалён с этого компьютера.")
+            : string.Format(
+                InstallerCulture.Pick(
+                    "Paths removed from {1}: {0}.",
+                    "Удалено путей из {1}: {0}."),
+                outcome.RemovedPaths.Count,
+                layout.Root));
         if (outcome.RewrittenConfigurations.Count > 0)
         {
-            summary.Append(" Client configurations updated: ")
-                .Append(outcome.RewrittenConfigurations.Count)
-                .Append('.');
+            summary.Append(' ').Append(string.Format(
+                InstallerCulture.Pick(
+                    "Client configurations updated: {0}.",
+                    "Обновлено конфигураций клиентов: {0}."),
+                outcome.RewrittenConfigurations.Count));
         }
 
         if (outcome.RemovedHooks.Count > 0)
         {
-            summary.Append(' ')
-                .Append(outcome.RemovedHooks.Count)
-                .Append(" Git hook dispatcher(s) removed.");
+            summary.Append(' ').Append(string.Format(
+                InstallerCulture.Pick(
+                    "Git hook dispatchers removed: {0}.",
+                    "Удалено диспетчеров хуков Git: {0}."),
+                outcome.RemovedHooks.Count));
         }
 
         return summary.ToString();

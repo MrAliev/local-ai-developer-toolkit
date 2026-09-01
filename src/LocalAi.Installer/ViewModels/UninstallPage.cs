@@ -1,4 +1,5 @@
 using LocalAi.Installer.Core.Removal;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -42,7 +43,9 @@ public sealed class RemovalRow(RemovalItem item) : ObservableObject
     /// </summary>
     public bool NeedsDecision { get; set; }
 
-    public string DecisionText => NeedsDecision ? "your choice" : string.Empty;
+    public string DecisionText => NeedsDecision
+        ? InstallerCulture.Pick("your choice", "на ваш выбор")
+        : string.Empty;
 }
 
 /// <summary>One connected repository, and whether its dispatchers are to be taken out.</summary>
@@ -67,10 +70,14 @@ public sealed class RepositoryRow(
     public bool CanChoose => skipReason is null && dispatcherCount > 0;
 
     public string StateText => skipReason is { Length: > 0 } reason
-        ? "skipped — " + reason
+        ? string.Format(
+            InstallerCulture.Pick("skipped — {0}", "пропущен — {0}"),
+            reason)
         : dispatcherCount == 0
-            ? "no LocalAi hooks found"
-            : dispatcherCount + " hook(s) installed";
+            ? InstallerCulture.Pick("no LocalAi hooks found", "хуков LocalAi не найдено")
+            : string.Format(
+                InstallerCulture.Pick("hooks installed: {0}", "установлено хуков: {0}"),
+                dispatcherCount);
 }
 
 public sealed class UninstallPresetOption(RemovalPreset preset) : ObservableObject

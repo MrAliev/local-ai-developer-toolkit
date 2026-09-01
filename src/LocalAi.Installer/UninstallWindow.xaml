@@ -26,7 +26,8 @@
         </Style>
 
         <Style x:Key="NavButton" TargetType="Button">
-            <Setter Property="Width" Value="96" />
+            <Setter Property="MinWidth" Value="96" />
+            <Setter Property="Padding" Value="12,0" />
             <Setter Property="Height" Value="28" />
             <Setter Property="Margin" Value="6,0,0,0" />
         </Style>
@@ -53,13 +54,15 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="180" />
+            <!-- 200, matching the installation wizard: Russian rail entries run 15-30%
+                 longer, and the window is 760 wide, so the room costs nothing. -->
+            <ColumnDefinition Width="200" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" Background="#F3F3F3" BorderBrush="#DDDDDD" BorderThickness="0,0,1,0">
             <StackPanel Margin="16,20,12,16">
-                <TextBlock Text="Remove LocalAi" FontSize="15" FontWeight="Bold" Margin="0,0,0,16" />
+                <TextBlock Text="{x:Static vm:PageLabels.RemoveLocalAi}" FontSize="15" FontWeight="Bold" Margin="0,0,0,16" />
                 <ItemsControl ItemsSource="{Binding StepList}"
                               ItemTemplate="{StaticResource StepTemplate}" />
             </StackPanel>
@@ -105,7 +108,7 @@
                             </Style>
                         </StackPanel.Style>
 
-                        <TextBlock Text="Start from" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <TextBlock Text="{x:Static vm:PageLabels.StartFrom}" FontWeight="SemiBold" Margin="0,0,0,6" />
                         <ItemsControl ItemsSource="{Binding Presets}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -122,7 +125,7 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <TextBlock Text="What goes" FontWeight="SemiBold" Margin="0,10,0,6" />
+                        <TextBlock Text="{x:Static vm:PageLabels.WhatGoes}" FontWeight="SemiBold" Margin="0,10,0,6" />
                         <ItemsControl ItemsSource="{Binding Rows}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -146,7 +149,7 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <TextBlock Text="Connected repositories" FontWeight="SemiBold" Margin="0,10,0,6" />
+                        <TextBlock Text="{x:Static vm:PageLabels.ConnectedRepositories}" FontWeight="SemiBold" Margin="0,10,0,6" />
                         <ItemsControl ItemsSource="{Binding Repositories}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -206,7 +209,7 @@
                                  VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
                         <CheckBox Margin="0,12,0,0"
                                   IsChecked="{Binding IsConfirmed}"
-                                  Content="I have read what will be removed and want to continue." />
+                                  Content="{x:Static vm:PageLabels.RemovalConsent}" />
                     </StackPanel>
 
                     <!-- Progress -->
@@ -240,13 +243,13 @@
                         <TextBox Text="{Binding Summary, Mode=OneWay}"
                                  IsReadOnly="True" TextWrapping="Wrap" Height="90"
                                  VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
-                        <TextBlock Text="Report" Margin="0,12,0,4" FontWeight="SemiBold" />
+                        <TextBlock Text="{x:Static vm:PageLabels.Report}" Margin="0,12,0,4" FontWeight="SemiBold" />
                         <TextBox Text="{Binding Report, Mode=OneWay}"
                                  IsReadOnly="True" TextWrapping="Wrap" Height="220"
                                  VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
                         <!-- The install half of a clean reinstall, offered only once the
                              removal half has finished and only when it succeeded. -->
-                        <Button Content="Continue to install"
+                        <Button Content="{x:Static vm:PageLabels.ContinueToInstall}"
                                 Command="{Binding ContinueToInstallCommand}"
                                 HorizontalAlignment="Left" Margin="0,10,0,0" Padding="12,4"
                                 Visibility="{Binding CanContinueToInstall, Converter={StaticResource BoolToVisibility}}" />
@@ -256,12 +259,12 @@
 
             <Border Grid.Row="2" BorderBrush="#DDDDDD" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,10,0,0">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Content="Back" Style="{StaticResource NavButton}"
+                    <Button Content="{x:Static vm:PageLabels.Back}" Style="{StaticResource NavButton}"
                             Command="{Binding BackCommand}" />
-                    <Button Content="Next" Style="{StaticResource NavButton}"
+                    <Button Content="{x:Static vm:PageLabels.Next}" Style="{StaticResource NavButton}"
                             Command="{Binding NextCommand}"
                             Visibility="{Binding IsNextVisible, Converter={StaticResource BoolToVisibility}}" />
-                    <Button Content="Uninstall" Style="{StaticResource NavButton}" IsDefault="True"
+                    <Button Content="{x:Static vm:PageLabels.Uninstall}" Style="{StaticResource NavButton}" IsDefault="True"
                             Command="{Binding UninstallCommand}"
                             Visibility="{Binding IsUninstallVisible, Converter={StaticResource BoolToVisibility}}" />
                     <Button Content="{Binding CancelButtonText}" Style="{StaticResource NavButton}" IsCancel="True"

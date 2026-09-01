@@ -164,6 +164,12 @@ public sealed record DependencySelection(string Id, string Title, bool IsRequire
                 InstallerCulture.Pick("optional: {0}", "необязателен: {0}"),
                 Consequence);
 
+    /// <summary>
+    /// Everything after the bold title, in one string. The markup used to join three Runs, which
+    /// concatenate in source order — the one thing a translation cannot keep.
+    /// </summary>
+    public string StateLine => " — " + StateText + " · " + RequirementText;
+
     public string ActionText => !IsInstallable
         ? InstallerCulture.Pick("Install manually", "Установить вручную")
         : IsInstalled
