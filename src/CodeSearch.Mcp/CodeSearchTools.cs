@@ -334,6 +334,7 @@ public static class CodeSearchTools
         };
 
         IReadOnlyList<SearchHit> hits;
+        var started = Stopwatch.StartNew();
         try
         {
             hits = await service.SearchAsync(query, root, options, cancellationToken);
@@ -368,7 +369,10 @@ public static class CodeSearchTools
         var report = new StringBuilder();
         var status2 = service.Status(root);
         report.Append("Index: ").Append(status2.ChunkCount).Append(" chunks over ")
-            .Append(status2.FileCount).Append(" files, model ").Append(status2.Model);
+            .Append(status2.FileCount).Append(" files, model ").Append(status2.Model)
+            // How long this took, so the caller can report it rather than estimate it. The
+            // embedding of the query dominates; the rest is memory.
+            .Append(", ").Append(Seconds(started.Elapsed));
         if (status2.CommitDrifted)
         {
             report.Append(" (STALE: built at ").Append(Short(status2.IndexedCommit))
@@ -759,6 +763,15 @@ public static class CodeSearchTools
 
     private static string IndexCommand(string root, string model) =>
         $""""{Path.Combine(AppContext.BaseDirectory, "localai.exe")}" sync --root "{root}"""";
+
+    /// <summary>
+    /// A duration a person reads rather than parses: tenths under ten seconds, whole seconds
+    /// above, because nobody needs a millisecond from a call that took half a minute.
+    /// </summary>
+    private static string Seconds(TimeSpan span) =>
+        span < TimeSpan.FromSeconds(10)
+            ? $"{span.TotalSeconds:0.0}s"
+            : $"{span.TotalSeconds:0}s";
 
     private static string Short(string commit) => commit.Length >= 9 ? commit[..9] : commit;
 

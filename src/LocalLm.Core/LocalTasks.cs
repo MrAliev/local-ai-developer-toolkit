@@ -11,9 +11,44 @@ public sealed record LocalResult(
     string Detail,
     LocalUsageReceipt Receipt)
 {
-    /// <summary>The line the caller is expected to surface, so the saving is visible, not silent.</summary>
+    /// <summary>
+    /// The line the caller is expected to surface, so what a local call cost and saved is
+    /// visible rather than silent.
+    ///
+    /// The duration was measured all along — the broker records how long a job waited and how
+    /// long it ran — and then went only into experiment telemetry, so a caller asked to report
+    /// it could only guess. It comes from the receipt now.
+    /// </summary>
     public string Notice =>
-        $"🔧 Локально: {Model}. {Detail}. {TokenEstimator.DescribeSaving(SavedTokens)}";
+        $"🔧 Локально: {Model}. {Detail}. {DescribeDuration()}. " +
+        TokenEstimator.DescribeSaving(SavedTokens);
+
+    /// <summary>
+    /// How long it took, and how much of that was waiting.
+    ///
+    /// The two are different stories: four seconds behind another client is a queue to look
+    /// at, four seconds of inference is a model to look at. The wait is only named when it is
+    /// a real share of the total, so the ordinary line stays short.
+    /// </summary>
+    private string DescribeDuration() => DescribeDuration(Receipt);
+
+    /// <summary>
+    /// Shared with the translation result, which reports the same way and would otherwise
+    /// grow a second copy of this to drift against.
+    /// </summary>
+    internal static string DescribeDuration(LocalUsageReceipt receipt)
+    {
+        var total = receipt.QueueDuration + receipt.ExecutionDuration;
+        var queued = receipt.QueueDuration;
+        return queued >= TimeSpan.FromSeconds(0.5) && queued >= total * 0.2
+            ? $"{Seconds(total)} (в очереди {Seconds(queued)})"
+            : Seconds(total);
+    }
+
+    private static string Seconds(TimeSpan span) =>
+        span < TimeSpan.FromSeconds(10)
+            ? $"{span.TotalSeconds:0.0} с"
+            : $"{span.TotalSeconds:0} с";
 }
 
 /// <summary>
@@ -556,7 +591,16 @@ public sealed class LocalTasks
                 $"{validation.Detail}.");
         }
 
-        var receipt = attempt.Receipt;
+        var everyCall = attempts.SelectMany(candidate => candidate.Receipts).ToArray();
+        var receipt = attempt.Receipt with
+        {
+            QueueDuration = everyCall.Aggregate(
+                TimeSpan.Zero,
+                (total, each) => total + each.QueueDuration),
+            ExecutionDuration = everyCall.Aggregate(
+                TimeSpan.Zero,
+                (total, each) => total + each.ExecutionDuration),
+        };
         var model = receipt.Routing?.SelectedModel ?? receipt.Model;
         var answer = TranslationAttribution.Append(
             attempt.Text,
@@ -678,6 +722,7 @@ public sealed record LocalTranslationResult(
 {
     public string Notice =>
         $"🔧 Локально: {Model}. Перевод проверен: {Validation.Detail}. " +
+        $"{LocalResult.DescribeDuration(Receipt)}. " +
         $"Локально обработано примерно {TokenEstimator.Describe(LocalTokensProcessed)} токенов; " +
         $"на облачной генерации сэкономлено примерно {TokenEstimator.Describe(SavedTokens)}; " +
         $"чистое сокращение облачного контекста — " +

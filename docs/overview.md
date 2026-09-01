@@ -389,6 +389,17 @@ zero is clamped rather than obeyed.
 
 ### 7.1 Method
 
+Every local call reports what it cost and what it saved: which tool and model ran, how long it
+took, and the tokens avoided. The duration was measured all along — the broker records how long
+a job waited and how long it ran — and went only into experiment telemetry, so the line that
+reports a call could not state it and whoever read that line had to guess. It comes from the
+receipt now, with the wait named separately when it is a real share of the total: four seconds
+behind another client is a queue to look at, four seconds of inference is a model to look at.
+`search_code` does go through that queue — embedding the query is a broker job like any
+other — but the receipt does not reach the tool, and the time a search takes is more than the
+embedding anyway: loading the index and composing the overlay are the rest of it. So it times
+itself around the whole search.
+
 There is no live token counter in the system, so every number is an estimate and is given as a
 range. The conversion constants were checked against the code: **4.0 characters per token** for
 Latin text, **2.2** for Cyrillic, and for images **the pixel area divided by 750**. The saving
