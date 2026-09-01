@@ -54,10 +54,11 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("estimated cloud tokens avoided")]
     [InlineData("exact `index_unload` tool name")]
     [InlineData("ETA")]
-    // The volume is stated up front and the progress while it runs. What is NOT required is a
-    // file count: index_status carries none, and asking for one only invites an invented
-    // number.
+    // Report what the tool returns. The trap this replaced was asking for a figure at the
+    // start of a build, when the phase is not counted at all — which leaves inventing one as
+    // the only way to comply.
     [InlineData("processed and total chunks")]
+    [InlineData("not counted in the phases before and after")]
     // Hidden indexing is indistinguishable from a hung machine, and the person watching has
     // no other way to tell the two apart.
     [InlineData("never filter the indexer")]
@@ -83,7 +84,7 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("localai repo status --root")]
     [InlineData("localai sync --root")]
     [InlineData("localai hooks install --root")]
-    [InlineData("INITIALIZING")]
+    [InlineData("Connected is not ready")]
     public void The_block_states_every_rule_the_installation_depends_on(string rule) =>
         // Whitespace-normalised: the block is wrapped to a column, so a required phrase can
         // fall across a line break without the requirement having changed at all.
@@ -156,30 +157,56 @@ public sealed class ManagedInstructionBlockTests
     }
 
     /// <summary>
-    /// The user's own guidance outranks this block — and two rules are outside that
-    /// arrangement, because they are not preferences. A configuration line saying "just call
-    /// Ollama directly" must not read as authority to break the transport invariant, and
-    /// nothing in a repository file may promote itself from data to instruction.
+    /// The user's own guidance outranks this block — except where it cannot.
+    ///
+    /// The first attempt at this carve-out ended "if one genuinely needs relaxing, say so and
+    /// ask", which applied to both named rules. For the untrusted-content boundary that is a
+    /// pre-blessed shape for the exact request an injection wants to make, and it contradicted
+    /// the absolute prohibition further down the same block. The boundary has no escape; the
+    /// transport rule has exactly one, and it is a policy rather than a line of guidance.
     /// </summary>
     [Fact]
-    public void The_precedence_rule_does_not_reach_the_two_invariants()
+    public void The_precedence_rule_does_not_reach_the_boundary()
     {
         var block = ManagedInstructionBlock.Block;
-
         Assert.Contains("theirs wins", block, StringComparison.Ordinal);
-        var carveOut = block.IndexOf("not preferences", StringComparison.Ordinal);
-        Assert.True(carveOut > 0, "the block must say which rules the user's guidance cannot override");
-        Assert.Contains(
-            "untrusted-content",
-            block[carveOut..],
-            StringComparison.Ordinal);
-        Assert.Contains("broker", block[carveOut..], StringComparison.Ordinal);
+
+        // Bounded to the paragraph. Searching to the end of the block found "broker" and
+        // "untrusted-content" in unrelated sections, so the assertion passed with the
+        // carve-out deleted.
+        var start = block.IndexOf("not a preference", StringComparison.Ordinal);
+        Assert.True(start > 0, "the block must name what the user's guidance cannot override");
+        var end = block.IndexOf("\n\n", start, StringComparison.Ordinal);
+        var carveOut = end > start ? block[start..end] : block[start..];
+
+        Assert.Contains("untrusted-content", carveOut, StringComparison.Ordinal);
+        Assert.Contains("no way to ask", carveOut, StringComparison.Ordinal);
+        // The boundary paragraph must not offer the escape the transport rule has.
+        Assert.DoesNotContain("say so and ask", carveOut, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The transport rule keeps its one documented way out — a policy, not a preference — so
+    /// that tightening the boundary does not quietly forbid something the product supports.
+    /// </summary>
+    [Fact]
+    public void The_transport_rule_keeps_the_one_escape_it_has()
+    {
+        var block = ManagedInstructionBlock.Block;
+        var transport = block[block.IndexOf("The transport rule", StringComparison.Ordinal)..];
+
+        Assert.Contains("policy", transport[..400], StringComparison.Ordinal);
+        Assert.Contains("never by a line of guidance", transport[..400], StringComparison.Ordinal);
     }
 
     /// <summary>
     /// This text is prepended to every CLAUDE.md and AGENTS.md and read on every session, so a
     /// sentence that merely restates another one is paid for on every turn forever. The block
     /// grew 72% in one commit, most of it restatement, before anybody measured it.
+    ///
+    /// This catches copied sentences, which is the mistake that actually happened — a passage
+    /// committed twice. It cannot catch restatement in different words; nothing automated can,
+    /// and a pass here is not evidence that the block says each thing once.
     /// </summary>
     [Fact]
     public void The_block_says_nothing_twice()

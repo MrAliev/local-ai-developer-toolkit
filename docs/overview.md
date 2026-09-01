@@ -502,7 +502,9 @@ after it. Writing these once and shipping them is what keeps two machines from b
 differently for reasons nobody can see.
 
 Whatever the person wrote outside the markers is theirs: an install replaces the block and
-leaves the rest of the file alone, and an uninstall takes the block back out and nothing else.
+keeps every character around it, and an uninstall takes the block back out and nothing else.
+Every character, not every byte — the file is rewritten as UTF-8 without a preamble, so one
+that arrived with a byte-order mark comes back without it.
 Where their guidance disagrees with the block, theirs wins and the assistant says which rule it is
 overriding. A rule that is true of one machine, one set of cards or one maintainer's
 permissions belongs outside the markers; a rule that is true everywhere belongs inside them.
