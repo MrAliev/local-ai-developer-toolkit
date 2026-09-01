@@ -13,6 +13,11 @@ name: Documentation
 
 on:
   pull_request:
+    # Including edited: the remedy this check prints is "say so in the pull request
+    # body", and without that type the body it reads is the one from the event that
+    # started the run. Saying it then changed nothing until an unrelated push arrived,
+    # which taught the wrong lesson about a check that exists to be answered.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: documentation-${{ github.ref }}
