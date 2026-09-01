@@ -58,16 +58,33 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// has changed. Nothing is skipped irrevocably.
     /// </summary>
     private IReadOnlyList<(InstallerPage Page, string Title)> Steps =>
-        Mode == StartChoice.Install || settingsRevealed
+        Mode == StartChoice.Install
             ? AllSteps
-            : [.. AllSteps.Where(step => !FoldedOnUpdate.Contains(step.Page))];
+            : [.. AllSteps
+                .Select(step => step.Page == InstallerPage.Diagnose
+                    // On this path the page is one line and a spinner, and what the reader is
+                    // waiting on is the release as much as the machine. "System check" would
+                    // promise a table that never arrives.
+                    ? (step.Page, "Preparing")
+                    : step)
+                .Where(step =>
+                (releaseRevealed || !FoldedRelease.Contains(step.Page)) &&
+                (settingsRevealed || !FoldedSettings.Contains(step.Page)))];
 
     /// <summary>
     /// What an update does not ask again. Diagnose stays: it is where an interrupted run is
     /// offered back and where an unsupported machine is stopped. Package stays for now — it
     /// still owns resolving the release, and moving that is its own change.
     /// </summary>
-    private static readonly IReadOnlySet<InstallerPage> FoldedOnUpdate =
+    /// <summary>
+    /// Which release to install. Its own group, and its own button on the review page: the
+    /// release and the settings are different questions, and one control for both is the
+    /// confusion this redesign exists to remove.
+    /// </summary>
+    private static readonly IReadOnlySet<InstallerPage> FoldedRelease =
+        new HashSet<InstallerPage> { InstallerPage.Package };
+
+    private static readonly IReadOnlySet<InstallerPage> FoldedSettings =
         new HashSet<InstallerPage>
         {
             InstallerPage.Dependencies,
@@ -76,11 +93,16 @@ public sealed class InstallerWizardViewModel : ObservableObject
             InstallerPage.Agents,
         };
 
-    /// <summary>Set by "Change these settings" on the review page; never unset.</summary>
+    /// <summary>Set by the review page's two buttons; never unset.</summary>
     private bool settingsRevealed;
+
+    private bool releaseRevealed;
 
     public bool AreSettingsFolded =>
         Mode != StartChoice.Install && !settingsRevealed;
+
+    public bool IsReleaseFolded =>
+        Mode != StartChoice.Install && !releaseRevealed;
 
     /// <summary>
     /// Brings the folded pages back and moves to the first of them. Offered on the review
@@ -97,6 +119,24 @@ public sealed class InstallerWizardViewModel : ObservableObject
         settingsRevealed = true;
         CurrentPage = InstallerPage.Dependencies;
     }
+
+    /// <summary>
+    /// Brings back the release page alone. Back from it returns to the review rather than to
+    /// the page before it in the rail: it was opened from there, for one answer.
+    /// </summary>
+    public void RevealRelease()
+    {
+        if (!IsReleaseFolded)
+        {
+            return;
+        }
+
+        releaseRevealed = true;
+        returnFromReleaseToConfirm = true;
+        CurrentPage = InstallerPage.Package;
+    }
+
+    private bool returnFromReleaseToConfirm;
 
     private readonly DiagnosePageViewModel diagnose = new();
     private readonly DependenciesPageViewModel dependencies = new();
@@ -168,6 +208,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             ReportUnexpectedError);
         CancelCommand = new RelayCommand(Cancel, () => CanCancel);
         RevealSettingsCommand = new RelayCommand(RevealSettings, () => AreSettingsFolded);
+        RevealReleaseCommand = new RelayCommand(RevealRelease, () => IsReleaseFolded);
         RollbackCommand = new AsyncRelayCommand(
             () => RollbackThisRunAsync(),
             () => CanRollback,
@@ -216,8 +257,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     public RelayCommand CancelCommand { get; }
 
-    /// <summary>Brings back the pages an update folds away.</summary>
+    /// <summary>Brings back the four settings pages an update folds away.</summary>
     public RelayCommand RevealSettingsCommand { get; }
+
+    /// <summary>Brings back the release page alone.</summary>
+    public RelayCommand RevealReleaseCommand { get; }
 
     public AsyncRelayCommand RollbackCommand { get; }
 
@@ -293,7 +337,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     public string StepTitle => CurrentPage switch
     {
-        InstallerPage.Diagnose => "Checking this computer",
+        InstallerPage.Diagnose => Mode == StartChoice.Install ? "System check" : "Preparing",
         InstallerPage.Dependencies => "Prerequisites",
         InstallerPage.Package => "LocalAi package",
         InstallerPage.Models => "Local models",
@@ -306,8 +350,15 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     public string StepDescription => CurrentPage switch
     {
+        InstallerPage.Diagnose when Mode != StartChoice.Install =>
+            "Checking this computer and finding the release. This takes a few seconds.",
+        // The shipped line stopped being true the moment results appeared, so it says one
+        // thing while the probe runs and another once there is a table to read.
+        InstallerPage.Diagnose when diagnose.IsChecking =>
+            "Checking this computer. Starting winget, git and ollama to see what is " +
+            "installed — this takes a few seconds.",
         InstallerPage.Diagnose =>
-            "Results of the environment check. Items marked as a warning still allow " +
+            "What was found on this computer. Items marked as a warning still allow " +
             "installation.",
         InstallerPage.Dependencies =>
             "Choose which prerequisites to install. Nothing is selected for you.",
@@ -429,6 +480,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
         LoadInterruptedRunJournal();
         SeedSettingsFromInstallation();
         await RefreshEnvironmentDiagnosticsAsync(cancellationToken);
+        if (AreSettingsFolded)
+        {
+            // The errand settled which release this is, so resolving it is work rather than a
+            // question. It happens here, behind the check already running, instead of behind a
+            // "Check release" button on a page an update no longer shows.
+            await ResolvePackageAsync(cancellationToken);
+        }
+
         hasInitialized = true;
     }
 
@@ -590,6 +649,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
         if (!CanMovePrevious)
         {
             return false;
+        }
+
+        if (CurrentPage == InstallerPage.Package && returnFromReleaseToConfirm)
+        {
+            returnFromReleaseToConfirm = false;
+            CurrentPage = InstallerPage.Confirm;
+            return true;
         }
 
         CurrentPage = Adjacent(CurrentPage, forward: false);
@@ -1440,8 +1506,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
             builder.AppendLine(
                 "Warning: no release has been verified, so LocalAi itself will not be " +
                 "installed and the client applications will be left unconfigured. Only the " +
-                "prerequisites above will be applied. Go back to the LocalAi package step to " +
-                "check a release first.");
+                "prerequisites above will be applied. Choose a release below and verify it " +
+                "before continuing.");
         }
 
         return builder.ToString().Trim();
@@ -1469,6 +1535,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(StepStatus));
         OnPropertyChanged(nameof(VersionContext));
         OnPropertyChanged(nameof(AreSettingsFolded));
+        OnPropertyChanged(nameof(IsReleaseFolded));
         OnPropertyChanged(nameof(StepList));
         OnPropertyChanged(nameof(CurrentPageIndex));
         OnPropertyChanged(nameof(CanMovePrevious));

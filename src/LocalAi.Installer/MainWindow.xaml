@@ -108,7 +108,9 @@
                         </StackPanel.Style>
                         <StackPanel Margin="0,4,0,0"
                                     Visibility="{Binding Diagnose.IsChecking, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="Checking this computer. Starting winget, git and ollama to see what is installed — this takes a few seconds."
+                            <!-- The lead above already says what is happening; this is the
+                                 detail line under the spinner. -->
+                            <TextBlock Text="Starting winget, git and ollama…"
                                        Style="{StaticResource Muted}" Margin="0,0,0,10" />
                             <ProgressBar IsIndeterminate="True" Height="4" Width="280" HorizontalAlignment="Left" />
                         </StackPanel>
@@ -378,12 +380,18 @@
                         <TextBox Text="{Binding ReviewText, Mode=OneWay}"
                                  IsReadOnly="True" TextWrapping="Wrap" Height="200"
                                  VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
-                        <!-- An update folds the settings pages away; this is how somebody
-                             who wants a different answer this time gets them back. -->
-                        <Button Content="Change these settings…"
-                                Command="{Binding RevealSettingsCommand}"
-                                HorizontalAlignment="Left" Margin="0,10,0,0" Padding="12,4"
-                                Visibility="{Binding AreSettingsFolded, Converter={StaticResource BoolToVisibility}}" />
+                        <!-- Two questions, two buttons, in review-box row order: the release
+                             is the first row, the settings are the rest. -->
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="Choose a release…"
+                                    Command="{Binding RevealReleaseCommand}"
+                                    Padding="12,4" Margin="0,0,8,0"
+                                    Visibility="{Binding IsReleaseFolded, Converter={StaticResource BoolToVisibility}}" />
+                            <Button Content="Change settings…"
+                                    Command="{Binding RevealSettingsCommand}"
+                                    Padding="12,4"
+                                    Visibility="{Binding AreSettingsFolded, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
                         <CheckBox Content="I have reviewed these settings"
                                   Margin="0,12,0,0"
                                   IsChecked="{Binding Review.IsConfirmed, Mode=TwoWay}"

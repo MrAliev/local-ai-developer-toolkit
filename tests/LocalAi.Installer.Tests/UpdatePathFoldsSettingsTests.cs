@@ -28,9 +28,10 @@ public sealed class UpdatePathFoldsSettingsTests
         var wizard = new InstallerWizardViewModel(StartChoice.UpdateOrRepair);
 
         Assert.True(wizard.AreSettingsFolded);
-        // Diagnose, Package, Confirm, Progress, Finish.
-        Assert.Equal(5, wizard.StepList.Count);
-        Assert.Contains("Step 1 of 5", wizard.StepStatus, StringComparison.Ordinal);
+        // Diagnose, Confirm, Progress, Finish. The release follows from the errand, so the
+        // package page is folded with the rest and resolved while the check runs.
+        Assert.Equal(4, wizard.StepList.Count);
+        Assert.Contains("Step 1 of 4", wizard.StepStatus, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -46,17 +47,17 @@ public sealed class UpdatePathFoldsSettingsTests
     }
 
     [Fact]
-    public void Next_on_an_update_goes_straight_from_the_check_to_the_package()
+    public void Next_on_an_update_goes_from_the_check_straight_to_the_review()
     {
         var wizard = Checked(StartChoice.UpdateOrRepair);
 
         Assert.True(wizard.MoveNext());
 
-        Assert.Equal(InstallerPage.Package, wizard.CurrentPage);
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
     }
 
     [Fact]
-    public void Back_from_the_package_returns_to_the_check_rather_than_a_folded_page()
+    public void Back_from_the_review_returns_to_the_check_rather_than_a_folded_page()
     {
         var wizard = Checked(StartChoice.UpdateOrRepair);
         wizard.MoveNext();
@@ -71,15 +72,48 @@ public sealed class UpdatePathFoldsSettingsTests
     /// exactly the run somebody discovers it on the review page.
     /// </summary>
     [Fact]
-    public void The_folded_pages_come_back_on_request()
+    public void The_settings_pages_come_back_on_request()
     {
         var wizard = new InstallerWizardViewModel(StartChoice.UpdateOrRepair);
 
         wizard.RevealSettings();
 
         Assert.False(wizard.AreSettingsFolded);
-        Assert.Equal(9, wizard.StepList.Count);
+        // The four settings pages return; the release page is a separate question.
+        Assert.Equal(8, wizard.StepList.Count);
         Assert.Equal(InstallerPage.Dependencies, wizard.CurrentPage);
+    }
+
+    /// <summary>
+    /// The release and the settings are different questions, so one button for both would be
+    /// the confusion this redesign removes. Choosing a release reveals that page alone.
+    /// </summary>
+    [Fact]
+    public void The_release_page_comes_back_on_its_own()
+    {
+        var wizard = new InstallerWizardViewModel(StartChoice.UpdateOrRepair);
+
+        wizard.RevealRelease();
+
+        Assert.False(wizard.IsReleaseFolded);
+        Assert.True(wizard.AreSettingsFolded);
+        Assert.Equal(5, wizard.StepList.Count);
+        Assert.Equal(InstallerPage.Package, wizard.CurrentPage);
+    }
+
+    /// <summary>
+    /// It was opened from the review for one answer, so Back returns there rather than to
+    /// whatever precedes it in the rail.
+    /// </summary>
+    [Fact]
+    public void Back_from_a_release_page_opened_off_the_review_returns_to_the_review()
+    {
+        var wizard = Checked(StartChoice.UpdateOrRepair);
+        wizard.RevealRelease();
+
+        Assert.True(wizard.MovePrevious());
+
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
     }
 
     [Fact]
@@ -100,6 +134,7 @@ public sealed class UpdatePathFoldsSettingsTests
     /// wizard would be applying an effect it never listed.
     /// </summary>
     [Theory]
+    [InlineData("LocalAi package:")]
     [InlineData("Dependencies:")]
     [InlineData("Models:")]
     [InlineData("Model residency:")]
@@ -109,6 +144,65 @@ public sealed class UpdatePathFoldsSettingsTests
         var wizard = new InstallerWizardViewModel(StartChoice.UpdateOrRepair);
 
         Assert.Contains(expected, wizard.ReviewText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// When nothing resolved, the warning has to name a route that exists. On this path the
+    /// package step is folded away, so telling somebody to "go back" to it would send them
+    /// looking for a page the rail does not show.
+    /// </summary>
+    /// <summary>
+    /// One wording for both paths, naming a direction rather than a control: a sentence that
+    /// names a button by its label breaks the moment the button is relabelled, and the old
+    /// one named a page an update no longer shows.
+    /// </summary>
+    [Theory]
+    [InlineData(StartChoice.Install)]
+    [InlineData(StartChoice.UpdateOrRepair)]
+    public void An_unresolved_release_says_the_same_thing_on_every_path(StartChoice mode)
+    {
+        var review = new InstallerWizardViewModel(mode).ReviewText;
+
+        Assert.Contains(
+            "Choose a release below and verify it before continuing.",
+            review,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Go back to the LocalAi package step", review, StringComparison.Ordinal);
+        Assert.DoesNotContain("Change these settings", review, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The first page is named for what the reader is waiting on, and the two paths differ
+    /// because their content does: a real diagnostics table on an install, one line and a
+    /// spinner on an update while the release resolves.
+    /// </summary>
+    [Fact]
+    public void The_first_step_is_named_for_the_wait_it_describes()
+    {
+        var update = new InstallerWizardViewModel(StartChoice.UpdateOrRepair);
+        var install = new InstallerWizardViewModel(StartChoice.Install);
+
+        Assert.Equal("Preparing", update.StepTitle);
+        Assert.Equal("Preparing", update.StepList[0].Title);
+        Assert.Contains("finding the release", update.StepDescription, StringComparison.Ordinal);
+
+        Assert.Equal("System check", install.StepTitle);
+        Assert.Equal("System check", install.StepList[0].Title);
+    }
+
+    /// <summary>
+    /// The install lead stopped being true the moment results appeared, so it changes when
+    /// they do.
+    /// </summary>
+    [Fact]
+    public void The_install_lead_stops_describing_a_wait_once_there_is_a_table()
+    {
+        var wizard = new InstallerWizardViewModel(StartChoice.Install);
+        Assert.Contains("Starting winget", wizard.StepDescription, StringComparison.Ordinal);
+
+        wizard.Diagnose.IsChecking = false;
+
+        Assert.Contains("What was found", wizard.StepDescription, StringComparison.Ordinal);
     }
 
     /// <summary>
