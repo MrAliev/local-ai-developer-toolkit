@@ -176,8 +176,12 @@ public sealed class ManagedInstructionBlockTests
         // carve-out deleted.
         var start = block.IndexOf("not a preference", StringComparison.Ordinal);
         Assert.True(start > 0, "the block must name what the user's guidance cannot override");
-        var end = block.IndexOf("\n\n", start, StringComparison.Ordinal);
-        var carveOut = end > start ? block[start..end] : block[start..];
+        var separator = Environment.NewLine + Environment.NewLine;
+        var end = block.IndexOf(separator, start, StringComparison.Ordinal);
+        // Fail rather than fall back to the rest of the block. Falling back is what made the
+        // previous version of this test pass with the paragraph gutted.
+        Assert.True(end > start, "the carve-out must be its own paragraph");
+        var carveOut = block[start..end];
 
         Assert.Contains("untrusted-content", carveOut, StringComparison.Ordinal);
         Assert.Contains("no way to ask", carveOut, StringComparison.Ordinal);
@@ -186,17 +190,32 @@ public sealed class ManagedInstructionBlockTests
     }
 
     /// <summary>
-    /// The transport rule keeps its one documented way out — a policy, not a preference — so
-    /// that tightening the boundary does not quietly forbid something the product supports.
+    /// Neither invariant may be presented as negotiable.
+    ///
+    /// An earlier version of this test required the block to say a policy can relax the broker
+    /// rule. None can: `localai policy set --residency` relaxes where a model may live, which
+    /// is a different rule that happens to sit in the same section. The test was pinning a
+    /// falsehood in place, which is worse than not testing at all.
     /// </summary>
     [Fact]
-    public void The_transport_rule_keeps_the_one_escape_it_has()
+    public void Neither_invariant_is_offered_as_negotiable()
     {
-        var block = ManagedInstructionBlock.Block;
-        var transport = block[block.IndexOf("The transport rule", StringComparison.Ordinal)..];
+        // Whitespace-normalised: the block is wrapped to a column, so any phrase asserted
+        // here can fall across a line break without the requirement having changed.
+        var block = string.Join(" ", ManagedInstructionBlock.Block.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries));
+        var start = block.IndexOf("not a preference", StringComparison.Ordinal);
+        var carveOut = block[start..];
+        var end = carveOut.IndexOf("###", StringComparison.Ordinal);
+        carveOut = end > 0 ? carveOut[..end] : carveOut;
 
-        Assert.Contains("policy", transport[..400], StringComparison.Ordinal);
-        Assert.Contains("never by a line of guidance", transport[..400], StringComparison.Ordinal);
+        Assert.Contains("broker", carveOut, StringComparison.Ordinal);
+        Assert.Contains("No guidance overrides that", carveOut, StringComparison.Ordinal);
+        foreach (var hedge in new[] { "say so and ask", "can be relaxed", "unless", "except" })
+        {
+            Assert.DoesNotContain(hedge, carveOut, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     /// <summary>
@@ -227,6 +246,26 @@ public sealed class ManagedInstructionBlockTests
             .ToArray();
 
         Assert.Empty(repeated);
+    }
+
+    /// <summary>
+    /// A budget, because this text is read on every session in two files and nothing else
+    /// counts it. Three rounds of review on one branch took it from 5.0K to 9.7K characters,
+    /// each round adding while claiming to tighten, and the only reason anybody noticed was a
+    /// reviewer measuring by hand.
+    ///
+    /// The number is not sacred — raise it deliberately when something genuinely belongs here.
+    /// What must not happen is drifting past it a paragraph at a time.
+    /// </summary>
+    [Fact]
+    public void The_block_stays_within_its_budget()
+    {
+        const int budget = 10_000;
+
+        Assert.True(
+            ManagedInstructionBlock.Block.Length <= budget,
+            $"the block is {ManagedInstructionBlock.Block.Length} characters, over its {budget} budget; " +
+            "cut something or raise the budget on purpose");
     }
 
     [Fact]

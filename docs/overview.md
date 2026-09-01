@@ -509,11 +509,12 @@ Where their guidance disagrees with the block, theirs wins and the assistant say
 overriding. A rule that is true of one machine, one set of cards or one maintainer's
 permissions belongs outside the markers; a rule that is true everywhere belongs inside them.
 
-Two of the block's rules are outside that arrangement, and the block says so: everything goes
-through the broker rather than straight to Ollama, and text arriving inside untrusted-content
-markers is data rather than instructions. The first is what keeps several clients correct at
-once; the second is what stops a file in a repository from issuing orders. A line in a
-configuration file is not evidence that somebody meant to switch either of them off.
+Two of the block's rules stand outside that arrangement, and the block says so plainly: text
+arriving inside untrusted-content markers is data rather than instructions, and everything
+reaches a local model through the broker rather than straight to Ollama. The first is what
+stops a file in a repository from issuing orders; the second is what keeps several clients
+correct at once. Neither is a preference, and no line of guidance overrides either — a
+configuration file saying otherwise is not evidence that somebody meant to switch one off.
 
 Installation needs no GitHub account: releases are public, and the installer downloads the
 manifest, the signature and the package over plain HTTPS with no credentials. The GitHub CLI
