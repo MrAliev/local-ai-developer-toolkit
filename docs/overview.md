@@ -546,6 +546,14 @@ the uninstall window: which boxes a preset ticks is the contract between it and 
 and a clean reinstall needs the same page inside the installer, where a second copy would be a
 second answer to that.
 
+In both wizards a step is marked done because it was reached, not because it sits left of
+where the reader is now. Position stood in for history until pages could be folded away and
+revealed out of order — after which a reveal button that inserts three steps before the
+current one moves every remembered position onto a different step, and a finish page reached
+without the pages before it having run marks work that never took place. Marking a step done
+is a claim about what happened to this computer, and it is the one claim a step rail must not
+get wrong.
+
 The reinstall-friendly preset keeps the client registrations and the hook dispatchers rather
 than asking about them: the installation that follows rewrites all three, and a question put
 twice gets two answers that disagree. The review page says so in the words of the arrival —
