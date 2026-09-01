@@ -23,9 +23,12 @@ public sealed class SyncRetentionTests : IDisposable
     public void Publishing_drops_the_generations_the_repository_has_outgrown()
     {
         var store = new GenerationStore(RepositoryRoot);
-        var oldest = Publish(store, "aaa");
-        var middle = Publish(store, "bbb");
-        var newest = Publish(store, "ccc");
+        // Published far enough back to be past the grace that protects a generation which
+        // might still be being built: published moments ago, all three would be kept whatever
+        // the count says.
+        var oldest = Publish(store, "aaa", DateTimeOffset.UtcNow.AddDays(-30));
+        var middle = Publish(store, "bbb", DateTimeOffset.UtcNow.AddDays(-20));
+        var newest = Publish(store, "ccc", DateTimeOffset.UtcNow.AddDays(-10));
         store.SetCurrent(store.ReadManifest(newest));
         WriteRetention(generationsPerRepository: 2);
 
@@ -84,7 +87,7 @@ public sealed class SyncRetentionTests : IDisposable
             });
     }
 
-    private string Publish(GenerationStore store, string tree)
+    private string Publish(GenerationStore store, string tree, DateTimeOffset? publishedAtUtc = null)
     {
         Directory.CreateDirectory(_root);
         var source = Path.Combine(_root, tree + ".cidx");
@@ -100,7 +103,8 @@ public sealed class SyncRetentionTests : IDisposable
                     1,
                     CodeIndex.CurrentVersion,
                     1,
-                    1))
+                    1),
+                publishedAtUtc: publishedAtUtc ?? DateTimeOffset.UtcNow)
             .Identity.Id;
     }
 

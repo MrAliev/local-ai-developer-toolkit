@@ -56,7 +56,7 @@ public sealed record RuntimeRetentionPolicy(
         ResponseBudgetBytes: 512L * 1024 * 1024,
         ArchiveRetentionDays: 14,
         ArchiveEntryLimit: 2000,
-        GenerationsPerRepository: 3,
+        GenerationsPerRepository: 1,
         InstalledVersions: 3,
         LauncherBackups: 3,
         SweepIntervalSeconds: 60,

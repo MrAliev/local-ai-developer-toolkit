@@ -896,7 +896,7 @@ below.
 | `ResponseBudgetBytes` | 512 MB | total retained response bodies, oldest dropped first |
 | `ArchiveRetentionDays` | 14 | age at which an archived job is deleted outright |
 | `ArchiveEntryLimit` | 2000 | archived jobs kept, oldest deleted first |
-| `GenerationsPerRepository` | 3 | index generations kept, including the current one |
+| `GenerationsPerRepository` | 1 | index generations kept, including the current one; anything published in the last day is kept as well, because it may be a build in progress |
 | `InstalledVersions` | 3 | version directories kept under `bin\versions` |
 | `LauncherBackups` | 3 | launcher backups kept under `installer\backups` |
 | `TelemetryRetentionDays` | 30 | age at which a job telemetry record under `telemetry\metrics` is deleted |

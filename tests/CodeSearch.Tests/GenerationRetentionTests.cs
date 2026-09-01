@@ -74,6 +74,103 @@ public sealed class GenerationRetentionTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(Repository, "overlays", dropped)));
     }
 
+    /// <summary>
+    /// Under a generation that is kept, most overlays are still unreachable: one directory per
+    /// worktree, and inside it one per tree that worktree's HEAD has ever pointed at. Nothing
+    /// removed those, so weeks of ordinary branch work left one overlay per commit per
+    /// worktree — on the machine this was found on, six times the size of the generation they
+    /// hang off, none of it readable by anything.
+    /// </summary>
+    [Fact]
+    public void Overlays_for_commits_nobody_is_on_are_removed()
+    {
+        var store = new GenerationStore(Repository);
+        var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
+        store.SetCurrent(store.ReadManifest(current));
+        Overlay(current, "live-worktree", "current-tree");
+        Overlay(current, "live-worktree", "a-tree-from-a-commit-ago");
+        Overlay(current, "worktree-that-was-deleted", "any-tree");
+
+        var result = GenerationRetention.Prune(
+            Repository,
+            RuntimeRetentionPolicy.Default,
+            Now,
+            reachable: new HashSet<(string, string)> { ("live-worktree", "current-tree") });
+
+        Assert.Equal(2, result.OverlaysRemoved.Count);
+        Assert.True(Directory.Exists(
+            Path.Combine(Repository, "overlays", current, "live-worktree", "current-tree")));
+        Assert.False(Directory.Exists(
+            Path.Combine(Repository, "overlays", current, "live-worktree", "a-tree-from-a-commit-ago")));
+        Assert.False(Directory.Exists(
+            Path.Combine(Repository, "overlays", current, "worktree-that-was-deleted")));
+    }
+
+    /// <summary>
+    /// A caller that cannot say what is reachable gets nothing removed under a kept
+    /// generation. Guessing here costs an hour of embedding, and the hook has every reason to
+    /// be unable to enumerate worktrees on a repository somebody is in the middle of moving.
+    /// </summary>
+    [Fact]
+    public void Nothing_under_a_kept_generation_goes_when_reachability_is_unknown()
+    {
+        var store = new GenerationStore(Repository);
+        var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
+        store.SetCurrent(store.ReadManifest(current));
+        Overlay(current, "some-worktree", "some-tree");
+
+        var result = GenerationRetention.Prune(Repository, RuntimeRetentionPolicy.Default, Now);
+
+        Assert.Empty(result.OverlaysRemoved);
+        Assert.True(Directory.Exists(
+            Path.Combine(Repository, "overlays", current, "some-worktree", "some-tree")));
+    }
+
+    /// <summary>
+    /// A generation published but not yet pointed at survives. The overlay phase runs between
+    /// publishing and the pointer moving, so with only the current one kept, a sweep in that
+    /// window deleted the generation a sync had just spent its whole run building — and an
+    /// interrupted run's generation, which the next sync would otherwise reuse rather than
+    /// rebuild.
+    /// </summary>
+    [Fact]
+    public void A_generation_published_moments_ago_is_not_swept()
+    {
+        var store = new GenerationStore(Repository);
+        var current = Publish(store, "a", Now - TimeSpan.FromDays(30));
+        var justBuilt = Publish(store, "b", Now - TimeSpan.FromMinutes(5));
+        store.SetCurrent(store.ReadManifest(current));
+
+        var result = GenerationRetention.Prune(
+            Repository,
+            RuntimeRetentionPolicy.Default with { GenerationsPerRepository = 1 },
+            Now);
+
+        Assert.Empty(result.GenerationsRemoved);
+        Assert.True(Directory.Exists(Path.Combine(Repository, "generations", justBuilt)));
+        Assert.True(Directory.Exists(Path.Combine(Repository, "generations", current)));
+    }
+
+    /// <summary>
+    /// And one old enough to be nobody's build does go, so the grace is a window rather than
+    /// a reprieve.
+    /// </summary>
+    [Fact]
+    public void A_generation_older_than_the_grace_still_goes()
+    {
+        var store = new GenerationStore(Repository);
+        var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
+        var old = Publish(store, "b", Now - TimeSpan.FromDays(30));
+        store.SetCurrent(store.ReadManifest(current));
+
+        var result = GenerationRetention.Prune(
+            Repository,
+            RuntimeRetentionPolicy.Default with { GenerationsPerRepository = 1 },
+            Now);
+
+        Assert.Equal([old], result.GenerationsRemoved);
+    }
+
     [Fact]
     public void An_unreadable_pointer_stops_the_pass_instead_of_guessing()
     {
@@ -157,9 +254,9 @@ public sealed class GenerationRetentionTests : IDisposable
             .Identity.Id;
     }
 
-    private void Overlay(string generationId)
+    private void Overlay(string generationId, string worktree = "worktree", string tree = "tree")
     {
-        var directory = Path.Combine(Repository, "overlays", generationId, "worktree");
+        var directory = Path.Combine(Repository, "overlays", generationId, worktree, tree);
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "clean.cidx"), "OVERLAY");
     }

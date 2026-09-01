@@ -33,11 +33,28 @@ public sealed record GenerationRetentionResult(
 /// </summary>
 public static class GenerationRetention
 {
+    /// <summary>
+    /// How long a freshly published generation is kept regardless of the count. Long enough to
+    /// cover the overlay phase between publishing and the pointer moving, and an interrupted
+    /// run whose generation the next sync will reuse rather than rebuild.
+    /// </summary>
+    private static readonly TimeSpan Grace = TimeSpan.FromDays(1);
+
+    /// <summary>
+    /// <paramref name="reachable"/> is what the repository can still ask about: for each live
+    /// worktree, the hash of its path and the tree its HEAD points at. Everything else under
+    /// a kept generation is an overlay for a commit nobody is on any more, or for a worktree
+    /// that no longer exists — and nothing ever removed those, so weeks of branch work left
+    /// one overlay per commit per worktree, six times the size of the generation they hang
+    /// off. Pass null to leave overlays alone, which is what a caller that cannot enumerate
+    /// worktrees must do rather than guess.
+    /// </summary>
     public static GenerationRetentionResult Prune(
         string repositoryRuntimeRoot,
         RuntimeRetentionPolicy policy,
         DateTimeOffset now,
-        bool dryRun = false)
+        bool dryRun = false,
+        IReadOnlySet<(string WorktreeId, string HeadTree)>? reachable = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRuntimeRoot);
         ArgumentNullException.ThrowIfNull(policy);
@@ -81,6 +98,16 @@ public static class GenerationRetention
             keep.Add(current);
         }
 
+        // A generation is published minutes before the pointer moves to it: the overlay phase
+        // runs in between. Keeping only the current one meant a sweep in that window deleted
+        // the generation a sync had just spent its whole run building, and the sync then died
+        // on the missing base. Anything young enough to be that build is kept whatever the
+        // count says — the same grace the staging directory already gets.
+        foreach (var candidate in candidates.Where(item => now - item.PublishedAtUtc < Grace))
+        {
+            keep.Add(candidate.Id);
+        }
+
         foreach (var candidate in candidates)
         {
             if (keep.Count >= policy.GenerationsPerRepository)
@@ -111,19 +138,61 @@ public static class GenerationRetention
         {
             foreach (var directory in Directory.EnumerateDirectories(overlaysRoot))
             {
-                if (keep.Contains(Path.GetFileName(directory)))
+                if (!keep.Contains(Path.GetFileName(directory)))
+                {
+                    // The generation is gone, so nothing under it can be read at all.
+                    var size = DirectorySize(directory);
+                    if (!TryRemove(directory, dryRun))
+                    {
+                        continue;
+                    }
+
+                    bytes += size;
+                    overlaysRemoved.Add(Path.GetFileName(directory));
+                    continue;
+                }
+
+                if (reachable is null)
                 {
                     continue;
                 }
 
-                var size = DirectorySize(directory);
-                if (!TryRemove(directory, dryRun))
+                // The generation is kept, but most of what is under it is not reachable: one
+                // directory per worktree, and inside it one per tree that worktree's HEAD has
+                // ever pointed at.
+                foreach (var worktree in Directory.EnumerateDirectories(directory))
                 {
-                    continue;
-                }
+                    var worktreeId = Path.GetFileName(worktree);
+                    var live = reachable.Where(entry => entry.WorktreeId == worktreeId).ToArray();
+                    if (live.Length == 0)
+                    {
+                        var size = DirectorySize(worktree);
+                        if (TryRemove(worktree, dryRun))
+                        {
+                            bytes += size;
+                            overlaysRemoved.Add(Path.GetFileName(directory) + "/" + worktreeId);
+                        }
 
-                bytes += size;
-                overlaysRemoved.Add(Path.GetFileName(directory));
+                        continue;
+                    }
+
+                    foreach (var tree in Directory.EnumerateDirectories(worktree))
+                    {
+                        var headTree = Path.GetFileName(tree);
+                        if (live.Any(entry => entry.HeadTree == headTree))
+                        {
+                            continue;
+                        }
+
+                        var size = DirectorySize(tree);
+                        if (TryRemove(tree, dryRun))
+                        {
+                            bytes += size;
+                            overlaysRemoved.Add(
+                                Path.GetFileName(directory) + "/" + worktreeId + "/" + headTree);
+                        }
+                    }
+                }
             }
         }
 
