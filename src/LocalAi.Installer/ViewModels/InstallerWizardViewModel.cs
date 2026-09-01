@@ -28,8 +28,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         (InstallerPage.Diagnose, "System check"),
         (InstallerPage.Dependencies, "Prerequisites"),
         (InstallerPage.Package, "LocalAi package"),
-        (InstallerPage.Models, "Models"),
-        (InstallerPage.Residency, "Video memory"),
+        (InstallerPage.Models, "Models and memory"),
         (InstallerPage.Agents, "Client apps"),
         (InstallerPage.Confirm, "Confirm"),
         (InstallerPage.Progress, "Install"),
@@ -89,7 +88,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
         {
             InstallerPage.Dependencies,
             InstallerPage.Models,
-            InstallerPage.Residency,
             InstallerPage.Agents,
         };
 
@@ -340,8 +338,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         InstallerPage.Diagnose => Mode == StartChoice.Install ? "System check" : "Preparing",
         InstallerPage.Dependencies => "Prerequisites",
         InstallerPage.Package => "LocalAi package",
-        InstallerPage.Models => "Local models",
-        InstallerPage.Residency => "Video memory requirements",
+        InstallerPage.Models => "How models run on this computer",
         InstallerPage.Agents => "Client applications",
         InstallerPage.Confirm => "Ready to install",
         InstallerPage.Progress => "Installing",
@@ -363,9 +360,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         InstallerPage.Dependencies =>
             "Choose which prerequisites to install. Nothing is selected for you.",
         InstallerPage.Package => "Choose the LocalAi release to install.",
-        InstallerPage.Models => "Choose which local models to set up.",
-        InstallerPage.Residency =>
-            "Decide how strictly models must fit into video memory.",
+        InstallerPage.Models =>
+            "Video memory decides which models fit. Choose the rule first; the list below " +
+            "follows it.",
         InstallerPage.Agents =>
             "Choose how each client application should be integrated.",
         InstallerPage.Confirm =>
@@ -451,7 +448,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
         InstallerPage.Dependencies => dependencies.CanContinue,
         InstallerPage.Package => package.CanContinue,
         InstallerPage.Models => models.CanContinue,
-        InstallerPage.Residency => residency.CanContinue,
         InstallerPage.Agents => agents.CanContinue,
         _ => false,
     };
@@ -1638,6 +1634,16 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         diagnose.Load(diagnosis);
         residency.HasUsableAdapter = diagnose.HasUsableAdapter;
+        // The card the rule is about, named the way the machine reports it. The one the
+        // recommendation weighs against is the one with the most dedicated video memory, so
+        // that is the one the group names.
+        var weighed = diagnosis.Gpu.Adapters
+            .Where(adapter => !adapter.IsSoftware)
+            .OrderByDescending(adapter => adapter.DedicatedLocalBytes)
+            .FirstOrDefault();
+        residency.AdapterFound = weighed is null
+            ? string.Empty
+            : "Found: " + GpuAdapterDisplay.Describe(weighed);
         agents.ApplyDetection(diagnosis.Agents);
         await RefreshRecommendationAsync(diagnosis, cancellationToken);
 

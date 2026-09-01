@@ -3,10 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:LocalAi.Installer.ViewModels"
         Title="{Binding WindowTitle}"
-        Width="760"
-        Height="560"
-        MinWidth="720"
-        MinHeight="520"
+        Width="820"
+        Height="620"
+        MinWidth="780"
+        MinHeight="580"
         WindowStartupLocation="CenterScreen"
         Loaded="OnLoaded">
     <Window.Resources>
@@ -59,7 +59,9 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="180" />
+            <!-- 220, not 180: the merged page's rail entries are longer, and
+                 Russian runs 15-30% longer than English. -->
+            <ColumnDefinition Width="220" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -247,7 +249,9 @@
                         <TextBlock Text="{Binding Package.StatusText}" Style="{StaticResource Muted}" Margin="0,10,0,0" />
                     </StackPanel>
 
-                    <!-- Models -->
+                    <!-- Models and memory: the rule that decides what fits, above the list
+                         that follows from it. These were two pages, and the recompute the rule
+                         triggers landed on a page the reader had already left (#257). -->
                     <StackPanel>
                         <StackPanel.Style>
                             <Style TargetType="StackPanel">
@@ -259,9 +263,46 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
+
+                        <TextBlock Text="Video memory" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <TextBlock Text="{Binding Residency.AdapterFound}"
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="0,0,0,8"
+                                   Visibility="{Binding Residency.HasAdapterFound, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock Text="{Binding Residency.AdapterHint}"
+                                   Style="{StaticResource WarningText}" Margin="0,0,0,8"
+                                   Visibility="{Binding Residency.HasAdapterHint, Converter={StaticResource BoolToVisibility}}" />
+                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsRequireFullVram, Mode=TwoWay}" Margin="0,0,0,4">
+                            <TextBlock Text="Require the whole model in video memory (recommended)" />
+                        </RadioButton>
+                        <TextBlock Text="Refuses to run a model that does not fit. Fastest, and the only rule that never degrades an answer."
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,6"
+                                   Visibility="{Binding Residency.IsRequireFullVram, Converter={StaticResource BoolToVisibility}}" />
+                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsAllowPartialOffload, Mode=TwoWay}" Margin="0,0,0,4">
+                            <TextBlock Text="Allow part of the model in system memory &#8212; slower" />
+                        </RadioButton>
+                        <TextBlock Text="Needs an adapter that holds at least part of the model."
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,6"
+                                   Visibility="{Binding Residency.IsAllowPartialOffload, Converter={StaticResource BoolToVisibility}}" />
+                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsAllowCpu, Mode=TwoWay}" Margin="0,0,0,4">
+                            <TextBlock Text="Allow running on the processor &#8212; much slower" />
+                        </RadioButton>
+                        <TextBlock Text="Works without a usable adapter."
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,6"
+                                   Visibility="{Binding Residency.IsAllowCpu, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock Text="{Binding Residency.Warning}" Margin="0,4,0,0"
+                                   Style="{StaticResource WarningText}"
+                                   Visibility="{Binding Residency.HasWarning, Converter={StaticResource BoolToVisibility}}" />
+
+                        <TextBlock Text="Local models" FontWeight="SemiBold" Margin="0,16,0,6" />
+                        <!-- The anchor: it restates the rule inside the group the rule governs,
+                             so the dependency stays legible once the radios have scrolled away,
+                             and its count moves the moment the rule does. -->
+                        <TextBlock Text="{Binding Models.RuleSummary}"
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="0,0,0,8" />
                         <RadioButton GroupName="ModelMode" Content="Choose automatically for this computer"
                                      IsChecked="{Binding Models.IsAutomatic, Mode=TwoWay}" Margin="0,0,0,4" />
-                        <StackPanel Margin="20,0,0,10">
+                        <StackPanel Margin="20,0,0,10"
+                                    Visibility="{Binding Models.IsAutomatic, Converter={StaticResource BoolToVisibility}}">
                             <TextBlock Text="{Binding Models.AutomaticSummary}"
                                        Style="{StaticResource Muted}" FontSize="11" Margin="0,0,0,6" />
                             <ItemsControl ItemsSource="{Binding Models.AutomaticSelection}">
@@ -272,67 +313,29 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </StackPanel>
-
                         <RadioButton GroupName="ModelMode" Content="Choose exactly"
                                      IsChecked="{Binding Models.IsChooseExact, Mode=TwoWay}" Margin="0,0,0,4" />
                         <StackPanel Margin="20,0,0,10"
                                     Visibility="{Binding Models.IsChooseExact, Converter={StaticResource BoolToVisibility}}">
                             <TextBlock Text="Model" />
-                            <ComboBox Width="320" Height="24" HorizontalAlignment="Left" Margin="0,4,0,2"
-                                      ItemsSource="{Binding Models.CatalogModels}"
+                            <ComboBox ItemsSource="{Binding Models.CatalogModels}"
                                       SelectedItem="{Binding Models.SelectedModel, Mode=TwoWay}"
-                                      DisplayMemberPath="Tag" />
-                            <TextBlock Text="{Binding Models.SelectedModelPurpose}"
-                                       Style="{StaticResource Muted}" FontSize="11" Margin="0,0,0,8" />
+                                      DisplayMemberPath="Tag"
+                                      MaxWidth="320" HorizontalAlignment="Left" Height="24" Margin="0,4,0,8" />
                             <TextBlock Text="Context size" />
-                            <ComboBox Width="160" Height="24" HorizontalAlignment="Left" Margin="0,4,0,2"
-                                      ItemsSource="{Binding Models.AvailableContexts}"
-                                      SelectedItem="{Binding Models.SelectedContext, Mode=TwoWay}" />
+                            <ComboBox ItemsSource="{Binding Models.Contexts}"
+                                      SelectedItem="{Binding Models.SelectedContext, Mode=TwoWay}"
+                                      MaxWidth="160" HorizontalAlignment="Left" Height="24" Margin="0,4,0,6" />
                             <TextBlock Text="Only the sizes this model permits are offered. A smaller context needs less video memory."
                                        Style="{StaticResource Muted}" FontSize="11" />
                         </StackPanel>
-
                         <RadioButton GroupName="ModelMode" Content="Skip model setup"
                                      IsChecked="{Binding Models.IsSkip, Mode=TwoWay}" Margin="0,0,0,4" />
                         <TextBlock Text="Nothing is downloaded now. Models can be set up later."
-                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,0" />
+                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,0"
+                                   Visibility="{Binding Models.IsSkip, Converter={StaticResource BoolToVisibility}}" />
                     </StackPanel>
 
-                    <!-- Video memory -->
-                    <StackPanel>
-                        <StackPanel.Style>
-                            <Style TargetType="StackPanel">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding CurrentPage}" Value="{x:Static vm:InstallerPage.Residency}">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </StackPanel.Style>
-                        <TextBlock Text="{Binding Residency.AdapterHint}"
-                                   Style="{StaticResource WarningText}"
-                                   Margin="0,0,0,12"
-                                   Visibility="{Binding Residency.HasAdapterHint, Converter={StaticResource BoolToVisibility}}" />
-                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsRequireFullVram, Mode=TwoWay}" Margin="0,0,0,4">
-                            <TextBlock Text="Require the whole model in video memory (recommended)" />
-                        </RadioButton>
-                        <TextBlock Text="Refuses to run a model that does not fit. Fastest and predictable."
-                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,10" />
-                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsAllowPartialOffload, Mode=TwoWay}" Margin="0,0,0,4">
-                            <TextBlock Text="Allow part of the model in system memory" />
-                        </RadioButton>
-                        <TextBlock Text="Needs an adapter that holds at least part of the model. Slower."
-                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,10" />
-                        <RadioButton GroupName="Residency" IsChecked="{Binding Residency.IsAllowCpu, Mode=TwoWay}" Margin="0,0,0,4">
-                            <TextBlock Text="Allow running on the processor" />
-                        </RadioButton>
-                        <TextBlock Text="Works without a usable adapter. Much slower."
-                                   Style="{StaticResource Muted}" FontSize="11" Margin="20,0,0,10" />
-                        <TextBlock Text="{Binding Residency.Warning}"
-                                   Style="{StaticResource WarningText}"
-                                   Visibility="{Binding Residency.HasWarning, Converter={StaticResource BoolToVisibility}}" />
-                    </StackPanel>
 
                     <!-- Client apps -->
                     <StackPanel>

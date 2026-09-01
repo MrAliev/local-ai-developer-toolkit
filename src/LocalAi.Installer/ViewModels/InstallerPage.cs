@@ -14,7 +14,6 @@ public enum InstallerPage
     Dependencies,
     Package,
     Models,
-    Residency,
     Agents,
     Confirm,
     Progress,

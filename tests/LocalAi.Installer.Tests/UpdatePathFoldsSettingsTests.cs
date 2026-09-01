@@ -19,7 +19,8 @@ public sealed class UpdatePathFoldsSettingsTests
         var wizard = new InstallerWizardViewModel(StartChoice.Install);
 
         Assert.False(wizard.AreSettingsFolded);
-        Assert.Equal(9, wizard.StepList.Count);
+        // Video memory merged into the models page, so eight rather than nine.
+        Assert.Equal(8, wizard.StepList.Count);
     }
 
     [Fact]
@@ -79,8 +80,8 @@ public sealed class UpdatePathFoldsSettingsTests
         wizard.RevealSettings();
 
         Assert.False(wizard.AreSettingsFolded);
-        // The four settings pages return; the release page is a separate question.
-        Assert.Equal(8, wizard.StepList.Count);
+        // The settings pages return; the release page is a separate question.
+        Assert.Equal(7, wizard.StepList.Count);
         Assert.Equal(InstallerPage.Dependencies, wizard.CurrentPage);
     }
 

@@ -83,6 +83,27 @@ public sealed class ResidencyPageViewModel : ObservableObject
 
     public bool HasAdapterHint => !HasUsableAdapter;
 
+    /// <summary>
+    /// Which card the rule is about, in the words the machine reports it.
+    ///
+    /// Set from the adapter the recommendation weighed against — the one with the most
+    /// dedicated video memory — so the group states its subject rather than leaving the
+    /// reader to infer it from a number further down.
+    /// </summary>
+    public string AdapterFound
+    {
+        get => adapterFound;
+        set
+        {
+            SetProperty(ref adapterFound, value);
+            OnPropertyChanged(nameof(HasAdapterFound));
+        }
+    }
+
+    public bool HasAdapterFound => !string.IsNullOrWhiteSpace(AdapterFound);
+
+    private string adapterFound = string.Empty;
+
     public string AdapterHint => HasUsableAdapter
         ? string.Empty
         : "No adapter with dedicated video memory was found. With the strict setting no " +
