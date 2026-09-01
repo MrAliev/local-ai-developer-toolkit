@@ -2,17 +2,9 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
-
-/// <summary>
-/// The languages the installer speaks. The same two every document in this repository comes in.
-/// </summary>
-public enum InstallerLanguage
-{
-    English,
-    Russian,
-}
 
 /// <summary>
 /// Remembers which language somebody chose, so the answer outlives the run that gave it —

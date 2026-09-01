@@ -1,3 +1,4 @@
+using LocalAi.Installer.Core;
 namespace LocalAi.Installer.Tests;
 
 /// <summary>

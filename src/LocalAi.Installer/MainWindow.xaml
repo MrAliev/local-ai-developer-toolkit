@@ -31,7 +31,8 @@
         </Style>
 
         <Style x:Key="NavButton" TargetType="Button">
-            <Setter Property="Width" Value="96" />
+            <Setter Property="MinWidth" Value="96" />
+            <Setter Property="Padding" Value="12,0" />
             <Setter Property="Height" Value="28" />
             <Setter Property="Margin" Value="6,0,0,0" />
         </Style>
@@ -122,8 +123,12 @@
                                 <DataTemplate>
                                     <Grid Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="150" />
-                                            <ColumnDefinition Width="80" />
+                                            <!-- Auto with a floor rather than fixed: "Установлено"
+                                                 and "Не найдено" do not fit the 80 that held
+                                                 "Found", and a status clipped to "Установл" is
+                                                 worse than a column that grows. -->
+                                            <ColumnDefinition Width="Auto" MinWidth="150" />
+                                            <ColumnDefinition Width="Auto" MinWidth="80" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="SemiBold" />
@@ -246,7 +251,7 @@
                                    Text="A folder holding release-manifest.json, release-manifest.sig and localai-package.zip. Leave empty to install from GitHub. The manifest is verified against the key built into this installer either way; models still come from the Ollama registry." />
                         <TextBox Text="{Binding Package.SourceFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  Width="480" Height="24" HorizontalAlignment="Left" Margin="0,0,0,8" />
-                        <Button Content="Check again" Width="140" Height="26" HorizontalAlignment="Left"
+                        <Button Content="Check again" MinWidth="140" Padding="12,0" Height="26" HorizontalAlignment="Left"
                                 IsEnabled="{Binding Package.CanCheck}"
                                 Click="OnPackageCheckRelease" />
                         <TextBlock Text="{Binding Package.StatusText}" Style="{StaticResource Muted}" Margin="0,10,0,0" />

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using LocalAi.Installer.ViewModels;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer;
 

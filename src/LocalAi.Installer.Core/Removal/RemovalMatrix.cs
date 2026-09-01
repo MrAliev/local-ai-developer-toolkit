@@ -151,59 +151,106 @@ public static class RemovalMatrix
     public static string Title(RemovalItem item) =>
         item switch
         {
-            RemovalItem.Binaries => "Binaries, launcher, version pointer",
-            RemovalItem.RepositoryIndexes => "Repository indexes and overlays",
-            RemovalItem.Settings => "Settings files",
-            RemovalItem.TransientState => "Queue, archive, quarantine, telemetry",
-            RemovalItem.OtherRuntimeFiles => "Everything else in the runtime root",
-            RemovalItem.ClaudeIntegration => "Claude integration",
-            RemovalItem.CodexIntegration => "Codex integration",
-            RemovalItem.GitHooks => "Git hook dispatchers",
-            RemovalItem.SigningKeys => "Release signing keys",
+            RemovalItem.Binaries => InstallerCulture.Pick(
+                "Binaries, launcher, version pointer",
+                "Бинарные файлы, launcher, указатель версии"),
+            RemovalItem.RepositoryIndexes => InstallerCulture.Pick(
+                "Repository indexes and overlays",
+                "Индексы репозиториев и overlay"),
+            RemovalItem.Settings => InstallerCulture.Pick(
+                "Settings files",
+                "Файлы настроек"),
+            RemovalItem.TransientState => InstallerCulture.Pick(
+                "Queue, archive, quarantine, telemetry",
+                "Очередь, архив, карантин, телеметрия"),
+            RemovalItem.OtherRuntimeFiles => InstallerCulture.Pick(
+                "Everything else in the runtime root",
+                "Всё остальное в корне рантайма"),
+            RemovalItem.ClaudeIntegration => InstallerCulture.Pick(
+                "Claude integration",
+                "Интеграция с Claude"),
+            RemovalItem.CodexIntegration => InstallerCulture.Pick(
+                "Codex integration",
+                "Интеграция с Codex"),
+            RemovalItem.GitHooks => InstallerCulture.Pick(
+                "Git hook dispatchers",
+                "Диспетчеры хуков Git"),
+            RemovalItem.SigningKeys => InstallerCulture.Pick(
+                "Release signing keys",
+                "Ключи подписи релизов"),
             _ => throw new ArgumentOutOfRangeException(nameof(item), item, null),
         };
 
     public static string Note(RemovalItem item) =>
         item switch
         {
-            RemovalItem.Binaries => "Removing these is the uninstall.",
-            RemovalItem.RepositoryIndexes =>
+            RemovalItem.Binaries => InstallerCulture.Pick(
+                "Removing these is the uninstall.",
+                "Их удаление и есть деинсталляция."),
+            RemovalItem.RepositoryIndexes => InstallerCulture.Pick(
                 "Hours of embedding to rebuild; keeping them makes a reinstall pick the " +
                 "repositories back up at once.",
-            RemovalItem.Settings => "Hand-tuned; a reinstall honours them.",
-            RemovalItem.TransientState => "Transient state, nothing to preserve.",
-            RemovalItem.OtherRuntimeFiles =>
+                "На пересчёт эмбеддингов уйдут часы; если оставить, " +
+                "переустановка сразу подхватит репозитории."),
+            RemovalItem.Settings => InstallerCulture.Pick(
+                "Hand-tuned; a reinstall honours them.",
+                "Настроены вручную; переустановка их учитывает."),
+            RemovalItem.TransientState => InstallerCulture.Pick(
+                "Transient state, nothing to preserve.",
+                "Временное состояние, сохранять нечего."),
+            RemovalItem.OtherRuntimeFiles => InstallerCulture.Pick(
                 "Anything in the runtime root this installer does not recognise, listed by path.",
-            RemovalItem.ClaudeIntegration =>
+                "Всё в корне рантайма, чего этот установщик не распознаёт, " +
+                "перечислено по путям."),
+            RemovalItem.ClaudeIntegration => InstallerCulture.Pick(
                 "Server registrations and the managed block; your own text is untouched.",
-            RemovalItem.CodexIntegration =>
+                "Регистрации серверов и управляемый блок; ваш собственный " +
+                "текст не трогается."),
+            RemovalItem.CodexIntegration => InstallerCulture.Pick(
                 "Server registrations, their tool sub-tables, and the managed block.",
-            RemovalItem.GitHooks =>
+                "Регистрации серверов, их подтаблицы инструментов и " +
+                "управляемый блок."),
+            RemovalItem.GitHooks => InstallerCulture.Pick(
                 "Listed from the runtime manifests, each repository its own choice.",
-            RemovalItem.SigningKeys =>
+                "Перечислены по манифестам рантайма, каждый репозиторий — " +
+                "отдельный выбор."),
+            RemovalItem.SigningKeys => InstallerCulture.Pick(
                 "Kept unless separately confirmed: the offline backup then becomes the only copy.",
+                "Остаются, пока это не подтверждено отдельно: иначе " +
+                "офлайн-копия станет единственной."),
             _ => throw new ArgumentOutOfRangeException(nameof(item), item, null),
         };
 
     public static string Title(RemovalPreset preset) =>
         preset switch
         {
-            RemovalPreset.FullUninstall => "Full uninstall",
-            RemovalPreset.DisconnectClients => "Disconnect clients",
-            RemovalPreset.ReinstallFriendly => "Reinstall-friendly",
+            RemovalPreset.FullUninstall => InstallerCulture.Pick(
+                "Full uninstall",
+                "Полное удаление"),
+            RemovalPreset.DisconnectClients => InstallerCulture.Pick(
+                "Disconnect clients",
+                "Отключить клиентов"),
+            RemovalPreset.ReinstallFriendly => InstallerCulture.Pick(
+                "Reinstall-friendly",
+                "С заделом на переустановку"),
             _ => throw new ArgumentOutOfRangeException(nameof(preset), preset, null),
         };
 
     public static string Description(RemovalPreset preset) =>
         preset switch
         {
-            RemovalPreset.FullUninstall =>
+            RemovalPreset.FullUninstall => InstallerCulture.Pick(
                 "Everything LocalAi installed goes, except the signing keys unless you " +
                 "confirm those separately.",
-            RemovalPreset.DisconnectClients =>
+                "Уходит всё, что установил LocalAi, кроме ключей подписи — " +
+                "их надо подтвердить отдельно."),
+            RemovalPreset.DisconnectClients => InstallerCulture.Pick(
                 "The agents stop using LocalAi; the runtime stays exactly as it is.",
-            RemovalPreset.ReinstallFriendly =>
+                "Агенты перестают пользоваться LocalAi; рантайм остаётся ровно как есть."),
+            RemovalPreset.ReinstallFriendly => InstallerCulture.Pick(
                 "The binaries go; the indexes and settings a reinstall would honour stay.",
+                "Бинарные файлы уходят; индексы и настройки, которые учтёт " +
+                "переустановка, остаются."),
             _ => throw new ArgumentOutOfRangeException(nameof(preset), preset, null),
         };
 

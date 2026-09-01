@@ -1,6 +1,7 @@
 using LocalAi.Contracts.Activation;
 using LocalAi.TestFixtures;
 using LocalAi.Installer.ViewModels;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.Tests;
 

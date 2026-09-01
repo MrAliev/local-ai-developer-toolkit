@@ -4,6 +4,7 @@ using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Removal;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 

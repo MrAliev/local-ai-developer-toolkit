@@ -3,6 +3,7 @@ using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Removal;
 using LocalAi.Installer.ViewModels;
 using LocalAi.TestFixtures;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.Tests;
 

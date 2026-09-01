@@ -1,3 +1,4 @@
+using LocalAi.Installer.Core;
 using System.Globalization;
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Planning;
@@ -166,27 +167,3 @@ public sealed record AgentOption(string Agent, AgentChoice Choice)
 /// have their own page enumerations to keep track of where they are.
 /// </summary>
 public sealed record WizardStep(string Title, bool IsCurrent, bool IsDone);
-
-/// <summary>
-/// The language the installer speaks, for this run.
-///
-/// A mutable static, which is worth defending rather than hiding: the installer is one window
-/// at a time on one thread, the alternative is threading a language through five view-model
-/// constructors that tests already build directly, and every reader of it is a property
-/// evaluated when a screen paints.
-///
-/// Set once at startup from the remembered choice, and again when somebody picks a language on
-/// the start screen. It was declared long before any of that and read by nobody.
-/// </summary>
-public static class InstallerCulture
-{
-    public static InstallerLanguage Current { get; set; } = InstallerLanguage.English;
-
-    public static bool IsRussian => Current == InstallerLanguage.Russian;
-
-    /// <summary>The one of two strings this language calls for.</summary>
-    public static string Pick(string english, string russian) => IsRussian ? russian : english;
-
-    public static string CurrentCultureCode =>
-        IsRussian ? "ru" : CultureInfo.InvariantCulture.TwoLetterISOLanguageName;
-}
