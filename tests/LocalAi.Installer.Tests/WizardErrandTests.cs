@@ -209,6 +209,76 @@ public sealed class WizardErrandTests
     }
 
     /// <summary>
+    /// A release published while the wizard sat open is adopted. The whole point of the
+    /// re-check, and nothing covered it — the scripted feed could not tell one requested tag
+    /// from another, so only the failure path was ever exercised.
+    /// </summary>
+    [Fact]
+    public async Task A_release_published_while_the_wizard_waited_is_picked_up()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.51") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+        await wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+
+        feed.NewestTag = "0.1.52";
+        feed.Release = Release("0.1.52");
+        var report = new StringBuilder();
+        await wizard.RefreshLatestBeforeInstallAsync(report, TestContext.Current.CancellationToken);
+
+        Assert.Equal("0.1.52", wizard.Package.ResolvedTag);
+        Assert.Contains("was published after", report.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And when that newer release will not verify, the run keeps the one it had — including
+    /// the tag it will download by. Assigning the tag before the manifest resolved left the
+    /// wizard fetching the newer asset and checking it against the older hash, so the install
+    /// died claiming corruption right after promising to continue with the older release.
+    /// </summary>
+    [Fact]
+    public async Task A_newer_release_that_will_not_verify_leaves_the_old_tag_alone()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.51") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+        await wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+
+        feed.NewestTag = "0.1.52";
+        feed.ThrowOnResolve = true;
+        var report = new StringBuilder();
+        await wizard.RefreshLatestBeforeInstallAsync(report, TestContext.Current.CancellationToken);
+
+        Assert.Equal("0.1.51", wizard.Package.ResolvedTag);
+        Assert.Contains("continuing with 0.1.51", report.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A hung connection is not a cancellation. HttpClient times out on its own and throws
+    /// TaskCanceledException, which is an OperationCanceledException — so filtering by type
+    /// let it escape, abandon the run as "cancelled by the user", and leave the rail saying
+    /// "checking…" for the rest of the session.
+    /// </summary>
+    [Fact]
+    public async Task A_timeout_is_reported_rather_than_taken_for_a_cancellation()
+    {
+        var feed = new ScriptedFeed { TimeOut = true };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+
+        await wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(wizard.Package.IsResolving);
+        Assert.Equal("no release", wizard.VersionContext);
+    }
+
+    /// <summary>
     /// The release is resolved behind the first page, without anybody pressing "Check
     /// release" — which is what lets the rail name it at all on an installation.
     /// </summary>
@@ -294,9 +364,18 @@ public sealed class WizardErrandTests
 
         public bool Throw { get; set; }
 
+        /// <summary>A connection that hangs: HttpClient's own timeout, not a cancellation.</summary>
+        public bool TimeOut { get; set; }
+
         public TaskCompletionSource? Gate { get; set; }
 
         public int Resolves { get; private set; }
+
+        /// <summary>What "latest" resolves to, when the test wants it to differ.</summary>
+        public string? NewestTag { get; set; }
+
+        /// <summary>Thrown by ResolveAsync only, to model a manifest that will not verify.</summary>
+        public bool ThrowOnResolve { get; set; }
 
         public async Task<string> ResolveTagAsync(string requestedTag, CancellationToken ct)
         {
@@ -305,9 +384,14 @@ public sealed class WizardErrandTests
                 await gate.Task;
             }
 
+            if (TimeOut)
+            {
+                throw new TaskCanceledException("The request was canceled due to a timeout.");
+            }
+
             return Throw
                 ? throw new ReleaseResolutionException("the feed could not be reached")
-                : Release?.Manifest.ReleaseVersion ?? "0.0.0";
+                : NewestTag ?? Release?.Manifest.ReleaseVersion ?? "0.0.0";
         }
 
         public async Task<ResolvedRelease> ResolveAsync(
@@ -317,7 +401,7 @@ public sealed class WizardErrandTests
         {
             Resolves++;
             await Task.CompletedTask;
-            return Throw
+            return Throw || ThrowOnResolve
                 ? throw new ReleaseResolutionException("the feed could not be reached")
                 : Release ?? throw new ReleaseResolutionException("no release");
         }

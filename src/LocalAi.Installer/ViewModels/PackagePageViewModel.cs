@@ -187,6 +187,13 @@ public sealed class PackagePageViewModel : ObservableObject
     /// </summary>
     public bool IsResolving { get; private set; }
 
+    /// <summary>
+    /// Takes the flag down without saying anything else. For a resolve whose answer nobody
+    /// wants any more: the question moved on, so there is nothing to report, but the flag it
+    /// raised still has to come down or the rail keeps claiming a check is running.
+    /// </summary>
+    public void EndResolving() => IsResolving = false;
+
     /// <summary>Says a resolve has started; every terminal outcome below clears it.</summary>
     public void BeginResolving()
     {

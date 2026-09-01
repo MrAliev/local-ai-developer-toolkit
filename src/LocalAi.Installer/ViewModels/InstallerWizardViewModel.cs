@@ -163,6 +163,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     private bool hasReadInstalledVersion;
 
+    /// <summary>
+    /// Which resolve is the current one. The question alone cannot tell two resolves of the
+    /// same question apart — the automatic one and the "Check release" button ask identically
+    /// — and the older one finishing last would otherwise overwrite the newer answer.
+    /// </summary>
+    private int resolveGeneration;
+
 
     private readonly Func<string?> readInstalledVersion;
     private readonly AgentIntegrationPageViewModel agents = new();
@@ -1865,6 +1872,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         // simply by the tag or the folder being edited. Comparing the question itself covers
         // both; a counter only covered the first.
         var asked = (package.ReleaseVersion, package.SourceFolder);
+        var mine = ++resolveGeneration;
         package.BeginResolving();
         RefreshAll();
         try
@@ -1875,7 +1883,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // the field can keep its convenient default.
             var tag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
             var release = await feed.ResolveAsync(tag, WorkingDirectory, cancellationToken);
-            if (asked != (package.ReleaseVersion, package.SourceFolder))
+            if (mine != resolveGeneration ||
+                asked != (package.ReleaseVersion, package.SourceFolder))
             {
                 // The question changed while this was in flight — the person typed a
                 // different tag, or chose a folder. Answering the old one here would put a
@@ -1886,16 +1895,32 @@ public sealed class InstallerWizardViewModel : ObservableObject
             resolvedTag = tag;
             package.SelectResolvedRelease(release, tag);
         }
-        catch (ReleaseResolutionException exception)
-            when (asked == (package.ReleaseVersion, package.SourceFolder))
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            package.ReportUnavailable(exception.Message);
-        }
-        catch (Exception exception)
-            when (exception is not OperationCanceledException
-                && asked == (package.ReleaseVersion, package.SourceFolder))
-        {
-            package.ReportUnavailable($"The release could not be checked: {exception.Message}");
+            // The token, not the exception type: a black-holed connection times out inside
+            // HttpClient and arrives as TaskCanceledException, which is an
+            // OperationCanceledException and is not a cancellation at all. Filtering by type
+            // let it escape as "cancelled by the user", abandoning the run and leaving the
+            // rail saying "checking…" for the rest of the session.
+            //
+            // Reported even when the question has moved on: a stale answer must be silent,
+            // but a stale failure that escapes becomes an unexpected-error banner, which is
+            // louder than the fresh one it is not.
+            var stale = mine != resolveGeneration ||
+                asked != (package.ReleaseVersion, package.SourceFolder);
+            if (!stale)
+            {
+                package.ReportUnavailable(
+                    exception is ReleaseResolutionException
+                        ? exception.Message
+                        : $"The release could not be checked: {exception.Message}");
+            }
+            else
+            {
+                // Nothing to say about a question nobody is asking, but the flag it set has
+                // to come down or the rail keeps claiming a check is running.
+                package.EndResolving();
+            }
         }
 
         RefreshAll();
@@ -1964,10 +1989,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 report,
                 $"LocalAi package: {newest} was published after this release was checked; " +
                 "resolving it instead.");
+            // Resolved first, then recorded: assigning the tag before this await left the
+            // wizard pointing at a release whose manifest had failed to verify, so the run
+            // downloaded that asset and checked it against the previous manifest's hash.
+            var release = await feed.ResolveAsync(newest, WorkingDirectory, cancellationToken);
             resolvedTag = newest;
-            package.SelectResolvedRelease(
-                await feed.ResolveAsync(newest, WorkingDirectory, cancellationToken),
-                newest);
+            package.SelectResolvedRelease(release, newest);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
