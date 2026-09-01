@@ -52,6 +52,41 @@ public sealed class NoticeReportsDurationTests
         Assert.DoesNotContain("в очереди", notice, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The total includes the wait even when the wait is too small to name. Dropping it there
+    /// went unnoticed by every test, because each one that checked a number passed no wait at
+    /// all — and that is the branch almost every call takes.
+    /// </summary>
+    [Fact]
+    public void A_wait_too_small_to_name_is_still_counted()
+    {
+        var notice = Result(
+            queued: TimeSpan.FromSeconds(0.3),
+            ran: TimeSpan.FromSeconds(5)).Notice;
+
+        Assert.Contains("5.3 с", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("в очереди", notice, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Both halves of the threshold, at their boundaries: a wait under half a second is never
+    /// named however large its share, and one over it is named only when the share is real.
+    /// Neither constant was pinned, so both could be loosened without a test noticing.
+    /// </summary>
+    [Theory]
+    [InlineData(0.4, 0.5, false)]   // large share, under the floor
+    [InlineData(0.6, 1.0, true)]    // over the floor, share well past a fifth
+    [InlineData(0.6, 20.0, false)]  // over the floor, share too small to matter
+    // Between a tenth and a fifth: named under a looser rule, silent under this one, so the
+    // share itself is pinned rather than only the floor.
+    [InlineData(0.6, 4.0, false)]
+    public void The_threshold_holds_at_both_of_its_edges(double queued, double ran, bool named)
+    {
+        var notice = Result(TimeSpan.FromSeconds(queued), TimeSpan.FromSeconds(ran)).Notice;
+
+        Assert.Equal(named, notice.Contains("в очереди", StringComparison.Ordinal));
+    }
+
     /// <summary>Tenths while that means something, whole seconds once it does not.</summary>
     [Fact]
     public void A_long_call_is_reported_in_whole_seconds()

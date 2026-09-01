@@ -30,10 +30,16 @@ public sealed record LocalResult(
     /// at, four seconds of inference is a model to look at. The wait is only named when it is
     /// a real share of the total, so the ordinary line stays short.
     /// </summary>
-    private string DescribeDuration()
+    private string DescribeDuration() => DescribeDuration(Receipt);
+
+    /// <summary>
+    /// Shared with the translation result, which reports the same way and would otherwise
+    /// grow a second copy of this to drift against.
+    /// </summary>
+    internal static string DescribeDuration(LocalUsageReceipt receipt)
     {
-        var total = Receipt.QueueDuration + Receipt.ExecutionDuration;
-        var queued = Receipt.QueueDuration;
+        var total = receipt.QueueDuration + receipt.ExecutionDuration;
+        var queued = receipt.QueueDuration;
         return queued >= TimeSpan.FromSeconds(0.5) && queued >= total * 0.2
             ? $"{Seconds(total)} (в очереди {Seconds(queued)})"
             : Seconds(total);
@@ -585,7 +591,16 @@ public sealed class LocalTasks
                 $"{validation.Detail}.");
         }
 
-        var receipt = attempt.Receipt;
+        var everyCall = attempts.SelectMany(candidate => candidate.Receipts).ToArray();
+        var receipt = attempt.Receipt with
+        {
+            QueueDuration = everyCall.Aggregate(
+                TimeSpan.Zero,
+                (total, each) => total + each.QueueDuration),
+            ExecutionDuration = everyCall.Aggregate(
+                TimeSpan.Zero,
+                (total, each) => total + each.ExecutionDuration),
+        };
         var model = receipt.Routing?.SelectedModel ?? receipt.Model;
         var answer = TranslationAttribution.Append(
             attempt.Text,
@@ -707,6 +722,7 @@ public sealed record LocalTranslationResult(
 {
     public string Notice =>
         $"🔧 Локально: {Model}. Перевод проверен: {Validation.Detail}. " +
+        $"{LocalResult.DescribeDuration(Receipt)}. " +
         $"Локально обработано примерно {TokenEstimator.Describe(LocalTokensProcessed)} токенов; " +
         $"на облачной генерации сэкономлено примерно {TokenEstimator.Describe(SavedTokens)}; " +
         $"чистое сокращение облачного контекста — " +

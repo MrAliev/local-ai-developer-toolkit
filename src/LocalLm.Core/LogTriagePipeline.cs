@@ -66,6 +66,12 @@ internal sealed class LogTriagePipeline(
         long fragmentCount = 0;
         long originalTokens = 0;
         LocalUsageReceipt? lastReceipt = null;
+        // Accumulated, not overwritten. A triage is one model call per fragment plus the
+        // reduction rounds, and reporting the last one as the whole run understated a
+        // hundred-second job as three seconds -- in a line whose purpose is to make the cost
+        // of a local call visible. The saving beside it was accumulated all along.
+        var queued = TimeSpan.Zero;
+        var executed = TimeSpan.Zero;
         await foreach (var fragment in ReadFragmentsAsync(
                            source,
                            fragmentBudget,
@@ -84,6 +90,8 @@ internal sealed class LogTriagePipeline(
                 capacity,
                 cancellationToken);
             lastReceipt = result.Receipt;
+            queued += result.Receipt.QueueDuration;
+            executed += result.Receipt.ExecutionDuration;
             await reducer.AddAsync(result.Value, cancellationToken);
         }
 
@@ -91,11 +99,14 @@ internal sealed class LogTriagePipeline(
         if (reduced.Receipt is not null)
         {
             lastReceipt = reduced.Receipt;
+            queued += reduced.Receipt.QueueDuration;
+            executed += reduced.Receipt.ExecutionDuration;
         }
 
         var answer = reduced.Text;
-        var receipt = lastReceipt
-            ?? throw new InvalidOperationException("Log triage produced no model receipt.");
+        var receipt = (lastReceipt
+            ?? throw new InvalidOperationException("Log triage produced no model receipt."))
+            with { QueueDuration = queued, ExecutionDuration = executed };
         var detail = source.Path is null
             ? $"разобран текстовый лог ({source.Text!.Length} символов), " +
               $"фрагментов: {fragmentCount}, контекст: {capacity.ContextTokens}"
