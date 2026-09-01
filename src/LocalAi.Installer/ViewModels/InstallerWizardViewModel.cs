@@ -1503,11 +1503,20 @@ public sealed class InstallerWizardViewModel : ObservableObject
         if (!package.HasPackage)
         {
             builder.AppendLine();
+            // What the run will actually do, which on an update is usually nothing at all:
+            // prerequisites are already installed and nothing is ticked, so the shipped
+            // "only the prerequisites above will be applied" told the reader about work that
+            // was not going to happen, on the page whose whole purpose is to say what is
+            // (#264).
+            var remaining = dependencies.Dependencies
+                .Any(dependency => dependency.IsConsented && dependency.IsInstallable)
+                ? "Only the prerequisites above will be applied."
+                : "Nothing will be applied.";
             builder.AppendLine(
                 "Warning: no release has been verified, so LocalAi itself will not be " +
-                "installed and the client applications will be left unconfigured. Only the " +
-                "prerequisites above will be applied. Choose a release below and verify it " +
-                "before continuing.");
+                "installed and the client applications will be left unconfigured. " +
+                remaining +
+                " Choose a release below and verify it before continuing.");
         }
 
         return builder.ToString().Trim();
