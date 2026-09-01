@@ -55,10 +55,80 @@ public sealed class UninstallWizardViewModelTests : IDisposable
         Assert.True(Row(wizard, RemovalItem.Binaries).IsSelected);
         Assert.False(Row(wizard, RemovalItem.RepositoryIndexes).IsSelected);
         Assert.False(Row(wizard, RemovalItem.Settings).IsSelected);
-        Assert.True(Row(wizard, RemovalItem.ClaudeIntegration).NeedsDecision);
+        // The three client rows used to arrive here undecided. They are pinned to kept now:
+        // a reinstall rewrites all three, so asking was asking twice.
         Assert.False(Row(wizard, RemovalItem.ClaudeIntegration).IsSelected);
-        Assert.Equal("your choice", Row(wizard, RemovalItem.ClaudeIntegration).DecisionText);
-        Assert.False(Row(wizard, RemovalItem.Binaries).NeedsDecision);
+        Assert.False(Row(wizard, RemovalItem.CodexIntegration).IsSelected);
+        Assert.False(Row(wizard, RemovalItem.GitHooks).IsSelected);
+        Assert.All(wizard.Rows, row => Assert.False(row.NeedsDecision, row.Title));
+    }
+
+    /// <summary>
+    /// The sentence that replaces the "your choice" hint the pinning took away — one wording
+    /// for each way of arriving at this preset, because on one of them an installation follows
+    /// and on the other nothing does.
+    /// </summary>
+    [Fact]
+    public async Task A_reinstall_says_the_installation_will_rewrite_what_it_keeps()
+    {
+        var wizard = await Wizard(
+            preset: RemovalPreset.ReinstallFriendly,
+            offersInstallAfterwards: true);
+
+        Assert.True(await wizard.MoveNextAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(wizard.HasKeepNotice);
+        Assert.Contains(
+            "the installation that follows this removal rewrites all three",
+            wizard.KeepNotice,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Picked by hand out of a plain uninstall, nothing follows — so the sentence says where
+    /// the decision went instead of promising a rewrite that is not coming.
+    /// </summary>
+    [Fact]
+    public async Task Picking_the_preset_by_hand_is_told_where_the_choice_went()
+    {
+        var wizard = await Wizard(preset: RemovalPreset.ReinstallFriendly);
+
+        Assert.True(await wizard.MoveNextAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(wizard.HasKeepNotice);
+        Assert.Contains("go back and tick their rows", wizard.KeepNotice, StringComparison.Ordinal);
+        Assert.DoesNotContain("follows", wizard.KeepNotice, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A row ticked by hand outranks the preset that filled it in, and the sentence has to
+    /// stop rather than describe a run that is not happening.
+    /// </summary>
+    [Fact]
+    public async Task Overriding_a_pinned_row_silences_the_sentence()
+    {
+        var wizard = await Wizard(
+            preset: RemovalPreset.ReinstallFriendly,
+            offersInstallAfterwards: true);
+        Row(wizard, RemovalItem.ClaudeIntegration).IsSelected = true;
+
+        Assert.True(await wizard.MoveNextAsync(TestContext.Current.CancellationToken));
+
+        Assert.False(wizard.HasKeepNotice);
+        Assert.Equal(string.Empty, wizard.KeepNotice);
+    }
+
+    /// <summary>
+    /// A full uninstall removes those rows outright; there is nothing kept to explain.
+    /// </summary>
+    [Fact]
+    public async Task A_full_uninstall_has_no_such_sentence()
+    {
+        var wizard = await Wizard();
+
+        Assert.True(await wizard.MoveNextAsync(TestContext.Current.CancellationToken));
+
+        Assert.False(wizard.HasKeepNotice);
     }
 
     [Fact]
@@ -289,6 +359,30 @@ public sealed class UninstallWizardViewModelTests : IDisposable
         Assert.True(wizard.CanContinueToInstall);
         Assert.Contains("Continue to install", wizard.StepDescription, StringComparison.Ordinal);
         Assert.True(Directory.Exists(Path.Combine(machine.Runtime, "repositories")));
+    }
+
+    /// <summary>
+    /// The finish page used to say the kept things were waiting "either way", which read as
+    /// "stopping here costs nothing". With the hook dispatchers kept it no longer is: every
+    /// connected repository fails its hooks until a launcher is back. Close is still on the
+    /// screen; the page just stops calling it equivalent.
+    /// </summary>
+    [Fact]
+    public async Task Stopping_after_the_removal_is_not_called_free()
+    {
+        var wizard = await Wizard(
+            preset: RemovalPreset.ReinstallFriendly,
+            offersInstallAfterwards: true);
+        await wizard.MoveNextAsync(TestContext.Current.CancellationToken);
+        wizard.IsConfirmed = true;
+
+        Assert.True(await wizard.RunAsync(TestContext.Current.CancellationToken));
+
+        Assert.DoesNotContain("either way", wizard.StepDescription, StringComparison.Ordinal);
+        Assert.Contains(
+            "will not work again until the launcher is back",
+            wizard.StepDescription,
+            StringComparison.Ordinal);
     }
 
     [Fact]

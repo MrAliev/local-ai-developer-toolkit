@@ -53,4 +53,54 @@ public sealed class WizardErrandTests
 
         Assert.False(string.IsNullOrWhiteSpace(context));
     }
+
+    /// <summary>
+    /// The line is captured, not recomputed on every read.
+    ///
+    /// It is built from the installed version on disk, and a clean reinstall deletes that
+    /// pointer half way through its own run. Rebuilt each time, the rail would flip from
+    /// "0.1.50 → 0.1.51" to "installing 0.1.51" the moment the removal half succeeded —
+    /// erasing, mid-run, the only statement of what was there before.
+    /// </summary>
+    [Theory]
+    [InlineData(StartChoice.Install)]
+    [InlineData(StartChoice.UpdateOrRepair)]
+    [InlineData(StartChoice.CleanReinstall)]
+    public void The_version_line_is_captured_rather_than_recomputed(StartChoice mode)
+    {
+        var wizard = new InstallerWizardViewModel(mode);
+
+        Assert.Same(wizard.VersionContext, wizard.VersionContext);
+    }
+
+    /// <summary>
+    /// The consent is worded for the run it consents to. "I have reviewed these settings" was
+    /// the same sentence on all three errands, and on a reinstall it was the wrong one: what
+    /// the person is agreeing to there is a removal followed by an installation, not a set of
+    /// settings.
+    /// </summary>
+    [Theory]
+    [InlineData(StartChoice.Install, "installed")]
+    [InlineData(StartChoice.UpdateOrRepair, "change")]
+    [InlineData(StartChoice.CleanReinstall, "removed")]
+    public void The_consent_names_what_this_run_does(StartChoice mode, string expected)
+    {
+        Assert.Contains(
+            expected,
+            new InstallerWizardViewModel(mode).ConsentText,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// One tick over one list. Two boxes on one page teach people to tick boxes, so the
+    /// reinstall consent covers both halves in a single sentence rather than asking twice.
+    /// </summary>
+    [Fact]
+    public void A_reinstall_consents_to_both_halves_at_once()
+    {
+        var consent = new InstallerWizardViewModel(StartChoice.CleanReinstall).ConsentText;
+
+        Assert.Contains("removed", consent, StringComparison.Ordinal);
+        Assert.Contains("installed", consent, StringComparison.Ordinal);
+    }
 }

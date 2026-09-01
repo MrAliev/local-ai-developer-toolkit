@@ -69,15 +69,22 @@ public sealed class RemovalMatrixTests
         Assert.True(selection.Includes(RemovalItem.TransientState));
         Assert.False(selection.Includes(RemovalItem.RepositoryIndexes));
         Assert.False(selection.Includes(RemovalItem.Settings));
-        Assert.Equal(
-            [RemovalItem.ClaudeIntegration, RemovalItem.CodexIntegration, RemovalItem.GitHooks],
-            selection.ItemsNeedingDecision);
+        // The client registrations and the hooks are kept rather than asked about: the
+        // installation that follows a reinstall rewrites all three, so asking is putting the
+        // same question twice and letting the two answers disagree.
+        Assert.False(selection.Includes(RemovalItem.ClaudeIntegration));
+        Assert.False(selection.Includes(RemovalItem.CodexIntegration));
+        Assert.False(selection.Includes(RemovalItem.GitHooks));
+        Assert.Empty(selection.ItemsNeedingDecision);
     }
 
     [Fact]
     public void A_row_the_preset_left_open_is_prefilled_as_kept()
     {
-        var selection = RemovalSelection.FromPreset(RemovalPreset.ReinstallFriendly);
+        // Full uninstall is the preset that still leaves one open — the signing keys, which
+        // no preset may remove on somebody's behalf.
+        var selection = RemovalSelection.FromPreset(RemovalPreset.FullUninstall);
+        Assert.NotEmpty(selection.ItemsNeedingDecision);
 
         Assert.All(
             selection.ItemsNeedingDecision,

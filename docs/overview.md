@@ -526,14 +526,29 @@ values still appear on the review page — a folded page must never become an un
 and one button there brings all four back for the run where a carried-forward answer is wrong.
 
 That answer travels with the window: the title bar names the errand, and the step
-rail carries a version line on every page — `installing 0.1.51`, `0.1.50 → 0.1.51`, or
-`0.1.50 → 0.1.50 (repair)`. It is the one place a version is a question; everywhere else the
+rail carries a version line on every page — `installing 0.1.51`, `0.1.50 → 0.1.51`,
+`0.1.50 → 0.1.50 (repair)`, or `0.1.50 → 0.1.51 (reinstall)`. That line is read from disk once
+and then stated, not re-read: a reinstall deletes the version pointer half way through its own
+run, and a line rebuilt on every page would flip to `installing 0.1.51` at that moment,
+erasing mid-run the only statement of what was there. The consent is worded for the errand
+too — a run that removes before it installs says so, rather than asking somebody to agree
+they have reviewed "these settings". It is the one place a version is a question; everywhere else the
 wizard states it. An installation registers itself in Apps & features, whose entry runs a copy of the
 installer parked inside the runtime root — so removal is still reachable long after the
 downloaded file is gone. Removal is a matrix rather than one hammer: three presets over rows
 that change one at a time, every removal listed before anything happens, the broker asked to
 finish before the root is touched, and the release signing key kept unless separately
 confirmed.
+
+The reinstall-friendly preset keeps the client registrations and the hook dispatchers rather
+than asking about them: the installation that follows rewrites all three, and a question put
+twice gets two answers that disagree. The review page says so in the words of the arrival —
+reached from a clean reinstall, that the installation to come rewrites them; reached by
+picking the preset by hand in a plain uninstall, that nothing here disconnects a client and
+which rows to tick to change that. The one thing that genuinely breaks in between is stated
+the same way: dispatchers left pointing at a launcher that has gone are a permanent state when
+nothing follows, and an interval when an installation does, so the kept-item note says which
+of the two this run is producing, and the finish page stops calling stopping there free.
 
 A version directory is named after the commit it was built from, so the pointer alone cannot
 say which release is installed. `bin\installed-release.json` records that, beside the pointer

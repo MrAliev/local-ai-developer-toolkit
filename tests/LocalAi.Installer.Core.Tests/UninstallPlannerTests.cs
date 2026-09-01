@@ -316,6 +316,39 @@ public sealed class UninstallPlannerTests : IDisposable
                 StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A launcher removed with the dispatchers left in place breaks every connected
+    /// repository. Whether that is a state or an interval depends on something the planner
+    /// cannot see — so it is told, and the two answers say different things.
+    /// </summary>
+    [Fact]
+    public async Task The_broken_hooks_are_an_interval_when_an_installation_follows()
+    {
+        var selection = RemovalSelection.FromPreset(RemovalPreset.ReinstallFriendly);
+
+        var alone = await Plan(selection);
+        var beforeAnInstall = await machine.PlanAsync(
+            selection,
+            TestContext.Current.CancellationToken,
+            installationFollows: true);
+
+        var stated = Assert.Single(
+            alone.Retained,
+            notice => notice.Title == "Git hook dispatchers");
+        Assert.Contains("from then on", stated.Detail, StringComparison.Ordinal);
+        Assert.Contains("remove them here or by hand", stated.Detail, StringComparison.Ordinal);
+
+        var bounded = Assert.Single(
+            beforeAnInstall.Retained,
+            notice => notice.Title == "Git hook dispatchers");
+        Assert.Contains(
+            "until the installation that follows puts it back",
+            bounded.Detail,
+            StringComparison.Ordinal);
+        // Advice to do destructive work for a reason that no longer holds.
+        Assert.DoesNotContain("remove them here", bounded.Detail, StringComparison.Ordinal);
+    }
+
     private Task<UninstallPlan> Plan(RemovalSelection selection) =>
         machine.PlanAsync(selection, TestContext.Current.CancellationToken);
 }

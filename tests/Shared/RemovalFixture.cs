@@ -84,13 +84,14 @@ internal sealed class RemovalFixture : IDisposable
     public Task<UninstallPlan> PlanAsync(
         RemovalSelection selection,
         CancellationToken cancellationToken,
-        string? registrySubKey = null) =>
+        string? registrySubKey = null,
+        bool installationFollows = false) =>
         new UninstallPlanner(
                 Layout,
                 Home,
                 HooksPathReader,
                 registrySubKey: registrySubKey ?? UnusedRegistrySubKey)
-            .PlanAsync(selection, cancellationToken);
+            .PlanAsync(selection, cancellationToken, installationFollows);
 
     /// <summary>
     /// A key nothing writes, so a planner built by a test never reads the machine's real

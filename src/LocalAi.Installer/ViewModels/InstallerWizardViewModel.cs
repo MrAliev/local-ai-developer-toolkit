@@ -154,6 +154,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private ModelResidencyPolicy? storedResidency;
 
     private bool? storedUpdateCheck;
+
+    /// <summary>The version line, read from disk once and then stated, not re-read.</summary>
+    private string? heldVersionContext;
     private readonly AgentIntegrationPageViewModel agents = new();
     private readonly ReviewApplyPageViewModel review = new();
     private readonly FinishPageViewModel finish = new();
@@ -292,6 +295,18 @@ public sealed class InstallerWizardViewModel : ObservableObject
     }
 
     /// <summary>
+    /// The consent, in the words of the run it consents to. One tick over one list: two boxes
+    /// on one page train people to tick boxes.
+    /// </summary>
+    public string ConsentText => Mode switch
+    {
+        StartChoice.UpdateOrRepair => "I have read what will change and want to continue.",
+        StartChoice.CleanReinstall =>
+            "I have read what will be removed and what will be installed, and want to continue.",
+        _ => "I have read what will be installed and want to continue.",
+    };
+
+    /// <summary>
     /// What this run is, in the title bar. An update that calls itself "LocalAi Setup" is the
     /// same wizard as an install, which is exactly the impression that has to stop.
     /// </summary>
@@ -313,24 +328,39 @@ public sealed class InstallerWizardViewModel : ObservableObject
     {
         get
         {
-            var installed = InstalledVersionReader
-                .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
-                .DisplayName;
-            var resolved = package.Resolved?.Manifest.ReleaseVersion;
-            if (installed is null)
-            {
-                return resolved is null ? "installing" : "installing " + resolved;
-            }
-
-            if (resolved is null)
-            {
-                return installed + " → checking…";
-            }
-
-            return string.Equals(installed, resolved, StringComparison.OrdinalIgnoreCase)
-                ? installed + " → " + resolved + " (repair)"
-                : installed + " → " + resolved;
+            // Captured, not recomputed. This reads the installed version from disk, and a
+            // reinstall deletes that pointer half way through its own run — leaving the line
+            // to flip from "0.1.50 → 0.1.51" to "installing 0.1.51" and erase the only
+            // statement of what was there.
+            heldVersionContext ??= BuildVersionContext();
+            return heldVersionContext;
         }
+    }
+
+    private string BuildVersionContext()
+    {
+        var installed = InstalledVersionReader
+            .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
+            .DisplayName;
+        var resolved = package.Resolved?.Manifest.ReleaseVersion;
+        if (installed is null)
+        {
+            return resolved is null ? "installing" : "installing " + resolved;
+        }
+
+        if (resolved is null)
+        {
+            return installed + " → checking…";
+        }
+
+        if (Mode == StartChoice.CleanReinstall)
+        {
+            return installed + " → " + resolved + " (reinstall)";
+        }
+
+        return string.Equals(installed, resolved, StringComparison.OrdinalIgnoreCase)
+            ? installed + " → " + resolved + " (repair)"
+            : installed + " → " + resolved;
     }
 
     public string StepTitle => CurrentPage switch
@@ -1538,6 +1568,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(StepTitle));
         OnPropertyChanged(nameof(StepDescription));
         OnPropertyChanged(nameof(StepStatus));
+        if (!isRunning)
+        {
+            heldVersionContext = BuildVersionContext();
+        }
+
         OnPropertyChanged(nameof(VersionContext));
         OnPropertyChanged(nameof(AreSettingsFolded));
         OnPropertyChanged(nameof(IsReleaseFolded));

@@ -131,6 +131,12 @@ public static class RemovalMatrix
                 RemovalItem.RepositoryIndexes or
                 RemovalItem.Settings or
                 RemovalItem.SigningKeys => RemovalDisposition.Keep,
+                // Kept rather than asked. On a reinstall the installation that follows
+                // rewrites all three, so asking whether to remove them is asking the same
+                // question twice and answering it differently each time.
+                RemovalItem.ClaudeIntegration or
+                RemovalItem.CodexIntegration or
+                RemovalItem.GitHooks => RemovalDisposition.Keep,
                 _ => RemovalDisposition.Ask,
             },
             _ => throw new ArgumentOutOfRangeException(nameof(preset), preset, null),
