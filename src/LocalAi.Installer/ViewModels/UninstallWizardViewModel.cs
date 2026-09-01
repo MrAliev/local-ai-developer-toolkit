@@ -424,7 +424,7 @@ public sealed class UninstallWizardViewModel : ObservableObject
         isComplete = false;
         hasRunError = false;
         CurrentPage = UninstallPage.Progress;
-        SetProgress(5, "Asking LocalAi to stop...");
+        SetProgress(0, "Asking LocalAi to stop…");
 
         var log = new StringBuilder();
         InstallerRunJournal? journal = null;
@@ -432,7 +432,12 @@ public sealed class UninstallWizardViewModel : ObservableObject
         {
             journal = InstallerRunJournal.Start(LogDirectory);
             var outcome = await new UninstallRunner(layout, processRunner)
-                .ApplyAsync(plan, journal, linked.Token);
+                .ApplyAsync(
+                    plan,
+                    journal,
+                    linked.Token,
+                    new Progress<UninstallProgress>(step =>
+                        SetProgress(step.Percent, step.Text)));
             hasRunError = !outcome.Succeeded;
             isComplete = outcome.Succeeded;
             journal.Finish(outcome.Succeeded

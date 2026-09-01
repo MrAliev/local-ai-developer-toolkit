@@ -538,7 +538,10 @@ installer parked inside the runtime root — so removal is still reachable long 
 downloaded file is gone. Removal is a matrix rather than one hammer: three presets over rows
 that change one at a time, every removal listed before anything happens, the broker asked to
 finish before the root is touched, and the release signing key kept unless separately
-confirmed.
+confirmed. It says where it has got to while it works — asking the broker to stop, rewriting
+the client configurations, taking out the hook dispatchers, removing files, finishing — because
+the stop alone can take two minutes, and a bar that has not moved for two minutes is what
+makes people kill an installer mid-run.
 
 The reinstall-friendly preset keeps the client registrations and the hook dispatchers rather
 than asking about them: the installation that follows rewrites all three, and a question put

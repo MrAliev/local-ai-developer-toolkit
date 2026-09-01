@@ -72,23 +72,35 @@ public sealed class UninstallRunner(
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(
             selfDirectory ?? AppContext.BaseDirectory));
 
+    /// <summary>
+    /// <paramref name="progress"/> is how the page in front of somebody learns that this is
+    /// still happening. The removal used to report nothing between starting and finishing, and
+    /// asking the broker to stop alone can take two minutes — a bar that has not moved for two
+    /// minutes is what makes people kill installers.
+    /// </summary>
     public async Task<UninstallOutcome> ApplyAsync(
         UninstallPlan plan,
         InstallerRunJournal journal,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<UninstallProgress>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(journal);
 
+        progress?.Report(new(0, "Asking LocalAi to stop…"));
         var stopped = await StopRunningToolsAsync(plan, journal, cancellationToken);
         var failures = new List<UninstallFailure>();
+        progress?.Report(new(25, "Updating client configurations…"));
         var rewritten = await RewriteClientConfigurationsAsync(
             plan,
             journal,
             failures,
             cancellationToken);
+        progress?.Report(new(45, "Removing Git hook dispatchers…"));
         var hooks = RemoveHooks(plan, journal, failures, cancellationToken);
+        progress?.Report(new(60, "Removing files…"));
         var removed = RemovePaths(plan, journal, failures, cancellationToken);
+        progress?.Report(new(90, "Finishing the removal…"));
         var (unregistered, deferred) = RemoveRegistration(plan, journal, failures);
         RemoveDirectoriesLeftEmptyByTheSweep(plan, removed);
         return new UninstallOutcome(
