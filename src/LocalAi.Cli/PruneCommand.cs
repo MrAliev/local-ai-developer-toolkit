@@ -68,7 +68,12 @@ public static class PruneCommand
                 continue;
             }
 
-            var result = GenerationRetention.Prune(repository, policy, now, dryRun);
+            var result = GenerationRetention.Prune(
+                repository,
+                policy,
+                now,
+                dryRun,
+                ReachableOverlays(repository, runtimeRoot));
             if (result.ActionCount == 0)
             {
                 continue;
@@ -98,6 +103,101 @@ public static class PruneCommand
         }
 
         return new PruneReport(archive, lines, reclaimed);
+    }
+
+    /// <summary>
+    /// What each repository can still be asked about: every worktree its manifest records that
+    /// still exists, keyed the way its overlay directory is, with the tree its HEAD is on.
+    ///
+    /// Without this the command the documentation names for reclaiming space was the one path
+    /// that could not reclaim the bulk of it: overlays under a kept generation are most of what
+    /// accumulates, and passing nothing meant leaving all of them alone.
+    ///
+    /// Null on any doubt — an unreadable manifest, a worktree that cannot be inspected, a
+    /// manifest recording no worktrees at all. The sweep then leaves overlays alone for this
+    /// repository, which costs disk until the next sync; the other way costs a worktree its
+    /// index until somebody notices.
+    /// </summary>
+    private static IReadOnlySet<(string WorktreeId, string HeadTree)>? ReachableOverlays(
+        string repositoryRuntimeRoot,
+        string runtimeRoot)
+    {
+        try
+        {
+            var manifest = new RepositoryManifestStore(repositoryRuntimeRoot).Read();
+            if (manifest is null)
+            {
+                return null;
+            }
+
+            var reachable = new HashSet<(string, string)>();
+            foreach (var worktree in manifest.ActiveWorktrees)
+            {
+                if (IsGone(worktree.Path))
+                {
+                    // Recorded but gone: its overlays are exactly what this is here to collect.
+                    continue;
+                }
+
+                // Only the working root and the head tree are wanted. Inspect would also list
+                // the dirty paths and hash the full text of every one of them — six git calls
+                // and a read of the whole working diff, per worktree, on a pass that is
+                // otherwise directory enumeration and runs under --dry-run too.
+                var workingRoot = RepoLocator.ResolveWorkingRoot(worktree.Path);
+                reachable.Add((
+                    RuntimeIndexLayout.WorktreeKey(workingRoot),
+                    RepoLocator.GitOutputOrThrow(
+                        workingRoot,
+                        "rev-parse HEAD^{tree}",
+                        "The git HEAD tree")));
+            }
+
+            // An empty set is not the same answer as "leave these alone": retention reads it as
+            // nothing being reachable and removes every overlay under every kept generation. A
+            // manifest that records no worktrees is a manifest that cannot answer the question.
+            return reachable.Count == 0 ? null : reachable;
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or IOException or
+                UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            // InvalidDataException is what a corrupt manifest raises — an unsupported schema, a
+            // checksum that does not decode or does not match. Leaving it out did not merely
+            // skip this repository: it escaped Execute and ended the whole run, so telemetry,
+            // installed versions and launcher backups were never swept.
+            Console.Error.WriteLine(
+                $"localai: {Path.GetFileName(repositoryRuntimeRoot)[..12]}: overlays left alone, " +
+                $"its worktrees could not be established ({exception.Message})");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a recorded worktree is really gone, as opposed to merely unreachable right now.
+    ///
+    /// <see cref="Directory.Exists(string)"/> answers false for both, without saying which — an
+    /// unmounted volume, a disconnected share and a subst drive absent from this session all
+    /// look exactly like a deleted checkout. Reading that as "deleted" would collect the
+    /// overlays of every worktree on a drive that happens to be offline. So the volume is asked
+    /// about first: a missing directory on a root that is present is a deletion, and anything
+    /// else is doubt, which the caller turns into leaving this repository's overlays alone.
+    /// </summary>
+    private static bool IsGone(string worktreePath)
+    {
+        if (Directory.Exists(worktreePath))
+        {
+            return false;
+        }
+
+        var root = Path.GetPathRoot(Path.GetFullPath(worktreePath));
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            throw new IOException(
+                $"The volume holding '{worktreePath}' is not available, so whether that worktree " +
+                "still exists cannot be established.");
+        }
+
+        return true;
     }
 
     private static IEnumerable<string> Repositories(string runtimeRoot)
