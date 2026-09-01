@@ -60,12 +60,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
         Mode == StartChoice.Install
             ? AllSteps
             : [.. AllSteps
-                .Select(step => step.Page == InstallerPage.Diagnose
-                    // On this path the page is one line and a spinner, and what the reader is
-                    // waiting on is the release as much as the machine. "System check" would
-                    // promise a table that never arrives.
-                    ? (step.Page, "Preparing")
-                    : step)
                 .Where(step =>
                 (releaseRevealed || !FoldedRelease.Contains(step.Page)) &&
                 (settingsRevealed || !FoldedSettings.Contains(step.Page)))];
@@ -405,22 +399,39 @@ public sealed class InstallerWizardViewModel : ObservableObject
             : heldInstalledVersion + " → " + resolved;
     }
 
+    /// <summary>
+    /// The label on the control that carries the run out. It is the most-read thing on that
+    /// page, and "Install" on a run somebody started as "Update or repair" is exactly the "did
+    /// it hear me?" this wording work is about (#257).
+    /// </summary>
+    public string ActionText => IsUpdate ? "Update" : "Install";
+
+    /// <summary>
+    /// True for the errands that change an existing installation rather than create one. Both
+    /// read as an update to the person running them, whatever the removal matrix does first.
+    /// </summary>
+    private bool IsUpdate => Mode is StartChoice.UpdateOrRepair or StartChoice.CleanReinstall;
+
     public string StepTitle => CurrentPage switch
     {
-        InstallerPage.Diagnose => Mode == StartChoice.Install ? "System check" : "Preparing",
+        InstallerPage.Diagnose => "System check",
         InstallerPage.Dependencies => "Prerequisites",
         InstallerPage.Package => "LocalAi package",
         InstallerPage.Models => "How models run on this computer",
         InstallerPage.Agents => "Client applications",
-        InstallerPage.Confirm => "Ready to install",
-        InstallerPage.Progress => "Installing",
-        _ => hasRunError ? "Installation not completed" : "Installation complete",
+        InstallerPage.Confirm => IsUpdate ? "Ready to update" : "Ready to install",
+        InstallerPage.Progress => IsUpdate ? "Updating" : "Installing",
+        _ => (hasRunError, IsUpdate) switch
+        {
+            (true, true) => "Update not completed",
+            (true, false) => "Installation not completed",
+            (false, true) => "Update complete",
+            (false, false) => "Installation complete",
+        },
     };
 
     public string StepDescription => CurrentPage switch
     {
-        InstallerPage.Diagnose when Mode != StartChoice.Install =>
-            "Checking this computer and finding the release. This takes a few seconds.",
         // The shipped line stopped being true the moment results appeared, so it says one
         // thing while the probe runs and another once there is a table to read.
         InstallerPage.Diagnose when diagnose.IsChecking =>

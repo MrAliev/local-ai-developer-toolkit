@@ -173,22 +173,22 @@ public sealed class UpdatePathFoldsSettingsTests
     }
 
     /// <summary>
-    /// The first page is named for what the reader is waiting on, and the two paths differ
-    /// because their content does: a real diagnostics table on an install, one line and a
-    /// spinner on an update while the release resolves.
+    /// The first page is called the same thing on both paths, because it is the same page: the
+    /// probe runs unconditionally and the table renders as soon as it finishes. It was renamed
+    /// to "Preparing" on the update path on the belief that the page there was one line and a
+    /// spinner — a difference with nothing behind it, and this test pinned it.
     /// </summary>
     [Fact]
-    public void The_first_step_is_named_for_the_wait_it_describes()
+    public void The_first_step_is_called_the_same_thing_on_both_paths()
     {
         var update = new InstallerWizardViewModel(StartChoice.UpdateOrRepair);
         var install = new InstallerWizardViewModel(StartChoice.Install);
 
-        Assert.Equal("Preparing", update.StepTitle);
-        Assert.Equal("Preparing", update.StepList[0].Title);
-        Assert.Contains("finding the release", update.StepDescription, StringComparison.Ordinal);
-
+        Assert.Equal("System check", update.StepTitle);
+        Assert.Equal("System check", update.StepList[0].Title);
         Assert.Equal("System check", install.StepTitle);
         Assert.Equal("System check", install.StepList[0].Title);
+        Assert.Equal(install.StepDescription, update.StepDescription);
     }
 
     /// <summary>

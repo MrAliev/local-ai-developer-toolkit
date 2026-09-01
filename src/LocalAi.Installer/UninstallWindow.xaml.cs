@@ -23,7 +23,10 @@ public partial class UninstallWindow : Window
         viewModel.CloseRequested += (_, _) => Close();
         viewModel.InstallRequested += (_, _) =>
         {
-            var installer = new MainWindow();
+            // The errand travels: without it the install half of a clean reinstall runs
+            // as a plain install, and the two strings written for this path — the window
+            // title and the consent line — were unreachable.
+            var installer = new MainWindow(StartChoice.CleanReinstall);
             Application.Current.MainWindow = installer;
             installer.Show();
             Close();

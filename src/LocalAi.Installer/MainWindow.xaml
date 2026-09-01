@@ -236,15 +236,18 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <TextBlock Text="Release tag" />
+                        <TextBlock Text="Version to install" />
                         <TextBox Text="{Binding Package.ReleaseVersion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 Width="280" Height="24" HorizontalAlignment="Left" Margin="0,4,0,8" />
-                        <TextBlock Text="Install from a folder (optional)" Margin="0,4,0,0" />
+                                 Width="280" Height="24" HorizontalAlignment="Left" Margin="0,4,0,2" />
+                        <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="Leave this at latest to install whatever is newest when you press the button on the last page. Type a version number instead to pin one." />
+                        <TextBlock Text="Install from a folder" Margin="0,4,0,0" />
                         <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,4"
                                    Text="A folder holding release-manifest.json, release-manifest.sig and localai-package.zip. Leave empty to install from GitHub. The manifest is verified against the key built into this installer either way; models still come from the Ollama registry." />
                         <TextBox Text="{Binding Package.SourceFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  Width="480" Height="24" HorizontalAlignment="Left" Margin="0,0,0,8" />
-                        <Button Content="Check release" Width="140" Height="26" HorizontalAlignment="Left"
+                        <Button Content="Check again" Width="140" Height="26" HorizontalAlignment="Left"
+                                IsEnabled="{Binding Package.CanCheck}"
                                 Click="OnPackageCheckRelease" />
                         <TextBlock Text="{Binding Package.StatusText}" Style="{StaticResource Muted}" Margin="0,10,0,0" />
                     </StackPanel>
@@ -405,8 +408,12 @@
                         <Border BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="3"
                                 Padding="10,8" Margin="0,14,0,0">
                             <StackPanel>
-                                <CheckBox Content="Check for new LocalAi releases (optional)"
+                                <TextBlock Text="After this installation" FontWeight="SemiBold"
+                                           Margin="0,0,0,6" />
+                                <CheckBox Content="After it is installed, let LocalAi look up whether a newer release exists"
                                           IsChecked="{Binding Review.EnableUpdateCheck, Mode=TwoWay}" />
+                                <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Text="A newer version is then mentioned in localai doctor and in the index status your assistant reads. Nothing pops up, and nothing installs itself." />
                                 <TextBlock Text="{Binding Review.UpdateCheckDisclosure, Mode=OneTime}"
                                            Style="{StaticResource Muted}" Margin="0,6,0,0" />
                             </StackPanel>
@@ -476,7 +483,7 @@
                     <Button Content="Next" Style="{StaticResource NavButton}"
                             Command="{Binding NextCommand}"
                             Visibility="{Binding IsNextVisible, Converter={StaticResource BoolToVisibility}}" />
-                    <Button Content="Install" Style="{StaticResource NavButton}" IsDefault="True"
+                    <Button Content="{Binding ActionText}" Style="{StaticResource NavButton}" IsDefault="True"
                             Command="{Binding InstallCommand}"
                             Visibility="{Binding IsInstallVisible, Converter={StaticResource BoolToVisibility}}" />
                     <Button Content="{Binding CancelButtonText}" Style="{StaticResource NavButton}" IsCancel="True"
