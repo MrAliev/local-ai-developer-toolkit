@@ -205,15 +205,15 @@ public sealed class PruneCommandTests : IDisposable
         var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
         LiveRepository(identity, worktree);
 
-        var current = Overlay(identity.RepositoryRuntimeRoot, Generation, identity, "clean.cidx");
+        var current = Overlay(identity.RepositoryRuntimeRoot.Value, Generation, identity, "clean.cidx");
         var pastCommit = Overlay(
-            identity.RepositoryRuntimeRoot,
+            identity.RepositoryRuntimeRoot.Value,
             Generation,
             RuntimeIndexLayout.WorktreeKey(worktree),
             new string('a', 40),
             "clean.cidx");
         var goneWorktree = Overlay(
-            identity.RepositoryRuntimeRoot,
+            identity.RepositoryRuntimeRoot.Value,
             Generation,
             RuntimeIndexLayout.WorktreeKey(Path.Combine(_root, "deleted-worktree")),
             identity.HeadTree,
@@ -247,7 +247,7 @@ public sealed class PruneCommandTests : IDisposable
         LiveRepository(identity, worktree, opaque);
 
         var overlay = Overlay(
-            identity.RepositoryRuntimeRoot,
+            identity.RepositoryRuntimeRoot.Value,
             Generation,
             RuntimeIndexLayout.WorktreeKey(worktree),
             new string('a', 40),
@@ -271,12 +271,12 @@ public sealed class PruneCommandTests : IDisposable
         var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
         LiveRepository(identity, worktree);
         var overlay = Overlay(
-            identity.RepositoryRuntimeRoot,
+            identity.RepositoryRuntimeRoot.Value,
             Generation,
             RuntimeIndexLayout.WorktreeKey(worktree),
             new string('a', 40),
             "clean.cidx");
-        Corrupt(identity.RepositoryRuntimeRoot);
+        Corrupt(identity.RepositoryRuntimeRoot.Value);
         Version("oldest", Now - TimeSpan.FromDays(60));
         Version("old", Now - TimeSpan.FromDays(30));
         Version("previous", Now - TimeSpan.FromDays(2));
@@ -301,7 +301,7 @@ public sealed class PruneCommandTests : IDisposable
         var worktree = NewCheckout("live");
         var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
         LiveRepository(identity);
-        var overlay = Overlay(identity.RepositoryRuntimeRoot, Generation, identity, "clean.cidx");
+        var overlay = Overlay(identity.RepositoryRuntimeRoot.Value, Generation, identity, "clean.cidx");
 
         PruneCommand.Execute(Runtime, dryRun: false, Now);
 
@@ -319,7 +319,7 @@ public sealed class PruneCommandTests : IDisposable
         var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
         LiveRepository(identity, worktree);
         var pastCommit = Overlay(
-            identity.RepositoryRuntimeRoot,
+            identity.RepositoryRuntimeRoot.Value,
             Generation,
             RuntimeIndexLayout.WorktreeKey(worktree),
             new string('a', 40),
@@ -357,7 +357,7 @@ public sealed class PruneCommandTests : IDisposable
         var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
         LiveRepository(identity, worktree, Path.Combine(absent, "offline", "worktree"));
         var overlay = Overlay(
-            identity.RepositoryRuntimeRoot,
+            identity.RepositoryRuntimeRoot.Value,
             Generation,
             RuntimeIndexLayout.WorktreeKey(worktree),
             new string('a', 40),
@@ -390,7 +390,7 @@ public sealed class PruneCommandTests : IDisposable
         WorkingIndexIdentity identity,
         params string[] worktrees)
     {
-        var root = identity.RepositoryRuntimeRoot;
+        var root = identity.RepositoryRuntimeRoot.Value;
         Directory.CreateDirectory(Path.Combine(root, "generations", Generation));
         File.WriteAllText(
             Path.Combine(root, "generations", Generation, "base.cidx"),
@@ -402,7 +402,7 @@ public sealed class PruneCommandTests : IDisposable
                 LocalAiJson.Strict));
         new RepositoryManifestStore(root).Save(new RepositoryManifest(
             Path.GetFileName(root),
-            identity.RepositoryRoot,
+            identity.RepositoryRoot.Value,
             "refs/heads/main",
             Generation,
             identity.HeadTree,

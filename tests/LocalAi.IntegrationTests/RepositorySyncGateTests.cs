@@ -89,7 +89,7 @@ public sealed class RepositorySyncGateTests : IDisposable
 
         Assert.Contains(identity.RepositoryId, error.Message, StringComparison.Ordinal);
         Assert.False(
-            Directory.Exists(identity.RepositoryRuntimeRoot),
+            Directory.Exists(identity.RepositoryRuntimeRoot.Value),
             "A busy sync must exit before writing any shared state.");
     }
 

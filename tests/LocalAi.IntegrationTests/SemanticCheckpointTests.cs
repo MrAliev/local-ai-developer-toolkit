@@ -1,3 +1,4 @@
+using LocalAi.Contracts;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Semantics;
 using LocalAi.Cli;
@@ -160,10 +161,10 @@ public sealed class SemanticCheckpointTests : IDisposable
         CodeSearchSyncCommand.CurrentSemanticGenerationVersion);
 
     private static WorkingIndexIdentity Dev() => new(
-        "R:/Repository",
-        "R:/Repository",
+        FsPath.From("R:/Repository"),
+        FsPath.From("R:/Repository"),
         RepositoryId,
-        "R:/Runtime",
+        FsPath.From("R:/Runtime"),
         "b609fcfdfc4087d04d7ee8a06a12c99ae94ab236",
         Tree,
         null);

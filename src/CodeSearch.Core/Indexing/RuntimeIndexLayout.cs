@@ -5,11 +5,18 @@ using LocalAi.Repository;
 
 namespace CodeSearch.Core.Indexing;
 
+/// <summary>
+/// The three paths are FsPath rather than string because two of them become directory names in
+/// the runtime — the worktree key is hashed from <paramref name="WorkingRoot"/>, and
+/// <paramref name="RepositoryRuntimeRoot"/> is where that repository's generations live. A
+/// string carries no evidence that it was normalised, and a comparison that forgets still
+/// compiles.
+/// </summary>
 public sealed record WorkingIndexIdentity(
-    string WorkingRoot,
-    string RepositoryRoot,
+    FsPath WorkingRoot,
+    FsPath RepositoryRoot,
     string RepositoryId,
-    string RepositoryRuntimeRoot,
+    FsPath RepositoryRuntimeRoot,
     string HeadCommit,
     string HeadTree,
     string? DirtyHash);
@@ -60,10 +67,10 @@ public static class RuntimeIndexLayout
             : DirtyCorpusPolicy.ComputeWorkingContentHash(root.Value, dirtyPaths);
 
         return new WorkingIndexIdentity(
-            root.Value,
-            repositoryRoot.Value,
+            root,
+            repositoryRoot,
             identity.Id,
-            repositoryRuntimeRoot.Value,
+            repositoryRuntimeRoot,
             head,
             tree,
             dirtyHash);
@@ -74,10 +81,10 @@ public static class RuntimeIndexLayout
         string? runtimeRoot = null)
     {
         var identity = Inspect(repositoryRoot, runtimeRoot);
-        var store = new GenerationStore(identity.RepositoryRuntimeRoot);
+        var store = new GenerationStore(identity.RepositoryRuntimeRoot.Value);
         var current = store.ReadCurrent();
         return current is null
-            ? RepoLocator.LegacyIndexPathFor(identity.RepositoryRoot, runtimeRoot)
+            ? RepoLocator.LegacyIndexPathFor(identity.RepositoryRoot.Value, runtimeRoot)
             : store.IndexPath(current.GenerationId);
     }
 
@@ -88,7 +95,7 @@ public static class RuntimeIndexLayout
         ArgumentException.ThrowIfNullOrWhiteSpace(generationId);
         var worktreeId = WorktreeKey(identity.WorkingRoot);
         return Path.Combine(
-            identity.RepositoryRuntimeRoot,
+            identity.RepositoryRuntimeRoot.Value,
             "overlays",
             generationId,
             worktreeId,

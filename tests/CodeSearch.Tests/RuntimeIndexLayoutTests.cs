@@ -37,7 +37,7 @@ public sealed class RuntimeIndexLayoutTests
 
             Assert.StartsWith(
                 runtimeRoot,
-                named.RepositoryRuntimeRoot,
+                named.RepositoryRuntimeRoot.Value,
                 StringComparison.OrdinalIgnoreCase);
             Assert.StartsWith(
                 runtimeRoot,
@@ -58,7 +58,7 @@ public sealed class RuntimeIndexLayoutTests
             Assert.Equal(machine.HeadTree, named.HeadTree);
             Assert.StartsWith(
                 RuntimeIndexLayout.DefaultRuntimeRoot,
-                machine.RepositoryRuntimeRoot,
+                machine.RepositoryRuntimeRoot.Value,
                 StringComparison.OrdinalIgnoreCase);
         }
         finally
@@ -149,10 +149,10 @@ public sealed class RuntimeIndexLayoutTests
     public void Overlay_path_is_exact_for_generation_tree_and_dirty_hash()
     {
         var identity = new WorkingIndexIdentity(
-            @"C:\repo-worktree",
-            @"C:\repo",
+            FsPath.From(@"C:\repo-worktree"),
+            FsPath.From(@"C:\repo"),
             "repository",
-            @"C:\runtime\repository",
+            FsPath.From(@"C:\runtime\repository"),
             "commit",
             "tree",
             "dirty");
@@ -167,10 +167,10 @@ public sealed class RuntimeIndexLayoutTests
     public void Clean_and_dirty_overlays_never_share_a_path()
     {
         var clean = new WorkingIndexIdentity(
-            @"C:\repo-worktree",
-            @"C:\repo",
+            FsPath.From(@"C:\repo-worktree"),
+            FsPath.From(@"C:\repo"),
             "repository",
-            @"C:\runtime\repository",
+            FsPath.From(@"C:\runtime\repository"),
             "commit",
             "tree",
             null);

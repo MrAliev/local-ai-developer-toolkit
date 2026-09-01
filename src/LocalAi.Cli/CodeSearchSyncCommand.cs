@@ -91,13 +91,13 @@ public static class CodeSearchSyncCommand
             cancellationToken)
             ?? throw new RepositorySyncBusyException(requested.RepositoryId);
         var progressStore = new RepositoryIndexProgressStore(
-            requested.RepositoryRuntimeRoot);
+            requested.RepositoryRuntimeRoot.Value);
         var manifestStore = new RepositoryManifestStore(
-            requested.RepositoryRuntimeRoot);
+            requested.RepositoryRuntimeRoot.Value);
         var lastProgress = new RepositoryIndexProgress(
             requested.RepositoryId,
             RepositoryIndexProgressPhase.Planning,
-            requested.WorkingRoot,
+            requested.WorkingRoot.Value,
             0,
             0,
             0,
@@ -142,7 +142,7 @@ public static class CodeSearchSyncCommand
 
         try
         {
-            var worktrees = ReadWorktrees(requested.WorkingRoot);
+            var worktrees = ReadWorktrees(requested.WorkingRoot.Value);
             var mainline = ResolveMainline(
                 requested,
                 manifestStore.Read()?.DevRef);
@@ -159,7 +159,7 @@ public static class CodeSearchSyncCommand
                 CurrentSemanticGenerationVersion);
             var commonDirectory = RepositoryIdentity.FromCommonDirectory(
                 RepoLocator.GitOutputOrThrow(
-                    requested.WorkingRoot,
+                    requested.WorkingRoot.Value,
                     "rev-parse --path-format=absolute --git-common-dir",
                     "The git common directory"))
                 .CommonDirectory;
@@ -179,7 +179,7 @@ public static class CodeSearchSyncCommand
                     .Select(item => new RepositoryWorktree(item.Path, item.Head, item.Branch))
                     .ToArray(),
                 DateTimeOffset.UtcNow));
-            var store = new GenerationStore(requested.RepositoryRuntimeRoot);
+            var store = new GenerationStore(requested.RepositoryRuntimeRoot.Value);
             var current = store.ReadCurrent();
             var generationChanged = !string.Equals(
                 current?.GenerationId,
@@ -201,9 +201,9 @@ public static class CodeSearchSyncCommand
                     mainline.Identity,
                     progress => ReportProgress(
                         RepositoryIndexProgressPhase.EmbeddingBase,
-                        mainline.Identity.WorkingRoot,
+                        mainline.Identity.WorkingRoot.Value,
                         progress),
-                    phase => ReportPhase(phase, mainline.Identity.WorkingRoot),
+                    phase => ReportPhase(phase, mainline.Identity.WorkingRoot.Value),
                     runtimeRoot,
                     requireSemantics,
                     cancellationToken);
@@ -213,7 +213,7 @@ public static class CodeSearchSyncCommand
                 ? generationChanged
                     ? worktrees
                     : worktrees.Where(
-                        item => SamePath(item.Path, requested.WorkingRoot)).ToArray()
+                        item => FsPath.From(item.Path) == requested.WorkingRoot).ToArray()
                 : [];
             var overlaysBuilt = 0;
             var present = SelectPresentWorktrees(
@@ -270,9 +270,9 @@ public static class CodeSearchSyncCommand
                 {
                     ReportPhase(
                         RepositoryIndexProgressPhase.SemanticOverlay,
-                        identity.WorkingRoot);
+                        identity.WorkingRoot.Value);
                     var semanticBuild = await BuildSemanticIndexAsync(
-                        identity.WorkingRoot,
+                        identity.WorkingRoot.Value,
                         identity,
                         generation.Identity,
                         runtimeRoot,
@@ -292,13 +292,13 @@ public static class CodeSearchSyncCommand
                     // left to be inferred from the adapter line above.
                     WarnDegradedSemanticOverlay(
                         semanticBuild.AdapterStatuses,
-                        identity.WorkingRoot);
+                        identity.WorkingRoot.Value);
                     var baseSemanticIndex = SemanticIndex.Load(
                         store.SemanticIndexPath(generation.Identity.Id));
                     var semanticOverlay = SemanticIndexOverlay.Create(
                         baseSemanticIndex,
                         semanticBuild.Index,
-                        RuntimeIndexLayout.GetDirtyPaths(identity.WorkingRoot));
+                        RuntimeIndexLayout.GetDirtyPaths(identity.WorkingRoot.Value));
                     semanticOverlay.Save(semanticOverlayPath);
                     worktreeSemantics = semanticBuild.Index;
                     builtOverlay = true;
@@ -325,16 +325,16 @@ public static class CodeSearchSyncCommand
                         Console.Error.WriteLine,
                         progress => ReportProgress(
                             RepositoryIndexProgressPhase.EmbeddingOverlay,
-                            identity.WorkingRoot,
+                            identity.WorkingRoot.Value,
                             progress),
                         definitions);
                     await builder.BuildOverlayAsync(
-                        identity.WorkingRoot,
+                        identity.WorkingRoot.Value,
                         store.IndexPath(generation.Identity.Id),
                         overlayPath,
                         cancellationToken,
                         new IndexBuildContext(
-                            identity.WorkingRoot,
+                            identity.WorkingRoot.Value,
                             identity.HeadCommit,
                             identity.HeadTree,
                             identity.RepositoryId,
@@ -363,7 +363,7 @@ public static class CodeSearchSyncCommand
                 }
             }
 
-            ReportPhase(RepositoryIndexProgressPhase.Publishing, requested.WorkingRoot);
+            ReportPhase(RepositoryIndexProgressPhase.Publishing, requested.WorkingRoot.Value);
             store.SetCurrent(generation, current);
             var manifest = new RepositoryManifest(
                 requested.RepositoryId,
@@ -386,7 +386,7 @@ public static class CodeSearchSyncCommand
                 DateTimeOffset.UtcNow);
             manifestStore.Save(manifest);
             PruneSupersededGenerations(
-                requested.RepositoryRuntimeRoot,
+                requested.RepositoryRuntimeRoot.Value,
                 runtimeRoot,
                 ReachableOverlays(worktrees, runtimeRoot));
 
@@ -452,7 +452,7 @@ public static class CodeSearchSyncCommand
         var drifted = false;
         try
         {
-            var live = RuntimeIndexLayout.Inspect(captured.WorkingRoot, runtimeRoot);
+            var live = RuntimeIndexLayout.Inspect(captured.WorkingRoot.Value, runtimeRoot);
             drifted =
                 !string.Equals(live.HeadCommit, captured.HeadCommit, StringComparison.Ordinal) ||
                 !string.Equals(live.HeadTree, captured.HeadTree, StringComparison.Ordinal) ||
@@ -483,7 +483,7 @@ public static class CodeSearchSyncCommand
         }
 
         Console.Error.WriteLine(
-            $"Worktree {captured.WorkingRoot} changed while its overlay was building; " +
+            $"Worktree {captured.WorkingRoot.Value} changed while its overlay was building; " +
             "the overlay was discarded and the next sync rebuilds it from the new state.");
         return true;
     }
@@ -592,12 +592,12 @@ public static class CodeSearchSyncCommand
         foreach (var candidate in candidates)
         {
             var commit = GitValue(
-                requested.WorkingRoot,
+                requested.WorkingRoot.Value,
                 "rev-parse",
                 "--verify",
                 $"{candidate}^{{commit}}");
             var tree = GitValue(
-                requested.WorkingRoot,
+                requested.WorkingRoot.Value,
                 "rev-parse",
                 "--verify",
                 $"{candidate}^{{tree}}");
@@ -633,7 +633,7 @@ public static class CodeSearchSyncCommand
         CancellationToken cancellationToken)
     {
         var stagingRoot = Path.Combine(
-            dev.RepositoryRuntimeRoot,
+            dev.RepositoryRuntimeRoot.Value,
             "staging");
         Directory.CreateDirectory(stagingRoot);
         var workIndex = Path.Combine(
@@ -662,7 +662,7 @@ public static class CodeSearchSyncCommand
                 }
             }
 
-            using var snapshot = CommitSnapshot.Create(dev.WorkingRoot, dev.HeadCommit);
+            using var snapshot = CommitSnapshot.Create(dev.WorkingRoot.Value, dev.HeadCommit);
 
             // Semantics first, deliberately. Roslyn loads the whole solution here and the SCIP
             // adapters shell out per language, which is minutes on a large repository — but
@@ -716,7 +716,7 @@ public static class CodeSearchSyncCommand
                 force: false,
                 cancellationToken,
                 new IndexBuildContext(
-                    dev.WorkingRoot,
+                    dev.WorkingRoot.Value,
                     dev.HeadCommit,
                     dev.HeadTree,
                     dev.RepositoryId,
@@ -1018,7 +1018,7 @@ public static class CodeSearchSyncCommand
                     snapshot.HeadTree,
                     snapshot.DirtyHash,
                     snapshot.HeadCommit,
-                    CommitTimestamp(snapshot.WorkingRoot, snapshot.HeadCommit)),
+                    CommitTimestamp(snapshot.WorkingRoot.Value, snapshot.HeadCommit)),
                 cancellationToken);
             languageIndex = new XamlSemanticIndexer().Supplement(csharp, sourceRoot);
         }
@@ -1362,14 +1362,6 @@ public static class CodeSearchSyncCommand
             ? null
             : Encoding.UTF8.GetString(output).Trim();
     }
-
-    private static bool SamePath(string first, string second) =>
-        string.Equals(
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
-            OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
 
     private sealed record Mainline(
         string Ref,

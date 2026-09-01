@@ -337,13 +337,13 @@ public static class DoctorCommand
             var identity = CodeSearch.Core.Indexing.RuntimeIndexLayout.Inspect(
                 repositoryRoot!,
                 runtimeRoot);
-            var manifest = new RepositoryManifestStore(identity.RepositoryRuntimeRoot).Read();
+            var manifest = new RepositoryManifestStore(identity.RepositoryRuntimeRoot.Value).Read();
             if (manifest is null)
             {
                 return new DoctorCheck(
                     "repository",
                     DoctorStatus.Warning,
-                    $"{identity.RepositoryRoot} is not connected. " +
+                    $"{identity.RepositoryRoot.Value} is not connected. " +
                     "Run localai sync --root to index it.");
             }
 

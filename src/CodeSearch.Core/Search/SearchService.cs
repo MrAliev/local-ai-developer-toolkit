@@ -471,7 +471,7 @@ public sealed class SearchService : IDisposable
 
         try
         {
-            var path = new GenerationStore(identity.RepositoryRuntimeRoot)
+            var path = new GenerationStore(identity.RepositoryRuntimeRoot.Value)
                 .SemanticIndexPath(index.GenerationId);
             if (!File.Exists(path))
             {
@@ -509,7 +509,7 @@ public sealed class SearchService : IDisposable
         }
 
         var manifest = new RepositoryManifestStore(
-            identity.RepositoryRuntimeRoot).Read();
+            identity.RepositoryRuntimeRoot.Value).Read();
         if (manifest is null ||
             !string.Equals(
                 manifest.RepositoryId,
