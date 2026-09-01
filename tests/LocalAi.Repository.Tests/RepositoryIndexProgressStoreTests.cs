@@ -12,7 +12,7 @@ public sealed class RepositoryIndexProgressStoreTests : IDisposable
     [Fact]
     public void Save_is_atomic_and_round_trips_progress_and_eta()
     {
-        var store = new RepositoryIndexProgressStore(_root);
+        var store = new RepositoryIndexProgressStore(FsPath.From(_root));
         var expected = new RepositoryIndexProgress(
             "repository",
             RepositoryIndexProgressPhase.EmbeddingBase,
@@ -35,7 +35,7 @@ public sealed class RepositoryIndexProgressStoreTests : IDisposable
     [InlineData(11, 10)]
     public void Save_rejects_invalid_chunk_counters(int processed, int total)
     {
-        var store = new RepositoryIndexProgressStore(_root);
+        var store = new RepositoryIndexProgressStore(FsPath.From(_root));
         var progress = new RepositoryIndexProgress(
             "repository",
             RepositoryIndexProgressPhase.EmbeddingBase,
@@ -56,7 +56,7 @@ public sealed class RepositoryIndexProgressStoreTests : IDisposable
         File.WriteAllBytes(Path.Combine(_root, "progress.json"), new byte[337]);
 
         var error = Assert.Throws<InvalidDataException>(
-            () => new RepositoryIndexProgressStore(_root).Read());
+            () => new RepositoryIndexProgressStore(FsPath.From(_root)).Read());
 
         Assert.IsType<System.Text.Json.JsonException>(error.InnerException);
     }

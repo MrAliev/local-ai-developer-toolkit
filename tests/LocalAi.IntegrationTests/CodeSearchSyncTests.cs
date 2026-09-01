@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using CodeSearch.Core.Semantics;
 using LocalAi.Cli;
+using LocalAi.Contracts;
 using LocalAi.Repository;
 
 namespace LocalAi.IntegrationTests;
@@ -54,7 +55,7 @@ public sealed class CodeSearchSyncTests : IDisposable
             "repositories",
             identity.Id);
         var manifest = Assert.IsType<LocalAi.Contracts.RepositoryManifest>(
-            new RepositoryManifestStore(repositoryRuntimeRoot).Read());
+            new RepositoryManifestStore(FsPath.From(repositoryRuntimeRoot)).Read());
         Assert.Equal(expectedRef, manifest.DevRef);
         Assert.Equal(
             LocalAi.Contracts.RepositoryIndexState.Initializing,

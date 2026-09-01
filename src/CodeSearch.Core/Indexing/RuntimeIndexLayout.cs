@@ -81,7 +81,7 @@ public static class RuntimeIndexLayout
         string? runtimeRoot = null)
     {
         var identity = Inspect(repositoryRoot, runtimeRoot);
-        var store = new GenerationStore(identity.RepositoryRuntimeRoot.Value);
+        var store = new GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent();
         return current is null
             ? RepoLocator.LegacyIndexPathFor(identity.RepositoryRoot.Value, runtimeRoot)

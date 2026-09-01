@@ -251,7 +251,7 @@ internal sealed class RemovalFixture : IDisposable
         string repositoryId,
         string commonDirectory,
         IReadOnlyList<string> worktrees) =>
-        new RepositoryManifestStore(Path.Combine(Runtime, "repositories", repositoryId)).Save(
+        new RepositoryManifestStore(FsPath.From(Runtime).Combine("repositories", repositoryId)).Save(
             new RepositoryManifest(
                 repositoryId,
                 commonDirectory,

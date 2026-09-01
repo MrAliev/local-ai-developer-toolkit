@@ -1,3 +1,4 @@
+using LocalAi.Contracts;
 using LocalAi.Repository;
 
 namespace LocalAi.Cli;
@@ -89,7 +90,7 @@ public static class RepoCommand
             Path.GetFullPath(localAiRuntimeRoot),
             "repositories",
             identity.Id);
-        var configured = new RepositoryManifestStore(repositoryRoot).Read() is not null;
+        var configured = new RepositoryManifestStore(FsPath.From(repositoryRoot)).Read() is not null;
 
         // The verdict names the repository it is about. A caller reaches this command with a
         // path, a worktree or nothing at all, and every one of those resolves to a common

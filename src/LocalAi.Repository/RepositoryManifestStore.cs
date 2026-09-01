@@ -9,11 +9,9 @@ public sealed class RepositoryManifestStore
 {
     private readonly string _manifestPath;
 
-    public RepositoryManifestStore(string repositoryRuntimeRoot)
+    public RepositoryManifestStore(FsPath repositoryRuntimeRoot)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRuntimeRoot);
-        var root = Path.GetFullPath(repositoryRuntimeRoot);
-        _manifestPath = Path.Combine(root, "manifest.json");
+        _manifestPath = repositoryRuntimeRoot.Combine("manifest.json").Value;
     }
 
     public void Save(RepositoryManifest manifest)

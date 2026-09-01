@@ -66,7 +66,7 @@ public static class GenerationRetention
             return GenerationRetentionResult.Empty;
         }
 
-        var store = new GenerationStore(root);
+        var store = new GenerationStore(FsPath.From(root));
         string? current = null;
         try
         {

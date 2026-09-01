@@ -91,9 +91,9 @@ public static class CodeSearchSyncCommand
             cancellationToken)
             ?? throw new RepositorySyncBusyException(requested.RepositoryId);
         var progressStore = new RepositoryIndexProgressStore(
-            requested.RepositoryRuntimeRoot.Value);
+            requested.RepositoryRuntimeRoot);
         var manifestStore = new RepositoryManifestStore(
-            requested.RepositoryRuntimeRoot.Value);
+            requested.RepositoryRuntimeRoot);
         var lastProgress = new RepositoryIndexProgress(
             requested.RepositoryId,
             RepositoryIndexProgressPhase.Planning,
@@ -179,7 +179,7 @@ public static class CodeSearchSyncCommand
                     .Select(item => new RepositoryWorktree(item.Path, item.Head, item.Branch))
                     .ToArray(),
                 DateTimeOffset.UtcNow));
-            var store = new GenerationStore(requested.RepositoryRuntimeRoot.Value);
+            var store = new GenerationStore(requested.RepositoryRuntimeRoot);
             var current = store.ReadCurrent();
             var generationChanged = !string.Equals(
                 current?.GenerationId,

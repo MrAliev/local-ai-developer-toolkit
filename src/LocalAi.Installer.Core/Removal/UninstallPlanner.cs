@@ -206,7 +206,7 @@ public sealed class UninstallPlanner
         RepositoryManifest? manifest;
         try
         {
-            manifest = new RepositoryManifestStore(repositoryRuntimeRoot).Read();
+            manifest = new RepositoryManifestStore(FsPath.From(repositoryRuntimeRoot)).Read();
         }
         catch (Exception exception) when (
             exception is InvalidDataException or IOException or UnauthorizedAccessException)

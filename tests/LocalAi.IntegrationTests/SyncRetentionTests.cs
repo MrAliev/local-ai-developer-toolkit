@@ -22,7 +22,7 @@ public sealed class SyncRetentionTests : IDisposable
     [Fact]
     public void Publishing_drops_the_generations_the_repository_has_outgrown()
     {
-        var store = new GenerationStore(RepositoryRoot);
+        var store = new GenerationStore(FsPath.From(RepositoryRoot));
         // Published far enough back to be past the grace that protects a generation which
         // might still be being built: published moments ago, all three would be kept whatever
         // the count says.
@@ -46,7 +46,7 @@ public sealed class SyncRetentionTests : IDisposable
     [Fact]
     public void The_generation_being_served_is_never_dropped()
     {
-        var store = new GenerationStore(RepositoryRoot);
+        var store = new GenerationStore(FsPath.From(RepositoryRoot));
         var oldest = Publish(store, "aaa");
         Publish(store, "bbb");
         Publish(store, "ccc");
