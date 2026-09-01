@@ -1,3 +1,4 @@
+using LocalAi.Contracts;
 using System.Diagnostics;
 using CodeSearch.Core.Indexing;
 
@@ -65,6 +66,45 @@ public sealed class RuntimeIndexLayoutTests
             DeleteTree(runtimeRoot);
             DeleteTree(repository);
         }
+    }
+
+    /// <summary>
+    /// The overlay directory name is a shipped wire format: it is what a released build wrote on
+    /// disk, and what retention matches against to decide an overlay is unreachable. Changing
+    /// what this produces orphans every overlay on every machine — and, worse, makes the ones
+    /// already there look collectable.
+    ///
+    /// The expected value is read off a real overlay directory an earlier release built, not off
+    /// this code.
+    /// </summary>
+    [Fact]
+    public void The_key_of_a_known_worktree_is_the_directory_an_earlier_release_built()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The recorded directory was built by a Windows installation.");
+
+        Assert.Equal(
+            "6d16c7330624ccef59b9ed6e17f7c587ee312a1d78501f4926510ecf0ab87a1e",
+            RuntimeIndexLayout.WorktreeKey(
+                FsPath.From(@"R:\LocalAi")));
+    }
+
+    /// <summary>
+    /// However the caller spelled it. This is the pairing that deleted live overlays twice: the
+    /// writer had the path from Inspect, the reader had it from `git worktree list`, and the two
+    /// print different separators for the same directory.
+    /// </summary>
+    [Theory]
+    [InlineData(@"R:\LocalAi")]
+    [InlineData("R:/LocalAi")]
+    [InlineData(@"R:\LocalAi\")]
+    [InlineData(@"r:\LOCALAI")]
+    public void Every_spelling_of_one_worktree_gives_one_key(string spelling)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Drive letters and case folding are Windows path rules.");
+
+        Assert.Equal(
+            "6d16c7330624ccef59b9ed6e17f7c587ee312a1d78501f4926510ecf0ab87a1e",
+            RuntimeIndexLayout.WorktreeKey(spelling));
     }
 
     private static void Git(string workingDirectory, params string[] arguments)

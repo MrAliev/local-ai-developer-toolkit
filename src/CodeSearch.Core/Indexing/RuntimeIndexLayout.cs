@@ -134,17 +134,16 @@ public static class RuntimeIndexLayout
     /// <summary>
     /// The directory name an overlay for this worktree lives under. Exposed because retention
     /// has to recognise the same key rather than compute its own version of it.
+    ///
+    /// Takes an <see cref="FsPath"/> so the normalisation cannot be skipped: git prints forward
+    /// slashes on Windows and Inspect yields backslashes, so the same worktree hashed to two
+    /// different keys depending on who asked — and a key that matches no directory reads as
+    /// "this worktree is gone", which is how live overlays came to be deleted.
     /// </summary>
-    public static string WorktreeKey(string workingRoot)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingRoot);
-        // Normalised here rather than by the caller: git prints forward slashes on Windows
-        // and Inspect yields backslashes, so the same worktree hashed to two different keys
-        // depending on who asked — and a key that matches no directory reads as "this
-        // worktree is gone".
-        var normalised = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workingRoot));
-        return Hash(OperatingSystem.IsWindows() ? normalised.ToUpperInvariant() : normalised);
-    }
+    public static string WorktreeKey(FsPath workingRoot) => Hash(workingRoot.IdentityKey);
+
+    /// <summary>For a working root arriving as text — a command-line argument, git output.</summary>
+    public static string WorktreeKey(string workingRoot) => WorktreeKey(FsPath.From(workingRoot));
 
     private static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
