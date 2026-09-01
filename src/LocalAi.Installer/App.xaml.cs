@@ -1,3 +1,5 @@
+using LocalAi.Installer.ViewModels;
+using System.Globalization;
 using System.Windows;
 
 namespace LocalAi.Installer;
@@ -34,6 +36,11 @@ public partial class App : Application
     /// </summary>
     private void OnStartup(object sender, StartupEventArgs e)
     {
+        // Before any window is built, and on both paths. The uninstall path arrives from Apps
+        // and features, never sees the start screen, and would otherwise inherit nothing —
+        // somebody who chose Russian to install would be removed from in English.
+        InstallerCulture.Current = InstallerLanguageStore.Default.Read(CultureInfo.CurrentUICulture);
+
         Window window = IsUninstallRequested(e.Args)
             ? new UninstallWindow()
             : new StartWindow();

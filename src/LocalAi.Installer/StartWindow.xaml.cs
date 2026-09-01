@@ -19,6 +19,15 @@ public partial class StartWindow : Window
         DataContext = viewModel;
     }
 
+    private void OnChooseLanguage(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string name } &&
+            Enum.TryParse<InstallerLanguage>(name, out var language))
+        {
+            viewModel.ChooseLanguage(language);
+        }
+    }
+
     private void OnChoose(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: StartChoice choice })

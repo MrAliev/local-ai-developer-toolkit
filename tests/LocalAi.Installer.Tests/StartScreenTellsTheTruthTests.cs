@@ -10,8 +10,17 @@ namespace LocalAi.Installer.Tests;
 /// A screen that advertises a question the product deliberately stopped asking is worse than
 /// one that says nothing — the person waits for it, and then wonders what they missed.
 /// </summary>
+[Collection(InstallerLanguageCollection.Name)]
 public sealed class StartScreenTellsTheTruthTests
 {
+    // The language is process state now, so a class that asserts English says so. Run
+    // after one that chose Russian, it would otherwise read that choice as its own — which
+    // is exactly how this first failed.
+    // xunit builds one instance per test, so this runs before each of them — a
+    // static constructor runs once and lets whichever class went first decide.
+    public StartScreenTellsTheTruthTests() => InstallerCulture.Current = InstallerLanguage.English;
+
+
     [Fact]
     public void The_update_errand_does_not_promise_a_choice_the_wizard_never_offers()
     {

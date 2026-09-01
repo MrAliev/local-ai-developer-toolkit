@@ -11,8 +11,17 @@ namespace LocalAi.Installer.Tests;
 /// it offers has to depend on what is actually on the machine — and where it cannot help, it
 /// has to say why rather than present a button that fails.
 /// </summary>
+[Collection(InstallerLanguageCollection.Name)]
 public sealed class InstallerStartViewModelTests : IDisposable
 {
+    // The language is process state now, so a class that asserts English says so. Run
+    // after one that chose Russian, it would otherwise read that choice as its own — which
+    // is exactly how this first failed.
+    // xunit builds one instance per test, so this runs before each of them — a
+    // static constructor runs once and lets whichever class went first decide.
+    public InstallerStartViewModelTests() => InstallerCulture.Current = InstallerLanguage.English;
+
+
     private readonly RemovalFixture machine = new();
 
     public void Dispose() => machine.Dispose();

@@ -14,8 +14,17 @@ namespace LocalAi.Installer.Tests;
 /// is release-shaped by coincidence. A check built on data that happens to look right is how
 /// this shipped.
 /// </summary>
+[Collection(InstallerLanguageCollection.Name)]
 public sealed class StartScreenNamesTheReleaseTests : IDisposable
 {
+    // The language is process state now, so a class that asserts English says so. Run
+    // after one that chose Russian, it would otherwise read that choice as its own — which
+    // is exactly how this first failed.
+    // xunit builds one instance per test, so this runs before each of them — a
+    // static constructor runs once and lets whichever class went first decide.
+    public StartScreenNamesTheReleaseTests() => InstallerCulture.Current = InstallerLanguage.English;
+
+
     public void Dispose() => machine.Dispose();
 
     private const string BuildId = "467ed5f0f9bf";
