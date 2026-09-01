@@ -57,15 +57,27 @@ public sealed class UpdateCheckPolicyStore
         WriteIndented = true,
     };
 
-    private readonly string _path;
+    private readonly string _runtimeRoot;
+
+    /// <summary>
+    /// Where this reads from: the settings directory, falling back to the loose file an
+    /// installation from before the split still has. Writing only ever goes to the settings
+    /// directory, so the fallback empties itself rather than becoming a second source of truth.
+    /// </summary>
+    private string ReadPath =>
+        RuntimeDirectories.SettingsFile(_runtimeRoot, UpdateCheckPolicy.FileName);
+
+    private string WritePath =>
+        RuntimeDirectories.SettingsFileForWriting(_runtimeRoot, UpdateCheckPolicy.FileName);
 
     public UpdateCheckPolicyStore(string runtimeRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
-        _path = Path.Combine(Path.GetFullPath(runtimeRoot), UpdateCheckPolicy.FileName);
+        _runtimeRoot = Path.GetFullPath(runtimeRoot);
     }
 
-    public string FilePath => _path;
+    /// <summary>Where the file is now, which may still be the legacy path.</summary>
+    public string FilePath => ReadPath;
 
     public static UpdateCheckPolicy ReadDefault() =>
         new UpdateCheckPolicyStore(ModelResidencyPolicyStore.DefaultRuntimeRoot).Read();
@@ -74,13 +86,13 @@ public sealed class UpdateCheckPolicyStore
     {
         try
         {
-            if (!File.Exists(_path))
+            if (!File.Exists(ReadPath))
             {
                 return UpdateCheckPolicy.Default;
             }
 
             var policy = JsonSerializer.Deserialize<UpdateCheckPolicy>(
-                File.ReadAllBytes(_path),
+                File.ReadAllBytes(ReadPath),
                 SerializerOptions);
             if (policy is null ||
                 policy.SchemaVersion != UpdateCheckPolicy.Default.SchemaVersion ||
@@ -113,9 +125,12 @@ public sealed class UpdateCheckPolicyStore
                 UpdateCheckPolicy.MaximumIntervalHours + " hours.");
         }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(WritePath)!);
         File.WriteAllBytes(
-            _path,
+            WritePath,
             JsonSerializer.SerializeToUtf8Bytes(policy, SerializerOptions));
+        RuntimeDirectories.DiscardLegacySettingsFile(
+            _runtimeRoot,
+            UpdateCheckPolicy.FileName);
     }
 }

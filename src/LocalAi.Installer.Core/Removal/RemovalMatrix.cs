@@ -1,3 +1,5 @@
+using LocalAi.Contracts;
+
 namespace LocalAi.Installer.Core.Removal;
 
 /// <summary>
@@ -89,6 +91,10 @@ public static class RemovalMatrix
     public static IReadOnlyList<string> SettingsFileNames { get; } = Array.AsReadOnly(
     [
         "policy.json",
+        // Kept for installations that predate the settings directory. New settings go into
+        // that directory and are recognised by where they are, so this list is a compatibility
+        // shim rather than something to extend.
+        "semantic-navigation.json",
         "retention.json",
         "log-triage.json",
         "language-servers.json",
@@ -219,6 +225,17 @@ public static class RemovalMatrix
         if (string.Equals(name, "repositories", StringComparison.OrdinalIgnoreCase))
         {
             return RemovalItem.RepositoryIndexes;
+        }
+
+        // A directory cannot fall behind the code the way a list of names can. Everything
+        // inside it is a setting because of where it is, so adding a setting and having the
+        // removal matrix know about it are the same act.
+        if (string.Equals(
+                name,
+                RuntimeDirectories.SettingsDirectoryName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return RemovalItem.Settings;
         }
 
         if (string.Equals(name, SigningKeyDirectoryName, StringComparison.OrdinalIgnoreCase))

@@ -58,15 +58,26 @@ public sealed class LogTriagePolicyStore
         WriteIndented = true,
     };
 
-    private readonly string path;
+    private readonly string runtimeRoot;
 
     public LogTriagePolicyStore(string runtimeRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
-        path = System.IO.Path.Combine(runtimeRoot, LogTriagePolicy.FileName);
+        this.runtimeRoot = runtimeRoot;
     }
 
-    public string Path => path;
+    /// <summary>
+    /// Where this reads from: the settings directory, falling back to the loose file an
+    /// installation from before the split still has. Writing only ever goes to the settings
+    /// directory, so the fallback empties itself rather than becoming a second source of truth.
+    /// </summary>
+    public string Path =>
+        LocalAi.Contracts.RuntimeDirectories.SettingsFile(runtimeRoot, LogTriagePolicy.FileName);
+
+    private string WritePath =>
+        LocalAi.Contracts.RuntimeDirectories.SettingsFileForWriting(
+            runtimeRoot,
+            LogTriagePolicy.FileName);
 
     public static string DefaultRuntimeRoot =>
         LocalAi.Contracts.ModelResidencyPolicyStore.DefaultRuntimeRoot;
@@ -78,13 +89,13 @@ public sealed class LogTriagePolicyStore
     {
         try
         {
-            if (!File.Exists(path))
+            if (!File.Exists(Path))
             {
                 return LogTriagePolicy.Default;
             }
 
             var policy = JsonSerializer.Deserialize<LogTriagePolicy>(
-                File.ReadAllBytes(path),
+                File.ReadAllBytes(Path),
                 SerializerOptions);
             return policy is null || policy.SchemaVersion != 1
                 ? LogTriagePolicy.Default
@@ -100,9 +111,12 @@ public sealed class LogTriagePolicyStore
     public void Write(LogTriagePolicy policy)
     {
         ArgumentNullException.ThrowIfNull(policy);
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(WritePath)!);
         File.WriteAllBytes(
-            path,
+            WritePath,
             JsonSerializer.SerializeToUtf8Bytes(policy.Normalized(), SerializerOptions));
+        LocalAi.Contracts.RuntimeDirectories.DiscardLegacySettingsFile(
+            runtimeRoot,
+            LogTriagePolicy.FileName);
     }
 }

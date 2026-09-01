@@ -1337,7 +1337,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         try
         {
             var runtimeRoot = ModelResidencyPolicyStore.DefaultRuntimeRoot;
-            var policyPath = Path.Combine(runtimeRoot, BrokerPolicy.FileName);
+            var policyPath = RuntimeDirectories.SettingsFileForWriting(
+                runtimeRoot,
+                BrokerPolicy.FileName);
             // Captured before the write, journalled only when the writer will actually
             // write: mirroring its own installation check keeps the journal free of steps
             // for effects that never happened.
@@ -1403,7 +1405,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         try
         {
             var runtimeRoot = ModelResidencyPolicyStore.DefaultRuntimeRoot;
-            var policyPath = Path.Combine(runtimeRoot, UpdateCheckPolicy.FileName);
+            var policyPath = RuntimeDirectories.SettingsFileForWriting(
+                runtimeRoot,
+                UpdateCheckPolicy.FileName);
             var prior = Directory.Exists(runtimeRoot) ? CaptureFileState(policyPath) : null;
             if (prior is not null)
             {

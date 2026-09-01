@@ -136,12 +136,23 @@ public sealed class RuntimeRetentionPolicyStore
         WriteIndented = true,
     };
 
-    private readonly string _path;
+    private readonly string _runtimeRoot;
+
+    /// <summary>
+    /// Where this reads from: the settings directory, falling back to the loose file an
+    /// installation from before the split still has. Writing only ever goes to the settings
+    /// directory, so the fallback empties itself rather than becoming a second source of truth.
+    /// </summary>
+    private string ReadPath =>
+        RuntimeDirectories.SettingsFile(_runtimeRoot, RuntimeRetentionPolicy.FileName);
+
+    private string WritePath =>
+        RuntimeDirectories.SettingsFileForWriting(_runtimeRoot, RuntimeRetentionPolicy.FileName);
 
     public RuntimeRetentionPolicyStore(string runtimeRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeRoot);
-        _path = Path.Combine(runtimeRoot, RuntimeRetentionPolicy.FileName);
+        _runtimeRoot = runtimeRoot;
     }
 
     public static string DefaultRuntimeRoot => ModelResidencyPolicyStore.DefaultRuntimeRoot;
@@ -153,13 +164,13 @@ public sealed class RuntimeRetentionPolicyStore
     {
         try
         {
-            if (!File.Exists(_path))
+            if (!File.Exists(ReadPath))
             {
                 return RuntimeRetentionPolicy.Default;
             }
 
             var policy = JsonSerializer.Deserialize<RuntimeRetentionPolicy>(
-                File.ReadAllBytes(_path),
+                File.ReadAllBytes(ReadPath),
                 SerializerOptions);
             return policy is null || policy.SchemaVersion != 1
                 ? RuntimeRetentionPolicy.Default
@@ -175,9 +186,12 @@ public sealed class RuntimeRetentionPolicyStore
     public void Write(RuntimeRetentionPolicy policy)
     {
         ArgumentNullException.ThrowIfNull(policy);
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(WritePath)!);
         File.WriteAllBytes(
-            _path,
+            WritePath,
             JsonSerializer.SerializeToUtf8Bytes(policy.Normalized(), SerializerOptions));
+        RuntimeDirectories.DiscardLegacySettingsFile(
+            _runtimeRoot,
+            RuntimeRetentionPolicy.FileName);
     }
 }

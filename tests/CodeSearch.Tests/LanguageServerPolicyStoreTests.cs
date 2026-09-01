@@ -75,7 +75,7 @@ public class LanguageServerPolicyStoreTests
     public void AnOutOfRangeValueFallsBackToDisabledDefaults()
     {
         var root = TempRoot();
-        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(new LanguageServerPolicyStore(root).Path)!);
         var store = new LanguageServerPolicyStore(root);
         File.WriteAllBytes(
             store.Path,
@@ -162,7 +162,7 @@ public class LanguageServerPolicyStoreTests
     public void ConfigurationWrittenBeforeTheFieldExistedStillLoads()
     {
         var root = TempRoot();
-        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(new LanguageServerPolicyStore(root).Path)!);
         File.WriteAllText(
             Path.Combine(root, LanguageServerPolicy.FileName),
             """
@@ -217,7 +217,7 @@ public class LanguageServerPolicyStoreTests
     public void AFileCarryingUnusableInitializationOptionsFallsBackToDisabledDefaults()
     {
         var root = TempRoot();
-        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(new LanguageServerPolicyStore(root).Path)!);
         File.WriteAllText(
             Path.Combine(root, LanguageServerPolicy.FileName),
             """

@@ -75,7 +75,7 @@ TypeScript 7 больше не поставляет `lib/tsserver.js`, поэт�
 | `local_model_feedback` | Решение владельца: `Promote`, `ContinueExperiment`, `FallbackOnly`, `Disable`. | — |
 
 `triage_log` перед каждым вызовом читает профиль из
-`%LOCALAPPDATA%\LocalAi\log-triage.json`. Необязательные поля JSON: `maximumContextTokens`, `reservedContextTokens`,
+`%LOCALAPPDATA%\LocalAi\settings\log-triage.json`. Необязательные поля JSON: `maximumContextTokens`, `reservedContextTokens`,
 `charactersPerToken`, `maximumFragmentCharacters`, `maximumOverlapCharacters`,
 `maximumPartialSummaryCharacters`, `promptOverheadCharacters` и `schemaVersion: 1`.
 Если файла нет, он повреждён или имеет неподдерживаемую версию, применяются безопасные значения
