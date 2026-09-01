@@ -548,7 +548,14 @@ picking the preset by hand in a plain uninstall, that nothing here disconnects a
 which rows to tick to change that. The one thing that genuinely breaks in between is stated
 the same way: dispatchers left pointing at a launcher that has gone are a permanent state when
 nothing follows, and an interval when an installation does, so the kept-item note says which
-of the two this run is producing, and the finish page stops calling stopping there free.
+of the two this run is producing, and the finish page stops calling stopping there free. The
+Apps & features entry is left alone on that path for the same reason and one more: taking it
+out and writing it back inside one run is churn on the good path, and on the bad one the
+uninstaller's parked copy is what a removal launched from Apps & features runs from, so
+deleting it falls to a retry loop that keeps trying for a minute after the process exits —
+long enough to delete the copy the installation half has by then written, leaving an entry
+that points at nothing and no way to uninstall. The entry is also true throughout: the run
+ends with LocalAi installed.
 
 A version directory is named after the commit it was built from, so the pointer alone cannot
 say which release is installed. `bin\installed-release.json` records that, beside the pointer
