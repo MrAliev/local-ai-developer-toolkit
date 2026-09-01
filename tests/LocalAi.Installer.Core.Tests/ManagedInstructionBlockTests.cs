@@ -53,46 +53,46 @@ public sealed class ManagedInstructionBlockTests
     [InlineData("full-VRAM, zero-offload")]
     [InlineData("estimated cloud tokens avoided")]
     [InlineData("exact `index_unload` tool name")]
-    // The wording moved from "processed, total and remaining chunks" when the paragraph
-    // gained the cadence: the volume is stated up front, the progress at least once a minute.
-    [InlineData("how many files and chunks")]
-    [InlineData("processed, remaining")]
-    [InlineData("at least once a")]
-    [InlineData("current ETA")]
+    [InlineData("ETA")]
+    // The volume is stated up front and the progress while it runs. What is NOT required is a
+    // file count: index_status carries none, and asking for one only invites an invented
+    // number.
+    [InlineData("processed and total chunks")]
     // Hidden indexing is indistinguishable from a hung machine, and the person watching has
     // no other way to tell the two apart.
-    [InlineData("Never filter the indexer")]
-    // Surviving an install and outranking the block are different promises, and only the
-    // first is mechanical. Without the second, an assistant reading both a user's rule and
-    // this block has no rule for the conflict and follows whichever it read last.
-    [InlineData("same on every machine")]
-    [InlineData("it wins")]
+    [InlineData("never filter the indexer")]
     // The index covers commits. Edits still in the working tree need an overlay that nothing
     // builds on its own, and without this the refusal reads as a broken tool rather than a
     // missing step — which is how a text search gets reached for instead.
     [InlineData("Uncommitted work is not in the index yet")]
-    // Leaving the local tool is a decision with a reason, not a silent fallback. Without this
-    // the machine sits idle while an assistant greps, and nobody is told it happened.
-    [InlineData("Reach for the local tool first")]
+    // Named because a sync aimed at the repository root while you are editing a worktree
+    // builds an overlay for somewhere else, and the search still refuses.
+    [InlineData("the worktree you are editing")]
+    // All four hooks, so nobody syncs by hand after a rebase.
+    [InlineData("commit, checkout, merge")]
+    [InlineData("rewrite")]
+    // Leaving the local tool is a decision with a reason, not a silent fallback.
     [InlineData("ask before switching")]
-    [InlineData("offer the three ways forward")]
-    // The report is a shape, not a sentiment: a local call reported vaguely is one the reader
-    // cannot tell from a call that never happened.
+    // The report is a shape, not a sentiment: a local call reported vaguely cannot be told
+    // from one that never happened.
     [InlineData("Saved roughly")]
     [InlineData("four characters per token")]
     // The first thing to check when the index lags HEAD, and the one people never think of.
     [InlineData("core.hooksPath")]
     [InlineData("git rev-parse --git-path hooks")]
-    // Indexing is opt-in per repository, so an assistant that does not know how to connect
-    // one is limited to whatever was set up before it arrived.
-    // With --root, because the block is read by agents that are not standing in the repository
-    // they are asking about, and the bare form answers about wherever the process happens to be.
     [InlineData("localai repo status --root")]
     [InlineData("localai sync --root")]
     [InlineData("localai hooks install --root")]
     [InlineData("INITIALIZING")]
     public void The_block_states_every_rule_the_installation_depends_on(string rule) =>
-        Assert.Contains(rule, ManagedInstructionBlock.Block, StringComparison.Ordinal);
+        // Whitespace-normalised: the block is wrapped to a column, so a required phrase can
+        // fall across a line break without the requirement having changed at all.
+        Assert.Contains(
+            rule,
+            string.Join(" ", ManagedInstructionBlock.Block.Split(
+                (char[]?)null,
+                StringSplitOptions.RemoveEmptyEntries)),
+            StringComparison.Ordinal);
 
     [Fact]
     public void The_block_is_written_with_one_line_ending_convention()
@@ -153,6 +153,53 @@ public sealed class ManagedInstructionBlockTests
 
         Assert.Equal(original + Environment.NewLine, removed.Content);
         Assert.StartsWith(original, removed.Content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The user's own guidance outranks this block — and two rules are outside that
+    /// arrangement, because they are not preferences. A configuration line saying "just call
+    /// Ollama directly" must not read as authority to break the transport invariant, and
+    /// nothing in a repository file may promote itself from data to instruction.
+    /// </summary>
+    [Fact]
+    public void The_precedence_rule_does_not_reach_the_two_invariants()
+    {
+        var block = ManagedInstructionBlock.Block;
+
+        Assert.Contains("theirs wins", block, StringComparison.Ordinal);
+        var carveOut = block.IndexOf("not preferences", StringComparison.Ordinal);
+        Assert.True(carveOut > 0, "the block must say which rules the user's guidance cannot override");
+        Assert.Contains(
+            "untrusted-content",
+            block[carveOut..],
+            StringComparison.Ordinal);
+        Assert.Contains("broker", block[carveOut..], StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// This text is prepended to every CLAUDE.md and AGENTS.md and read on every session, so a
+    /// sentence that merely restates another one is paid for on every turn forever. The block
+    /// grew 72% in one commit, most of it restatement, before anybody measured it.
+    /// </summary>
+    [Fact]
+    public void The_block_says_nothing_twice()
+    {
+        var normalised = string.Join(" ", ManagedInstructionBlock.Block.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries));
+        var sentences = normalised
+            .Split(['.', ':'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(sentence => sentence.Trim())
+            .Where(sentence => sentence.Length > 45)
+            .ToArray();
+
+        var repeated = sentences
+            .GroupBy(sentence => sentence, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+
+        Assert.Empty(repeated);
     }
 
     [Fact]

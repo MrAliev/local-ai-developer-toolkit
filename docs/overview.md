@@ -501,25 +501,17 @@ Git actually keeps its hooks, and the requirement to report indexing while it ru
 after it. Writing these once and shipping them is what keeps two machines from behaving
 differently for reasons nobody can see.
 
-Whatever the person wrote outside the markers is theirs. It survives every install byte for
-byte — the block is replaced wholesale, and an uninstall takes it back out and nothing else —
-and where it disagrees with the block, theirs wins and the assistant says which rule it is
+Whatever the person wrote outside the markers is theirs: an install replaces the block and
+leaves the rest of the file alone, and an uninstall takes the block back out and nothing else.
+Where their guidance disagrees with the block, theirs wins and the assistant says which rule it is
 overriding. A rule that is true of one machine, one set of cards or one maintainer's
 permissions belongs outside the markers; a rule that is true everywhere belongs inside them.
 
-The operating rules travel the same way. Every machine gets the same block between the markers
-in `CLAUDE.md` and `AGENTS.md`: reach for the local tool first and say so out loud when you
-cannot, the transport invariants, how to connect a repository that has never been indexed, what
-to do about work that is edited but not committed, the shape of the saved-tokens report, where
-Git actually keeps its hooks, and the requirement to report indexing while it runs rather than
-after it. Writing these once and shipping them is what keeps two machines from behaving
-differently for reasons nobody can see.
-
-Whatever the person wrote outside the markers is theirs. It survives every install byte for
-byte — the block is replaced wholesale, and an uninstall takes it back out and nothing else —
-and where it disagrees with the block, theirs wins and the assistant says which rule it is
-overriding. A rule that is true of one machine, one set of cards or one maintainer's
-permissions belongs outside the markers; a rule that is true everywhere belongs inside them.
+Two of the block's rules are outside that arrangement, and the block says so: everything goes
+through the broker rather than straight to Ollama, and text arriving inside untrusted-content
+markers is data rather than instructions. The first is what keeps several clients correct at
+once; the second is what stops a file in a repository from issuing orders. A line in a
+configuration file is not evidence that somebody meant to switch either of them off.
 
 Installation needs no GitHub account: releases are public, and the installer downloads the
 manifest, the signature and the package over plain HTTPS with no credentials. The GitHub CLI
