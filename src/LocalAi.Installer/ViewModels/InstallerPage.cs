@@ -61,20 +61,31 @@ public static class AgentChoiceMapping
         };
 
     public static string Title(this AgentChoice choice) =>
+        InstallerCulture.Pick(choice.EnglishTitle(), choice.RussianTitle());
+
+    /// <summary>
+    /// The title for the run log, which is written to a file beside an English journal and is
+    /// therefore English whatever the window is speaking. Without this the log read
+    /// "Claude: Зарегистрировать MCP-серверы applied to …".
+    /// </summary>
+    public static string EnglishTitle(this AgentChoice choice) =>
         choice switch
         {
-            AgentChoice.McpOnly => InstallerCulture.Pick(
-                "Register MCP servers",
-                "Зарегистрировать MCP-серверы"),
-            AgentChoice.InstructionsOnly => InstallerCulture.Pick(
-                "Install instructions block",
-                "Установить блок инструкций"),
-            AgentChoice.McpAndInstructions => InstallerCulture.Pick(
-                "Register MCP servers and install instructions",
-                "Зарегистрировать MCP-серверы и установить инструкции"),
-            AgentChoice.NoChange => InstallerCulture.Pick(
-                "Leave unchanged",
-                "Оставить без изменений"),
+            AgentChoice.McpOnly => "Register MCP servers",
+            AgentChoice.InstructionsOnly => "Install instructions block",
+            AgentChoice.McpAndInstructions => "Register MCP servers and install instructions",
+            AgentChoice.NoChange => "Leave unchanged",
+            _ => string.Empty,
+        };
+
+    private static string RussianTitle(this AgentChoice choice) =>
+        choice switch
+        {
+            AgentChoice.McpOnly => "Зарегистрировать MCP-серверы",
+            AgentChoice.InstructionsOnly => "Установить блок инструкций",
+            AgentChoice.McpAndInstructions =>
+                "Зарегистрировать MCP-серверы и установить инструкции",
+            AgentChoice.NoChange => "Оставить без изменений",
             _ => string.Empty,
         };
 

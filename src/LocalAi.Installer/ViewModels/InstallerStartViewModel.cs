@@ -65,9 +65,13 @@ public sealed class InstallerStartViewModel : ObservableObject
         Func<InstalledVersion>? readInstalledVersion = null,
         InstallerLanguageStore? languageStore = null)
     {
-        languages = languageStore ?? InstallerLanguageStore.Default;
         var root = localAppData ??
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        // Rooted where the caller said its state lives. Defaulting to the real profile even
+        // when the rest of the view model was redirected let the test suite rewrite the
+        // language of the installer actually installed on the machine, once per run.
+        languages = languageStore ?? new InstallerLanguageStore(
+            Path.Combine(root, RemovalMatrix.JournalDirectoryName));
         existing = (inspector ?? new ExistingLocalAiInspector(new SystemFileSystemProbe()))
             .Inspect(root);
         installed = readInstalledVersion is null
@@ -159,7 +163,9 @@ public sealed class InstallerStartViewModel : ObservableObject
         // labelled and given its own line rather than glued into a sentence — which also fixes
         // an exception message running into the next clause without a full stop.
         ExistingLocalAiState.Unrecognized => InstallerCulture.Pick(
-            (existing.Reason ?? "The installation could not be read.") +
+            (existing.Reason is { Length: > 0 } englishReason
+                ? "Reason: " + englishReason
+                : "The installation could not be read.") +
             "\nInstalling again repairs it; removing clears it away.",
             (existing.Reason is { Length: > 0 } reason
                 ? "Причина: " + reason

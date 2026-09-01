@@ -60,11 +60,23 @@ public sealed class RemovalTextsSpeakRussianTests : IDisposable
             RemovalMatrix.Description(RemovalPreset.ReinstallFriendly));
     }
 
+    /// <summary>
+    /// A run of three Latin words in a row, not one Cyrillic character anywhere. Every Russian
+    /// line here carries Latin names — LocalAi, launcher, overlay, winget — but names come one
+    /// or two at a time; three in a row is a clause somebody forgot.
+    /// </summary>
     private static void AssertRussian(string text, string what)
     {
         Assert.False(string.IsNullOrWhiteSpace(text), $"{what} is empty");
         Assert.True(
             Regex.IsMatch(text, "[а-яА-ЯёЁ]"),
             $"{what} is still English: {text}");
+
+        var clause = Regex.Match(
+            text,
+            @"[A-Za-z][A-Za-z.\-]*\s+[A-Za-z][A-Za-z.\-]*\s+[A-Za-z][A-Za-z.\-]*");
+        Assert.False(
+            clause.Success,
+            $"{what} still carries an English clause \"{clause.Value}\": {text}");
     }
 }

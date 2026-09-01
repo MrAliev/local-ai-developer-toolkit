@@ -188,7 +188,7 @@ public sealed record UninstallPlan(
 
     private static string HookLine(HookRemovalEntry hook) =>
         hook.IsSkipped
-            ? "  " + InstallerCulture.Pick("skip", "пропущен") + " " +
+            ? "  " + InstallerCulture.Pick("skip", "пропустить") + " " +
                 hook.CommonDirectory + " — " + hook.SkipReason
             : "  " + hook.CommonDirectory +
                 (hook.HasWork

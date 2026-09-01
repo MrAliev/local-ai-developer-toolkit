@@ -159,7 +159,7 @@ public sealed class PackagePageViewModel : ObservableObject
     private string Source =>
         SourceFolder.Length == 0
             ? string.Empty
-            : string.Format(InstallerCulture.Pick(", from {0}", ", из {0}"), SourceFolder);
+            : string.Format(InstallerCulture.Pick(", from {0}", ", из папки {0}"), SourceFolder);
 
     /// <summary>
     /// The label on the button that applies the run — "Install" or "Update". Set by the wizard,

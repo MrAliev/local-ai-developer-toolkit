@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using LocalAi.Installer.Core;
 using LocalAi.Installer.ViewModels;
 
@@ -23,7 +22,7 @@ public sealed class PagesSpeakRussianTests : IDisposable
 
         foreach (var status in Enum.GetValues<CheckStatus>())
         {
-            AssertRussian(new EnvironmentCheck("x", status, "y").StatusText, $"{status}");
+            RussianText.AssertRussian(new EnvironmentCheck("x", status, "y").StatusText, $"{status}");
         }
     }
 
@@ -37,8 +36,8 @@ public sealed class PagesSpeakRussianTests : IDisposable
             Consequence = "без него определения ищутся текстом",
         };
 
-        AssertRussian(optional.StateText, "state");
-        AssertRussian(optional.ActionText, "action");
+        RussianText.AssertRussian(optional.StateText, "state");
+        RussianText.AssertRussian(optional.ActionText, "action");
         Assert.Equal("необязателен: без него определения ищутся текстом", optional.RequirementText);
         Assert.Equal(
             "обязателен",
@@ -70,8 +69,8 @@ public sealed class PagesSpeakRussianTests : IDisposable
 
         foreach (var choice in Enum.GetValues<AgentChoice>())
         {
-            AssertRussian(choice.Title(), $"Title({choice})");
-            AssertRussian(choice.Description(), $"Description({choice})");
+            RussianText.AssertRussian(choice.Title(), $"Title({choice})");
+            RussianText.AssertRussian(choice.Description(), $"Description({choice})");
         }
     }
 
@@ -92,7 +91,7 @@ public sealed class PagesSpeakRussianTests : IDisposable
         Assert.NotEmpty(page.ChoiceOptions);
         foreach (var option in page.ChoiceOptions)
         {
-            AssertRussian(option.Title, $"{option.Choice} title");
+            RussianText.AssertRussian(option.Title, $"{option.Choice} title");
         }
     }
 
@@ -116,11 +115,5 @@ public sealed class PagesSpeakRussianTests : IDisposable
         Assert.Equal(
             "Codex (not detected)",
             new AgentOption("codex", AgentChoice.NoChange).Heading);
-    }
-
-    private static void AssertRussian(string text, string what)
-    {
-        Assert.False(string.IsNullOrWhiteSpace(text), $"{what} is empty");
-        Assert.True(Regex.IsMatch(text, "[а-яА-ЯёЁ]"), $"{what} is still English: {text}");
     }
 }

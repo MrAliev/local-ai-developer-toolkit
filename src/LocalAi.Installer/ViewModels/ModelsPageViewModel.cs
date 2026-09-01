@@ -269,7 +269,7 @@ public sealed class ModelsPageViewModel : ObservableObject
                 : string.Format(
                     InstallerCulture.Pick(
                         "{0} — all {1} catalogue models offered",
-                        "{0} — предложены все {1} моделей каталога"),
+                        "{0} — предложены все модели каталога ({1})"),
                     rule,
                     catalogue);
         }
@@ -281,7 +281,7 @@ public sealed class ModelsPageViewModel : ObservableObject
         return string.Format(
             InstallerCulture.Pick(
                 "{0} — {1} of {2} catalogue models fit",
-                "{0} — подходит {1} из {2} моделей каталога"),
+                "{0} — подходящих моделей: {1} из {2}"),
             rule,
             fitting,
             catalogue);

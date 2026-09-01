@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core;
 using LocalAi.Installer.ViewModels;
@@ -31,7 +30,7 @@ public sealed class WizardSpeaksRussianTests : IDisposable
 
         foreach (var step in new InstallerWizardViewModel().StepList)
         {
-            AssertRussian(step.Title, "rail entry");
+            RussianText.AssertRussian(step.Title, "rail entry");
         }
     }
 
@@ -60,12 +59,12 @@ public sealed class WizardSpeaksRussianTests : IDisposable
         {
             foreach (var isUpdate in new[] { false, true })
             {
-                AssertRussian(WizardText.Title(page, isUpdate, hasRunError: false), $"{page} title");
-                AssertRussian(WizardText.Title(page, isUpdate, hasRunError: true), $"{page} title");
-                AssertRussian(
+                RussianText.AssertRussian(WizardText.Title(page, isUpdate, hasRunError: false), $"{page} title");
+                RussianText.AssertRussian(WizardText.Title(page, isUpdate, hasRunError: true), $"{page} title");
+                RussianText.AssertRussian(
                     WizardText.Description(page, isUpdate, "Установить", hasRunError: false),
                     $"{page} description");
-                AssertRussian(
+                RussianText.AssertRussian(
                     WizardText.Description(page, isUpdate, "Установить", hasRunError: true),
                     $"{page} description");
             }
@@ -81,8 +80,8 @@ public sealed class WizardSpeaksRussianTests : IDisposable
 
         Assert.Equal("Установить", wizard.ActionText);
         Assert.Equal("Шаг 1 из 8", wizard.StepStatus);
-        AssertRussian(wizard.CancelButtonText, "cancel button");
-        AssertRussian(wizard.WindowTitle, "window title");
+        RussianText.AssertRussian(wizard.CancelButtonText, "cancel button");
+        RussianText.AssertRussian(wizard.WindowTitle, "window title");
     }
 
     [Fact]
@@ -131,11 +130,5 @@ public sealed class WizardSpeaksRussianTests : IDisposable
             WizardText.Title(InstallerPage.Models, isUpdate: false, hasRunError: false));
         Assert.Equal("Install", wizard.ActionText);
         Assert.Equal("Step 1 of 8", wizard.StepStatus);
-    }
-
-    private static void AssertRussian(string text, string what)
-    {
-        Assert.False(string.IsNullOrWhiteSpace(text), $"{what} is empty");
-        Assert.True(Regex.IsMatch(text, "[а-яА-ЯёЁ]"), $"{what} is still English: {text}");
     }
 }

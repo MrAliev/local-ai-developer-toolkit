@@ -9,3 +9,4 @@ global using Xunit;
 // the assembly rather than around a collection somebody has to remember to join: one collection
 // for the whole assembly, and xunit never runs two tests of one collection at the same time.
 [assembly: CollectionBehavior(CollectionBehavior.CollectionPerAssembly)]
+[assembly: LocalAi.Installer.Core.Tests.PinInstallerLanguage]

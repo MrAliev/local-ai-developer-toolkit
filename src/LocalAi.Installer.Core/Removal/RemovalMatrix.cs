@@ -216,7 +216,7 @@ public static class RemovalMatrix
                 "отдельный выбор."),
             RemovalItem.SigningKeys => InstallerCulture.Pick(
                 "Kept unless separately confirmed: the offline backup then becomes the only copy.",
-                "Остаются, пока это не подтверждено отдельно: иначе " +
+                "Остаются, пока не подтверждено отдельно: после удаления " +
                 "офлайн-копия станет единственной."),
             _ => throw new ArgumentOutOfRangeException(nameof(item), item, null),
         };
@@ -232,7 +232,7 @@ public static class RemovalMatrix
                 "Отключить клиентов"),
             RemovalPreset.ReinstallFriendly => InstallerCulture.Pick(
                 "Reinstall-friendly",
-                "С заделом на переустановку"),
+                "С расчётом на переустановку"),
             _ => throw new ArgumentOutOfRangeException(nameof(preset), preset, null),
         };
 

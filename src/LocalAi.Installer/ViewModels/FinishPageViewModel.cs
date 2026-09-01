@@ -1,5 +1,5 @@
 using LocalAi.Installer.Core;
-﻿namespace LocalAi.Installer.ViewModels;
+namespace LocalAi.Installer.ViewModels;
 
 public sealed class FinishPageViewModel : ObservableObject
 {

@@ -331,15 +331,15 @@ public sealed class InstallerWizardViewModel : ObservableObject
     {
         StartChoice.UpdateOrRepair => InstallerCulture.Pick(
             "I have read what will change and want to continue.",
-            "Я прочитал, что изменится, и хочу продолжить."),
+            "Я понимаю, что изменится, и хочу продолжить."),
         StartChoice.CleanReinstall => InstallerCulture.Pick(
             "I have read what will be removed and what will be installed, and want to " +
             "continue.",
-            "Я прочитал, что будет удалено и что установлено, и хочу " +
+            "Я понимаю, что будет удалено и что установлено, и хочу " +
             "продолжить."),
         _ => InstallerCulture.Pick(
             "I have read what will be installed and want to continue.",
-            "Я прочитал, что будет установлено, и хочу продолжить."),
+            "Я понимаю, что будет установлено, и хочу продолжить."),
     };
 
     /// <summary>
@@ -1106,9 +1106,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
         AppendLog(
             report,
             journal.Snapshot.HasReversibleWork
-                ? "Some of the applied actions are reversible. Use \"Roll back changes\" " +
-                    "below to undo them; the journal at " + journal.JournalPath +
-                    " records exactly what was done."
+                // The log is English, but this sentence points at a button, and the button
+                // carries whatever label the window is showing. An instruction naming a
+                // control that is not on screen cannot be followed.
+                ? "Some of the applied actions are reversible. Use \"" +
+                    PageLabels.RollBackChanges + "\" below to undo them; the journal at " +
+                    journal.JournalPath + " records exactly what was done."
                 : "Nothing this run applied is reversible by the installer. The journal " +
                     "at " + journal.JournalPath + " records exactly what was done.");
     }
@@ -1284,7 +1287,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
                         Files: plan.Files.Select(BuildAgentFileUndo).ToArray()));
                 AppendLog(
                     report,
-                    $"{plan.AgentName}: {agent.Choice.Title()} applied to " +
+                    $"{plan.AgentName}: {agent.Choice.EnglishTitle()} applied to " +
                     string.Join(", ", plan.Files.Select(file => file.Path)) +
                     ". Restart the client to pick it up.");
             }
@@ -1538,6 +1541,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
         return 0;
     }
 
+    /// <summary>Where the run wrote its report, said on the finish page.</summary>
+    private static string SavedTo => InstallerCulture.Pick(
+        "Report saved to {0}.",
+        "Отчёт сохранён в {0}.");
+
     /// <summary>
     /// Says when this run replaces a setting the machine already had.
     ///
@@ -1545,10 +1553,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// chose AllowCpu it is also a silent reversal, and the page that promises to list every
     /// effect has to say which of the two it is (#256).
     /// </summary>
-    private static string SavedTo => InstallerCulture.Pick(
-        "Report saved to {0}.",
-        "Отчёт сохранён в {0}.");
-
     private string StoredResidencyNote() =>
         storedResidency is { } stored && stored != residency.Policy
             ? string.Format(

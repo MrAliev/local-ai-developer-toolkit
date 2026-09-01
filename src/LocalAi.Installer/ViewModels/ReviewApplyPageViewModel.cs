@@ -1,5 +1,5 @@
 using LocalAi.Installer.Core;
-﻿using LocalAi.Contracts;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.ViewModels;
 

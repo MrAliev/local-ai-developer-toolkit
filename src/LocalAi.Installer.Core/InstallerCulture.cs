@@ -28,7 +28,4 @@ public static class InstallerCulture
 
     /// <summary>The one of two strings this language calls for.</summary>
     public static string Pick(string english, string russian) => IsRussian ? russian : english;
-
-    public static string CurrentCultureCode =>
-        IsRussian ? "ru" : System.Globalization.CultureInfo.InvariantCulture.TwoLetterISOLanguageName;
 }

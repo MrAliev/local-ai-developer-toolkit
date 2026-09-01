@@ -11,6 +11,9 @@ namespace LocalAi.Installer.Tests;
 /// This exists because the sweep that moved 44 of them looked at Text, Content and Header, and
 /// the removal window's own Title was none of those — so the window carrying a fully translated
 /// page was still called "Remove LocalAi" in the task bar.
+///
+/// AutomationProperties.Name is deliberately not swept: the start screen carries one per
+/// language, each shown only while the other language is active.
 /// </summary>
 public sealed class MarkupCarriesNoProseTests
 {
@@ -24,6 +27,22 @@ public sealed class MarkupCarriesNoProseTests
         "(?<attribute>Title|Text|Content|Header|ToolTip)=\"(?<value>[^\"{][^\"]*)\"",
         RegexOptions.Compiled);
 
+    /// <summary>
+    /// Element content rather than an attribute: &lt;Button&gt;Close&lt;/Button&gt;. The most natural
+    /// way to put a sentence back into markup, and invisible to the attribute pattern.
+    /// </summary>
+    private static readonly Regex Content = new(
+        ">(?<value>[^<>{]*[A-Za-z\u0410-\u044f]{3,}[^<>]*)</",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// A style that sets one of the text properties. Value= on its own carries brushes,
+    /// thicknesses and "Wrap", so it is only prose when the Property beside it says so.
+    /// </summary>
+    private static readonly Regex StyledText = new(
+        "Property=\"(Content|Text|Header|ToolTip)\"[ ]+Value=\"(?<value>[^\"{][^\"]*)\"",
+        RegexOptions.Compiled);
+
     [Theory]
     [InlineData("MainWindow.xaml")]
     [InlineData("UninstallWindow.xaml")]
@@ -35,15 +54,18 @@ public sealed class MarkupCarriesNoProseTests
 
         foreach (var (line, number) in File.ReadLines(path).Select((line, index) => (line, index + 1)))
         {
-            foreach (Match match in Literal.Matches(line))
+            foreach (var pattern in new[] { Literal, Content, StyledText })
             {
-                var value = match.Groups["value"].Value;
-                if (NotProse.Contains(value) || !Regex.IsMatch(value, "[A-Za-zА-Яа-я]"))
+                foreach (Match match in pattern.Matches(line))
                 {
-                    continue;
-                }
+                    var value = match.Groups["value"].Value.Trim();
+                    if (NotProse.Contains(value) || !Regex.IsMatch(value, "[A-Za-zА-Яа-я]"))
+                    {
+                        continue;
+                    }
 
-                offenders.Add($"{window}:{number}  {match.Groups["attribute"].Value}=\"{value}\"");
+                    offenders.Add($"{window}:{number}  {value}");
+                }
             }
         }
 

@@ -1,3 +1,4 @@
+using System.IO;
 using LocalAi.Contracts.Activation;
 using LocalAi.Installer.ViewModels;
 using LocalAi.TestFixtures;
@@ -104,6 +105,30 @@ public sealed class StartScreenSpeaksRussianTests : IDisposable
         Assert.Contains(nameof(InstallerStartViewModel.Headline), announced);
         Assert.Contains("установлен на этом компьютере.", start.Headline, StringComparison.Ordinal);
         Assert.Equal("Установить LocalAi", start.Option(StartChoice.Install).Title);
+    }
+
+    /// <summary>
+    /// A test that remembers a language must remember it inside its own fixture. This one wrote
+    /// to the real %LOCALAPPDATA%: every run of the suite silently switched the language of the
+    /// installer actually installed on the machine, and the escape was invisible because the
+    /// store never fails a run.
+    ///
+    /// The trap is in the seam rather than in the test: a caller who redirects the whole view
+    /// model to a temporary root has said where its state lives, and the language is state.
+    /// </summary>
+    [Fact]
+    public void Remembering_a_language_stays_inside_the_root_it_was_given()
+    {
+        var start = Start("0.1.51");
+
+        start.ChooseLanguage(InstallerLanguage.Russian);
+
+        Assert.True(
+            File.Exists(Path.Combine(
+                machine.LocalAppData,
+                "LocalAi-installer-logs",
+                "ui-language.json")),
+            "the choice was written somewhere other than the root the view model was given");
     }
 
     private InstallerStartViewModel Start(string? release) =>

@@ -637,31 +637,39 @@ public sealed class UninstallWizardViewModel : ObservableObject
         UninstallOutcome outcome,
         StringBuilder log)
     {
+        // Unlike the installation run's report, this one is never written to a file: it is
+        // bound to a read-only box on the finish page and nothing else. There is no English
+        // journal for it to match, and its own "Kept:" lines already carry text the planner
+        // translated — so leaving the labels English produced half a sentence in each language.
         foreach (var path in outcome.RemovedPaths)
         {
-            log.AppendLine("Removed " + path);
+            log.AppendLine(InstallerCulture.Pick("Removed ", "Удалено ") + path);
         }
 
         foreach (var path in outcome.RewrittenConfigurations)
         {
-            log.AppendLine("Updated " + path);
+            log.AppendLine(InstallerCulture.Pick("Updated ", "Обновлено ") + path);
         }
 
         foreach (var hook in outcome.RemovedHooks)
         {
-            log.AppendLine("Removed hook " + hook);
+            log.AppendLine(InstallerCulture.Pick("Removed hook ", "Удалён хук ") + hook);
         }
 
         foreach (var failure in outcome.Failures)
         {
-            log.AppendLine("Could not remove " + failure.Path + ": " + failure.Reason);
+            log.AppendLine(
+                InstallerCulture.Pick("Could not remove ", "Не удалось удалить ") +
+                failure.Path + ": " + failure.Reason);
         }
 
         // Repeated on the last page rather than only on the review page: the prerequisites and
         // the models are the part a person goes looking for afterwards.
         foreach (var notice in plan.Retained)
         {
-            log.AppendLine("Kept: " + notice.Title + " — " + notice.Detail);
+            log.AppendLine(
+                InstallerCulture.Pick("Kept: ", "Оставлено: ") +
+                notice.Title + " — " + notice.Detail);
         }
 
         return log.ToString().Trim();

@@ -14,14 +14,36 @@ namespace LocalAi.Installer.Core.Diagnosis;
 /// </summary>
 public static class GpuAdapterDisplay
 {
+    /// <summary>For a window. Follows the language the installer was told to speak.</summary>
     public static string Describe(GpuAdapterSnapshot adapter)
     {
         ArgumentNullException.ThrowIfNull(adapter);
         var memory = adapter.DedicatedLocalBytes > 0
             ? string.Format(
-                InstallerCulture.Pick(" ({0:N1} GB dedicated)", " ({0:N1} ГБ выделенной)"),
+                InstallerCulture.Pick(
+                    " ({0:N1} GB dedicated)",
+                    " ({0:N1} ГБ выделенной памяти)"),
                 adapter.DedicatedLocalBytes / (1024d * 1024 * 1024))
-            : InstallerCulture.Pick(" (no dedicated memory)", " (выделенной памяти нет)");
+            : InstallerCulture.Pick(
+                " (no dedicated memory)",
+                " (выделенной памяти нет)");
+        var software = adapter.IsSoftware
+            ? InstallerCulture.Pick(" [software]", " [программный]")
+            : string.Empty;
+        return adapter.Name + memory + software;
+    }
+
+    /// <summary>
+    /// For a sentence that is written to the run log. The log sits beside an English journal
+    /// and stays English, so a Russian parenthetical in the middle of it helps nobody.
+    /// </summary>
+    public static string DescribeInEnglish(GpuAdapterSnapshot adapter)
+    {
+        ArgumentNullException.ThrowIfNull(adapter);
+        var memory = adapter.DedicatedLocalBytes > 0
+            ? FormattableString.Invariant(
+                $" ({adapter.DedicatedLocalBytes / (1024d * 1024 * 1024):N1} GB dedicated)")
+            : " (no dedicated memory)";
         return adapter.Name + memory + (adapter.IsSoftware ? " [software]" : string.Empty);
     }
 }

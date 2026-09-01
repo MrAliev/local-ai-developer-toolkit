@@ -31,7 +31,7 @@ public static class PageLabels
     // --- Prerequisites ------------------------------------------------------------------
     public static string NoAutomatedInstaller => InstallerCulture.Pick(
         "No automated installer is available; install it yourself.",
-        "Автоматической установки нет; установите сами.");
+        "Автоматической установки нет; установите его вручную.");
 
     // --- LocalAi package ----------------------------------------------------------------
     public static string VersionToInstall => InstallerCulture.Pick(
@@ -129,13 +129,13 @@ public static class PageLabels
 
     public static string EnableUpdateCheck => InstallerCulture.Pick(
         "After it is installed, let LocalAi look up whether a newer release exists",
-        "Разрешить LocalAi после установки проверять, вышел ли более новый релиз");
+        "После установки разрешить LocalAi проверять, вышел ли более новый релиз");
 
     public static string UpdateCheckHint => InstallerCulture.Pick(
         "A newer version is then mentioned in localai doctor and in the index status your " +
         "assistant reads. Nothing pops up, and nothing installs itself.",
-        "О более новой версии тогда скажет localai doctor и статус индекса, который читает " +
-        "ваш ассистент. Ничего не всплывает и ничего не устанавливается само.");
+        "Тогда о более новой версии сообщат localai doctor и статус индекса, который " +
+        "читает ваш ассистент. Ничего не всплывает и ничего не устанавливается само.");
 
     // --- Progress, finish, navigation ---------------------------------------------------
     public static string Log => InstallerCulture.Pick("Log", "Журнал");
@@ -155,7 +155,7 @@ public static class PageLabels
         "Remove LocalAi",
         "Удаление LocalAi");
 
-    public static string StartFrom => InstallerCulture.Pick("Start from", "Начать с");
+    public static string StartFrom => InstallerCulture.Pick("Start from", "С чего начать");
 
     public static string WhatGoes => InstallerCulture.Pick("What goes", "Что удаляется");
 
@@ -165,7 +165,7 @@ public static class PageLabels
 
     public static string RemovalConsent => InstallerCulture.Pick(
         "I have read what will be removed and want to continue.",
-        "Я прочитал, что будет удалено, и хочу продолжить.");
+        "Я понимаю, что будет удалено, и хочу продолжить.");
 
     public static string Report => InstallerCulture.Pick("Report", "Отчёт");
 
