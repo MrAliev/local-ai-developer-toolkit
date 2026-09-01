@@ -389,6 +389,43 @@ public sealed class UninstallRunnerTests : IDisposable
         Assert.Null(registration.Read());
     }
 
+    /// <summary>
+    /// The removal says where it has got to. It used to say nothing between starting and
+    /// finishing, and the broker stop alone can take two minutes — a bar that has not moved
+    /// for two minutes is what makes people kill installers.
+    /// </summary>
+    [Fact]
+    public async Task The_removal_says_where_it_has_got_to()
+    {
+        var plan = await Plan(RemovalSelection.FromPreset(RemovalPreset.FullUninstall));
+        var seen = new List<UninstallProgress>();
+
+        await Apply(plan, progress: new Progress<UninstallProgress>(seen.Add));
+
+        // Reported in order, ending short of 100: finishing is the caller's to announce,
+        // because only the caller knows whether anything follows this removal.
+        Assert.NotEmpty(seen);
+        Assert.Equal(seen.Select(step => step.Percent).Order(), seen.Select(step => step.Percent));
+        Assert.All(seen, step => Assert.InRange(step.Percent, 0, 99));
+        Assert.All(seen, step => Assert.False(string.IsNullOrWhiteSpace(step.Text)));
+        Assert.Contains(seen, step => step.Text.Contains("stop", StringComparison.Ordinal));
+        Assert.Contains(seen, step => step.Text.Contains("Removing files", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Nothing reported is a supported caller, not a crash: the standalone runner and every
+    /// test that predates this pass no progress at all.
+    /// </summary>
+    [Fact]
+    public async Task A_caller_that_wants_no_progress_gets_none()
+    {
+        var plan = await Plan(RemovalSelection.FromPreset(RemovalPreset.FullUninstall));
+
+        var outcome = await Apply(plan);
+
+        Assert.True(outcome.Succeeded);
+    }
+
     private Task<UninstallPlan> Plan(
         RemovalSelection selection,
         string? registrySubKey = null) =>
@@ -398,14 +435,15 @@ public sealed class UninstallRunnerTests : IDisposable
         UninstallPlan plan,
         RecordingProcessRunner? runner = null,
         string? selfDirectory = null,
-        Action<string>? removeUninstallerAfterExit = null)
+        Action<string>? removeUninstallerAfterExit = null,
+        IProgress<UninstallProgress>? progress = null)
     {
         using var journal = InstallerRunJournal.Start(journalDirectory);
         return await Runner(
                 runner ?? new RecordingProcessRunner(),
                 selfDirectory,
                 removeUninstallerAfterExit)
-            .ApplyAsync(plan, journal, TestContext.Current.CancellationToken);
+            .ApplyAsync(plan, journal, TestContext.Current.CancellationToken, progress);
     }
 
     private UninstallRunner Runner(
