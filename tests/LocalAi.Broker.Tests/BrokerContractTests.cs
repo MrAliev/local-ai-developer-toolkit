@@ -283,6 +283,7 @@ public sealed class BrokerContractTests
     [InlineData(typeof(LocalJobKind))]
     [InlineData(typeof(LocalJobPriority))]
     [InlineData(typeof(LocalJobState))]
+    [InlineData(typeof(ResidencyShortfall))]
     public void Enums_reject_numeric_json(Type enumType)
     {
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("0", enumType));

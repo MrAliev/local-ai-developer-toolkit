@@ -74,8 +74,9 @@ The parameters below come from the code, not from the documentation.
 | Contexts | Discrete steps from 2K to 256K tokens; a step is used only when preflight proved the runner fits entirely |
 | Experiments | A new candidate runs on the first ten completed tasks of a profile, then pauses until the owner decides: promote, continue, keep as fallback only, or disable |
 
-Partial offload to system memory is not an error — it makes the answer several times slower and
-says nothing about it. That is precisely why it is forbidden by default, and why relaxing it
+Partial offload to system memory is not an error — it makes the answer several times slower
+without failing. The slowdown announces itself only because the report line is made to say so,
+beside the model it names. That is precisely why it is forbidden by default, and why relaxing it
 stays visible in the run report.
 
 ### 3.1 The queue: three properties visible in use

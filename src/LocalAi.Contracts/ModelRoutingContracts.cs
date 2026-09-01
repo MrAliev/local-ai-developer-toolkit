@@ -318,7 +318,10 @@ public sealed record LocalModelPreflightOutput(
     [property: JsonRequired] long SizeBytes,
     [property: JsonRequired] long SizeVramBytes,
     [property: JsonRequired] bool FullyResident,
-    [property: JsonRequired] DateTimeOffset VerifiedAtUtc);
+    [property: JsonRequired] DateTimeOffset VerifiedAtUtc,
+    // What a relaxed policy cost this load, in English prose, or null when the model is fully
+    // resident. Optional so a preflight written by an older build still deserialises.
+    string? DegradationWarning = null);
 
 public sealed record LocalExperimentReportOutput(
     LocalTaskProfile Profile,

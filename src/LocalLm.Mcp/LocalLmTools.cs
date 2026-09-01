@@ -134,8 +134,11 @@ public static class LocalLmTools
                 targetLanguage,
                 markdown,
                 cancellationToken);
-            return result.Notice + "\n\n" +
-                UntrustedContent.Wrap(result.Answer, "translate_local");
+            return Report(
+                result.Notice,
+                result.Receipt.Routing?.ResidencyShortfall ?? ResidencyShortfall.None,
+                result.Answer,
+                "translate_local");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -202,6 +205,28 @@ public static class LocalLmTools
             cancellationToken));
 
     /// <summary>
+    /// What a local tool hands back: the report line, the advice when there is any to give,
+    /// and the answer inside its untrusted-content markers.
+    ///
+    /// The advice is separate from the mark on purpose. The mark is four words inside a line
+    /// printed anyway and goes on every degraded answer; this is a sentence, and a sentence
+    /// on every call is how a line stops being read.
+    /// </summary>
+    internal static string Report(
+        string notice,
+        ResidencyShortfall shortfall,
+        string answer,
+        string origin,
+        ResidencyAdvice? advice = null)
+    {
+        var line = (advice ?? ResidencyAdvice.Shared).AdviceFor(shortfall);
+        return notice +
+            (line is null ? string.Empty : "\n" + line) +
+            "\n\n" +
+            UntrustedContent.Wrap(answer, origin);
+    }
+
+    /// <summary>
     /// Turns a result into the text the caller sees: the notice line first, so the delegation and
     /// its saving are impossible to drop when relaying the answer, then the answer inside a
     /// nonce-bound untrusted boundary. The local model read repository files, logs or images —
@@ -222,8 +247,11 @@ public static class LocalLmTools
         try
         {
             var result = await job();
-            return result.Notice + "\n\n" +
-                UntrustedContent.Wrap(result.Answer, origin);
+            return Report(
+                result.Notice,
+                result.Receipt.Routing?.ResidencyShortfall ?? ResidencyShortfall.None,
+                result.Answer,
+                origin);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

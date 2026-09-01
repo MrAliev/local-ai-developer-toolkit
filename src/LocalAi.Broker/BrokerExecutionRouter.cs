@@ -279,7 +279,8 @@ public sealed class BrokerExecutionRouter
             proof.SizeBytes,
             proof.SizeVramBytes,
             proof.FullyResident,
-            proof.VerifiedAtUtc);
+            proof.VerifiedAtUtc,
+            proof.DegradationWarning);
     }
 
     private async Task<LocalModelFeedbackOutput> ApplyFeedbackAsync(

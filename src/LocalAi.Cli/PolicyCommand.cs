@@ -86,6 +86,11 @@ public static class PolicyCommand
             output.WriteLine(
                 "warning: residency is relaxed; responses may be substantially slower " +
                 "than a fully resident load.");
+            output.WriteLine(
+                "warning: answers from the LocalLm tools are labelled as degraded in the line " +
+                "they print; embedding and search do not route through that line and carry no " +
+                "mark. Restore strict residency with: " +
+                "localai policy set --residency RequireFullVram");
         }
 
         var updatePolicy = updates.Read();
@@ -214,9 +219,11 @@ public static class PolicyCommand
             output.WriteLine(
                 residency == ModelResidencyPolicy.AllowCpu
                     ? "warning: models may now run entirely on the CPU. Expect a large " +
-                        "slowdown; every degraded answer carries a warning."
+                        "slowdown; answers from the LocalLm tools are labelled as degraded " +
+                        "in the line they print."
                     : "warning: models may now be partially offloaded to system memory. " +
-                        "Expect a slowdown; every degraded answer carries a warning.");
+                        "Expect a slowdown; answers from the LocalLm tools are labelled as " +
+                        "degraded in the line they print.");
         }
 
         output.WriteLine(

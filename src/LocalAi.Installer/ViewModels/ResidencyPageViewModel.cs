@@ -115,11 +115,11 @@ public sealed class ResidencyPageViewModel : ObservableObject
     public string Warning => Policy switch
     {
         ModelResidencyPolicy.AllowPartialOffload =>
-            "Part of a model may spill into system memory. Responses will be slower, and each " +
-            "degraded answer will say so.",
+            "Part of a model may spill into system memory. Responses will be slower, and " +
+            "every answer produced that way is labelled as degraded.",
         ModelResidencyPolicy.AllowCpu =>
-            "Models may run entirely on the CPU. Expect a large slowdown. Each degraded " +
-            "answer will say so.",
+            "Models may run entirely on the CPU. Expect a large slowdown, and every answer " +
+            "produced that way is labelled as degraded.",
         _ => string.Empty,
     };
 

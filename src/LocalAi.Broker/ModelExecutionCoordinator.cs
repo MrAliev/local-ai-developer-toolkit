@@ -301,6 +301,9 @@ public sealed class ModelExecutionCoordinator
 
         var executionCompleted = _timeProvider.GetUtcNow();
         var validation = _validate(selection, raw);
+        var (shortfall, residentPercent) = _warmProof is null
+            ? (ResidencyShortfall.None, (int?)null)
+            : _warmProof.Shortfall();
         var routing = new LocalRoutingReceipt(
             selection.Profile,
             selection.Model,
@@ -311,7 +314,14 @@ public sealed class ModelExecutionCoordinator
             gross,
             verification,
             net,
-            selection.IsExperimentalAttempt);
+            selection.IsExperimentalAttempt,
+            ExperimentalModel: null,
+            ExperimentalOutcome: null,
+            // Read from the warm proof rather than from this call's EnsureReadyAsync, which only
+            // runs on a cold start: taking it from there would mark the first answer of every
+            // warm window and leave the rest looking healthy.
+            ResidencyShortfall: shortfall,
+            VramResidentPercent: residentPercent);
         var result = raw with { Routing = routing };
         await TryAppendTelemetryAsync(
             original,

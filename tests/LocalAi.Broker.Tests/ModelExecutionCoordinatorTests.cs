@@ -55,6 +55,68 @@ public sealed class ModelExecutionCoordinatorTests : IDisposable
         Assert.False(result.Routing!.WasCold);
     }
 
+    /// <summary>
+    /// The join #277 is about: the runtime measures the shortfall, and the receipt is what
+    /// carries it to the line a person reads. Testing the two ends apart — the arithmetic here,
+    /// the rendering there — is exactly how the field came to be assigned and read by nobody,
+    /// so this asserts the middle.
+    /// </summary>
+    [Fact]
+    public async Task A_partly_offloaded_load_reaches_the_receipt()
+    {
+        var runtime = new FakeRuntime { SizeBytes = 1000, SizeVramBytes = 420 };
+        var coordinator = Create(runtime, (_, _) => Task.FromResult(Result("answer")));
+
+        var result = await coordinator.ExecuteAsync(
+            RoutedRequest(),
+            Availability(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ResidencyShortfall.PartialOffload, result.Routing!.ResidencyShortfall);
+        Assert.Equal(42, result.Routing.VramResidentPercent);
+    }
+
+    /// <summary>
+    /// And keeps reaching it once the model is warm. EnsureReadyAsync runs only on a cold
+    /// start, so a mark read from this call's preflight would appear on the first answer of
+    /// every warm window and leave the rest of them looking healthy.
+    /// </summary>
+    [Fact]
+    public async Task A_warm_answer_is_marked_too()
+    {
+        var runtime = new FakeRuntime { SizeBytes = 1000, SizeVramBytes = 0 };
+        var coordinator = Create(runtime, (_, _) => Task.FromResult(Result("answer")));
+
+        await coordinator.ExecuteAsync(
+            RoutedRequest("one"),
+            Availability(),
+            TestContext.Current.CancellationToken);
+        var warm = await coordinator.ExecuteAsync(
+            RoutedRequest("two"),
+            Availability(resident: ["translategemma:12b"]),
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(runtime.Preflights);
+        Assert.False(warm.Routing!.WasCold);
+        Assert.Equal(ResidencyShortfall.Cpu, warm.Routing.ResidencyShortfall);
+    }
+
+    /// <summary>A healthy load leaves the receipt unmarked, so the mark keeps meaning something.</summary>
+    [Fact]
+    public async Task A_fully_resident_load_leaves_the_receipt_unmarked()
+    {
+        var coordinator = Create(
+            new FakeRuntime(),
+            (_, _) => Task.FromResult(Result("answer")));
+
+        var result = await coordinator.ExecuteAsync(
+            RoutedRequest(),
+            Availability(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ResidencyShortfall.None, result.Routing!.ResidencyShortfall);
+    }
+
     [Fact]
     public async Task Workflow_steps_do_not_count_as_completed_experiment_tasks()
     {
@@ -472,6 +534,10 @@ public sealed class ModelExecutionCoordinatorTests : IDisposable
 
         public ModelPreflightException? Failure { get; init; }
 
+        public long SizeBytes { get; init; } = 100;
+
+        public long SizeVramBytes { get; init; } = 100;
+
         public bool IsDisabled(string model, int contextTokens) => false;
 
         public Task PullAsync(string model, CancellationToken cancellationToken = default) =>
@@ -491,9 +557,9 @@ public sealed class ModelExecutionCoordinatorTests : IDisposable
             return Task.FromResult(new ModelResidencyProof(
                 model,
                 contextTokens,
-                100,
-                100,
-                true,
+                SizeBytes,
+                SizeVramBytes,
+                SizeBytes == SizeVramBytes,
                 DateTimeOffset.UtcNow));
         }
     }
