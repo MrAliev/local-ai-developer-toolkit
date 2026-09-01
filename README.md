@@ -928,6 +928,14 @@ grace. A version whose files are still mapped by a running tool refuses to be de
 the right answer — the next prune collects it. It also forgets repository records whose
 checkout no longer exists, which is what a throwaway worktree leaves behind.
 
+Most of what accumulates is overlays. Each is keyed by worktree and by the tree its commit
+named, so every commit on every branch leaves one behind, and they outnumber the generation
+they hang off several times over. `prune` keeps the overlay each live worktree is currently
+on and collects the rest — but only when it can establish what those worktrees are. A
+repository whose manifest does not read, names no worktrees, or names one on a volume that
+is not mounted has its overlays left alone rather than guessed at: a wrong guess costs a
+live checkout its index.
+
 ### Broker compatibility and startup
 
 The broker `host.json` schema 3 publishes an explicit protocol version and stable build

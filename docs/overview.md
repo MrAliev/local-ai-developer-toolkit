@@ -490,7 +490,9 @@ force and the state of the index. It only reads and starts nothing; a stopped br
 rather than reported as an error, because it starts on demand.
 
 **Cleanup.** `localai prune` frees space against the retention limits; a dry-run flag previews
-it. It never touches the active version pointer or the current index generation.
+it. It never touches the active version pointer or the current index generation, and it
+collects the overlays no live worktree is on — leaving a repository's overlays alone whenever
+it cannot establish which worktrees those are.
 
 ---
 

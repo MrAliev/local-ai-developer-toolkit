@@ -1,3 +1,4 @@
+using CodeSearch.Core.Indexing;
 using LocalAi.Cli;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Activation;
@@ -191,6 +192,294 @@ public sealed class PruneCommandTests : IDisposable
         Assert.True(report.BytesReclaimed > 0);
     }
 
+    /// <summary>
+    /// The overlays under a generation that is being kept are the bulk of what accumulates —
+    /// one per worktree, and inside it one per tree that worktree's HEAD has ever been on — and
+    /// the command the documentation names for reclaiming space walked straight past all of
+    /// them. On this machine that was 1.4 GB the sweep reported as nothing to do.
+    /// </summary>
+    [Fact]
+    public void Overlays_nothing_can_read_are_collected_from_a_generation_that_stays()
+    {
+        var worktree = NewCheckout("live");
+        var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
+        LiveRepository(identity, worktree);
+
+        var current = Overlay(identity.RepositoryRuntimeRoot, Generation, identity, "clean.cidx");
+        var pastCommit = Overlay(
+            identity.RepositoryRuntimeRoot,
+            Generation,
+            RuntimeIndexLayout.WorktreeKey(worktree),
+            new string('a', 40),
+            "clean.cidx");
+        var goneWorktree = Overlay(
+            identity.RepositoryRuntimeRoot,
+            Generation,
+            RuntimeIndexLayout.WorktreeKey(Path.Combine(_root, "deleted-worktree")),
+            identity.HeadTree,
+            "clean.cidx");
+
+        var report = PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        Assert.True(File.Exists(current));
+        Assert.False(File.Exists(pastCommit));
+        Assert.False(File.Exists(goneWorktree));
+        Assert.True(report.BytesReclaimed > 0);
+    }
+
+    /// <summary>
+    /// A worktree that cannot be inspected is not a worktree that is gone. Guessing there costs
+    /// a live checkout its index; leaving the overlays alone costs disk until the next sync.
+    /// </summary>
+    [Fact]
+    public void A_worktree_that_cannot_be_inspected_stops_the_sweep_rather_than_guessing()
+    {
+        var worktree = NewCheckout("live");
+        var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
+        // Recorded, present on disk, and not a git checkout: Inspect throws rather than
+        // answering, which is the case that must not be read as "nothing is reachable".
+        var opaque = Path.Combine(_root, "not-a-checkout");
+        Directory.CreateDirectory(opaque);
+        // Proved rather than assumed: were the temp directory itself inside a git repository,
+        // the walk up from here would find that .git and answer instead of throwing, and this
+        // test would pass while exercising the branch it exists to rule out.
+        Assert.ThrowsAny<Exception>(() => RuntimeIndexLayout.Inspect(opaque, Runtime));
+        LiveRepository(identity, worktree, opaque);
+
+        var overlay = Overlay(
+            identity.RepositoryRuntimeRoot,
+            Generation,
+            RuntimeIndexLayout.WorktreeKey(worktree),
+            new string('a', 40),
+            "clean.cidx");
+
+        PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        Assert.True(File.Exists(overlay));
+    }
+
+    /// <summary>
+    /// A manifest nobody can read stops this repository's overlays being touched — it does not
+    /// stop the sweep. Leaving InvalidDataException out of the filter did the second: it escaped
+    /// Execute, so telemetry, installed versions and launcher backups were never reached, and a
+    /// single corrupt file turned the whole command into an error exit.
+    /// </summary>
+    [Fact]
+    public void A_manifest_that_does_not_verify_costs_its_own_repository_and_no_more()
+    {
+        var worktree = NewCheckout("live");
+        var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
+        LiveRepository(identity, worktree);
+        var overlay = Overlay(
+            identity.RepositoryRuntimeRoot,
+            Generation,
+            RuntimeIndexLayout.WorktreeKey(worktree),
+            new string('a', 40),
+            "clean.cidx");
+        Corrupt(identity.RepositoryRuntimeRoot);
+        Version("oldest", Now - TimeSpan.FromDays(60));
+        Version("old", Now - TimeSpan.FromDays(30));
+        Version("previous", Now - TimeSpan.FromDays(2));
+        Version("current", Now);
+        WriteCurrentPointer("current");
+
+        var report = PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        Assert.True(File.Exists(overlay));
+        Assert.False(Directory.Exists(Path.Combine(Runtime, "bin", "versions", "oldest")));
+        Assert.Contains(report.Lines, line => line.StartsWith("versions:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A manifest recording no worktrees cannot answer what is reachable, and an empty answer is
+    /// read by retention as "nothing is" — which removes every overlay under every generation it
+    /// is keeping.
+    /// </summary>
+    [Fact]
+    public void A_manifest_naming_no_worktrees_is_no_answer_rather_than_an_empty_one()
+    {
+        var worktree = NewCheckout("live");
+        var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
+        LiveRepository(identity);
+        var overlay = Overlay(identity.RepositoryRuntimeRoot, Generation, identity, "clean.cidx");
+
+        PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        Assert.True(File.Exists(overlay));
+    }
+
+    /// <summary>
+    /// The overlay pass obeys --dry-run like every other. The dry run test that predates overlays
+    /// creates none, so nothing covered the branch that now does the bulk of the removing.
+    /// </summary>
+    [Fact]
+    public void A_dry_run_reports_the_overlays_it_would_collect_without_collecting_them()
+    {
+        var worktree = NewCheckout("live");
+        var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
+        LiveRepository(identity, worktree);
+        var pastCommit = Overlay(
+            identity.RepositoryRuntimeRoot,
+            Generation,
+            RuntimeIndexLayout.WorktreeKey(worktree),
+            new string('a', 40),
+            "clean.cidx");
+
+        var report = PruneCommand.Execute(Runtime, dryRun: true, Now);
+
+        Assert.True(File.Exists(pastCommit));
+        Assert.True(report.BytesReclaimed > 0);
+    }
+
+    /// <summary>
+    /// A worktree on a volume that is not mounted is not a worktree that was deleted, and
+    /// Directory.Exists gives the same false for both. Reading that false as a deletion collects
+    /// the index of every checkout on a drive that happened to be offline when the sweep ran —
+    /// an hour of re-embedding each, for a machine whose second drive was simply not plugged in.
+    /// </summary>
+    [Fact]
+    public void A_worktree_on_a_volume_that_is_not_mounted_is_doubt_rather_than_a_deletion()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Only Windows has a volume that can be absent from a path's root.");
+        }
+
+        var absent = Enumerable.Range('D', 'Z' - 'D' + 1)
+            .Select(letter => $"{(char)letter}:\\")
+            .FirstOrDefault(root => !Directory.Exists(root));
+        if (absent is null)
+        {
+            Assert.Skip("Every drive letter is in use, so no absent volume can be named.");
+        }
+
+        var worktree = NewCheckout("live");
+        var identity = RuntimeIndexLayout.Inspect(worktree, Runtime);
+        LiveRepository(identity, worktree, Path.Combine(absent, "offline", "worktree"));
+        var overlay = Overlay(
+            identity.RepositoryRuntimeRoot,
+            Generation,
+            RuntimeIndexLayout.WorktreeKey(worktree),
+            new string('a', 40),
+            "clean.cidx");
+
+        PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        // Not just the offline worktree's overlays: the repository's whole overlay pass is off,
+        // because one worktree that cannot be established makes the answer unknown.
+        Assert.True(File.Exists(overlay));
+    }
+
+    /// <summary>Leaves the manifest present and unreadable, the way a half-written file is.</summary>
+    private static void Corrupt(string repositoryRuntimeRoot)
+    {
+        var path = Path.Combine(repositoryRuntimeRoot, "manifest.json");
+        var document = File.ReadAllText(path);
+        var checksum = document.IndexOf("\"checksum\"", StringComparison.OrdinalIgnoreCase);
+        Assert.True(checksum >= 0, "the manifest is expected to carry a checksum");
+        var start = document.IndexOf('"', document.IndexOf(':', checksum)) + 1;
+        File.WriteAllText(
+            path,
+            document[..start] + new string('0', 64) + document[(start + 64)..]);
+    }
+
+    private const string Generation = "gen-0000000000000000";
+
+    /// <summary>A repository whose generation is current and whose worktrees are recorded.</summary>
+    private void LiveRepository(
+        WorkingIndexIdentity identity,
+        params string[] worktrees)
+    {
+        var root = identity.RepositoryRuntimeRoot;
+        Directory.CreateDirectory(Path.Combine(root, "generations", Generation));
+        File.WriteAllText(
+            Path.Combine(root, "generations", Generation, "base.cidx"),
+            new string('x', 4096));
+        File.WriteAllText(
+            Path.Combine(root, "current.json"),
+            System.Text.Json.JsonSerializer.Serialize(
+                new GenerationPointer(Generation, identity.HeadTree, Now),
+                LocalAiJson.Strict));
+        new RepositoryManifestStore(root).Save(new RepositoryManifest(
+            Path.GetFileName(root),
+            identity.RepositoryRoot,
+            "refs/heads/main",
+            Generation,
+            identity.HeadTree,
+            "qwen3-embedding:8b-q8_0",
+            4096,
+            1,
+            4,
+            RepositoryIndexState.Current,
+            [.. worktrees.Select(path => new RepositoryWorktree(path, "head", "refs/heads/main"))],
+            Now - TimeSpan.FromHours(1)));
+    }
+
+    private static string Overlay(
+        string repositoryRuntimeRoot,
+        string generation,
+        WorkingIndexIdentity identity,
+        string file) =>
+        Overlay(
+            repositoryRuntimeRoot,
+            generation,
+            RuntimeIndexLayout.WorktreeKey(identity.WorkingRoot),
+            identity.HeadTree,
+            file);
+
+    private static string Overlay(
+        string repositoryRuntimeRoot,
+        string generation,
+        string worktreeId,
+        string headTree,
+        string file)
+    {
+        var directory = Path.Combine(
+            repositoryRuntimeRoot,
+            "overlays",
+            generation,
+            worktreeId,
+            headTree);
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, file);
+        File.WriteAllText(path, new string('x', 2048));
+        return path;
+    }
+
+    /// <summary>A real checkout, because the reachable set is read out of git.</summary>
+    private string NewCheckout(string name)
+    {
+        var directory = Path.Combine(_root, name);
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "A.cs"), "class A { }");
+        Git(directory, "init", "-b", "main");
+        Git(directory, "config", "user.email", "tests@local.invalid");
+        Git(directory, "config", "user.name", "LocalAi Tests");
+        Git(directory, "add", "A.cs");
+        Git(directory, "commit", "-m", "Initial");
+        return directory;
+    }
+
+    private static void Git(string workingDirectory, params string[] arguments)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = System.Diagnostics.Process.Start(start)!;
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+    }
+
     private string Runtime => Path.Combine(_root, "runtime");
 
     private string Repository(
@@ -246,9 +535,27 @@ public sealed class PruneCommandTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_root))
+        if (!Directory.Exists(_root))
         {
+            return;
+        }
+
+        // Git marks everything under .git/objects read-only, and a recursive delete stops on the
+        // first one. A fixture that cannot clean up fails every test that built a checkout.
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories))
+            {
+                File.SetAttributes(file, FileAttributes.Normal);
+            }
+
             Directory.Delete(_root, recursive: true);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // Cleanup that throws fails the test it was added to protect. A temp directory left
+            // behind is the smaller problem, and the next run picks a fresh one anyway.
         }
     }
 }
