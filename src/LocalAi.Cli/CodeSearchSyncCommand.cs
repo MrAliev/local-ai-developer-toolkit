@@ -385,7 +385,10 @@ public static class CodeSearchSyncCommand
                     .ToArray(),
                 DateTimeOffset.UtcNow);
             manifestStore.Save(manifest);
-            PruneSupersededGenerations(requested.RepositoryRuntimeRoot, runtimeRoot);
+            PruneSupersededGenerations(
+                requested.RepositoryRuntimeRoot,
+                runtimeRoot,
+                ReachableOverlays(worktrees, runtimeRoot));
 
             progressStore.Save(lastProgress = lastProgress with
             {
@@ -503,9 +506,42 @@ public static class CodeSearchSyncCommand
     /// Never fails the sync. The index is published and correct by this point; a retention sweep
     /// that could not run is worth reporting and nothing more.
     /// </summary>
+    /// <summary>
+    /// What the repository can still ask about: every live worktree, keyed the way its overlay
+    /// directory is, paired with the tree its HEAD points at. Anything else under a kept
+    /// generation belongs to a commit nobody is on or a worktree that is gone.
+    /// </summary>
+    private static IReadOnlySet<(string WorktreeId, string HeadTree)> ReachableOverlays(
+        IReadOnlyList<GitWorktree> worktrees,
+        string? runtimeRoot)
+    {
+        var reachable = new HashSet<(string, string)>();
+        foreach (var worktree in worktrees.Where(item => !item.IsPrunable))
+        {
+            try
+            {
+                var identity = RuntimeIndexLayout.Inspect(worktree.Path, runtimeRoot);
+                reachable.Add((
+                    RuntimeIndexLayout.WorktreeKey(identity.WorkingRoot),
+                    identity.HeadTree));
+            }
+            catch (Exception exception) when (
+                exception is InvalidOperationException or IOException or
+                    UnauthorizedAccessException)
+            {
+                // A worktree that cannot be inspected is not proof that its overlays are
+                // unreachable, so nothing about it is removed.
+                reachable.Add((RuntimeIndexLayout.WorktreeKey(worktree.Path), string.Empty));
+            }
+        }
+
+        return reachable;
+    }
+
     internal static void PruneSupersededGenerations(
         string repositoryRuntimeRoot,
-        string? runtimeRoot)
+        string? runtimeRoot,
+        IReadOnlySet<(string WorktreeId, string HeadTree)>? reachable = null)
     {
         try
         {
@@ -516,7 +552,8 @@ public static class CodeSearchSyncCommand
             var result = GenerationRetention.Prune(
                 repositoryRuntimeRoot,
                 policy,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                reachable: reachable);
             if (result.ActionCount > 0)
             {
                 Console.Error.WriteLine(

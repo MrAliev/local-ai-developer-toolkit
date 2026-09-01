@@ -87,10 +87,7 @@ public static class RuntimeIndexLayout
         string generationId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(generationId);
-        var worktreeId = Hash(
-            OperatingSystem.IsWindows()
-                ? identity.WorkingRoot.ToUpperInvariant()
-                : identity.WorkingRoot);
+        var worktreeId = WorktreeKey(identity.WorkingRoot);
         return Path.Combine(
             identity.RepositoryRuntimeRoot,
             "overlays",
@@ -132,6 +129,16 @@ public static class RuntimeIndexLayout
         return Encoding.UTF8.GetString(output)
             .Split('\0', StringSplitOptions.RemoveEmptyEntries)
             .Select(path => path.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    /// <summary>
+    /// The directory name an overlay for this worktree lives under. Exposed because retention
+    /// has to recognise the same key rather than compute its own version of it.
+    /// </summary>
+    public static string WorktreeKey(string workingRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingRoot);
+        return Hash(OperatingSystem.IsWindows() ? workingRoot.ToUpperInvariant() : workingRoot);
     }
 
     private static string Hash(string value) =>

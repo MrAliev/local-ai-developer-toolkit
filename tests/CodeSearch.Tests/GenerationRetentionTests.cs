@@ -74,6 +74,58 @@ public sealed class GenerationRetentionTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(Repository, "overlays", dropped)));
     }
 
+    /// <summary>
+    /// Under a generation that is kept, most overlays are still unreachable: one directory per
+    /// worktree, and inside it one per tree that worktree's HEAD has ever pointed at. Nothing
+    /// removed those, so weeks of ordinary branch work left one overlay per commit per
+    /// worktree — on the machine this was found on, six times the size of the generation they
+    /// hang off, none of it readable by anything.
+    /// </summary>
+    [Fact]
+    public void Overlays_for_commits_nobody_is_on_are_removed()
+    {
+        var store = new GenerationStore(Repository);
+        var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
+        store.SetCurrent(store.ReadManifest(current));
+        Overlay(current, "live-worktree", "current-tree");
+        Overlay(current, "live-worktree", "a-tree-from-a-commit-ago");
+        Overlay(current, "worktree-that-was-deleted", "any-tree");
+
+        var result = GenerationRetention.Prune(
+            Repository,
+            RuntimeRetentionPolicy.Default,
+            Now,
+            reachable: new HashSet<(string, string)> { ("live-worktree", "current-tree") });
+
+        Assert.Equal(2, result.OverlaysRemoved.Count);
+        Assert.True(Directory.Exists(
+            Path.Combine(Repository, "overlays", current, "live-worktree", "current-tree")));
+        Assert.False(Directory.Exists(
+            Path.Combine(Repository, "overlays", current, "live-worktree", "a-tree-from-a-commit-ago")));
+        Assert.False(Directory.Exists(
+            Path.Combine(Repository, "overlays", current, "worktree-that-was-deleted")));
+    }
+
+    /// <summary>
+    /// A caller that cannot say what is reachable gets nothing removed under a kept
+    /// generation. Guessing here costs an hour of embedding, and the hook has every reason to
+    /// be unable to enumerate worktrees on a repository somebody is in the middle of moving.
+    /// </summary>
+    [Fact]
+    public void Nothing_under_a_kept_generation_goes_when_reachability_is_unknown()
+    {
+        var store = new GenerationStore(Repository);
+        var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
+        store.SetCurrent(store.ReadManifest(current));
+        Overlay(current, "some-worktree", "some-tree");
+
+        var result = GenerationRetention.Prune(Repository, RuntimeRetentionPolicy.Default, Now);
+
+        Assert.Empty(result.OverlaysRemoved);
+        Assert.True(Directory.Exists(
+            Path.Combine(Repository, "overlays", current, "some-worktree", "some-tree")));
+    }
+
     [Fact]
     public void An_unreadable_pointer_stops_the_pass_instead_of_guessing()
     {
@@ -157,9 +209,9 @@ public sealed class GenerationRetentionTests : IDisposable
             .Identity.Id;
     }
 
-    private void Overlay(string generationId)
+    private void Overlay(string generationId, string worktree = "worktree", string tree = "tree")
     {
-        var directory = Path.Combine(Repository, "overlays", generationId, "worktree");
+        var directory = Path.Combine(Repository, "overlays", generationId, worktree, tree);
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "clean.cidx"), "OVERLAY");
     }
