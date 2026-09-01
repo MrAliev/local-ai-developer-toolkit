@@ -95,6 +95,7 @@ public sealed class HeuristicNavigationPolicyStore
                 temporary,
                 JsonSerializer.SerializeToUtf8Bytes(policy, SerializerOptions));
             File.Move(temporary, target, overwrite: true);
+            RuntimeDirectories.DiscardLegacySettingsFile(_runtimeRoot, HeuristicNavigationPolicy.FileName);
         }
         finally
         {

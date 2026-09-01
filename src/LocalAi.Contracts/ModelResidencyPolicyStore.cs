@@ -96,5 +96,6 @@ public sealed class ModelResidencyPolicyStore
         var path = WritePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(policy, SerializerOptions));
+        RuntimeDirectories.DiscardLegacySettingsFile(_runtimeRoot, BrokerPolicy.FileName);
     }
 }

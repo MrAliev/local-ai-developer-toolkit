@@ -64,6 +64,40 @@ public static class RuntimeDirectories
     }
 
     /// <summary>
+    /// Takes the legacy copy away once the setting has been written to its new home.
+    ///
+    /// Without this the old file is not a fallback but a second copy that never goes away:
+    /// it holds whatever it held before the split, forever, on every upgraded machine. That
+    /// is worse than it sounds, because everything that still builds the legacy path by hand
+    /// — a doctor check, a journal entry, a line in the README — keeps finding it and keeps
+    /// describing it, while the runtime reads the other one.
+    ///
+    /// Called after the write, so a failed write leaves the old copy where it was and the
+    /// installation keeps answering from it.
+    /// </summary>
+    public static void DiscardLegacySettingsFile(string runtimeRoot, string fileName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        var legacy = Path.Combine(runtimeRoot, fileName);
+        var current = SettingsFileForWriting(runtimeRoot, fileName);
+        if (!File.Exists(legacy) || !File.Exists(current))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(legacy);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // A locked or read-only legacy file is not worth failing a write over: the new
+            // one is already in place and is what will be read.
+        }
+    }
+
+    /// <summary>
     /// What the person keeps rather than the machine: <c>%APPDATA%\LocalAi</c>. Roams with the
     /// profile, survives an uninstall of the runtime, and holds nothing that could be wrong on
     /// another computer.

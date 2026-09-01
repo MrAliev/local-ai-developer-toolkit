@@ -227,13 +227,13 @@ public static class DoctorCommand
     {
         yield return PolicyCheck(
             "policy: models",
-            Path.Combine(root, BrokerPolicy.FileName),
+            RuntimeDirectories.SettingsFile(root, BrokerPolicy.FileName),
             () => new ModelResidencyPolicyStore(root).Read(),
             policy => $"residency {policy.ModelResidency}, keep-alive {policy.IdleModelKeepAliveSeconds}s");
 
         yield return PolicyCheck(
             "policy: retention",
-            Path.Combine(root, RuntimeRetentionPolicy.FileName),
+            RuntimeDirectories.SettingsFile(root, RuntimeRetentionPolicy.FileName),
             () => new RuntimeRetentionPolicyStore(root).Read(),
             policy =>
                 $"{policy.GenerationsPerRepository} generations, " +
@@ -242,7 +242,7 @@ public static class DoctorCommand
 
         yield return PolicyCheck(
             "policy: language servers",
-            Path.Combine(root, LanguageServerPolicy.FileName),
+            RuntimeDirectories.SettingsFile(root, LanguageServerPolicy.FileName),
             () => new LanguageServerPolicyStore(root).Read(),
             policy => policy.Enabled
                 ? $"enabled for {string.Join(", ", policy.Languages.Where(l => l.Value.Enabled).Select(l => l.Key))}"

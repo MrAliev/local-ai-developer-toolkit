@@ -165,7 +165,7 @@ the MCP tools take. An editor showing line 10 means `--line 9`. Positions that l
 symbol return nothing rather than an error, so an off-by-one reads as "there is nothing here"
 rather than as a mistake.
 
-The installation-wide `%LOCALAPPDATA%\LocalAi\semantic-indexing.json` file configures adapter
+The installation-wide `%LOCALAPPDATA%\LocalAi\settings\semantic-indexing.json` file configures adapter
 enablement, executable paths and arguments, output paths, timeout, captured process output, and
 all SCIP parser limits. The trusted adapter policy also makes legacy position fallback explicit:
 `Utf16` for `scip-typescript` and `Utf32` for `scip-python`; direct SCIP imports without that
@@ -173,7 +173,7 @@ policy still reject ambiguous indexes. It is read on every sync, so changes do n
 rebuilding LocalAi. On Windows, npm `.cmd` shims are resolved through PATH/PATHEXT while retaining
 bounded output and process-tree timeout handling.
 
-Live navigation is opt-in through `%LOCALAPPDATA%\LocalAi\language-servers.json`; changing this
+Live navigation is opt-in through `%LOCALAPPDATA%\LocalAi\settings\language-servers.json`; changing this
 file does not require rebuilding LocalAi. It configures the global enable switch, per-language
 executables and arguments, request/shutdown timeouts, maximum JSON-RPC message size, and bounded
 stderr capture. Defaults for TypeScript/JavaScript, Python, HTML, and C# are written disabled by
@@ -188,7 +188,7 @@ find implementations, overrides, and derived types; outgoing queries expose the 
 base or interface symbols. Relationship queries never use heuristic text matching.
 
 When neither LSP nor the snapshot-bound SIDX can resolve a symbol, LocalAi can perform a bounded
-syntax/text scan. `%LOCALAPPDATA%\LocalAi\semantic-navigation.json` controls whether this fallback
+syntax/text scan. `%LOCALAPPDATA%\LocalAi\settings\semantic-navigation.json` controls whether this fallback
 is enabled and limits scanned files, file size, result count, identifier length, and case
 sensitivity. The file is read for every request, so edits require no rebuild. Fallback results are
 always marked `Heuristic`; they are never promoted to precise navigation.
@@ -414,7 +414,7 @@ no model as a failure rather than as a line in the log. Sizes are read from the 
 signing time rather than committed here: a tag republished with different quantisation keeps
 its name, so a size in the source tree goes stale without anyone noticing.
 
-**Residency policy.** The video-memory page writes `%LOCALAPPDATA%\LocalAi\policy.json` —
+**Residency policy.** The video-memory page writes `%LOCALAPPDATA%\LocalAi\settings\policy.json` —
 but only when LocalAi is installed. On a machine without an installation nothing is written:
 creating the LocalAi root as a side effect would give it inherited permissions, which the
 layout lease refuses without mutating. Relaxing the policy is deliberate and stays visible
@@ -805,7 +805,7 @@ localai policy set --idle-model-keep-alive-seconds 0
 | `AllowPartialOffload` | part of the model on the adapter | pure CPU loads |
 | `AllowCpu` | anything that actually loaded | a model reporting no size |
 
-The policy lives in `%LOCALAPPDATA%\LocalAi\policy.json` and is read by the broker, the CLI
+The policy lives in `%LOCALAPPDATA%\LocalAi\settings\policy.json` and is read by the broker, the CLI
 and the installer alike. A missing, malformed or unknown-value document falls back to
 `RequireFullVram`: a parse error must never silently relax a safety check. A broker that is
 already running keeps the previous policy until it is restarted.
@@ -886,7 +886,7 @@ anywhere in the system.
 ### Retention
 
 Everything the runtime produces is bounded, and the bounds live in
-`%LOCALAPPDATA%\LocalAi\retention.json`. A missing or malformed document yields the defaults
+`%LOCALAPPDATA%\LocalAi\settings\retention.json`. A missing or malformed document yields the defaults
 below.
 
 | Bound | Default | Applies to |

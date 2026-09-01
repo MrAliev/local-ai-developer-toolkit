@@ -154,6 +154,7 @@ public sealed class SemanticIndexingPolicyStore
                 temporary,
                 JsonSerializer.SerializeToUtf8Bytes(policy, SerializerOptions));
             File.Move(temporary, target, overwrite: true);
+            RuntimeDirectories.DiscardLegacySettingsFile(_runtimeRoot, SemanticIndexingPolicy.FileName);
         }
         finally
         {

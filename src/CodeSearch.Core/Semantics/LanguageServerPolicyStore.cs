@@ -144,6 +144,7 @@ public sealed class LanguageServerPolicyStore
                 temporary,
                 JsonSerializer.SerializeToUtf8Bytes(policy, SerializerOptions));
             File.Move(temporary, target, overwrite: true);
+            RuntimeDirectories.DiscardLegacySettingsFile(_runtimeRoot, LanguageServerPolicy.FileName);
         }
         finally
         {

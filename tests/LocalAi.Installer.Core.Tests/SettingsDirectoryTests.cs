@@ -87,6 +87,61 @@ public sealed class SettingsDirectoryTests
     }
 
     /// <summary>
+    /// The legacy copy goes when the setting is next written, which is the difference between
+    /// a fallback and a second source of truth.
+    ///
+    /// It was claimed in three places and implemented in none: nothing deleted the old file,
+    /// so every upgraded machine kept a stale copy for ever. That copy is what made the
+    /// installer journal an undo record for a file the run never wrote, and what made doctor
+    /// report a configured policy as having no file — both of them still finding the old path
+    /// while the runtime read the new one.
+    /// </summary>
+    [Fact]
+    public void Writing_takes_the_legacy_copy_away()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "LocalAi.Settings", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var legacy = Path.Combine(root, "policy.json");
+            File.WriteAllText(legacy, "{\"schemaVersion\":1}");
+
+            new ModelResidencyPolicyStore(root).Write(BrokerPolicy.Default);
+
+            Assert.False(File.Exists(legacy), "the legacy copy should be gone once the new one exists");
+            Assert.True(File.Exists(RuntimeDirectories.SettingsFileForWriting(root, "policy.json")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// And a write that never landed leaves the old copy where it was: the installation keeps
+    /// answering from it rather than losing the setting to a failed write.
+    /// </summary>
+    [Fact]
+    public void A_legacy_copy_survives_when_nothing_replaced_it()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "LocalAi.Settings", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var legacy = Path.Combine(root, "policy.json");
+            File.WriteAllText(legacy, "{}");
+
+            RuntimeDirectories.DiscardLegacySettingsFile(root, "policy.json");
+
+            Assert.True(File.Exists(legacy));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// A setting neither file exists for resolves to where it would be written, so a caller
     /// asking for a path it will create does not get the legacy one.
     /// </summary>

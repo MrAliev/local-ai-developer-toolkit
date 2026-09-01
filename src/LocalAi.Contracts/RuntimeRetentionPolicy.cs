@@ -190,5 +190,8 @@ public sealed class RuntimeRetentionPolicyStore
         File.WriteAllBytes(
             WritePath,
             JsonSerializer.SerializeToUtf8Bytes(policy.Normalized(), SerializerOptions));
+        RuntimeDirectories.DiscardLegacySettingsFile(
+            _runtimeRoot,
+            RuntimeRetentionPolicy.FileName);
     }
 }

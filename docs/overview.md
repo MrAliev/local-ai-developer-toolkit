@@ -540,9 +540,12 @@ loose beside the queue and the indexes. They used to be told apart from everythi
 list of file names kept in the removal matrix, and the list fell behind: `semantic-navigation.json`
 is a real setting the matrix classified as an unrecognised runtime file, so the reinstall that
 promised to keep settings deleted it. A directory cannot fall behind, because adding a setting
-and having the matrix know about it become the same act. Reading falls back to the old loose
-path for installations that predate the split; writing never does, so the fallback empties
-itself rather than becoming a second source of truth.
+and having the matrix know about it become the same act. Reading falls back to the old loose path for
+installations that predate the split, and the write that follows takes that copy away — so the
+old file is a fallback rather than a second copy holding a stale answer for ever. That mattered
+more than it sounds: everything still building the old path by hand kept finding it while the
+runtime read the other one, which is how the installer came to journal an undo record for a
+file it had not written.
 
 What the person chooses for themselves rather than for a machine lives outside the runtime root
 altogether, in `%APPDATA%\LocalAi`, which roams with the profile and survives an uninstall.

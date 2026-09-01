@@ -115,5 +115,8 @@ public sealed class LogTriagePolicyStore
         File.WriteAllBytes(
             WritePath,
             JsonSerializer.SerializeToUtf8Bytes(policy.Normalized(), SerializerOptions));
+        LocalAi.Contracts.RuntimeDirectories.DiscardLegacySettingsFile(
+            runtimeRoot,
+            LogTriagePolicy.FileName);
     }
 }

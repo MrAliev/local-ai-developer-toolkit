@@ -129,5 +129,8 @@ public sealed class UpdateCheckPolicyStore
         File.WriteAllBytes(
             WritePath,
             JsonSerializer.SerializeToUtf8Bytes(policy, SerializerOptions));
+        RuntimeDirectories.DiscardLegacySettingsFile(
+            _runtimeRoot,
+            UpdateCheckPolicy.FileName);
     }
 }
