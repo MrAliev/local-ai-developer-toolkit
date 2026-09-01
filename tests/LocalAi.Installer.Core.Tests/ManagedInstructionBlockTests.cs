@@ -203,12 +203,16 @@ public sealed class ManagedInstructionBlockTests
             separator,
             ManagedInstructionBlock.Block.Substring(opening - separator.Length, separator.Length));
 
-        var end = ManagedInstructionBlock.Block.IndexOf(separator, opening, StringComparison.Ordinal);
-        Assert.True(end > opening, "the carve-out must end at a paragraph break");
+        // To the next heading, not to the next blank line. Bounded at the paragraph break,
+        // this test pinned one paragraph and was blind to a second appended after it — which
+        // is how an escape clause would be added to a rule whose whole purpose is that it has
+        // none.
+        var end = ManagedInstructionBlock.Block.IndexOf("###", opening, StringComparison.Ordinal);
+        Assert.True(end > opening, "the carve-out must be followed by a section");
 
         Assert.Equal(
             expected.ReplaceLineEndings(),
-            ManagedInstructionBlock.Block[opening..end]);
+            ManagedInstructionBlock.Block[opening..end].TrimEnd());
     }
 
     /// <summary>
@@ -264,9 +268,9 @@ public sealed class ManagedInstructionBlockTests
     /// reviewer measuring by hand.
     ///
     /// Measured on <see cref="ManagedInstructionBlock.Block"/>, markers included, which is what
-    /// lands in the file. That is a few hundred characters more than the body of the literal,
-    /// and it moves with the line endings — so the number here is deliberately not tight
-    /// enough for that to matter.
+    /// lands in the file, with line endings counted as one character each. Raw, the CRLF form
+    /// is about 180 characters longer than the LF form — more than the headroom — so an
+    /// unnormalised count would pass on one platform and fail on another.
     ///
     /// The number is not sacred: raise it on purpose when something genuinely belongs here.
     /// What must not happen is drifting past it a paragraph at a time.
@@ -276,9 +280,16 @@ public sealed class ManagedInstructionBlockTests
     {
         const int budget = 10_000;
 
+        // Counted with line endings normalised to one character, so the number is the same on
+        // every platform. Measured raw, a block written with CRLF is ~180 characters longer
+        // than the same block with LF — more than the headroom, so the test would pass on one
+        // machine and fail on another with nothing changed between them.
+        var measured = ManagedInstructionBlock.Block.Length
+            - ManagedInstructionBlock.Block.Count(character => character == (char)13);
+
         Assert.True(
-            ManagedInstructionBlock.Block.Length <= budget,
-            $"the block is {ManagedInstructionBlock.Block.Length} characters, over its {budget} budget; " +
+            measured <= budget,
+            $"the block is {measured} characters, over its {budget} budget; " +
             "cut something or raise the budget on purpose");
     }
 

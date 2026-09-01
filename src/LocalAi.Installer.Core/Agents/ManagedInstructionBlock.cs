@@ -269,13 +269,13 @@ public static class ManagedInstructionBlock
 
         > Locally: `search_code` (Ollama, <model>), 6.2s. Saved roughly ~25-30K cloud tokens.
 
-        Every one of those comes from the tool, not from you. LocalLm returns a line carrying
-        model, duration and saving — in Russian whatever language you work in, and saying so
-        plainly below about five hundred tokens rather than giving a band. `search_code` prints
-        its time in the header above the hits; its saving is the one figure you estimate, from
-        the files that would otherwise have been read whole, as a range. Where a wait is named
-        apart from the work — `6.1s (в очереди 4.1s)` — carry both. A local call reported
-        vaguely cannot be told from one that never happened.
+        Every one of those comes from the tool. LocalLm returns a line with model, duration
+        and saving, in Russian whatever language you work in; quote its numbers as they come —
+        `6.2 с`, or `6.1 с (в очереди 4.1 с)` where a wait is named apart from the work, worth
+        carrying because waiting and running point at different things. `search_code` prints
+        its own time in the header above the hits; its saving is the one figure you estimate,
+        from the files that would otherwise have been read whole. A local call reported vaguely
+        cannot be told from one that never happened.
 
         After CodeSearch work, name `index_unload` so the user can free the cached index at
         once — it leaves the on-disk index alone, and idle indexes are evicted anyway.
