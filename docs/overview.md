@@ -525,18 +525,21 @@ consenting is not the place for an enum member. Their
 values still appear on the review page — a folded page must never become an unlisted effect —
 and one button there brings all four back for the run where a carried-forward answer is wrong.
 
-That answer travels with the window: the title bar names the errand, and the step
-rail carries a version line on every page — `installing 0.1.51`, `0.1.50 → 0.1.51`,
-`0.1.50 → 0.1.50 (repair)`, or `0.1.50 → 0.1.51 (reinstall)`. That line follows the disk until the run
-starts and never afterwards: the release is resolved in the background, so it has to move from
-`0.1.50 → checking…` to `0.1.50 → 0.1.51` when the answer arrives, and from the moment the run
-begins the disk stops being the answer. A reinstall deletes the version pointer half way
-through its own run and an installation writes a new one, so a line still reading from it would
-flip to `installing 0.1.51` mid-run and then, on the finish page, to `0.1.51 → 0.1.51 (repair)`
-— erasing what the run was about at the moment somebody is reading the outcome. The consent is worded for the errand
-too — a run that removes before it installs says so, rather than asking somebody to agree
-they have reviewed "these settings". It is the one place a version is a question; everywhere else the
-wizard states it. An installation registers itself in Apps & features, whose entry runs a copy of the
+That answer travels with the window: the title bar names the errand, and the step rail
+carries a version line on every page — `0.1.51` on a computer with nothing installed,
+`0.1.50 → 0.1.51` for an upgrade, `0.1.50 → 0.1.50 (repair)` when the release asked for is the
+one already there. The line has two halves and they follow different rules. The left half is
+what was on this computer before the run: it is read from the version pointer once, behind the
+first page, and never read again — an installation writes that pointer, so a later read answers
+a different question, and the finish page turned `0.1.50 → 0.1.51` into `0.1.51 → 0.1.51
+(repair)` at exactly the moment somebody was reading the outcome. The right half is what this
+run is putting there. That is not history, and it is not always known when the window opens:
+the release is resolved behind the first page, and a request left at `latest` is checked once
+more immediately before installing, in case one was published while the wizard sat open. So it
+moves — `checking…` while the feed is being asked, `no release` when the answer never came, the
+version itself once there is one — right up to the moment the run settles it, and then stays.
+
+An installation registers itself in Apps & features, whose entry runs a copy of the
 installer parked inside the runtime root — so removal is still reachable long after the
 downloaded file is gone. Removal is a matrix rather than one hammer: three presets over rows
 that change one at a time, every removal listed before anything happens, the broker asked to

@@ -155,15 +155,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     private bool? storedUpdateCheck;
 
-    /// <summary>The version line, read from disk once and then stated, not re-read.</summary>
-    private string? heldVersionContext;
-
     /// <summary>
-    /// Whether the run has begun. Set once and never cleared — unlike <c>isRunning</c>, which
-    /// RunAsync clears in its finally block before refreshing, so a guard on that let the
-    /// finish page rebuild the version line out of the pointer the run had just written.
+    /// What was installed when this window opened. Held rather than re-read: null is a real
+    /// answer, so the flag beside it is what makes "read once" possible.
     /// </summary>
-    private bool hasRunStarted;
+    private string? heldInstalledVersion;
+
+    private bool hasReadInstalledVersion;
 
     private readonly Func<string?> readInstalledVersion;
     private readonly AgentIntegrationPageViewModel agents = new();
@@ -353,41 +351,39 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// the wizard used to ask for it again on a page of its own, two pages after the start
     /// screen had already settled what the run was for.
     /// </summary>
-    public string VersionContext
-    {
-        get
-        {
-            // Captured, not recomputed. This reads the installed version from disk, and a
-            // reinstall deletes that pointer half way through its own run — leaving the line
-            // to flip from "0.1.50 → 0.1.51" to "installing 0.1.51" and erase the only
-            // statement of what was there.
-            heldVersionContext ??= BuildVersionContext();
-            return heldVersionContext;
-        }
-    }
+    /// <summary>
+    /// What this run is doing, on every page. Two halves under different rules: what was on
+    /// this computer before the run, and what the run is putting there.
+    /// </summary>
+    public string VersionContext => BuildVersionContext();
 
     private string BuildVersionContext()
     {
-        var installed = readInstalledVersion();
-        var resolved = package.Resolved?.Manifest.ReleaseVersion;
-        if (installed is null)
+        // The left half is read once and never again. An installation writes the version
+        // pointer, so a later read answers a different question than the one this half asks —
+        // which is how the finish page turned "0.1.50 → 0.1.51" into "0.1.51 → 0.1.51
+        // (repair)" at the moment somebody was reading the outcome.
+        if (!hasReadInstalledVersion)
         {
-            return resolved is null ? "installing" : "installing " + resolved;
+            heldInstalledVersion = readInstalledVersion();
+            hasReadInstalledVersion = true;
         }
 
-        if (resolved is null)
+        // The right half is not history. It is the answer to what this run is doing, and on
+        // an installation it is not known when the window opens: the release resolves behind
+        // the first page, and a request left at "latest" is checked once more immediately
+        // before installing. So it moves until the run settles it.
+        var resolved = package.Resolved?.Manifest.ReleaseVersion
+            ?? (package.IsResolving ? "checking…" : "no release");
+
+        if (heldInstalledVersion is null)
         {
-            return installed + " → checking…";
+            return resolved;
         }
 
-        if (Mode == StartChoice.CleanReinstall)
-        {
-            return installed + " → " + resolved + " (reinstall)";
-        }
-
-        return string.Equals(installed, resolved, StringComparison.OrdinalIgnoreCase)
-            ? installed + " → " + resolved + " (repair)"
-            : installed + " → " + resolved;
+        return string.Equals(heldInstalledVersion, resolved, StringComparison.OrdinalIgnoreCase)
+            ? heldInstalledVersion + " → " + resolved + " (repair)"
+            : heldInstalledVersion + " → " + resolved;
     }
 
     public string StepTitle => CurrentPage switch
@@ -533,13 +529,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
         LoadInterruptedRunJournal();
         SeedSettingsFromInstallation();
         await RefreshEnvironmentDiagnosticsAsync(cancellationToken);
-        if (AreSettingsFolded)
-        {
-            // The errand settled which release this is, so resolving it is work rather than a
-            // question. It happens here, behind the check already running, instead of behind a
-            // "Check release" button on a page an update no longer shows.
-            await ResolvePackageAsync(cancellationToken);
-        }
+
+        // Behind the check already running, on every errand. A page whose one job is to name
+        // the release should open with the answer rather than with a button; and on the
+        // install path the run made this same call anyway, too late for the rail to say so.
+        await ResolvePackageAsync(cancellationToken);
 
         hasInitialized = true;
     }
@@ -744,9 +738,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
         var token = linked.Token;
 
         isRunning = true;
-        // From here the line states what this run is doing. What is on disk is about to
-        // stop being the answer to that.
-        hasRunStarted = true;
         isComplete = false;
         hasRunError = false;
         CurrentPage = InstallerPage.Progress;
@@ -1607,11 +1598,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(StepTitle));
         OnPropertyChanged(nameof(StepDescription));
         OnPropertyChanged(nameof(StepStatus));
-        if (!hasRunStarted)
-        {
-            heldVersionContext = BuildVersionContext();
-        }
-
         OnPropertyChanged(nameof(VersionContext));
         OnPropertyChanged(nameof(AreSettingsFolded));
         OnPropertyChanged(nameof(IsReleaseFolded));
@@ -1860,7 +1846,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     public async Task ResolvePackageAsync(CancellationToken cancellationToken = default)
     {
-        package.ReportUnavailable("Checking the release...");
+        package.BeginResolving();
         RefreshAll();
         try
         {
@@ -1922,6 +1908,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
         {
             return;
         }
+
+        package.BeginResolving();
 
         try
         {
@@ -2013,6 +2001,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         CancellationToken cancellationToken)
     {
         await RefreshLatestBeforeInstallAsync(report, cancellationToken);
+        // The version becomes known here on the install path, and the rail says what the run
+        // is doing — so it has to reach the progress page rather than waiting for the finish.
+        RefreshAll();
         if (package.Resolved is not { } resolved)
         {
             // Not a skip: installing the package is the entire point of this wizard. Returning

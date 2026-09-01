@@ -55,34 +55,71 @@ public sealed class WizardErrandTests
     }
 
     /// <summary>
-    /// The line follows the disk right up until the run starts, and never again.
+    /// The installed half is read once and never again — not on a page turn, not during the
+    /// run, not after it.
     ///
-    /// Before the run it has to move: the release is resolved in the background, so the line
-    /// begins as "0.1.50 → checking…" and has to become "0.1.50 → 0.1.51" when the answer
-    /// arrives. Once the run begins the disk stops being the answer — a clean reinstall
-    /// deletes the version pointer half way through, and an install writes a new one — so a
-    /// line still reading from it would first flip to "installing 0.1.51" and then, on the
-    /// finish page, to "0.1.51 → 0.1.51 (repair)", erasing what the run was about at exactly
-    /// the moment somebody is reading the outcome.
+    /// It is a statement about what was here before, and an installation rewrites the version
+    /// pointer it comes from, so a second read answers a different question. The first attempt
+    /// at this froze the whole line instead, which fixed the finish page and left the install
+    /// path saying "checking…" forever.
     /// </summary>
     [Fact]
-    public void The_version_line_follows_the_disk_until_the_run_starts()
+    public void The_installed_half_is_read_once()
     {
-        var onDisk = "0.1.50";
+        var reads = 0;
         var wizard = new InstallerWizardViewModel(
-            StartChoice.UpdateOrRepair,
-            () => onDisk);
+            StartChoice.Install,
+            () =>
+            {
+                reads++;
+                return "0.1.50";
+            });
 
-        Assert.StartsWith("0.1.50", wizard.VersionContext, StringComparison.Ordinal);
-
-        // Still before the run: a page turn re-reads, which is how "checking…" is replaced.
-        onDisk = "0.1.51";
-        wizard.MovePrevious();
+        var first = wizard.VersionContext;
         wizard.Diagnose.IsChecking = false;
         wizard.Diagnose.SetResult(supported: true);
         wizard.MoveNext();
+        var afterAPageTurn = wizard.VersionContext;
 
-        Assert.StartsWith("0.1.51", wizard.VersionContext, StringComparison.Ordinal);
+        Assert.StartsWith("0.1.50", first, StringComparison.Ordinal);
+        Assert.StartsWith("0.1.50", afterAPageTurn, StringComparison.Ordinal);
+        Assert.Equal(1, reads);
+    }
+
+    /// <summary>
+    /// The other half is not history: it is what this run is putting there, and on an
+    /// installation it is not known when the window opens. Three states, and the difference
+    /// between the first two is the whole point — a check nobody started reads the same as a
+    /// check still running only if the wizard cannot tell them apart.
+    /// </summary>
+    [Fact]
+    public void The_errand_half_says_which_of_the_three_it_is()
+    {
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null);
+
+        Assert.Equal("no release", wizard.VersionContext);
+
+        wizard.Package.BeginResolving();
+        Assert.Equal("checking…", wizard.VersionContext);
+
+        wizard.Package.ReportUnavailable("the feed could not be reached");
+        Assert.Equal("no release", wizard.VersionContext);
+    }
+
+    /// <summary>
+    /// Both halves together, on a machine that already has something. The arrow is what says
+    /// one version is being replaced by another; without a left half there is nothing to
+    /// replace and the line is just the release going in.
+    /// </summary>
+    [Fact]
+    public void The_arrow_appears_only_when_something_is_being_replaced()
+    {
+        Assert.Equal(
+            "no release",
+            new InstallerWizardViewModel(StartChoice.Install, () => null).VersionContext);
+        Assert.Equal(
+            "0.1.50 → no release",
+            new InstallerWizardViewModel(StartChoice.Install, () => "0.1.50").VersionContext);
     }
 
     /// <summary>
@@ -126,6 +163,8 @@ public sealed class WizardErrandTests
         Assert.True(await wizard.RunAsync(TestContext.Current.CancellationToken));
 
         Assert.Equal(InstallerPage.Finish, wizard.CurrentPage);
+        // The run wrote a new pointer; the left half still says what was here before it did.
+        Assert.StartsWith("0.1.50 →", wizard.VersionContext, StringComparison.Ordinal);
         Assert.Equal(before, wizard.VersionContext);
     }
 
