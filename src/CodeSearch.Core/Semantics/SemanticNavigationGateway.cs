@@ -308,7 +308,7 @@ public sealed class SemanticNavigationGateway
     {
         var workingRoot = RepoLocator.ResolveWorkingRoot(root).Value;
         var identity = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
-        var store = new GenerationStore(identity.RepositoryRuntimeRoot);
+        var store = new GenerationStore(identity.RepositoryRuntimeRoot.Value);
         var current = store.ReadCurrent()
             ?? throw new SemanticNavigationNotReadyException(
                 "No current repository generation is published. Run localai sync first.");

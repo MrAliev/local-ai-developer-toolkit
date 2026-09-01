@@ -130,7 +130,7 @@ public sealed class SearchChunkServiceTests : IDisposable
     [Fact]
     public async Task Refuses_an_indexed_range_that_no_longer_exists()
     {
-        var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
+        var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
         CreateIndex(_identity, _generation, "Example.cs", 2, 99)
             .Save(store.IndexPath(_generation.Id));
 
@@ -195,7 +195,7 @@ public sealed class SearchChunkServiceTests : IDisposable
     [Fact]
     public async Task Refuses_an_indexed_path_outside_the_repository()
     {
-        var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
+        var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
         CreateIndex(
                 _identity,
                 _generation,
@@ -216,7 +216,7 @@ public sealed class SearchChunkServiceTests : IDisposable
     [Fact]
     public async Task Refuses_a_missing_indexed_source_with_an_explicit_diagnostic()
     {
-        var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
+        var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
         CreateIndex(_identity, _generation, "Missing.cs", 1, 1)
             .Save(store.IndexPath(_generation.Id));
 
@@ -351,7 +351,7 @@ public sealed class SearchChunkServiceTests : IDisposable
     [Fact]
     public async Task Legacy_indexes_fail_with_rebuild_guidance_before_requesting_an_embedding()
     {
-        DeleteTree(_identity.RepositoryRuntimeRoot);
+        DeleteTree(_identity.RepositoryRuntimeRoot.Value);
         var legacyPath = RepoLocator.LegacyIndexPathFor(_root, _runtimeRoot);
         WriteLegacyIndexV2(legacyPath);
         var embeddingRequested = false;
@@ -426,7 +426,7 @@ public sealed class SearchChunkServiceTests : IDisposable
         {
             CreateIndex(identity, generation, relPath, startLine, endLine)
                 .Save(sourceIndex);
-            var store = new GenerationStore(identity.RepositoryRuntimeRoot);
+            var store = new GenerationStore(identity.RepositoryRuntimeRoot.Value);
             var manifest = store.PublishIndex(sourceIndex, generation);
             store.SetCurrent(manifest);
         }

@@ -269,7 +269,7 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
         try
         {
             index.Save(sourceIndex);
-            var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
+            var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
             var manifest = store.PublishIndex(sourceIndex, generation);
             store.SetCurrent(manifest);
         }

@@ -64,7 +64,7 @@ public sealed class SearchServiceStatusTests : IDisposable
                 Chunks = [],
                 Vectors = []
             }.Save(sourceIndex);
-            var store = new GenerationStore(featureIdentity.RepositoryRuntimeRoot);
+            var store = new GenerationStore(featureIdentity.RepositoryRuntimeRoot.Value);
             var manifest = store.PublishIndex(sourceIndex, generation);
             store.SetCurrent(manifest);
         }
@@ -73,7 +73,7 @@ public sealed class SearchServiceStatusTests : IDisposable
             File.Delete(sourceIndex);
         }
 
-        new RepositoryManifestStore(featureIdentity.RepositoryRuntimeRoot).Save(
+        new RepositoryManifestStore(featureIdentity.RepositoryRuntimeRoot.Value).Save(
             new RepositoryManifest(
                 featureIdentity.RepositoryId,
                 RepoLocator.GitOutput(
@@ -137,7 +137,7 @@ public sealed class SearchServiceStatusTests : IDisposable
                 Chunks = [],
                 Vectors = []
             }.Save(sourceIndex);
-            var store = new GenerationStore(identity.RepositoryRuntimeRoot);
+            var store = new GenerationStore(identity.RepositoryRuntimeRoot.Value);
             var manifest = store.PublishIndex(sourceIndex, generation);
             store.SetCurrent(manifest);
         }
