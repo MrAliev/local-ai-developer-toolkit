@@ -19,10 +19,48 @@ public sealed record ModelResidencyProof(
 {
     /// <summary>
     /// Set when a relaxed policy admitted a load that is not fully resident, and therefore
-    /// slower. Callers must surface it: a degraded answer that looks identical to a healthy
-    /// one is exactly the failure this policy exists to prevent.
+    /// slower. Read by the preflight output, which returns it as it stands; the report line a
+    /// local tool prints takes the fact from Shortfall() instead, because that line is rendered
+    /// by the client in its own language.
+    ///
+    /// For as long as this was the only carrier, it reached nobody: an English sentence had
+    /// nowhere to go in a Russian report line, so degraded answers looked healthy (#277).
     /// </summary>
     public string? DegradationWarning { get; init; }
+
+    /// <summary>
+    /// The shortfall as a fact rather than as prose, with the share of the model that reached
+    /// video memory.
+    ///
+    /// <see cref="DegradationWarning"/> is an English sentence, and the line that reports a
+    /// local call is rendered by the client in its own language — which is why the warning
+    /// travelled no further than this record for as long as it existed. This does travel.
+    ///
+    /// A size the runtime did not report is not a shortfall: marking a healthy answer as
+    /// degraded spends the mark's meaning on noise.
+    /// </summary>
+    public (ResidencyShortfall Shortfall, int? ResidentPercent) Shortfall()
+    {
+        if (SizeBytes <= 0)
+        {
+            return (ResidencyShortfall.None, null);
+        }
+
+        if (SizeVramBytes >= SizeBytes)
+        {
+            // Ollama has reported more in video memory than the model's own size. The honest
+            // reading of that is that nothing is missing, not that 103% of it arrived.
+            return (ResidencyShortfall.None, 100);
+        }
+
+        var percent = (int)(SizeVramBytes * 100 / SizeBytes);
+        // Under one percent is the processor running the model, whatever the arithmetic rounds
+        // to: reported as a partial offload it renders as "0% of the model in video memory —
+        // answers are slower", which says "slower" about the case that is slowest.
+        return percent <= 0
+            ? (ResidencyShortfall.Cpu, 0)
+            : (ResidencyShortfall.PartialOffload, percent);
+    }
 }
 
 public interface IModelRuntimeTransport

@@ -788,7 +788,8 @@ overwriting it.
 
 By default a model must be **fully resident in video memory**; anything less is refused. This
 is not a performance preference. A model that spills into system memory does not fail — it
-just becomes several times slower, and nothing in the answer says so.
+just becomes several times slower. Nothing about the failure announces itself; the label
+is put there deliberately, by the report line, and only for the tools that print one.
 
 Machines without a usable discrete adapter can relax it:
 
@@ -816,9 +817,12 @@ contains work routed to that same model. Jobs for other models do not retain it.
 number with `localai policy set --idle-model-keep-alive-seconds <seconds>` when the latency of
 reloading is preferable to releasing video memory promptly.
 
-Degradation stays visible: every load admitted below full residency carries a warning naming
-the share that reached video memory, and `FullyResident` reports the truth rather than a
-constant. Note that the agent instruction block still asks for full-VRAM validation, so
+Degradation stays visible, and visible where it is read: every load admitted below full
+residency carries a warning naming the share that reached video memory, `FullyResident`
+reports the truth rather than a constant, and the report line a local tool prints marks the
+shortfall beside the model on every answer produced that way — `qwen3-coder:30b (в
+видеопамяти 42% модели — ответы медленнее)`. How to restore strict residency is said once per
+process rather than on every call. Note that the agent instruction block still asks for full-VRAM validation, so
 relaxing this diverges from what those instructions promise.
 
 An NPU does not help here. Everything runs through Ollama, whose backends are CPU, CUDA,

@@ -658,7 +658,31 @@ public sealed record LocalRoutingReceipt(
     long EstimatedNetCloudTokensSaved,
     bool IsExperimentalAttempt = false,
     string? ExperimentalModel = null,
-    ModelExecutionOutcome? ExperimentalOutcome = null);
+    ModelExecutionOutcome? ExperimentalOutcome = null,
+    // How much of the model missed video memory on this call, and by how much. Defaulted so a
+    // receipt written by an older build still deserialises.
+    ResidencyShortfall ResidencyShortfall = ResidencyShortfall.None,
+    int? VramResidentPercent = null);
+
+/// <summary>
+/// What a relaxed residency policy actually cost this call.
+///
+/// The proof carried an English sentence and nothing read it, so the answers a relaxed policy
+/// produced were indistinguishable from healthy ones (#277). This is the fact rather than the
+/// prose: the line that reports a local call is rendered by the client, in its own language.
+/// </summary>
+[JsonConverter(typeof(StrictJsonStringEnumConverter))]
+public enum ResidencyShortfall
+{
+    /// <summary>The whole model reached video memory.</summary>
+    None,
+
+    /// <summary>Part of it is in system memory.</summary>
+    PartialOffload,
+
+    /// <summary>None of it reached video memory; the processor is running it.</summary>
+    Cpu
+}
 
 public sealed record LocalJobResult<T>(T Value, LocalUsageReceipt Receipt);
 

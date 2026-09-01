@@ -20,8 +20,29 @@ public sealed record LocalResult(
     /// it could only guess. It comes from the receipt now.
     /// </summary>
     public string Notice =>
-        $"🔧 Локально: {Model}. {Detail}. {DescribeDuration()}. " +
+        $"🔧 Локально: {Model}{DescribeResidency(Receipt)}. {Detail}. {DescribeDuration()}. " +
         TokenEstimator.DescribeSaving(SavedTokens);
+
+    /// <summary>
+    /// The mark beside the model when it did not fit in video memory.
+    ///
+    /// Beside the model rather than at the end of the line, because the shortfall is a fact
+    /// about the model rather than about the task, and because a reader who stops after the
+    /// first clause has still seen it. Empty for a healthy call: a parenthesis on every line
+    /// is how a line stops being read.
+    ///
+    /// The percentage is what makes it information rather than a warning — it says how much of
+    /// the model actually arrived.
+    /// </summary>
+    internal static string DescribeResidency(LocalUsageReceipt receipt) =>
+        receipt.Routing?.ResidencyShortfall switch
+        {
+            ResidencyShortfall.PartialOffload =>
+                $" (в видеопамяти {receipt.Routing.VramResidentPercent ?? 0}% модели — " +
+                "ответы медленнее)",
+            ResidencyShortfall.Cpu => " (целиком на процессоре — ответы намного медленнее)",
+            _ => string.Empty,
+        };
 
     /// <summary>
     /// How long it took, and how much of that was waiting.
@@ -721,7 +742,8 @@ public sealed record LocalTranslationResult(
     LocalUsageReceipt Receipt)
 {
     public string Notice =>
-        $"🔧 Локально: {Model}. Перевод проверен: {Validation.Detail}. " +
+        $"🔧 Локально: {Model}{LocalResult.DescribeResidency(Receipt)}. " +
+        $"Перевод проверен: {Validation.Detail}. " +
         $"{LocalResult.DescribeDuration(Receipt)}. " +
         $"Локально обработано примерно {TokenEstimator.Describe(LocalTokensProcessed)} токенов; " +
         $"на облачной генерации сэкономлено примерно {TokenEstimator.Describe(SavedTokens)}; " +

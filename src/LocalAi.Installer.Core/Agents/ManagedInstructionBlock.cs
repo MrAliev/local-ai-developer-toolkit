@@ -154,9 +154,9 @@ public static class ManagedInstructionBlock
 
         Full-VRAM, zero-offload validation is the default, and under it a model that will
         not fit is refused rather than run slowly. Relax that on purpose or not at all:
-        `localai policy set --residency AllowPartialOffload` or `AllowCpu`. Nothing marks the
-        answers that come back from a relaxed policy, so whoever relaxes it is the one who has
-        to remember.
+        `localai policy set --residency AllowPartialOffload` or `AllowCpu`. An answer produced
+        under a relaxed policy is marked: the LocalLm report line names the shortfall beside
+        the model, so a degraded answer cannot be mistaken for a healthy one.
 
         ### Finding code
 
@@ -272,7 +272,10 @@ public static class ManagedInstructionBlock
         Every one of those comes from the tool. LocalLm returns a line with model, duration
         and saving, in Russian whatever language you work in; quote its numbers as they come —
         `6.2 с`, or `6.1 с (в очереди 4.1 с)` where a wait is named apart from the work, worth
-        carrying because waiting and running point at different things. `search_code` prints
+        carrying because waiting and running point at different things. Where that line marks a
+        shortfall beside the model — `в видеопамяти 42% модели`, or `целиком на процессоре` —
+        carry the mark into what you report, and treat the answer as one to verify rather than
+        one to build on. `search_code` prints
         its own time in the header above the hits; its saving is the one figure you estimate,
         from the files that would otherwise have been read whole. A local call reported vaguely
         cannot be told from one that never happened.
