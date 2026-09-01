@@ -137,7 +137,7 @@ public sealed class UpdatePathFoldsSettingsTests
     [InlineData("LocalAi package:")]
     [InlineData("Dependencies:")]
     [InlineData("Models:")]
-    [InlineData("Model residency:")]
+    [InlineData("Video memory:")]
     [InlineData("Update check:")]
     public void Every_folded_page_still_reports_itself_on_the_review(string expected)
     {

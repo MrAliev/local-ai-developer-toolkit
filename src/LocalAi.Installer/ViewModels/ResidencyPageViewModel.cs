@@ -104,5 +104,18 @@ public sealed class ResidencyPageViewModel : ObservableObject
 
     public bool CanContinue => true;
 
-    public string ReviewText => $"Model residency: {Policy}";
+    /// <summary>
+    /// The rule in the words the page used to offer it, not the name the enum happens to
+    /// carry. "Model residency: RequireFullVram" put an identifier into the list somebody
+    /// reads before consenting — and StoredResidencyNote then printed a second one beside it.
+    /// </summary>
+    public string ReviewText => "Video memory: " + Name(Policy);
+
+    public static string Name(ModelResidencyPolicy policy) => policy switch
+    {
+        ModelResidencyPolicy.RequireFullVram => "whole model in video memory",
+        ModelResidencyPolicy.AllowPartialOffload => "part of the model in system memory",
+        ModelResidencyPolicy.AllowCpu => "running on the processor",
+        _ => policy.ToString(),
+    };
 }

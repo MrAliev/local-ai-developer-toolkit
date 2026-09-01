@@ -93,4 +93,23 @@ public sealed class StoredSettingsSeedTests : IDisposable
 
         Assert.False(store.Read().Enabled);
     }
+
+    /// <summary>
+    /// The consent list is read by a person, so it carries the rule in the words the page used
+    /// to offer it — not the name the enum happens to have. "Model residency: RequireFullVram"
+    /// put an identifier in front of somebody about to agree to it.
+    /// </summary>
+    [Theory]
+    [InlineData(ModelResidencyPolicy.RequireFullVram, "whole model in video memory")]
+    [InlineData(ModelResidencyPolicy.AllowPartialOffload, "part of the model in system memory")]
+    [InlineData(ModelResidencyPolicy.AllowCpu, "running on the processor")]
+    public void The_review_names_the_rule_rather_than_the_enum(
+        ModelResidencyPolicy policy,
+        string expected)
+    {
+        var page = new LocalAi.Installer.ViewModels.ResidencyPageViewModel { Policy = policy };
+
+        Assert.Equal("Video memory: " + expected, page.ReviewText);
+        Assert.DoesNotContain(policy.ToString(), page.ReviewText, StringComparison.Ordinal);
+    }
 }

@@ -120,7 +120,7 @@ public sealed partial class ModelRecommendationEngine
                     AdapterSelectionStatus.Selected,
                     selected,
                     FormattableString.Invariant(
-                        $"Using manually selected dedicated GPU adapter '{selected.StableId}'."));
+                        $"Using the manually selected adapter {GpuAdapterDisplay.Describe(selected)}."));
         }
 
         var defaultAdapter = eligible
@@ -132,8 +132,10 @@ public sealed partial class ModelRecommendationEngine
             return new AdapterSelection(
                 AdapterSelectionStatus.Selected,
                 defaultAdapter,
+                // The name, not the StableId: this sentence reaches the models page, and a
+                // PCI path is not an answer to "which card is this weighed against".
                 FormattableString.Invariant(
-                    $"Using dedicated GPU adapter '{defaultAdapter.StableId}' with the largest dedicated local VRAM."));
+                    $"Using {GpuAdapterDisplay.Describe(defaultAdapter)}, the adapter with the most dedicated video memory."));
         }
 
         return new AdapterSelection(

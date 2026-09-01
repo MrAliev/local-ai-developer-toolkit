@@ -174,13 +174,8 @@ public sealed class DiagnosePageViewModel : ObservableObject
         OnPropertyChanged(nameof(Checks));
     }
 
-    private static string Describe(GpuAdapterSnapshot adapter)
-    {
-        var memory = adapter.DedicatedLocalBytes > 0
-            ? $" ({adapter.DedicatedLocalBytes / (1024d * 1024 * 1024):N1} GB dedicated)"
-            : " (no dedicated memory)";
-        return adapter.Name + memory + (adapter.IsSoftware ? " [software]" : string.Empty);
-    }
+    private static string Describe(GpuAdapterSnapshot adapter) =>
+        GpuAdapterDisplay.Describe(adapter);
 
     private static EnvironmentCheck Describe(DependencySnapshot snapshot, string purpose) =>
         new(

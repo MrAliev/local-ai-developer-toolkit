@@ -1462,7 +1462,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     private string StoredResidencyNote() =>
         storedResidency is { } stored && stored != residency.Policy
-            ? $" (currently {stored} - this run changes it)"
+            ? $" (currently {ResidencyPageViewModel.Name(stored)} - this run changes it)"
             : string.Empty;
 
     /// <summary>
