@@ -527,10 +527,13 @@ and one button there brings all four back for the run where a carried-forward an
 
 That answer travels with the window: the title bar names the errand, and the step
 rail carries a version line on every page — `installing 0.1.51`, `0.1.50 → 0.1.51`,
-`0.1.50 → 0.1.50 (repair)`, or `0.1.50 → 0.1.51 (reinstall)`. That line is read from disk once
-and then stated, not re-read: a reinstall deletes the version pointer half way through its own
-run, and a line rebuilt on every page would flip to `installing 0.1.51` at that moment,
-erasing mid-run the only statement of what was there. The consent is worded for the errand
+`0.1.50 → 0.1.50 (repair)`, or `0.1.50 → 0.1.51 (reinstall)`. That line follows the disk until the run
+starts and never afterwards: the release is resolved in the background, so it has to move from
+`0.1.50 → checking…` to `0.1.50 → 0.1.51` when the answer arrives, and from the moment the run
+begins the disk stops being the answer. A reinstall deletes the version pointer half way
+through its own run and an installation writes a new one, so a line still reading from it would
+flip to `installing 0.1.51` mid-run and then, on the finish page, to `0.1.51 → 0.1.51 (repair)`
+— erasing what the run was about at the moment somebody is reading the outcome. The consent is worded for the errand
 too — a run that removes before it installs says so, rather than asking somebody to agree
 they have reviewed "these settings". It is the one place a version is a question; everywhere else the
 wizard states it. An installation registers itself in Apps & features, whose entry runs a copy of the

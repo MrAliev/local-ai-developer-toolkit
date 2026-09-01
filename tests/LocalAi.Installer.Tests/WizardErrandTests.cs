@@ -55,22 +55,78 @@ public sealed class WizardErrandTests
     }
 
     /// <summary>
-    /// The line is captured, not recomputed on every read.
+    /// The line follows the disk right up until the run starts, and never again.
     ///
-    /// It is built from the installed version on disk, and a clean reinstall deletes that
-    /// pointer half way through its own run. Rebuilt each time, the rail would flip from
-    /// "0.1.50 → 0.1.51" to "installing 0.1.51" the moment the removal half succeeded —
-    /// erasing, mid-run, the only statement of what was there before.
+    /// Before the run it has to move: the release is resolved in the background, so the line
+    /// begins as "0.1.50 → checking…" and has to become "0.1.50 → 0.1.51" when the answer
+    /// arrives. Once the run begins the disk stops being the answer — a clean reinstall
+    /// deletes the version pointer half way through, and an install writes a new one — so a
+    /// line still reading from it would first flip to "installing 0.1.51" and then, on the
+    /// finish page, to "0.1.51 → 0.1.51 (repair)", erasing what the run was about at exactly
+    /// the moment somebody is reading the outcome.
     /// </summary>
-    [Theory]
-    [InlineData(StartChoice.Install)]
-    [InlineData(StartChoice.UpdateOrRepair)]
-    [InlineData(StartChoice.CleanReinstall)]
-    public void The_version_line_is_captured_rather_than_recomputed(StartChoice mode)
+    [Fact]
+    public void The_version_line_follows_the_disk_until_the_run_starts()
     {
-        var wizard = new InstallerWizardViewModel(mode);
+        var onDisk = "0.1.50";
+        var wizard = new InstallerWizardViewModel(
+            StartChoice.UpdateOrRepair,
+            () => onDisk);
 
-        Assert.Same(wizard.VersionContext, wizard.VersionContext);
+        Assert.StartsWith("0.1.50", wizard.VersionContext, StringComparison.Ordinal);
+
+        // Still before the run: a page turn re-reads, which is how "checking…" is replaced.
+        onDisk = "0.1.51";
+        wizard.MovePrevious();
+        wizard.Diagnose.IsChecking = false;
+        wizard.Diagnose.SetResult(supported: true);
+        wizard.MoveNext();
+
+        Assert.StartsWith("0.1.51", wizard.VersionContext, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Once the run has started the line is stated, not re-read — including after it has
+    /// finished, which is where the first attempt at this let go: the guard was on
+    /// <c>isRunning</c>, and RunAsync clears that in its finally block before the refresh that
+    /// rebuilds the line. So the finish page rebuilt it out of the pointer the run had just
+    /// written, and "0.1.50 → 0.1.51" became "0.1.51 → 0.1.51 (repair)" at exactly the moment
+    /// somebody was reading the outcome.
+    /// </summary>
+    [Fact]
+    public async Task What_the_run_was_about_survives_the_run()
+    {
+        var installed = "0.1.50";
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => installed);
+        wizard.Diagnose.IsChecking = false;
+        wizard.Diagnose.SetResult(true);
+        foreach (var name in new[]
+                 {
+                     "Git", "Ollama", "GitHubCli", "DotNetSdk",
+                     "NodeJs", "ScipTypeScript", "Python", "ScipPython",
+                 })
+        {
+            wizard.Dependencies.SetInstalled(name, true);
+        }
+
+        for (var step = 0; step < 6; step++)
+        {
+            wizard.MoveNext();
+        }
+
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
+        var before = wizard.VersionContext;
+        Assert.StartsWith("0.1.50", before, StringComparison.Ordinal);
+
+        // A dry run: everything is present and no release was chosen, so nothing is installed.
+        // The disk moves under the wizard while it runs, the way a real install moves it by
+        // writing a new version pointer.
+        wizard.SetReviewConfirmed(true);
+        installed = "0.1.51";
+        Assert.True(await wizard.RunAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(InstallerPage.Finish, wizard.CurrentPage);
+        Assert.Equal(before, wizard.VersionContext);
     }
 
     /// <summary>

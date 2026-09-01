@@ -157,6 +157,15 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     /// <summary>The version line, read from disk once and then stated, not re-read.</summary>
     private string? heldVersionContext;
+
+    /// <summary>
+    /// Whether the run has begun. Set once and never cleared — unlike <c>isRunning</c>, which
+    /// RunAsync clears in its finally block before refreshing, so a guard on that let the
+    /// finish page rebuild the version line out of the pointer the run had just written.
+    /// </summary>
+    private bool hasRunStarted;
+
+    private readonly Func<string?> readInstalledVersion;
     private readonly AgentIntegrationPageViewModel agents = new();
     private readonly ReviewApplyPageViewModel review = new();
     private readonly FinishPageViewModel finish = new();
@@ -184,8 +193,18 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private InstallerRunJournal? interruptedJournal;
     private string? interruptedRunNotice;
 
-    public InstallerWizardViewModel(StartChoice mode = StartChoice.Install)
+    /// <summary>
+    /// <paramref name="readInstalledVersion"/> is how the rail learns which version is on this
+    /// computer. Injectable because the property that matters — that the answer stops changing
+    /// once the run starts — cannot be observed without moving the disk underneath it.
+    /// </summary>
+    public InstallerWizardViewModel(
+        StartChoice mode = StartChoice.Install,
+        Func<string?>? readInstalledVersion = null)
     {
+        this.readInstalledVersion = readInstalledVersion ?? (() => InstalledVersionReader
+            .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
+            .DisplayName);
         Mode = mode;
         var runner = new SystemProcessRunner();
         processRunner = runner;
@@ -349,9 +368,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     private string BuildVersionContext()
     {
-        var installed = InstalledVersionReader
-            .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
-            .DisplayName;
+        var installed = readInstalledVersion();
         var resolved = package.Resolved?.Manifest.ReleaseVersion;
         if (installed is null)
         {
@@ -727,6 +744,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         var token = linked.Token;
 
         isRunning = true;
+        // From here the line states what this run is doing. What is on disk is about to
+        // stop being the answer to that.
+        hasRunStarted = true;
         isComplete = false;
         hasRunError = false;
         CurrentPage = InstallerPage.Progress;
@@ -1587,7 +1607,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(StepTitle));
         OnPropertyChanged(nameof(StepDescription));
         OnPropertyChanged(nameof(StepStatus));
-        if (!isRunning)
+        if (!hasRunStarted)
         {
             heldVersionContext = BuildVersionContext();
         }
