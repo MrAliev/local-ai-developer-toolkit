@@ -88,26 +88,36 @@ public sealed class VersionLeaseTests : IDisposable
         {
             using var gate = ActivationCoordinator.AcquireStartupGate(_root, TimeSpan.FromSeconds(1));
             gateHeld.SetResult();
-            Thread.Sleep(120);
+            Thread.Sleep(700);
         }, TestContext.Current.CancellationToken);
         await gateHeld.Task;
         var stopwatch = Stopwatch.StartNew();
 
         var error = Assert.Throws<LauncherException>(() =>
-            VersionLease.AcquireExclusive(path, TimeSpan.FromMilliseconds(200)));
+            VersionLease.AcquireExclusive(path, TimeSpan.FromSeconds(1)));
 
         stopwatch.Stop();
         await holder;
         Assert.Equal("version_in_use", error.Code);
 
-        // The regression guarded against is spending the budget twice - once on the startup gate
-        // and again on the file lease - which would take about 400 ms. The upper bound only has
-        // to stay below that. It used to sit at 280 ms, which measured scheduler jitter rather
-        // than the behaviour: under a full parallel test run the same correct code overshot it.
+        // The regression guarded against is spending the budget twice — once on the startup gate
+        // and again on the file lease — so the only thing the bounds must do is separate one
+        // budget from two. That separation has to be wider than the machine's scheduling
+        // jitter, and twice it was not: the bound was 280 ms, was raised to 360 ms for the same
+        // reason, and a CI runner then took 731 ms of correct behaviour. Raising it again would
+        // have been the third time measuring the machine rather than the code.
+        //
+        // The gap between the two outcomes is exactly how long the gate is held, so the hold has
+        // to be a large share of the budget or there is nothing to measure. Holding for 700 ms
+        // of a one-second budget puts a correct run at about a second and a double-spending one
+        // at about 1.7 — 700 ms apart, where several hundred milliseconds of jitter no longer
+        // reach the boundary. With the old 120 ms hold the two were 1.0 and 1.12 seconds apart
+        // and the mutation survived, which is what a bound tuned for the machine rather than the
+        // behaviour buys.
         Assert.InRange(
             stopwatch.Elapsed,
-            TimeSpan.FromMilliseconds(170),
-            TimeSpan.FromMilliseconds(360));
+            TimeSpan.FromMilliseconds(850),
+            TimeSpan.FromMilliseconds(1_400));
     }
 
     public void Dispose()

@@ -25,7 +25,9 @@ public sealed class PackagePageViewModel : ObservableObject
     private string sourceFolder = string.Empty;
     private PackageSourceState state = PackageSourceState.NotChecked;
     private string statusText =
-        "No release has been checked yet.";
+        "Press Check again to look up this release.";
+
+    private bool isResolving;
 
     public string ReleaseVersion
     {
@@ -42,7 +44,7 @@ public sealed class PackagePageViewModel : ObservableObject
             OnPropertyChanged(nameof(ResolvedTag));
             OnPropertyChanged(nameof(WantsLatest));
             State = PackageSourceState.NotChecked;
-            StatusText = "No release has been checked yet.";
+            StatusText = "Press Check again to look up this release.";
         }
     }
 
@@ -68,7 +70,7 @@ public sealed class PackagePageViewModel : ObservableObject
             ResolvedTag = null;
             OnPropertyChanged(nameof(ResolvedTag));
             State = PackageSourceState.NotChecked;
-            StatusText = "No release has been checked yet.";
+            StatusText = "Press Check again to look up this release.";
         }
     }
 
@@ -140,9 +142,15 @@ public sealed class PackagePageViewModel : ObservableObject
 
     public string ReviewText => State switch
     {
+        PackageSourceState.Selected when IsAlreadyInstalled && WantsLatest =>
+            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed — nothing " +
+            "will change unless a newer one is published before you press Install",
         PackageSourceState.Selected when IsAlreadyInstalled =>
             $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed — " +
             "nothing will change",
+        PackageSourceState.Selected when WantsLatest =>
+            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} — or whatever is newest when " +
+            "you press Install",
         PackageSourceState.Selected => $"LocalAi package: {ResolvedTag ?? ReleaseVersion}",
         PackageSourceState.Incompatible =>
             $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is not compatible — " +
@@ -185,7 +193,28 @@ public sealed class PackagePageViewModel : ObservableObject
     /// step rail could not tell a check in flight from a check that failed — and said
     /// "checking…" forever on a path where nothing had asked.
     /// </summary>
-    public bool IsResolving { get; private set; }
+    public bool IsResolving
+    {
+        get => isResolving;
+        private set
+        {
+            if (isResolving == value)
+            {
+                return;
+            }
+
+            isResolving = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CanCheck));
+        }
+    }
+
+    /// <summary>
+    /// Whether the button can be pressed. It is not how an answer arrives any more — the page
+    /// looks the release up when it opens — so it is the way to ask again after an edit or a
+    /// failure, and asking twice at once is not a thing to allow.
+    /// </summary>
+    public bool CanCheck => !IsResolving;
 
     /// <summary>
     /// Takes the flag down without saying anything else. For a resolve whose answer nobody
@@ -236,7 +265,7 @@ public sealed class PackagePageViewModel : ObservableObject
     {
         IsResolving = false;
         Resolved = null;
-        StatusText = reason;
+        StatusText = "No release resolved. " + reason;
         State = PackageSourceState.Unavailable;
     }
 
@@ -249,7 +278,7 @@ public sealed class PackagePageViewModel : ObservableObject
         OnPropertyChanged(nameof(ReleaseVersion));
         OnPropertyChanged(nameof(ResolvedTag));
         OnPropertyChanged(nameof(WantsLatest));
-        StatusText = "No release has been checked yet.";
+        StatusText = "Press Check again to look up this release.";
         State = PackageSourceState.NotChecked;
     }
 }
