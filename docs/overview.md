@@ -507,7 +507,11 @@ the rest. An update also stops re-asking what it already has: prerequisites that
 that are pulled, the residency policy read from disk and the client registrations that exist
 are folded away, so the rail shows four steps rather than nine and the counter says so. The
 release is folded with them — the errand settled which one it is, so resolving it is work
-rather than a question, and it happens behind the system check instead of behind a button. Their
+rather than a question, and it happens behind the first page instead of behind a button.
+That page is called `Preparing` on this path rather than `System check`: its content is one
+line and a spinner, and what the reader waits for is the release as much as the machine.
+Two buttons on the review page bring back what was folded — one for the release, one for the
+settings, because they are different questions. Their
 values still appear on the review page — a folded page must never become an unlisted effect —
 and one button there brings all four back for the run where a carried-forward answer is wrong.
 
