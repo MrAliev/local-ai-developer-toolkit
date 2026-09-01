@@ -297,8 +297,7 @@ public sealed class InstallerWizardViewModelTests
 
         Assert.True(wizard.MoveNext()); // Dependencies
         Assert.True(wizard.MoveNext()); // Package
-        Assert.True(wizard.MoveNext()); // Models
-        Assert.True(wizard.MoveNext()); // Residency
+        Assert.True(wizard.MoveNext()); // Models and memory
         Assert.True(wizard.MoveNext()); // Agents
         Assert.True(wizard.MoveNext()); // Confirm
         Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);

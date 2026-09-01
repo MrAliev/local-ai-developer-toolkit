@@ -505,7 +505,13 @@ The same executable is also the uninstaller, the updater and the repair tool, so
 asks which of those this run is and offers only what the machine allows, naming the reason for
 the rest. An update also stops re-asking what it already has: prerequisites that are installed, models
 that are pulled, the residency policy read from disk and the client registrations that exist
-are folded away, so the rail shows four steps rather than nine and the counter says so. The
+are folded away, so the rail shows four steps rather than eight and the counter says so.
+
+The video-memory rule and the model choice are one page, in that order. They were two, and
+the recompute a rule change triggers — relaxing it offers more models — landed on a page the
+reader had already left, so they chose models under a filter the next page then silently
+changed. On one page the rule sits above its consequence, and a line inside the model group
+restates it with the count, so the dependency is legible after the radio buttons scroll away. The
 release is folded with them — the errand settled which one it is, so resolving it is work
 rather than a question, and it happens behind the first page instead of behind a button.
 That page is called `Preparing` on this path rather than `System check`: its content is one
