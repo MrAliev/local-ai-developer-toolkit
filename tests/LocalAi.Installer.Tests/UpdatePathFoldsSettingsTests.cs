@@ -206,6 +206,42 @@ public sealed class UpdatePathFoldsSettingsTests
     }
 
     /// <summary>
+    /// The warning used to promise work that was not going to happen. On an update the
+    /// prerequisites are installed and nothing is ticked, so "only the prerequisites above
+    /// will be applied" described a run nobody was about to get — on the page whose whole
+    /// purpose is to say what will happen (#264).
+    /// </summary>
+    [Fact]
+    public void With_no_prerequisites_selected_the_warning_says_nothing_will_be_applied()
+    {
+        var review = new InstallerWizardViewModel(StartChoice.UpdateOrRepair).ReviewText;
+
+        Assert.Contains("Nothing will be applied.", review, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Only the prerequisites above will be applied.",
+            review,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void With_a_prerequisite_selected_the_warning_names_it_as_the_work()
+    {
+        var wizard = new InstallerWizardViewModel(StartChoice.Install);
+        var installable = wizard.Dependencies.Dependencies
+            .FirstOrDefault(dependency => dependency.IsInstallable);
+        Assert.NotNull(installable);
+        wizard.Dependencies.SetConsent(installable!.Id, consent: true);
+
+        var review = wizard.ReviewText;
+
+        Assert.Contains(
+            "Only the prerequisites above will be applied.",
+            review,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Nothing will be applied.", review, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A wizard whose system check has passed, which is what gates Next on the first page.
     /// Without it every navigation assertion here would be testing the gate rather than the
     /// folding.
