@@ -149,8 +149,8 @@ public sealed class SearchService : IDisposable
     public async Task<IReadOnlyList<SearchHit>> SearchAsync(
         string query, string? root, SearchOptions options, CancellationToken ct = default)
     {
-        var workingRoot = RepoLocator.ResolveWorkingRoot(root);
-        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root), _runtimeRoot);
+        var workingRoot = RepoLocator.ResolveWorkingRoot(root).Value;
+        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root).Value, _runtimeRoot);
         var baseIndex = Load(indexPath);
         RequireSnapshotIdentity(baseIndex);
 
@@ -199,7 +199,7 @@ public sealed class SearchService : IDisposable
         CancellationToken ct = default)
     {
         var requested = SearchChunkId.Parse(chunkId);
-        var workingRoot = RepoLocator.ResolveWorkingRoot(root);
+        var workingRoot = RepoLocator.ResolveWorkingRoot(root).Value;
         var identity = RuntimeIndexLayout.Inspect(workingRoot, _runtimeRoot);
 
         if (!string.Equals(
@@ -212,7 +212,7 @@ public sealed class SearchService : IDisposable
                 requested with { RepositoryId = identity.RepositoryId });
         }
 
-        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root), _runtimeRoot);
+        var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root).Value, _runtimeRoot);
         var baseIndex = Load(indexPath);
         var actualSnapshot = new SearchChunkId(
             identity.RepositoryId,
@@ -392,8 +392,8 @@ public sealed class SearchService : IDisposable
 
     public IndexStatus Status(string? root)
     {
-        var workingRoot = RepoLocator.ResolveWorkingRoot(root);
-        var repositoryRoot = RepoLocator.ResolveRoot(root);
+        var workingRoot = RepoLocator.ResolveWorkingRoot(root).Value;
+        var repositoryRoot = RepoLocator.ResolveRoot(root).Value;
         var indexPath = RepoLocator.IndexPathFor(repositoryRoot, _runtimeRoot);
         var currentCommit = RepoLocator.GitCommit(workingRoot);
 

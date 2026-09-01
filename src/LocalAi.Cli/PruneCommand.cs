@@ -147,7 +147,7 @@ public static class PruneCommand
                 reachable.Add((
                     RuntimeIndexLayout.WorktreeKey(workingRoot),
                     RepoLocator.GitOutputOrThrow(
-                        workingRoot,
+                        workingRoot.Value,
                         "rev-parse HEAD^{tree}",
                         "The git HEAD tree")));
             }

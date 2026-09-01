@@ -137,7 +137,7 @@ internal static class SemanticNavigationCommand
 
     private static SemanticIndex Load(string? root, string? runtimeRoot)
     {
-        var workingRoot = CodeSearch.Core.Indexing.RepoLocator.ResolveWorkingRoot(root);
+        var workingRoot = CodeSearch.Core.Indexing.RepoLocator.ResolveWorkingRoot(root).Value;
         var identity = CodeSearch.Core.Indexing.RuntimeIndexLayout.Inspect(
             workingRoot,
             runtimeRoot);
@@ -294,7 +294,7 @@ internal static class SemanticNavigationCommand
                 suite = suite with { Iterations = iterations };
             }
 
-            var workingRoot = CodeSearch.Core.Indexing.RepoLocator.ResolveWorkingRoot(root);
+            var workingRoot = CodeSearch.Core.Indexing.RepoLocator.ResolveWorkingRoot(root).Value;
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();

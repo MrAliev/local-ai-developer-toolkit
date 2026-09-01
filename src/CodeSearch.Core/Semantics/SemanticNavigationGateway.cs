@@ -301,12 +301,12 @@ public sealed class SemanticNavigationGateway
 
     private static string ResolveLiveRoot(string? root) =>
         root is null
-            ? RepoLocator.ResolveWorkingRoot(null)
+            ? RepoLocator.ResolveWorkingRoot(null).Value
             : Path.GetFullPath(root);
 
     private static SemanticNavigationContext LoadCurrent(string? root, string? runtimeRoot)
     {
-        var workingRoot = RepoLocator.ResolveWorkingRoot(root);
+        var workingRoot = RepoLocator.ResolveWorkingRoot(root).Value;
         var identity = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
         var store = new GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent()
