@@ -19,6 +19,14 @@
     <PackageReference Include="Microsoft.Build.Locator" Version="1.11.2" />
     <PackageReference Include="Microsoft.Build.Framework" Version="18.9.6"
                       ExcludeAssets="runtime" PrivateAssets="all" />
+    <!--
+      Pulled in transitively by Microsoft.Build.Framework 18, and Microsoft.Build.Locator
+      refuses a build where an MSBuild assembly could be loaded from the output rather than
+      from the SDK the locator selected. The transitive reference carries no such attributes,
+      so it has to be stated here to carry them.
+    -->
+    <PackageReference Include="Microsoft.NET.StringTools" Version="18.9.6"
+                      ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="System.Numerics.Tensors" Version="10.0.11" />
   </ItemGroup>
 
