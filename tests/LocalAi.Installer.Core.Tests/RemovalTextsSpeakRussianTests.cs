@@ -9,7 +9,6 @@ namespace LocalAi.Installer.Core.Tests;
 /// half-translated consent surface — Russian frame, English rows — is worse than either whole,
 /// because the sentence somebody agrees to is the one they cannot read.
 /// </summary>
-[Collection(InstallerLanguageCollection.Name)]
 public sealed class RemovalTextsSpeakRussianTests : IDisposable
 {
     private readonly InstallerLanguage original = InstallerCulture.Current;

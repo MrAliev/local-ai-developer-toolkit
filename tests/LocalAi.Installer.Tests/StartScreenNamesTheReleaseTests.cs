@@ -15,7 +15,6 @@ namespace LocalAi.Installer.Tests;
 /// is release-shaped by coincidence. A check built on data that happens to look right is how
 /// this shipped.
 /// </summary>
-[Collection(InstallerLanguageCollection.Name)]
 public sealed class StartScreenNamesTheReleaseTests : IDisposable
 {
     // The language is process state now, so a class that asserts English says so. Run

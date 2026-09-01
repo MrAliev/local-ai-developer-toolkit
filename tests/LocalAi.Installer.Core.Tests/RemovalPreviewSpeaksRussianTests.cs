@@ -10,7 +10,6 @@ namespace LocalAi.Installer.Core.Tests;
 ///
 /// Paths stay paths in either language: they are what the file system calls the thing.
 /// </summary>
-[Collection(InstallerLanguageCollection.Name)]
 public sealed class RemovalPreviewSpeaksRussianTests : IDisposable
 {
     private readonly InstallerLanguage original = InstallerCulture.Current;

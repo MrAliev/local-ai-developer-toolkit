@@ -11,7 +11,6 @@ namespace LocalAi.Installer.Tests;
 /// A screen that advertises a question the product deliberately stopped asking is worse than
 /// one that says nothing — the person waits for it, and then wonders what they missed.
 /// </summary>
-[Collection(InstallerLanguageCollection.Name)]
 public sealed class StartScreenTellsTheTruthTests
 {
     // The language is process state now, so a class that asserts English says so. Run

@@ -60,7 +60,7 @@ public partial class MainWindow : Window
     private void OnAgentChoiceChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is not ComboBox { Tag: string agent } comboBox ||
-            comboBox.SelectedItem is not AgentChoice choice)
+            comboBox.SelectedItem is not AgentChoiceOption { Choice: var choice })
         {
             return;
         }

@@ -47,6 +47,22 @@ public sealed record UpdateCheckPolicy(
         "HTTPS, at most once per interval, and verifies the signature before believing the " +
         "version. Nothing about this machine is sent: no identifier, no account, no usage. " +
         "Nothing is ever downloaded or installed without you asking for it.";
+
+    /// <summary>
+    /// The same sentence for a reader who chose Russian. Kept here rather than beside the
+    /// checkbox for the reason the constant exists at all: consent has to be described the same
+    /// way wherever it is asked for, and two texts that must not drift belong in one diff.
+    ///
+    /// The CLI keeps printing the English one. A terminal that answers in English everywhere
+    /// else must not produce one Russian paragraph.
+    /// </summary>
+    public const string DisclosureRussian =
+        "Забирает с GitHub последний манифест релиза и его подпись по " +
+        "анонимному HTTPS, не чаще одного раза за интервал, и проверяет " +
+        "подпись, прежде чем поверить версии. Ничего об этом компьютере " +
+        "не отправляется: ни идентификатора, ни учётной записи, ни данных " +
+        "об использовании. Ничего никогда не скачивается и не устанавливается " +
+        "без вашего запроса.";
 }
 
 public sealed class UpdateCheckPolicyStore

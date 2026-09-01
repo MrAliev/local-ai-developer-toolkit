@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Models;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -118,8 +119,9 @@ public sealed class ModelsPageViewModel : ObservableObject
 
     public ObservableCollection<string> AutomaticSelection { get; } = [];
 
-    public string AutomaticSummary { get; private set; } =
-        "Model sizes have not been checked yet.";
+    public string AutomaticSummary { get; private set; } = InstallerCulture.Pick(
+        "Model sizes have not been checked yet.",
+        "Размеры моделей ещё не проверялись.");
 
     /// <summary>
     /// Applies a computed recommendation.
@@ -140,12 +142,17 @@ public sealed class ModelsPageViewModel : ObservableObject
         AutomaticSelection.Clear();
         if (!recommendation.SizesKnown)
         {
-            AutomaticSummary =
+            AutomaticSummary = InstallerCulture.Pick(
                 "Model sizes could not be retrieved, so nothing was weighed against this " +
-                "computer. Every catalogue model will be offered.";
+                "computer. Every catalogue model will be offered.",
+                "Размеры моделей получить не удалось, поэтому под этот " +
+                "компьютер ничего не взвешивалось. Будут предложены все " +
+                "модели каталога.");
             foreach (var model in CatalogModels)
             {
-                AutomaticSelection.Add($"{model.Tag} — size unknown");
+                AutomaticSelection.Add(string.Format(
+                    InstallerCulture.Pick("{0} — size unknown", "{0} — размер неизвестен"),
+                    model.Tag));
             }
         }
         else
@@ -157,17 +164,26 @@ public sealed class ModelsPageViewModel : ObservableObject
                          .GroupBy(fit => fit.Tag, StringComparer.Ordinal)
                          .Select(group => group.OrderByDescending(fit => fit.ContextTokens).First()))
             {
-                AutomaticSelection.Add(
-                    $"{fit.Tag} — {fit.DownloadSizeBytes / (1024d * 1024 * 1024):N1} GB, " +
-                    $"context {fit.ContextTokens}");
+                AutomaticSelection.Add(string.Format(
+                    InstallerCulture.Pick(
+                        "{0} — {1:N1} GB, context {2}",
+                        "{0} — {1:N1} ГБ, контекст {2}"),
+                    fit.Tag,
+                    fit.DownloadSizeBytes / (1024d * 1024 * 1024),
+                    fit.ContextTokens));
             }
 
             // The rule is now above this list on the same page, so "the previous page" would
             // name a route that no longer exists (#257).
             AutomaticSummary = AutomaticSelection.Count > 0
                 ? string.Empty
-                : "No catalogue model fits the detected video memory. Pick a relaxed rule " +
-                    "above to use this computer anyway, or skip model setup for now.";
+                : InstallerCulture.Pick(
+                    "No catalogue model fits the detected video memory. Pick a relaxed rule " +
+                    "above to use this computer anyway, or skip model setup for now.",
+                    "Ни одна модель каталога не помещается в обнаруженную " +
+                    "видеопамять. Выберите смягчённое правило выше, чтобы всё же " +
+                    "пользоваться этим компьютером, или пока пропустите " +
+                    "настройку моделей.");
         }
 
         RuleSummary = BuildRuleSummary();
@@ -220,7 +236,9 @@ public sealed class ModelsPageViewModel : ObservableObject
         private set => SetProperty(ref ruleSummary, value);
     }
 
-    private string ruleSummary = "Weighing models against this computer.";
+    private string ruleSummary = InstallerCulture.Pick(
+        "Weighing models against this computer.",
+        "Взвешиваю модели под этот компьютер.");
 
     /// <summary>
     /// "Whole model in video memory - 4 of 6 catalogue models fit", or its relaxed form.
@@ -232,11 +250,15 @@ public sealed class ModelsPageViewModel : ObservableObject
     private string BuildRuleSummary()
     {
         var rule = residencyRequiresVideoMemory
-            ? "Whole model in video memory"
-            : "Relaxed video memory rule";
+            ? InstallerCulture.Pick("Whole model in video memory", "Вся модель в видеопамяти")
+            : InstallerCulture.Pick("Relaxed video memory rule", "Смягчённое правило видеопамяти");
         if (!recommendation.SizesKnown)
         {
-            return rule + " - model sizes are unknown, so nothing was weighed";
+            return string.Format(
+                InstallerCulture.Pick(
+                    "{0} — model sizes are unknown, so nothing was weighed",
+                    "{0} — размеры моделей неизвестны, взвешивать нечего"),
+                rule);
         }
 
         var catalogue = CatalogModels.Count;
@@ -244,24 +266,45 @@ public sealed class ModelsPageViewModel : ObservableObject
         {
             return catalogue == 0
                 ? rule
-                : $"{rule} - all {catalogue} catalogue models offered";
+                : string.Format(
+                    InstallerCulture.Pick(
+                        "{0} — all {1} catalogue models offered",
+                        "{0} — предложены все {1} моделей каталога"),
+                    rule,
+                    catalogue);
         }
 
         var fitting = recommendation.Fitting
             .Select(fit => fit.Tag)
             .Distinct(StringComparer.Ordinal)
             .Count();
-        return $"{rule} - {fitting} of {catalogue} catalogue models fit";
+        return string.Format(
+            InstallerCulture.Pick(
+                "{0} — {1} of {2} catalogue models fit",
+                "{0} — подходит {1} из {2} моделей каталога"),
+            rule,
+            fitting,
+            catalogue);
     }
 
     public string ReviewText => Mode switch
     {
-        ModelSelectionMode.Skip => "Models: skipped, nothing will be downloaded",
-        ModelSelectionMode.ChooseExact =>
-            $"Models: {selectedModel?.Tag} with a {selectedContext} token context",
+        ModelSelectionMode.Skip => InstallerCulture.Pick(
+            "Models: skipped, nothing will be downloaded",
+            "Модели: пропущены, ничего не будет скачано"),
+        ModelSelectionMode.ChooseExact => string.Format(
+            InstallerCulture.Pick(
+                "Models: {0} with a {1} token context",
+                "Модели: {0}, контекст {1} токенов"),
+            selectedModel?.Tag,
+            selectedContext),
         _ => AutomaticSelection.Count > 0
-            ? "Models: " + string.Join(", ", AutomaticSelection)
-            : "Models: none fit this computer with the current video memory setting",
+            ? InstallerCulture.Pick("Models: ", "Модели: ") +
+                string.Join(", ", AutomaticSelection)
+            : InstallerCulture.Pick(
+                "Models: none fit this computer with the current video memory setting",
+                "Модели: при текущей настройке видеопамяти ни одна не " +
+                "подходит этому компьютеру"),
     };
 
     private void RebuildContexts()

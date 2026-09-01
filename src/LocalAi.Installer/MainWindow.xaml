@@ -361,14 +361,16 @@
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <StackPanel Margin="0,0,0,14">
-                                        <TextBlock>
-                                            <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" />
-                                            <Run Text=" (" /><Run Text="{Binding DetectionText, Mode=OneWay}" /><Run Text=")" />
-                                        </TextBlock>
-                                        <ComboBox Width="380" Height="24" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                        <!-- One heading, not four Runs: they concatenate in source
+                                             order, which is the one thing a translation cannot keep. -->
+                                        <TextBlock Text="{Binding Heading, Mode=OneWay}"
+                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <ComboBox MinWidth="380" Height="24" HorizontalAlignment="Left" Margin="0,4,0,0"
                                                   Tag="{Binding Agent}"
-                                                  ItemsSource="{Binding DataContext.Agents.Choices, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                  SelectedItem="{Binding Choice, Mode=OneWay}"
+                                                  ItemsSource="{Binding DataContext.Agents.ChoiceOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  DisplayMemberPath="Title"
+                                                  SelectedValuePath="Choice"
+                                                  SelectedValue="{Binding Choice, Mode=OneWay}"
                                                   SelectionChanged="OnAgentChoiceChanged" />
                                     </StackPanel>
                                 </DataTemplate>

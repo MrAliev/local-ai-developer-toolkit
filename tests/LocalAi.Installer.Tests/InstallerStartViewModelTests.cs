@@ -12,7 +12,6 @@ namespace LocalAi.Installer.Tests;
 /// it offers has to depend on what is actually on the machine — and where it cannot help, it
 /// has to say why rather than present a button that fails.
 /// </summary>
-[Collection(InstallerLanguageCollection.Name)]
 public sealed class InstallerStartViewModelTests : IDisposable
 {
     // The language is process state now, so a class that asserts English says so. Run

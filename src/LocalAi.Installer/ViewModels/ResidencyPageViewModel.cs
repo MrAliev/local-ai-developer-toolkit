@@ -1,4 +1,5 @@
 using LocalAi.Contracts;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -106,20 +107,29 @@ public sealed class ResidencyPageViewModel : ObservableObject
 
     public string AdapterHint => HasUsableAdapter
         ? string.Empty
-        : "No adapter with dedicated video memory was found. With the strict setting no " +
+        : InstallerCulture.Pick(
+            "No adapter with dedicated video memory was found. With the strict setting no " +
             "model will load on this machine; pick one of the relaxed options to use it " +
-            "anyway, and expect a large slowdown.";
+            "anyway, and expect a large slowdown.",
+            "Адаптер с выделенной видеопамятью не найден. При строгом правиле " +
+            "на этом компьютере не загрузится ни одна модель; выберите одно из " +
+            "смягчённых правил, чтобы всё же им пользоваться, и ожидайте " +
+            "сильного замедления.");
 
     public bool HasWarning => Policy != ModelResidencyPolicy.RequireFullVram;
 
     public string Warning => Policy switch
     {
-        ModelResidencyPolicy.AllowPartialOffload =>
+        ModelResidencyPolicy.AllowPartialOffload => InstallerCulture.Pick(
             "Part of a model may spill into system memory. Responses will be slower, and " +
             "every answer produced that way is labelled as degraded.",
-        ModelResidencyPolicy.AllowCpu =>
+            "Часть модели может уйти в системную память. Ответы станут " +
+            "медленнее, и каждый полученный так ответ помечается как ухудшенный."),
+        ModelResidencyPolicy.AllowCpu => InstallerCulture.Pick(
             "Models may run entirely on the CPU. Expect a large slowdown, and every answer " +
             "produced that way is labelled as degraded.",
+            "Модели могут работать целиком на процессоре. Ожидайте сильного " +
+            "замедления; каждый полученный так ответ помечается как ухудшенный."),
         _ => string.Empty,
     };
 
@@ -130,13 +140,20 @@ public sealed class ResidencyPageViewModel : ObservableObject
     /// carry. "Model residency: RequireFullVram" put an identifier into the list somebody
     /// reads before consenting — and StoredResidencyNote then printed a second one beside it.
     /// </summary>
-    public string ReviewText => "Video memory: " + Name(Policy);
+    public string ReviewText =>
+        InstallerCulture.Pick("Video memory: ", "Видеопамять: ") + Name(Policy);
 
     public static string Name(ModelResidencyPolicy policy) => policy switch
     {
-        ModelResidencyPolicy.RequireFullVram => "whole model in video memory",
-        ModelResidencyPolicy.AllowPartialOffload => "part of the model in system memory",
-        ModelResidencyPolicy.AllowCpu => "running on the processor",
+        ModelResidencyPolicy.RequireFullVram => InstallerCulture.Pick(
+            "whole model in video memory",
+            "вся модель в видеопамяти"),
+        ModelResidencyPolicy.AllowPartialOffload => InstallerCulture.Pick(
+            "part of the model in system memory",
+            "часть модели в системной памяти"),
+        ModelResidencyPolicy.AllowCpu => InstallerCulture.Pick(
+            "running on the processor",
+            "работа на процессоре"),
         _ => policy.ToString(),
     };
 }

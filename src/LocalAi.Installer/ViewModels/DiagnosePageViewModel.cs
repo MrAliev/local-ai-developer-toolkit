@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using LocalAi.Installer.Core;
 using LocalAi.Installer.Core.Diagnosis;
 
 namespace LocalAi.Installer.ViewModels;
@@ -90,7 +91,7 @@ public sealed class DiagnosePageViewModel : ObservableObject
 
         Checks.Clear();
         Checks.Add(new EnvironmentCheck(
-            "Operating system",
+            InstallerCulture.Pick("Operating system", "Операционная система"),
             diagnosis.OperatingSystem.OperatingSystemSupport == SupportStatus.Supported &&
             diagnosis.OperatingSystem.ArchitectureSupport == SupportStatus.Supported
                 ? CheckStatus.Ok
@@ -99,57 +100,71 @@ public sealed class DiagnosePageViewModel : ObservableObject
 
         Checks.Add(Describe(
             diagnosis.WinGet,
-            "Needed to install Git and Ollama automatically."));
+            InstallerCulture.Pick(
+                "Needed to install Git and Ollama automatically.",
+                "Нужен, чтобы установить Git и Ollama автоматически.")));
         Checks.Add(Describe(
             diagnosis.Git,
-            "Needed to index repositories."));
+            InstallerCulture.Pick(
+                "Needed to index repositories.",
+                "Нужен, чтобы индексировать репозитории.")));
         Checks.Add(Describe(
             diagnosis.GitHubCli,
-            "Optional. Releases are downloaded over plain HTTPS; this is only used as "
-            + "a fallback, or for a repository kept private."));
+            InstallerCulture.Pick(
+                "Optional. Releases are downloaded over plain HTTPS; this is only used as "
+                + "a fallback, or for a repository kept private.",
+                "Необязателен. Релизы скачиваются по обычному HTTPS; он "
+                + "нужен только как запасной путь или для закрытого репозитория.")));
 
         // Reported, never demanded. Signing in changes nothing for a public release, so
         // this line exists to answer "is my gh usable" for the fallback path and for a
         // private fork — not to make anyone feel unprepared for an ordinary install.
         HasGitHubSignIn = diagnosis.GitHubSignIn.State == DependencyState.Detected;
         Checks.Add(new EnvironmentCheck(
-            "GitHub sign-in",
+            InstallerCulture.Pick("GitHub sign-in", "Вход в GitHub"),
             CheckStatus.Ok,
             HasGitHubSignIn
-                ? diagnosis.GitHubSignIn.Version ?? "signed in"
-                : "not signed in — not required, releases are public"));
+                ? diagnosis.GitHubSignIn.Version ??
+                    InstallerCulture.Pick("signed in", "выполнен")
+                : InstallerCulture.Pick(
+                    "not signed in — not required, releases are public",
+                    "вход не выполнен — не требуется, релизы публичные")));
 
         var usableAdapters = diagnosis.Gpu.Adapters
             .Where(adapter => !adapter.IsSoftware)
             .ToArray();
         HasUsableAdapter = usableAdapters.Any(adapter => adapter.DedicatedLocalBytes > 0);
         Checks.Add(new EnvironmentCheck(
-            "Graphics adapters",
+            InstallerCulture.Pick("Graphics adapters", "Видеоадаптеры"),
             HasUsableAdapter ? CheckStatus.Ok : CheckStatus.Warning,
             diagnosis.Gpu.Adapters.Count > 0
                 ? string.Join("; ", diagnosis.Gpu.Adapters.Select(Describe))
-                : diagnosis.Gpu.Reason ?? "No adapter reported."));
+                : diagnosis.Gpu.Reason ??
+                    InstallerCulture.Pick("No adapter reported.", "Адаптеры не обнаружены.")));
 
         Checks.Add(new EnvironmentCheck(
-            "Free disk space",
+            InstallerCulture.Pick("Free disk space", "Свободное место на диске"),
             diagnosis.Disk.AvailableBytes is > 0 and var free && free >= 8L * 1024 * 1024 * 1024
                 ? CheckStatus.Ok
                 : CheckStatus.Warning,
             diagnosis.Disk.AvailableBytes is { } bytes
-                ? $"{bytes / (1024d * 1024 * 1024):N1} GB available"
-                : diagnosis.Disk.Reason ?? "unknown"));
+                ? string.Format(
+                    InstallerCulture.Pick("{0:N1} GB available", "{0:N1} ГБ свободно"),
+                    bytes / (1024d * 1024 * 1024))
+                : diagnosis.Disk.Reason ?? InstallerCulture.Pick("unknown", "неизвестно")));
 
         Checks.Add(new EnvironmentCheck(
-            "Network",
+            InstallerCulture.Pick("Network", "Сеть"),
             diagnosis.Network.State == ObservationState.Available
                 ? CheckStatus.Ok
                 : CheckStatus.Warning,
             diagnosis.Network.State == ObservationState.Available
-                ? "reachable"
-                : diagnosis.Network.Reason ?? "not reachable"));
+                ? InstallerCulture.Pick("reachable", "доступна")
+                : diagnosis.Network.Reason ??
+                    InstallerCulture.Pick("not reachable", "недоступна")));
 
         Checks.Add(new EnvironmentCheck(
-            "Existing LocalAi",
+            InstallerCulture.Pick("Existing LocalAi", "Установленный LocalAi"),
             diagnosis.ExistingLocalAi.State switch
             {
                 ExistingLocalAiState.Absent => CheckStatus.Ok,
@@ -158,11 +173,16 @@ public sealed class DiagnosePageViewModel : ObservableObject
             },
             diagnosis.ExistingLocalAi.State switch
             {
-                ExistingLocalAiState.Absent => "none — this will be a first installation",
-                ExistingLocalAiState.Compatible =>
-                    $"version {diagnosis.ExistingLocalAi.Version} at " +
-                    $"{diagnosis.ExistingLocalAi.VersionPath}",
-                _ => diagnosis.ExistingLocalAi.Reason ?? "present but not recognised",
+                ExistingLocalAiState.Absent => InstallerCulture.Pick(
+                    "none — this will be a first installation",
+                    "нет — это будет первая установка"),
+                ExistingLocalAiState.Compatible => string.Format(
+                    InstallerCulture.Pick("version {0} at {1}", "версия {0} в {1}"),
+                    diagnosis.ExistingLocalAi.Version,
+                    diagnosis.ExistingLocalAi.VersionPath),
+                _ => diagnosis.ExistingLocalAi.Reason ?? InstallerCulture.Pick(
+                    "present but not recognised",
+                    "есть, но не распознан"),
             }));
 
         SetResult(

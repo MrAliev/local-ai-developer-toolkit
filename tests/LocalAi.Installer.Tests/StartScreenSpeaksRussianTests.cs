@@ -11,7 +11,6 @@ namespace LocalAi.Installer.Tests;
 /// and it has to take effect there rather than from the next window — telling the installer
 /// which language you read and having it answer in the other one is the failure being fixed.
 /// </summary>
-[Collection(InstallerLanguageCollection.Name)]
 public sealed class StartScreenSpeaksRussianTests : IDisposable
 {
     private readonly RemovalFixture machine = new();
