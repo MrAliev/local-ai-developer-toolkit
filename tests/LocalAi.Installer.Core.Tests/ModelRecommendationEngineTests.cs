@@ -439,6 +439,39 @@ public sealed class ModelRecommendationEngineTests
     private static GpuSnapshot AvailableGpu(params GpuAdapterSnapshot[] adapters) =>
         new(ObservationState.Available, adapters, null);
 
+    /// <summary>
+    /// Which card the estimate was weighed against, said in the words the machine reports.
+    ///
+    /// The explanation reaches the models page, and it used to carry the adapter's StableId —
+    /// a PCI path — because every fixture here gives an adapter the same string for its name
+    /// and its id, so nothing noticed. This one gives them different strings.
+    /// </summary>
+    [Fact]
+    public void The_chosen_adapter_is_named_rather_than_identified_by_its_path()
+    {
+        var result = Recommend(
+            AvailableGpu(
+                new GpuAdapterSnapshot(
+                    @"PCI\VEN_10DE&DEV_2C02",
+                    "NVIDIA GeForce RTX 4070 Ti",
+                    12_884_901_888,
+                    false),
+                new GpuAdapterSnapshot(
+                    @"PCI\VEN_10DE&DEV_2C05",
+                    "NVIDIA GeForce RTX 5080",
+                    17_501_552_640,
+                    false)),
+            [Model("small", 2048, 1)]);
+
+        // The larger card wins, and it is named.
+        Assert.Equal("NVIDIA GeForce RTX 5080", result.SelectedAdapter!.Name);
+        Assert.Contains(
+            "NVIDIA GeForce RTX 5080 (16.3 GB dedicated)",
+            result.AdapterSelectionExplanation,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(@"PCI\VEN", result.AdapterSelectionExplanation, StringComparison.Ordinal);
+    }
+
     private static GpuAdapterSnapshot Gpu(string id, ulong dedicatedBytes) =>
         new(id, id, dedicatedBytes, false);
 

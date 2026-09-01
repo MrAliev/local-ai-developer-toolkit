@@ -513,7 +513,9 @@ line and a spinner, and what the reader waits for is the release as much as the 
 Two buttons on the review page bring back what was folded — one for the release, one for the
 settings, because they are different questions. What the review says a run will do is what it
 will do: when nothing is selected and no release verified, it says nothing will be applied
-rather than describing work that is not going to happen. Their
+rather than describing work that is not going to happen, and it names each setting in the words
+its page offered rather than in the identifier the code carries — a list somebody reads before
+consenting is not the place for an enum member. Their
 values still appear on the review page — a folded page must never become an unlisted effect —
 and one button there brings all four back for the run where a carried-forward answer is wrong.
 

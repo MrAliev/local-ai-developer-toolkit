@@ -355,7 +355,10 @@ public sealed class InstallerWizardViewModelTests
         Assert.Contains("LocalAi package", review, StringComparison.Ordinal);
         Assert.Contains("Git", review, StringComparison.Ordinal);
         Assert.Contains("skipped", review, StringComparison.Ordinal);
-        Assert.Contains("AllowCpu", review, StringComparison.Ordinal);
+        // The rule in the words the page offered it, not the enum: this list is read by
+        // a person about to consent to it.
+        Assert.Contains("running on the processor", review, StringComparison.Ordinal);
+        Assert.DoesNotContain("AllowCpu", review, StringComparison.Ordinal);
         Assert.Contains("Claude Code", review, StringComparison.Ordinal);
         Assert.Contains("Warning", review, StringComparison.Ordinal);
     }
