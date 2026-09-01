@@ -78,7 +78,12 @@ jobs:
 
           # The escape hatch is deliberately a sentence, not a label: writing why the documents
           # need nothing takes ten seconds and is exactly the thought the rule exists to force.
-          if printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*Docs:[[:space:]]*(none|not needed|n/a)\b'; then
+          # A here-string rather than a pipe: grep -q stops reading at the first match and
+          # closes the pipe, printf then fails to write the rest, and pipefail turns that
+          # into a failed condition. The check therefore rejected a body that matched — and
+          # the longer the body the likelier it was, so it looked intermittent rather than
+          # wrong. A pull request that answered the question in writing was told it had not.
+          if grep -qiE '^[[:space:]]*Docs:[[:space:]]*(none|not needed|n/a)\b' <<<"$PR_BODY"; then
             echo "The pull request states why no documentation change was needed. Rule satisfied."
             exit 0
           fi
