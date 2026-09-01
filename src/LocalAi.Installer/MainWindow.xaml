@@ -395,7 +395,7 @@
                                     Padding="12,4"
                                     Visibility="{Binding AreSettingsFolded, Converter={StaticResource BoolToVisibility}}" />
                         </StackPanel>
-                        <CheckBox Content="I have reviewed these settings"
+                        <CheckBox Content="{Binding ConsentText}"
                                   Margin="0,12,0,0"
                                   IsChecked="{Binding Review.IsConfirmed, Mode=TwoWay}"
                                   Checked="OnReviewConfirmedChanged"

@@ -46,6 +46,7 @@ public sealed class UninstallWizardViewModel : ObservableObject
     private string? blockingNotice;
     private string? unexpectedError;
     private string previewText = string.Empty;
+    private string keepNotice = string.Empty;
     private string summary = string.Empty;
     private string report = string.Empty;
     private int progress;
@@ -223,6 +224,20 @@ public sealed class UninstallWizardViewModel : ObservableObject
 
     public string PreviewText => previewText;
 
+    /// <summary>
+    /// What this run deliberately leaves alone, said before the list rather than inside it.
+    ///
+    /// The reinstall-friendly preset pins the client registrations and the hook dispatchers to
+    /// kept, because the installation that follows rewrites all three and asking twice invites
+    /// two different answers. Read from the confirmed plan rather than from the preset: the
+    /// rows stay tickable after a preset fills them in, so somebody who arrived here by
+    /// choosing a clean reinstall can still tick one, and this sentence must not then be a
+    /// lie. Empty when it does not apply.
+    /// </summary>
+    public string KeepNotice => keepNotice;
+
+    public bool HasKeepNotice => keepNotice.Length > 0;
+
     public string Summary => summary;
 
     public string Report => report;
@@ -263,8 +278,12 @@ public sealed class UninstallWizardViewModel : ObservableObject
         _ => hasRunError
             ? "Some things could not be removed. The report below says which, and why."
             : OffersInstallAfterwards
-                ? "Everything selected was removed. Continue to install to put LocalAi back, " +
-                    "or close: the indexes and settings you kept are waiting either way."
+                // Not "or close: either way". With the hook dispatchers now kept, stopping
+                // here leaves every connected repository failing its hooks until a launcher
+                // is back. Close is still on screen; this line stops calling it equivalent.
+                ? "Everything selected was removed. Continue to install to put LocalAi back: " +
+                    "the indexes and settings you kept are waiting, and the Git hooks in your " +
+                    "repositories will not work again until the launcher is back."
                 : "Everything selected was removed.",
     };
 
@@ -351,9 +370,15 @@ public sealed class UninstallWizardViewModel : ObservableObject
         // The preview is built from the current choices at the moment the person asks to see
         // it, and the plan they then confirm is the object apply is handed — so what the page
         // listed is what runs, not a second planning pass that could differ.
-        confirmedPlan = await planner.PlanAsync(Selection(), cancellationToken);
+        confirmedPlan = await planner.PlanAsync(
+            Selection(),
+            cancellationToken,
+            installationFollows: OffersInstallAfterwards);
         previewText = confirmedPlan.PreviewText;
+        keepNotice = BuildKeepNotice(confirmedPlan.Selection);
         OnPropertyChanged(nameof(PreviewText));
+        OnPropertyChanged(nameof(KeepNotice));
+        OnPropertyChanged(nameof(HasKeepNotice));
         CurrentPage = UninstallPage.Confirm;
         RefreshAll();
         return true;
@@ -470,6 +495,35 @@ public sealed class UninstallWizardViewModel : ObservableObject
     }
 
     /// <summary>The choices as the core understands them.</summary>
+    /// <summary>
+    /// Two sentences for two arrivals. On a reinstall the point is that the gap closes by
+    /// itself. On a hand-picked reinstall-friendly uninstall nothing follows, and pinning the
+    /// rows to kept took away the "your choice" hint that used to say the decision was
+    /// theirs — so that path is told where the decision went instead.
+    /// </summary>
+    private string BuildKeepNotice(RemovalSelection selection)
+    {
+        var keepsClaude = !selection.Includes(RemovalItem.ClaudeIntegration);
+        var keepsCodex = !selection.Includes(RemovalItem.CodexIntegration);
+        var keepsHooks = !selection.Includes(RemovalItem.GitHooks);
+
+        if (OffersInstallAfterwards)
+        {
+            // Silent the moment one of them is ticked: the override was deliberate, and the
+            // preview box below lists what it costs.
+            return keepsClaude && keepsCodex && keepsHooks
+                ? "The Claude and Codex registrations and the Git hook dispatchers are left " +
+                    "exactly as they are — the installation that follows this removal " +
+                    "rewrites all three."
+                : string.Empty;
+        }
+
+        return keepsClaude && keepsCodex
+            ? "The Claude and Codex registrations are left exactly as they are: this preset " +
+                "disconnects no clients. To remove them as well, go back and tick their rows."
+            : string.Empty;
+    }
+
     public RemovalSelection Selection()
     {
         var selection = RemovalSelection.FromPreset(selectedPreset);
@@ -616,7 +670,8 @@ public sealed class UninstallWizardViewModel : ObservableObject
                      nameof(CanRun), nameof(CanCancel), nameof(IsNextVisible),
                      nameof(IsUninstallVisible), nameof(CancelButtonText), nameof(Summary),
                      nameof(Report), nameof(BlockingNotice), nameof(IsBlocked),
-                     nameof(CanContinueToInstall),
+                     nameof(CanContinueToInstall), nameof(KeepNotice),
+                     nameof(HasKeepNotice),
                  })
         {
             OnPropertyChanged(name);

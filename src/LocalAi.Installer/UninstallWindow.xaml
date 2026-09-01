@@ -193,6 +193,12 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
+                        <!-- Above the list, not after it: the box scrolls and is 300 high, so
+                             anything below it sits between the list and the consent tick and
+                             competes with it. A sentence that frames a list goes before it. -->
+                        <TextBlock Text="{Binding KeepNotice}" Style="{StaticResource Muted}"
+                                   TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Visibility="{Binding HasKeepNotice, Converter={StaticResource BoolToVisibility}}" />
                         <TextBox Text="{Binding PreviewText, Mode=OneWay}"
                                  IsReadOnly="True" TextWrapping="NoWrap" Height="300"
                                  FontFamily="Consolas"

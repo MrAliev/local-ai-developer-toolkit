@@ -46,9 +46,16 @@ public sealed class UninstallPlanner
         this.registrySubKey = registrySubKey;
     }
 
+    /// <summary>
+    /// <paramref name="installationFollows"/> is the removal half of a clean reinstall saying
+    /// so. It changes no path this plan touches — only what the plan says about the gap it
+    /// leaves: a launcher removed with an installation behind it is an interval, and one
+    /// removed with nothing behind it is a state.
+    /// </summary>
     public async Task<UninstallPlan> PlanAsync(
         RemovalSelection selection,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool installationFollows = false)
     {
         ArgumentNullException.ThrowIfNull(selection);
         var hooks = await PlanHooksAsync(selection, cancellationToken);
@@ -60,7 +67,7 @@ public sealed class UninstallPlanner
             retained,
             PlanAgentConfigurations(selection),
             hooks,
-            Retained(selection, hooks),
+            Retained(selection, hooks, installationFollows),
             PlansAppsAndFeaturesRemoval(selection));
     }
 
@@ -333,7 +340,8 @@ public sealed class UninstallPlanner
     /// </summary>
     private IReadOnlyList<RetainedNotice> Retained(
         RemovalSelection selection,
-        IReadOnlyList<HookRemovalEntry> hooks)
+        IReadOnlyList<HookRemovalEntry> hooks,
+        bool installationFollows)
     {
         var notices = new List<RetainedNotice>
         {
@@ -382,8 +390,12 @@ public sealed class UninstallPlanner
         {
             notices.Add(new(
                 "Git hook dispatchers",
-                "They stay installed and will call a launcher that is no longer there. Each " +
-                "hook exits non-zero from then on; remove them here or by hand."));
+                installationFollows
+                    ? "They stay installed and keep pointing at the launcher this run " +
+                        "removes. Every hook in a connected repository exits non-zero until " +
+                        "the installation that follows puts it back."
+                    : "They stay installed and will call a launcher that is no longer there. " +
+                        "Each hook exits non-zero from then on; remove them here or by hand."));
         }
 
         var skipped = hooks.Where(hook => hook.IsSkipped).ToArray();
