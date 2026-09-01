@@ -233,6 +233,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
         // beside it. AppContext.BaseDirectory rather than the current directory: a wizard is
         // usually launched from Explorer, whose current directory is not where the file is.
         package.OfferLocalFolder(AppContext.BaseDirectory);
+        visited.Add(CurrentPage);
         RebuildSteps();
     }
 
@@ -290,9 +291,18 @@ public sealed class InstallerWizardViewModel : ObservableObject
             }
 
             currentPage = value;
+            // Added to, never removed from. Going back does not un-visit a page.
+            visited.Add(value);
             RefreshAll();
         }
     }
+
+    /// <summary>
+    /// The pages this run actually reached. Pages rather than an index: a reveal button adds
+    /// steps to the rail, so an index recorded before it was pressed would afterwards name a
+    /// different step.
+    /// </summary>
+    private readonly HashSet<InstallerPage> visited = [];
 
     /// <summary>
     /// The consent, in the words of the run it consents to. One tick over one list: two boxes
@@ -1548,6 +1558,15 @@ public sealed class InstallerWizardViewModel : ObservableObject
         return builder.ToString().Trim();
     }
 
+    /// <summary>
+    /// A step is done when it was actually reached, not when it happens to sit left of where
+    /// the reader is now.
+    ///
+    /// Position is not history. The reveal buttons jump backwards to a folded page, and a
+    /// finish page can be reached without the pages before it having run — so "everything to
+    /// my left happened" marks work that never took place, which is the one thing a step rail
+    /// must not do.
+    /// </summary>
     private void RebuildSteps()
     {
         StepList.Clear();
@@ -1557,7 +1576,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             StepList.Add(new WizardStep(
                 Steps[index].Title,
                 index == current,
-                index < current));
+                index != current && visited.Contains(Steps[index].Page)));
         }
     }
 
