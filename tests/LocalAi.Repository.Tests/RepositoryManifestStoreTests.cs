@@ -13,7 +13,7 @@ public sealed class RepositoryManifestStoreTests : IDisposable
     [Fact]
     public void Save_is_atomic_and_round_trips_checksum()
     {
-        var store = new RepositoryManifestStore(_root);
+        var store = new RepositoryManifestStore(FsPath.From(_root));
         var manifest = Manifest();
 
         store.Save(manifest);
@@ -34,7 +34,7 @@ public sealed class RepositoryManifestStoreTests : IDisposable
     [Fact]
     public void Tampered_manifest_is_rejected()
     {
-        var store = new RepositoryManifestStore(_root);
+        var store = new RepositoryManifestStore(FsPath.From(_root));
         store.Save(Manifest());
         var path = Path.Combine(_root, "manifest.json");
         File.WriteAllText(
@@ -62,7 +62,7 @@ public sealed class RepositoryManifestStoreTests : IDisposable
 
     private void AssertMalformedChecksum(string checksum)
     {
-        var store = new RepositoryManifestStore(_root);
+        var store = new RepositoryManifestStore(FsPath.From(_root));
         store.Save(Manifest());
         var path = Path.Combine(_root, "manifest.json");
         File.WriteAllText(

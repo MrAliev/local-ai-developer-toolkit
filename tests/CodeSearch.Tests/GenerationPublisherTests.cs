@@ -1,4 +1,5 @@
 using CodeSearch.Core.Indexing;
+using LocalAi.Contracts;
 
 namespace CodeSearch.Tests;
 
@@ -14,7 +15,7 @@ public sealed class GenerationPublisherTests : IDisposable
         Directory.CreateDirectory(_root);
         var source = Path.Combine(_root, "source.cidx");
         File.WriteAllText(source, "INDEX");
-        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var store = new GenerationStore(FsPath.From(Path.Combine(_root, "repo")));
         var publisher = new GenerationPublisher(store);
         var identity = GenerationStoreTests.Identity();
 
@@ -40,7 +41,7 @@ public sealed class GenerationPublisherTests : IDisposable
         var semantic = Path.Combine(_root, "source.sidx");
         File.WriteAllText(source, "INDEX");
         File.WriteAllText(semantic, "SEMANTIC");
-        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var store = new GenerationStore(FsPath.From(Path.Combine(_root, "repo")));
         var publisher = new GenerationPublisher(store);
         var identity = GenerationStoreTests.Identity() with
         {

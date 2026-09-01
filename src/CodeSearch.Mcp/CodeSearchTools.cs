@@ -597,7 +597,7 @@ public static class CodeSearchTools
         {
             var identity = RuntimeIndexLayout.Inspect(workingRoot, runtimeRoot);
             return new RepositoryIndexProgressStore(
-                identity.RepositoryRuntimeRoot.Value).Read();
+                identity.RepositoryRuntimeRoot).Read();
         }
         catch (Exception exception) when (
             exception is IOException or

@@ -124,7 +124,7 @@ public static class PruneCommand
     {
         try
         {
-            var manifest = new RepositoryManifestStore(repositoryRuntimeRoot).Read();
+            var manifest = new RepositoryManifestStore(FsPath.From(repositoryRuntimeRoot)).Read();
             if (manifest is null)
             {
                 return null;
@@ -234,7 +234,7 @@ public static class PruneCommand
         RepositoryManifest? manifest;
         try
         {
-            manifest = new RepositoryManifestStore(repositoryRuntimeRoot).Read();
+            manifest = new RepositoryManifestStore(FsPath.From(repositoryRuntimeRoot)).Read();
         }
         catch (Exception exception) when (
             exception is JsonException or IOException or UnauthorizedAccessException or

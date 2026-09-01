@@ -337,7 +337,7 @@ public static class DoctorCommand
             var identity = CodeSearch.Core.Indexing.RuntimeIndexLayout.Inspect(
                 repositoryRoot!,
                 runtimeRoot);
-            var manifest = new RepositoryManifestStore(identity.RepositoryRuntimeRoot.Value).Read();
+            var manifest = new RepositoryManifestStore(identity.RepositoryRuntimeRoot).Read();
             if (manifest is null)
             {
                 return new DoctorCheck(

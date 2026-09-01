@@ -151,7 +151,7 @@ public sealed class SearchSnapshotDriftTests : IDisposable
         try
         {
             index.Save(sourceIndex);
-            var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
+            var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
             store.SetCurrent(store.PublishIndex(sourceIndex, generation));
         }
         finally

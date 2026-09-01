@@ -400,7 +400,7 @@ public sealed class PruneCommandTests : IDisposable
             System.Text.Json.JsonSerializer.Serialize(
                 new GenerationPointer(Generation, identity.HeadTree, Now),
                 LocalAiJson.Strict));
-        new RepositoryManifestStore(root).Save(new RepositoryManifest(
+        new RepositoryManifestStore(FsPath.From(root)).Save(new RepositoryManifest(
             Path.GetFileName(root),
             identity.RepositoryRoot.Value,
             "refs/heads/main",
@@ -490,7 +490,7 @@ public sealed class PruneCommandTests : IDisposable
     {
         var directory = Path.Combine(Runtime, "repositories", name.PadRight(16, '0'));
         Directory.CreateDirectory(directory);
-        new RepositoryManifestStore(directory).Save(new RepositoryManifest(
+        new RepositoryManifestStore(FsPath.From(directory)).Save(new RepositoryManifest(
             name.PadRight(16, '0'),
             commonDirectory,
             "refs/heads/main",

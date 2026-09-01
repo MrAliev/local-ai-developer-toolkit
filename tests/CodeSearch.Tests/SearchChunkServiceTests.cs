@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using LocalAi.Contracts;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using CodeSearch.Core.Chunking;
@@ -130,7 +131,7 @@ public sealed class SearchChunkServiceTests : IDisposable
     [Fact]
     public async Task Refuses_an_indexed_range_that_no_longer_exists()
     {
-        var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
+        var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
         CreateIndex(_identity, _generation, "Example.cs", 2, 99)
             .Save(store.IndexPath(_generation.Id));
 
@@ -195,7 +196,7 @@ public sealed class SearchChunkServiceTests : IDisposable
     [Fact]
     public async Task Refuses_an_indexed_path_outside_the_repository()
     {
-        var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
+        var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
         CreateIndex(
                 _identity,
                 _generation,
@@ -216,7 +217,7 @@ public sealed class SearchChunkServiceTests : IDisposable
     [Fact]
     public async Task Refuses_a_missing_indexed_source_with_an_explicit_diagnostic()
     {
-        var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
+        var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
         CreateIndex(_identity, _generation, "Missing.cs", 1, 1)
             .Save(store.IndexPath(_generation.Id));
 
@@ -426,7 +427,7 @@ public sealed class SearchChunkServiceTests : IDisposable
         {
             CreateIndex(identity, generation, relPath, startLine, endLine)
                 .Save(sourceIndex);
-            var store = new GenerationStore(identity.RepositoryRuntimeRoot.Value);
+            var store = new GenerationStore(identity.RepositoryRuntimeRoot);
             var manifest = store.PublishIndex(sourceIndex, generation);
             store.SetCurrent(manifest);
         }

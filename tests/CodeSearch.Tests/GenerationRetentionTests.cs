@@ -15,7 +15,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void The_current_generation_survives_however_low_the_bound_goes()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         var oldest = Publish(store, "a", Now - TimeSpan.FromDays(10));
         Publish(store, "b", Now - TimeSpan.FromDays(5));
         Publish(store, "c", Now - TimeSpan.FromDays(1));
@@ -36,7 +36,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void Newest_generations_fill_the_remaining_places()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         var oldest = Publish(store, "a", Now - TimeSpan.FromDays(10));
         var middle = Publish(store, "b", Now - TimeSpan.FromDays(5));
         var newest = Publish(store, "c", Now - TimeSpan.FromDays(1));
@@ -54,7 +54,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void Overlays_leave_with_the_generation_they_are_keyed_to()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         var kept = Publish(store, "a", Now - TimeSpan.FromDays(1));
         var dropped = Publish(store, "b", Now - TimeSpan.FromDays(9));
         store.SetCurrent(store.ReadManifest(kept));
@@ -84,7 +84,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void Overlays_for_commits_nobody_is_on_are_removed()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
         store.SetCurrent(store.ReadManifest(current));
         Overlay(current, "live-worktree", "current-tree");
@@ -114,7 +114,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void Nothing_under_a_kept_generation_goes_when_reachability_is_unknown()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
         store.SetCurrent(store.ReadManifest(current));
         Overlay(current, "some-worktree", "some-tree");
@@ -136,7 +136,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void A_generation_published_moments_ago_is_not_swept()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         var current = Publish(store, "a", Now - TimeSpan.FromDays(30));
         var justBuilt = Publish(store, "b", Now - TimeSpan.FromMinutes(5));
         store.SetCurrent(store.ReadManifest(current));
@@ -158,7 +158,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void A_generation_older_than_the_grace_still_goes()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
         var old = Publish(store, "b", Now - TimeSpan.FromDays(30));
         store.SetCurrent(store.ReadManifest(current));
@@ -174,7 +174,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void An_unreadable_pointer_stops_the_pass_instead_of_guessing()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         Publish(store, "a", Now - TimeSpan.FromDays(10));
         Publish(store, "b", Now - TimeSpan.FromDays(1));
         File.WriteAllText(Path.Combine(Repository, "current.json"), "{not json");
@@ -191,7 +191,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void Staging_leftovers_go_only_once_no_build_could_still_hold_them()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         store.SetCurrent(store.ReadManifest(Publish(store, "a", Now)));
         var staging = Path.Combine(Repository, "staging");
         Directory.CreateDirectory(staging);
@@ -211,7 +211,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void Quarantined_progress_files_expire_with_the_rest_of_the_history()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         store.SetCurrent(store.ReadManifest(Publish(store, "a", Now)));
         var quarantined = Path.Combine(Repository, "progress.json.corrupt-20260807-095045");
         File.WriteAllText(quarantined, "{corrupt");
@@ -226,7 +226,7 @@ public sealed class GenerationRetentionTests : IDisposable
     [Fact]
     public void A_dry_run_reports_the_same_decisions_without_making_them()
     {
-        var store = new GenerationStore(Repository);
+        var store = new GenerationStore(FsPath.From(Repository));
         var kept = Publish(store, "a", Now - TimeSpan.FromDays(1));
         var dropped = Publish(store, "b", Now - TimeSpan.FromDays(9));
         store.SetCurrent(store.ReadManifest(kept));

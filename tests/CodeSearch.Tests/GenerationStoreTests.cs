@@ -1,5 +1,6 @@
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Semantics;
+using LocalAi.Contracts;
 
 namespace CodeSearch.Tests;
 
@@ -50,7 +51,7 @@ public sealed class GenerationStoreTests : IDisposable
     {
         var path = Path.Combine(_root, "not-configured");
 
-        var current = new GenerationStore(path).ReadCurrent();
+        var current = new GenerationStore(FsPath.From(path)).ReadCurrent();
 
         Assert.Null(current);
         Assert.False(Directory.Exists(path));
@@ -62,7 +63,7 @@ public sealed class GenerationStoreTests : IDisposable
         Directory.CreateDirectory(_root);
         var source = Path.Combine(_root, "source.cidx");
         File.WriteAllText(source, "INDEX");
-        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var store = new GenerationStore(FsPath.From(Path.Combine(_root, "repo")));
         var manifest = store.PublishIndex(source, Identity());
 
         Assert.Equal(manifest, store.ReadManifest(manifest.Identity.Id));
@@ -79,7 +80,7 @@ public sealed class GenerationStoreTests : IDisposable
         var semantic = Path.Combine(_root, "source.sidx");
         File.WriteAllText(source, "INDEX");
         File.WriteAllText(semantic, "SEMANTIC");
-        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var store = new GenerationStore(FsPath.From(Path.Combine(_root, "repo")));
 
         var manifest = store.PublishIndex(
             source,
@@ -113,7 +114,7 @@ public sealed class GenerationStoreTests : IDisposable
         var semantic = Path.Combine(_root, "source.sidx");
         File.WriteAllText(source, "INDEX");
         File.WriteAllText(semantic, "SEMANTIC");
-        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var store = new GenerationStore(FsPath.From(Path.Combine(_root, "repo")));
         var identity = Identity();
         store.PublishIndex(source, identity);
 

@@ -8,12 +8,9 @@ public sealed class RepositoryIndexProgressStore
 {
     private readonly string _path;
 
-    public RepositoryIndexProgressStore(string repositoryRuntimeRoot)
+    public RepositoryIndexProgressStore(FsPath repositoryRuntimeRoot)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRuntimeRoot);
-        _path = Path.Combine(
-            Path.GetFullPath(repositoryRuntimeRoot),
-            "progress.json");
+        _path = repositoryRuntimeRoot.Combine("progress.json").Value;
     }
 
     public void Save(RepositoryIndexProgress progress)

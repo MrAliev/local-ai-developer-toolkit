@@ -334,7 +334,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
     [Fact]
     public void Status_reports_durable_sync_progress_remaining_chunks_and_eta()
     {
-        new RepositoryIndexProgressStore(_identity.RepositoryRuntimeRoot.Value).Save(
+        new RepositoryIndexProgressStore(_identity.RepositoryRuntimeRoot).Save(
             new RepositoryIndexProgress(
                 _identity.RepositoryId,
                 RepositoryIndexProgressPhase.EmbeddingBase,
@@ -487,7 +487,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
     private void DriftMainlinePastTheIndexedCommit()
     {
         Git("commit", "--allow-empty", "-m", "Moves the mainline past the indexed commit");
-        new RepositoryManifestStore(_identity.RepositoryRuntimeRoot.Value).Save(
+        new RepositoryManifestStore(_identity.RepositoryRuntimeRoot).Save(
             new RepositoryManifest(
                 _identity.RepositoryId,
                 Path.Combine(_root, ".git"),
@@ -507,7 +507,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
         RepositoryIndexProgressPhase phase,
         int processedChunks,
         int totalChunks) =>
-        new RepositoryIndexProgressStore(_identity.RepositoryRuntimeRoot.Value).Save(
+        new RepositoryIndexProgressStore(_identity.RepositoryRuntimeRoot).Save(
             new RepositoryIndexProgress(
                 _identity.RepositoryId,
                 phase,
@@ -547,7 +547,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
         try
         {
             CreateIndex().Save(sourceIndex);
-            var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
+            var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
             var manifest = store.PublishIndex(sourceIndex, _generation);
             store.SetCurrent(manifest);
         }
@@ -586,7 +586,7 @@ public sealed class UntrustedContentMcpTests : IDisposable
                 Occurrences = [],
                 Relationships = [],
             }.Save(sourceSemanticIndex);
-            var store = new GenerationStore(_identity.RepositoryRuntimeRoot.Value);
+            var store = new GenerationStore(_identity.RepositoryRuntimeRoot);
             var manifest = store.PublishIndex(sourceIndex, generation, sourceSemanticIndex);
             store.SetCurrent(manifest);
         }

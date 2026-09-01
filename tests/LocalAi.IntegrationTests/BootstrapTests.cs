@@ -71,7 +71,7 @@ public sealed class BootstrapTests : IDisposable
         var runtime = Path.Combine(_root, "runtime");
         var status = RepoCommand.Status(common, runtime);
         var repositoryRoot = Path.Combine(runtime, "repositories", status.Identity.Id);
-        new RepositoryManifestStore(repositoryRoot).Save(new RepositoryManifest(
+        new RepositoryManifestStore(FsPath.From(repositoryRoot)).Save(new RepositoryManifest(
             status.Identity.Id,
             status.Identity.CommonDirectory,
             "refs/heads/dev",

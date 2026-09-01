@@ -7,15 +7,19 @@ namespace CodeSearch.Core.Indexing;
 
 public sealed class GenerationStore
 {
-    private readonly string _root;
     private readonly string _generationsRoot;
     private readonly string _currentPath;
 
-    public GenerationStore(string repositoryRuntimeRoot)
+    /// <summary>
+    /// Takes an <see cref="FsPath"/> so the caller cannot hand over a path it has not
+    /// canonicalised. This used to normalise for itself, one of nine places that each spelled
+    /// out the same rule — and the directory named here is where a repository's generations
+    /// and overlays live, so being wrong about it loses an index rather than a lookup.
+    /// </summary>
+    public GenerationStore(FsPath repositoryRuntimeRoot)
     {
-        _root = Path.GetFullPath(repositoryRuntimeRoot);
-        _generationsRoot = Path.Combine(_root, "generations");
-        _currentPath = Path.Combine(_root, "current.json");
+        _generationsRoot = repositoryRuntimeRoot.Combine("generations").Value;
+        _currentPath = repositoryRuntimeRoot.Combine("current.json").Value;
     }
 
     public GenerationManifest PublishIndex(

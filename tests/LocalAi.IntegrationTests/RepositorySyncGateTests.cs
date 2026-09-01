@@ -2,6 +2,7 @@ using System.Diagnostics;
 using CodeSearch.Core.Indexing;
 using LocalAi.Cli;
 using LocalAi.Contracts.Indexing;
+using LocalAi.Contracts;
 
 namespace LocalAi.IntegrationTests;
 
@@ -96,7 +97,7 @@ public sealed class RepositorySyncGateTests : IDisposable
     [Fact]
     public void Publishing_refuses_when_the_pointer_moved_since_planning()
     {
-        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var store = new GenerationStore(FsPath.From(Path.Combine(_root, "repo")));
         var first = Publish(store, "aaa");
         var second = Publish(store, "bbb");
         store.SetCurrent(store.ReadManifest(first));
@@ -114,7 +115,7 @@ public sealed class RepositorySyncGateTests : IDisposable
     [Fact]
     public void Publishing_with_the_observed_pointer_succeeds()
     {
-        var store = new GenerationStore(Path.Combine(_root, "repo"));
+        var store = new GenerationStore(FsPath.From(Path.Combine(_root, "repo")));
         var first = Publish(store, "aaa");
         store.SetCurrent(store.ReadManifest(first), expectedCurrent: null);
         Assert.Equal(first, store.ReadCurrent()!.GenerationId);
