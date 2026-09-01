@@ -14,7 +14,7 @@ public sealed class SemanticIndexingPolicyStoreTests : IDisposable
         var store = new SemanticIndexingPolicyStore(_root);
 
         Assert.Equal(SemanticIndexingPolicy.Default, store.Read());
-        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(new SemanticIndexingPolicyStore(_root).Path)!);
         File.WriteAllText(store.Path, "{not-json");
         Assert.Equal(SemanticIndexingPolicy.Default, store.Read());
     }

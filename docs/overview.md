@@ -535,7 +535,22 @@ too — a run that removes before it installs says so, rather than asking somebo
 they have reviewed "these settings". It is the one place a version is a question; everywhere else the
 wizard states it. An installation registers itself in Apps & features, whose entry runs a copy of the
 installer parked inside the runtime root — so removal is still reachable long after the
-downloaded file is gone. Removal is a matrix rather than one hammer: three presets over rows
+downloaded file is gone. Settings live in a directory of their own — `settings` under the runtime root — rather than
+loose beside the queue and the indexes. They used to be told apart from everything else by a
+list of file names kept in the removal matrix, and the list fell behind: `semantic-navigation.json`
+is a real setting the matrix classified as an unrecognised runtime file, so the reinstall that
+promised to keep settings deleted it. A directory cannot fall behind, because adding a setting
+and having the matrix know about it become the same act. Reading falls back to the old loose
+path for installations that predate the split; writing never does, so the fallback empties
+itself rather than becoming a second source of truth.
+
+What the person chooses for themselves rather than for a machine lives outside the runtime root
+altogether, in `%APPDATA%\LocalAi`, which roams with the profile and survives an uninstall.
+The split is about what a setting is attached to: a residency policy is a statement about this
+computer's graphics card and indexing limits are about its memory, so carrying either to
+another machine would be carrying a wrong answer.
+
+Removal is a matrix rather than one hammer: three presets over rows
 that change one at a time, every removal listed before anything happens, the broker asked to
 finish before the root is touched, and the release signing key kept unless separately
 confirmed. It says where it has got to while it works — asking the broker to stop, rewriting

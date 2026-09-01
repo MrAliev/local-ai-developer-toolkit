@@ -13,7 +13,7 @@ public sealed class LogTriagePolicyTests
             var store = new LogTriagePolicyStore(runtimeRoot);
 
             Assert.Equal(LogTriagePolicy.Default, store.Read());
-            Directory.CreateDirectory(runtimeRoot);
+            Directory.CreateDirectory(Path.GetDirectoryName(store.Path)!);
             File.WriteAllText(store.Path, "{ not json");
             Assert.Equal(LogTriagePolicy.Default, store.Read());
             File.WriteAllText(store.Path, "{\"schemaVersion\": 99}");
@@ -46,8 +46,10 @@ public sealed class LogTriagePolicyTests
             store.Write(requested);
 
             Assert.Equal(requested.Normalized(), store.Read());
+            // Written into the settings directory, and read back from there: the loose path
+            // in the runtime root is only a fallback for installations that predate it.
             Assert.Equal(
-                Path.Combine(runtimeRoot, LogTriagePolicy.FileName),
+                Path.Combine(runtimeRoot, "settings", LogTriagePolicy.FileName),
                 store.Path);
             Assert.Contains(
                 "\"maximumContextTokens\"",
