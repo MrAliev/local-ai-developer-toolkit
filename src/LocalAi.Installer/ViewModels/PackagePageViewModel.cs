@@ -33,7 +33,10 @@ public sealed class PackagePageViewModel : ObservableObject
         set
         {
             SetProperty(ref releaseVersion, value);
-            // Editing the tag invalidates whatever was resolved for the previous one.
+            // Editing the tag invalidates whatever was resolved for the previous one, and
+            // abandons any resolve still running for it — otherwise the rail keeps saying a
+            // check is in flight for a question nobody is asking any more.
+            IsResolving = false;
             Resolved = null;
             ResolvedTag = null;
             OnPropertyChanged(nameof(ResolvedTag));
@@ -58,7 +61,9 @@ public sealed class PackagePageViewModel : ObservableObject
         set
         {
             SetProperty(ref sourceFolder, value ?? string.Empty);
-            // Changing where a release comes from invalidates whatever the last one resolved to.
+            // Changing where a release comes from invalidates whatever the last one resolved
+            // to, and abandons any resolve still running for the old source.
+            IsResolving = false;
             Resolved = null;
             ResolvedTag = null;
             OnPropertyChanged(nameof(ResolvedTag));

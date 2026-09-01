@@ -163,6 +163,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     private bool hasReadInstalledVersion;
 
+
     private readonly Func<string?> readInstalledVersion;
     private readonly AgentIntegrationPageViewModel agents = new();
     private readonly ReviewApplyPageViewModel review = new();
@@ -171,6 +172,15 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private readonly IProcessRunner processRunner;
 
     private readonly AnonymousReleaseFeed anonymousFeed = new();
+
+    /// <summary>
+    /// Supplied instead of the real feed by tests. The behaviours that hang off this — that a
+    /// verified release survives a re-check which fails, that a resolve runs behind the first
+    /// page without anybody pressing a button, and that a resolve overtaken by a newer
+    /// question does not answer it — cannot be observed without one, and the first of those
+    /// shipped broken because there was nothing to observe it with.
+    /// </summary>
+    private readonly IReleaseFeed? feedForTests;
     private CancellationTokenSource? runCancellation;
     private InstallerPage currentPage = InstallerPage.Diagnose;
     private bool isRunning;
@@ -198,8 +208,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     public InstallerWizardViewModel(
         StartChoice mode = StartChoice.Install,
-        Func<string?>? readInstalledVersion = null)
+        Func<string?>? readInstalledVersion = null,
+        IReleaseFeed? releaseFeed = null)
     {
+        feedForTests = releaseFeed;
         this.readInstalledVersion = readInstalledVersion ?? (() => InstalledVersionReader
             .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
             .DisplayName);
@@ -1805,13 +1817,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// something other than what the operator pointed at.
     /// </remarks>
     private IReleaseFeed CreateFeed() =>
-        string.IsNullOrWhiteSpace(package.SourceFolder)
+        feedForTests
+        ?? (string.IsNullOrWhiteSpace(package.SourceFolder)
             ? new FallbackReleaseFeed(
                 anonymousFeed,
                 GitHubCliPath is null
                     ? null
                     : new GitHubReleaseFeed(processRunner, gitHubCliPath: GitHubCliPath))
-            : new DirectoryReleaseFeed(package.SourceFolder);
+            : new DirectoryReleaseFeed(package.SourceFolder));
 
     private static DependencyDefinition? ResolveDependencyDefinition(string dependencyId) =>
         dependencyId switch
@@ -1846,6 +1859,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     public async Task ResolvePackageAsync(CancellationToken cancellationToken = default)
     {
+        // The question this resolve is answering, captured whole. The package page is
+        // visible on an installation and its tag box updates on every keystroke, so the
+        // question can change while a resolve is in flight — by another resolve starting, or
+        // simply by the tag or the folder being edited. Comparing the question itself covers
+        // both; a counter only covered the first.
+        var asked = (package.ReleaseVersion, package.SourceFolder);
         package.BeginResolving();
         RefreshAll();
         try
@@ -1854,16 +1873,27 @@ public sealed class InstallerWizardViewModel : ObservableObject
             package.InstalledVersionDirectory = InstalledVersionDirectory();
             // "latest" is not a tag GitHub knows; resolve it to the newest published one so
             // the field can keep its convenient default.
-            resolvedTag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
-            package.SelectResolvedRelease(
-                await feed.ResolveAsync(resolvedTag, WorkingDirectory, cancellationToken),
-                resolvedTag);
+            var tag = await feed.ResolveTagAsync(package.ReleaseVersion, cancellationToken);
+            var release = await feed.ResolveAsync(tag, WorkingDirectory, cancellationToken);
+            if (asked != (package.ReleaseVersion, package.SourceFolder))
+            {
+                // The question changed while this was in flight — the person typed a
+                // different tag, or chose a folder. Answering the old one here would put a
+                // release on screen that nobody asked for and install it.
+                return;
+            }
+
+            resolvedTag = tag;
+            package.SelectResolvedRelease(release, tag);
         }
         catch (ReleaseResolutionException exception)
+            when (asked == (package.ReleaseVersion, package.SourceFolder))
         {
             package.ReportUnavailable(exception.Message);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception)
+            when (exception is not OperationCanceledException
+                && asked == (package.ReleaseVersion, package.SourceFolder))
         {
             package.ReportUnavailable($"The release could not be checked: {exception.Message}");
         }
@@ -1900,7 +1930,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// says "latest", is the one outcome that word rules out. A specific tag is left alone: it
     /// was asked for by name.
     /// </summary>
-    private async Task RefreshLatestBeforeInstallAsync(
+    /// <summary>
+    /// Internal rather than private so a test can drive it: reaching it through RunAsync means
+    /// enabling the real dependency installation, and the behaviour it holds — that a verified
+    /// release survives a re-check the feed refuses — shipped broken for want of a test.
+    /// </summary>
+    internal async Task RefreshLatestBeforeInstallAsync(
         StringBuilder report,
         CancellationToken cancellationToken)
     {
@@ -1909,8 +1944,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return;
         }
 
-        package.BeginResolving();
-
+        // Deliberately not BeginResolving(): that clears the verified release, and this
+        // method's whole contract is that a feed which cannot be reached right now is a
+        // reason to install what was already checked rather than to abandon the run. Nobody
+        // is looking at the package page during a run, so there is nothing here to say
+        // "checking…" to — and the rail is better off naming the version being installed.
         try
         {
             var feed = CreateFeed();

@@ -1,3 +1,6 @@
+using System.Text;
+using LocalAi.Contracts;
+using LocalAi.Installer.Core.Releases;
 using LocalAi.Installer.ViewModels;
 
 namespace LocalAi.Installer.Tests;
@@ -167,6 +170,187 @@ public sealed class WizardErrandTests
         Assert.StartsWith("0.1.50 →", wizard.VersionContext, StringComparison.Ordinal);
         Assert.Equal(before, wizard.VersionContext);
     }
+
+    /// <summary>
+    /// A verified release survives a re-check that fails, and the installation goes ahead.
+    ///
+    /// The run re-asks the feed immediately before installing, in case something was published
+    /// while the wizard sat open. An attempt to show "checking…" on the rail during that
+    /// re-check cleared the verified release first — so a transient network fault turned a
+    /// successful install into "no verified release was selected, so nothing was installed",
+    /// advice the reader had already followed.
+    ///
+    /// The first version of this test asserted against the page directly and never ran the
+    /// re-check at all, so restoring the defect left it green. It goes through the run now.
+    /// </summary>
+    [Fact]
+    public async Task A_re_check_that_fails_still_installs_what_was_verified()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.51") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+        await wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("0.1.51", wizard.Package.ResolvedTag);
+
+        // From here the feed is unreachable, exactly as a dropped connection would leave it.
+        feed.Throw = true;
+        var report = new StringBuilder();
+        await wizard.RefreshLatestBeforeInstallAsync(
+            report,
+            TestContext.Current.CancellationToken);
+
+        // What the install step reads two lines later must still be there.
+        Assert.NotNull(wizard.Package.Resolved);
+        Assert.Equal("0.1.51", wizard.Package.ResolvedTag);
+        Assert.False(wizard.Package.IsResolving);
+        Assert.Contains("continuing with 0.1.51", report.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The release is resolved behind the first page, without anybody pressing "Check
+    /// release" — which is what lets the rail name it at all on an installation.
+    /// </summary>
+    [Fact]
+    public async Task Initialising_resolves_the_release_on_the_install_path()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.51") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+
+        await wizard.InitializeAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, feed.Resolves);
+        Assert.Equal("0.1.51", wizard.VersionContext);
+    }
+
+    /// <summary>
+    /// A resolve overtaken by a newer question must not answer it. The package page is on
+    /// screen during an installation and its tag box updates on every keystroke, so two
+    /// resolves can be in flight; the slower one arriving last would otherwise put a release
+    /// nobody asked for on screen, and install it.
+    /// </summary>
+    [Fact]
+    public async Task A_resolve_that_was_overtaken_does_not_answer()
+    {
+        var feed = new ScriptedFeed { Release = Release("0.1.44") };
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+
+        // The first resolve is held mid-flight while the question changes under it.
+        feed.Gate = new TaskCompletionSource();
+        var first = wizard.ResolvePackageAsync(TestContext.Current.CancellationToken);
+        wizard.Package.ReleaseVersion = "0.1.51";
+        feed.Gate.SetResult();
+        await first;
+
+        Assert.Null(wizard.Package.Resolved);
+        Assert.Equal("0.1.51", wizard.Package.ReleaseVersion);
+        Assert.Equal("no release", wizard.VersionContext);
+    }
+
+    private static string TempLog() => Path.Combine(
+        Path.GetTempPath(),
+        "LocalAi.VersionLine",
+        Guid.NewGuid().ToString("N"));
+
+    /// <summary>A wizard standing on the review page, with everything it needs already met.</summary>
+    private static async Task<InstallerWizardViewModel> Ready(IReleaseFeed feed)
+    {
+        var wizard = new InstallerWizardViewModel(StartChoice.Install, () => null, feed)
+        {
+            LogDirectory = TempLog(),
+        };
+        wizard.Diagnose.IsChecking = false;
+        wizard.Diagnose.SetResult(true);
+        foreach (var name in new[]
+                 {
+                     "Git", "Ollama", "GitHubCli", "DotNetSdk",
+                     "NodeJs", "ScipTypeScript", "Python", "ScipPython",
+                 })
+        {
+            wizard.Dependencies.SetInstalled(name, true);
+        }
+
+        for (var step = 0; step < 6; step++)
+        {
+            wizard.MoveNext();
+        }
+
+        Assert.Equal(InstallerPage.Confirm, wizard.CurrentPage);
+        await Task.CompletedTask;
+        return wizard;
+    }
+
+    /// <summary>A feed that answers what the test tells it to, and can be held or broken.</summary>
+    private sealed class ScriptedFeed : IReleaseFeed
+    {
+        public ResolvedRelease? Release { get; set; }
+
+        public bool Throw { get; set; }
+
+        public TaskCompletionSource? Gate { get; set; }
+
+        public int Resolves { get; private set; }
+
+        public async Task<string> ResolveTagAsync(string requestedTag, CancellationToken ct)
+        {
+            if (Gate is { } gate)
+            {
+                await gate.Task;
+            }
+
+            return Throw
+                ? throw new ReleaseResolutionException("the feed could not be reached")
+                : Release?.Manifest.ReleaseVersion ?? "0.0.0";
+        }
+
+        public async Task<ResolvedRelease> ResolveAsync(
+            string tag,
+            string workingDirectory,
+            CancellationToken ct)
+        {
+            Resolves++;
+            await Task.CompletedTask;
+            return Throw
+                ? throw new ReleaseResolutionException("the feed could not be reached")
+                : Release ?? throw new ReleaseResolutionException("no release");
+        }
+
+        /// <summary>
+        /// Never reached by these tests: the run stops before downloading, because nothing
+        /// here supplies a package to verify.
+        /// </summary>
+        public Task<string> DownloadPackageAsync(
+            string tag,
+            string workingDirectory,
+            IProgress<long>? bytesDownloaded,
+            CancellationToken ct) =>
+            throw new NotSupportedException("these tests never reach the download");
+    }
+
+    /// <summary>Built the way PackagePageViewModelTests builds one, so the shapes agree.</summary>
+    private static ResolvedRelease Release(string version) =>
+        new(
+            new ReleaseManifest(
+                schemaVersion: 1,
+                releaseVersion: version,
+                versionDirectory: "0123456789ab",
+                modelCatalogVersion: "1",
+                protocolVersion: 1,
+                buildCompatibilityId: "test",
+                packageUri: new Uri($"https://example.invalid/{version}/localai-package.zip"),
+                packageSize: 1024,
+                packageSha256: new string('a', 64),
+                requiresAuthenticode: false,
+                models: []),
+            [1],
+            [2]);
 
     /// <summary>
     /// The consent is worded for the run it consents to. "I have reviewed these settings" was
