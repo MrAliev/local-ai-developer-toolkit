@@ -140,18 +140,30 @@ public sealed class PackagePageViewModel : ObservableObject
             InstalledVersionDirectory,
             StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Where the release comes from, named only when it is not the obvious place.
+    ///
+    /// The installer offers its own directory when that directory holds a release, and on the
+    /// update path the page carrying that box is folded away — so the offer is accepted without
+    /// anybody seeing it. This page is meant to be a complete list of effects, and "which
+    /// version" without "from where" is how an upgrade installs from a stale folder beside the
+    /// installer while the person reading believes it came from GitHub.
+    /// </summary>
+    private string Source =>
+        SourceFolder.Length == 0 ? string.Empty : $", from {SourceFolder}";
+
     public string ReviewText => State switch
     {
         PackageSourceState.Selected when IsAlreadyInstalled && WantsLatest =>
-            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed — nothing " +
-            "will change unless a newer one is published before you press Install",
+            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed{Source} — " +
+            "nothing will change unless a newer one is published before you press Install",
         PackageSourceState.Selected when IsAlreadyInstalled =>
-            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed — " +
+            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed{Source} — " +
             "nothing will change",
         PackageSourceState.Selected when WantsLatest =>
-            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} — or whatever is newest when " +
-            "you press Install",
-        PackageSourceState.Selected => $"LocalAi package: {ResolvedTag ?? ReleaseVersion}",
+            $"LocalAi package: {ResolvedTag ?? ReleaseVersion}{Source} — or whatever is " +
+            "newest when you press Install",
+        PackageSourceState.Selected => $"LocalAi package: {ResolvedTag ?? ReleaseVersion}{Source}",
         PackageSourceState.Incompatible =>
             $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is not compatible — " +
             "it will not be installed",
