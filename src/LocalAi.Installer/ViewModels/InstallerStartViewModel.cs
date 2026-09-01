@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
 using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Removal;
@@ -46,14 +48,26 @@ public sealed class InstallerStartViewModel : ObservableObject
 {
     private readonly ExistingLocalAiSnapshot existing;
 
+    /// <summary>
+    /// Which release is installed, as opposed to which directory holds it. The inspector reports
+    /// the directory from the pointer and never asks — so this screen said
+    /// "LocalAi 467ed5f0f9bf is installed" while the next window, doctor and update all said
+    /// 0.1.51, each reading the release record this one did not.
+    /// </summary>
+    private readonly InstalledVersion installed;
+
     public InstallerStartViewModel(
         string? localAppData = null,
-        IExistingLocalAiInspector? inspector = null)
+        IExistingLocalAiInspector? inspector = null,
+        Func<InstalledVersion>? readInstalledVersion = null)
     {
         var root = localAppData ??
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         existing = (inspector ?? new ExistingLocalAiInspector(new SystemFileSystemProbe()))
             .Inspect(root);
+        installed = readInstalledVersion is null
+            ? InstalledVersionReader.Read(Path.Combine(root, "LocalAi"))
+            : readInstalledVersion();
         foreach (var option in BuildOptions())
         {
             Actions.Add(option);
@@ -66,10 +80,18 @@ public sealed class InstallerStartViewModel : ObservableObject
 
     public string? InstalledVersion => existing.Version;
 
+    /// <summary>
+    /// The release this installation came from, with a leading space, or nothing when it did
+    /// not record one. The build id is not a substitute: it answers a question nobody has asked
+    /// yet, in the sentence that has to be legible at a glance.
+    /// </summary>
+    private string Release =>
+        installed.ReleaseVersion is { Length: > 0 } release ? " " + release : string.Empty;
+
     public string Headline => existing.State switch
     {
         ExistingLocalAiState.Compatible =>
-            "LocalAi " + existing.Version + " is installed on this computer.",
+            "LocalAi" + Release + " is installed on this computer.",
         ExistingLocalAiState.Unrecognized =>
             "There is a LocalAi directory here, but it is not a working installation.",
         _ => "LocalAi is not installed on this computer.",
@@ -77,6 +99,14 @@ public sealed class InstallerStartViewModel : ObservableObject
 
     public string Detail => existing.State switch
     {
+        // The build id lives here rather than in the headline, and only when there is no
+        // release to name: somebody has to be able to answer "which one are you running", and
+        // an unlabelled hash beside the product name is what read as a version.
+        ExistingLocalAiState.Compatible when installed.ReleaseVersion is null &&
+            installed.VersionDirectory is { Length: > 0 } build =>
+            $"Build {build}. This installation does not record which release it came from. " +
+            "Choose what to do with it. Nothing is changed until you confirm it on a review " +
+            "page.",
         ExistingLocalAiState.Compatible =>
             "Choose what to do with it. Nothing is changed until you confirm it on a review " +
             "page.",
@@ -100,7 +130,10 @@ public sealed class InstallerStartViewModel : ObservableObject
     private IEnumerable<StartActionOption> BuildOptions()
     {
         var installed = existing.State != ExistingLocalAiState.Absent;
-        var version = existing.Version is { Length: > 0 } named ? " " + named : string.Empty;
+        // The release, not the directory: the row says why Install is off, and "already
+        // installed" is the answer — naming a build id there repeats the headline's old
+        // mistake in smaller type.
+        var version = Release;
         yield return new StartActionOption(
             StartChoice.Install,
             "Install LocalAi",
@@ -115,7 +148,10 @@ public sealed class InstallerStartViewModel : ObservableObject
             installed && existing.State == ExistingLocalAiState.Unrecognized
                 ? "Repair this installation"
                 : "Update or repair",
-            "Installs the release you choose over the current one. Indexes, settings and " +
+            // Not "the release you choose": this path folds the release page away and resolves
+            // it behind the first screen. The sentence advertised a question the wizard
+            // deliberately stopped asking, which leaves the reader waiting for it.
+            "Installs the current release over the one that is there. Indexes, settings and " +
             "client integrations are kept.",
             installed,
             "Nothing is installed to update.");

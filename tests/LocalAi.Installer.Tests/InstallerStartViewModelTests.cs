@@ -24,7 +24,13 @@ public sealed class InstallerStartViewModelTests : IDisposable
 
         Assert.Equal(ExistingLocalAiState.Compatible, start.State);
         Assert.Equal(RemovalFixture.InstalledVersion, start.InstalledVersion);
-        Assert.Contains(RemovalFixture.InstalledVersion, start.Headline, StringComparison.Ordinal);
+        // The fixture writes no release record, so this machine cannot say which release
+        // it is — the headline says what it knows, and the build id is named below it.
+        Assert.Equal("LocalAi is installed on this computer.", start.Headline);
+        Assert.Contains(
+            "Build " + RemovalFixture.InstalledVersion,
+            start.Detail,
+            StringComparison.Ordinal);
         Assert.False(start.Option(StartChoice.Install).IsAvailable);
         Assert.Contains(
             "already installed",

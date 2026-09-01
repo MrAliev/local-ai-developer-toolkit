@@ -32,8 +32,8 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,16">
-            <TextBlock Text="{Binding Headline}" Style="{StaticResource PageTitle}" />
-            <TextBlock Text="{Binding Detail}" Style="{StaticResource Muted}" Margin="0,6,0,0" />
+            <TextBlock Text="{Binding Headline}" TextWrapping="Wrap" Style="{StaticResource PageTitle}" />
+            <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Style="{StaticResource Muted}" Margin="0,6,0,0" />
         </StackPanel>
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
@@ -48,12 +48,12 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding Description}"
+                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap"
                                                Style="{StaticResource Muted}" Margin="0,3,0,0" />
                                     <!-- Why an option is out of reach, said in place. A greyed
                                          button with no explanation is a worse answer than none. -->
-                                    <TextBlock Text="{Binding UnavailableReason}"
+                                    <TextBlock Text="{Binding UnavailableReason}" TextWrapping="Wrap"
                                                Foreground="#8A5300" Margin="0,4,0,0"
                                                Visibility="{Binding IsUnavailable, Converter={StaticResource BoolToVisibility}}" />
                                 </StackPanel>
