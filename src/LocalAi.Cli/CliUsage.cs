@@ -26,7 +26,7 @@ internal static class CliUsage
         "localai policy <show|set> [options] | " +
         "localai update [--wait] [--force] | " +
         "localai semantic <operation> [--request file] | localai bootstrap --dry-run | " +
-        "localai sync [--root dir] [--base-only] [--require-semantics] | " + Hook + " | " +
+        "localai sync [--root dir] [--base-only] [--require-semantics] [--max-inline-files n] | " + Hook + " | " +
         "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +
         Telemetry;
 }

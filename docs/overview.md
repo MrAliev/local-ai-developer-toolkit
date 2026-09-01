@@ -214,8 +214,9 @@ every worktree share one repository identity and one index.
 ### 4.4 Keeping it current
 
 The shared Git hooks — after a commit, a merge, a history rewrite and a branch switch — trigger
-synchronization: a small delta is computed immediately, a large one is queued. The hook itself
-never talks to a model. Installing the hooks is an explicit, consented operation. Two
+synchronization: the hook runs the same `localai sync` the command line runs, in its own
+process, and Git waits for it to finish. Nothing is deferred to a queue. The hook itself never
+talks to a model. Installing the hooks is an explicit, consented operation. Two
 synchronizations of the same repository do not interleave: the second one waits briefly and
 then exits with a named "repository busy" outcome before touching any shared state, instead of
 stamping its failure over the other run's story.

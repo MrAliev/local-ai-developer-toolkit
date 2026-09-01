@@ -181,10 +181,42 @@ static async Task<int> RunAsync(string[] args)
         var root = rootIndex >= 0 && rootIndex + 1 < args.Length
             ? args[rootIndex + 1]
             : Environment.CurrentDirectory;
+        var limitIndex = Array.IndexOf(args, SyncRefusal.LimitFlag);
+        int? inlineLimit = null;
+        if (limitIndex >= 0)
+        {
+            // A bound asked for and not understood must not become no bound at all: this is the
+            // enforcement point, and failing open here is the defect the flag exists to remove.
+            if (limitIndex + 1 >= args.Length ||
+                !int.TryParse(args[limitIndex + 1], out var parsedLimit) ||
+                parsedLimit < 0)
+            {
+                Console.Error.WriteLine(
+                    "localai: --max-inline-files needs a whole number of files, " +
+                    "for example --max-inline-files 200.");
+                return 64;
+            }
+
+            inlineLimit = parsedLimit;
+        }
         var result = await CodeSearchSyncCommand.ExecuteAsync(
             root,
             includeOverlays: !args.Contains("--base-only", StringComparer.Ordinal),
-            requireSemantics: args.Contains("--require-semantics", StringComparer.Ordinal));
+            requireSemantics: args.Contains("--require-semantics", StringComparer.Ordinal),
+            refuseInlineOverFiles: inlineLimit);
+        if (result.RefusedFiles is { } refused)
+        {
+            // Exit code 0: the run did exactly what it was asked to do. A non-zero code would
+            // read as a failed sync to every caller that checks one — the MCP tool prints
+            // "sync failed with N", and a hook would mark the commit's refresh as broken.
+            Console.WriteLine(SyncRefusal.Line(
+                result.RepositoryId,
+                refused,
+                // Reached only when a limit was given: nothing refuses without one.
+                inlineLimit ?? refused));
+            return 0;
+        }
+
         Console.WriteLine(
             $"SYNCED repository={result.RepositoryId} generation={result.GenerationId} " +
             $"overlays={result.OverlaysBuilt}" +
