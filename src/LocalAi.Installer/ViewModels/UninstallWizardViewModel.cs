@@ -36,8 +36,6 @@ public sealed class UninstallWizardViewModel : ObservableObject
     private readonly UninstallPlanner planner;
 
     private UninstallPage currentPage = UninstallPage.Choose;
-    private RemovalPreset selectedPreset = RemovalPreset.FullUninstall;
-    private bool removeSigningKeys;
     private bool isConfirmed;
     private bool isRunning;
     private bool isComplete;
@@ -69,7 +67,6 @@ public sealed class UninstallWizardViewModel : ObservableObject
         IProcessRunner? processRunner = null,
         Func<string, CancellationToken, Task<string?>>? readHooksPath = null)
     {
-        selectedPreset = preset;
         OffersInstallAfterwards = offersInstallAfterwards;
         this.layout = layout ?? InstallationLayout.CreateDefault();
         this.homeDirectory = homeDirectory ??
@@ -77,12 +74,20 @@ public sealed class UninstallWizardViewModel : ObservableObject
         this.processRunner = processRunner ?? new SystemProcessRunner();
         planner = new UninstallPlanner(this.layout, this.homeDirectory, readHooksPath);
 
-        foreach (var item in RemovalMatrix.Items.Where(item => item != RemovalItem.SigningKeys))
+        Choices = new RemovalChoicesPageViewModel(preset)
         {
-            Rows.Add(new RemovalRow(item));
-        }
-
-        ApplyPreset(selectedPreset);
+            SigningKeysDirectory = Path.Combine(
+                this.layout.Root,
+                RemovalMatrix.SigningKeyDirectoryName),
+        };
+        // A change on the page invalidates what the wizard says about it: the buttons, the
+        // step status, and any plan already built from the old answers.
+        Choices.Changed += (_, _) =>
+        {
+            OnPropertyChanged(nameof(SelectedPreset));
+            OnPropertyChanged(nameof(RemoveSigningKeys));
+            RefreshAll();
+        };
         ContinueToInstallCommand = new RelayCommand(
             () => InstallRequested?.Invoke(this, EventArgs.Empty),
             () => CanContinueToInstall);
@@ -116,15 +121,20 @@ public sealed class UninstallWizardViewModel : ObservableObject
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         RemovalMatrix.JournalDirectoryName);
 
-    public ObservableCollection<RemovalRow> Rows { get; } = [];
+    /// <summary>
+    /// The matrix page. Shared with the installer wizard, which needs the same page for the
+    /// removal half of a clean reinstall — the rows and the presets are the contract with the
+    /// planner, and two copies of it are two that drift.
+    /// </summary>
+    public RemovalChoicesPageViewModel Choices { get; }
 
-    public ObservableCollection<RepositoryRow> Repositories { get; } = [];
+    public ObservableCollection<RemovalRow> Rows => Choices.Rows;
+
+    public ObservableCollection<RepositoryRow> Repositories => Choices.Repositories;
 
     public ObservableCollection<WizardStep> StepList { get; } = [];
 
-    public IReadOnlyList<UninstallPresetOption> Presets { get; } = RemovalMatrix.Presets
-        .Select(preset => new UninstallPresetOption(preset))
-        .ToArray();
+    public IReadOnlyList<UninstallPresetOption> Presets => Choices.Presets;
 
     public RelayCommand BackCommand { get; }
 
@@ -164,19 +174,8 @@ public sealed class UninstallWizardViewModel : ObservableObject
 
     public RemovalPreset SelectedPreset
     {
-        get => selectedPreset;
-        set
-        {
-            if (selectedPreset == value)
-            {
-                return;
-            }
-
-            selectedPreset = value;
-            ApplyPreset(value);
-            OnPropertyChanged();
-            RefreshAll();
-        }
+        get => Choices.SelectedPreset;
+        set => Choices.SelectedPreset = value;
     }
 
     /// <summary>
@@ -185,20 +184,13 @@ public sealed class UninstallWizardViewModel : ObservableObject
     /// </summary>
     public bool RemoveSigningKeys
     {
-        get => removeSigningKeys;
-        set
-        {
-            SetProperty(ref removeSigningKeys, value);
-            RefreshAll();
-        }
+        get => Choices.RemoveSigningKeys;
+        set => Choices.RemoveSigningKeys = value;
     }
 
-    public string SigningKeysTitle => RemovalMatrix.Title(RemovalItem.SigningKeys);
+    public string SigningKeysTitle => Choices.SigningKeysTitle;
 
-    public string SigningKeysWarning =>
-        Path.Combine(layout.Root, RemovalMatrix.SigningKeyDirectoryName) +
-        " holds the private half of the release signing pair. Remove it only if you have the " +
-        "offline backup: it becomes the only copy that exists.";
+    public string SigningKeysWarning => Choices.SigningKeysWarning;
 
     public bool IsConfirmed
     {
@@ -347,15 +339,11 @@ public sealed class UninstallWizardViewModel : ObservableObject
         var inventory = await planner.PlanAsync(
             RemovalSelection.FromPreset(RemovalPreset.FullUninstall),
             cancellationToken);
-        Repositories.Clear();
-        foreach (var hook in inventory.Hooks)
-        {
-            Repositories.Add(new RepositoryRow(
-                hook.RepositoryId,
-                hook.CommonDirectory,
-                hook.Dispatchers.Count,
-                hook.SkipReason));
-        }
+        Choices.ListRepositories(inventory.Hooks.Select(hook => new RepositoryRow(
+            hook.RepositoryId,
+            hook.CommonDirectory,
+            hook.Dispatchers.Count,
+            hook.SkipReason)));
 
         RefreshAll();
     }
@@ -529,41 +517,7 @@ public sealed class UninstallWizardViewModel : ObservableObject
             : string.Empty;
     }
 
-    public RemovalSelection Selection()
-    {
-        var selection = RemovalSelection.FromPreset(selectedPreset);
-        foreach (var row in Rows)
-        {
-            selection = selection.With(row.Item, row.IsSelected);
-        }
-
-        selection = selection.WithSigningKeyRemoval(removeSigningKeys);
-        return Repositories.Count == 0
-            ? selection
-            : selection.WithRepositories(Repositories
-                .Where(repository => repository.IsSelected)
-                .Select(repository => repository.RepositoryId));
-    }
-
-    private void ApplyPreset(RemovalPreset preset)
-    {
-        foreach (var option in Presets)
-        {
-            option.IsSelected = option.Preset == preset;
-        }
-
-        var selection = RemovalSelection.FromPreset(preset);
-        var undecided = selection.ItemsNeedingDecision.ToHashSet();
-        foreach (var row in Rows)
-        {
-            row.IsSelected = selection.Includes(row.Item);
-            row.NeedsDecision = undecided.Contains(row.Item);
-        }
-
-        // The keys are never prefilled by a preset. Their checkbox is the confirmation.
-        removeSigningKeys = false;
-        OnPropertyChanged(nameof(RemoveSigningKeys));
-    }
+    public RemovalSelection Selection() => Choices.Selection();
 
     private string BuildSummary(UninstallOutcome outcome)
     {
