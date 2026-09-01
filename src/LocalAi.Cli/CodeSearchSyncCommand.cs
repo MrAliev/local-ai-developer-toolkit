@@ -511,7 +511,7 @@ public static class CodeSearchSyncCommand
     /// directory is, paired with the tree its HEAD points at. Anything else under a kept
     /// generation belongs to a commit nobody is on or a worktree that is gone.
     /// </summary>
-    private static IReadOnlySet<(string WorktreeId, string HeadTree)> ReachableOverlays(
+    private static IReadOnlySet<(string WorktreeId, string HeadTree)>? ReachableOverlays(
         IReadOnlyList<GitWorktree> worktrees,
         string? runtimeRoot)
     {
@@ -529,9 +529,15 @@ public static class CodeSearchSyncCommand
                 exception is InvalidOperationException or IOException or
                     UnauthorizedAccessException)
             {
-                // A worktree that cannot be inspected is not proof that its overlays are
-                // unreachable, so nothing about it is removed.
-                reachable.Add((RuntimeIndexLayout.WorktreeKey(worktree.Path), string.Empty));
+                // One worktree that cannot be inspected makes the whole set incomplete, and an
+                // incomplete set reads as "these are gone". Inspect hashes the dirty working
+                // files, so the throw lands exactly on a worktree with uncommitted work — the
+                // one whose overlay matters most. Abandoning the sweep costs disk until the
+                // next sync; guessing costs that worktree its index.
+                Console.Error.WriteLine(
+                    $"Worktree {worktree.Path} could not be inspected " +
+                    $"({exception.Message}); leaving overlays alone this pass.");
+                return null;
             }
         }
 

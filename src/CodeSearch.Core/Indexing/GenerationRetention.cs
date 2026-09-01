@@ -34,6 +34,13 @@ public sealed record GenerationRetentionResult(
 public static class GenerationRetention
 {
     /// <summary>
+    /// How long a freshly published generation is kept regardless of the count. Long enough to
+    /// cover the overlay phase between publishing and the pointer moving, and an interrupted
+    /// run whose generation the next sync will reuse rather than rebuild.
+    /// </summary>
+    private static readonly TimeSpan Grace = TimeSpan.FromDays(1);
+
+    /// <summary>
     /// <paramref name="reachable"/> is what the repository can still ask about: for each live
     /// worktree, the hash of its path and the tree its HEAD points at. Everything else under
     /// a kept generation is an overlay for a commit nobody is on any more, or for a worktree
@@ -89,6 +96,16 @@ public static class GenerationRetention
         if (current is not null)
         {
             keep.Add(current);
+        }
+
+        // A generation is published minutes before the pointer moves to it: the overlay phase
+        // runs in between. Keeping only the current one meant a sweep in that window deleted
+        // the generation a sync had just spent its whole run building, and the sync then died
+        // on the missing base. Anything young enough to be that build is kept whatever the
+        // count says — the same grace the staging directory already gets.
+        foreach (var candidate in candidates.Where(item => now - item.PublishedAtUtc < Grace))
+        {
+            keep.Add(candidate.Id);
         }
 
         foreach (var candidate in candidates)

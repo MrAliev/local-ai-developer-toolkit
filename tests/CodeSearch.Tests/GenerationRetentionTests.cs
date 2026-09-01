@@ -126,6 +126,51 @@ public sealed class GenerationRetentionTests : IDisposable
             Path.Combine(Repository, "overlays", current, "some-worktree", "some-tree")));
     }
 
+    /// <summary>
+    /// A generation published but not yet pointed at survives. The overlay phase runs between
+    /// publishing and the pointer moving, so with only the current one kept, a sweep in that
+    /// window deleted the generation a sync had just spent its whole run building — and an
+    /// interrupted run's generation, which the next sync would otherwise reuse rather than
+    /// rebuild.
+    /// </summary>
+    [Fact]
+    public void A_generation_published_moments_ago_is_not_swept()
+    {
+        var store = new GenerationStore(Repository);
+        var current = Publish(store, "a", Now - TimeSpan.FromDays(30));
+        var justBuilt = Publish(store, "b", Now - TimeSpan.FromMinutes(5));
+        store.SetCurrent(store.ReadManifest(current));
+
+        var result = GenerationRetention.Prune(
+            Repository,
+            RuntimeRetentionPolicy.Default with { GenerationsPerRepository = 1 },
+            Now);
+
+        Assert.Empty(result.GenerationsRemoved);
+        Assert.True(Directory.Exists(Path.Combine(Repository, "generations", justBuilt)));
+        Assert.True(Directory.Exists(Path.Combine(Repository, "generations", current)));
+    }
+
+    /// <summary>
+    /// And one old enough to be nobody's build does go, so the grace is a window rather than
+    /// a reprieve.
+    /// </summary>
+    [Fact]
+    public void A_generation_older_than_the_grace_still_goes()
+    {
+        var store = new GenerationStore(Repository);
+        var current = Publish(store, "a", Now - TimeSpan.FromDays(1));
+        var old = Publish(store, "b", Now - TimeSpan.FromDays(30));
+        store.SetCurrent(store.ReadManifest(current));
+
+        var result = GenerationRetention.Prune(
+            Repository,
+            RuntimeRetentionPolicy.Default with { GenerationsPerRepository = 1 },
+            Now);
+
+        Assert.Equal([old], result.GenerationsRemoved);
+    }
+
     [Fact]
     public void An_unreadable_pointer_stops_the_pass_instead_of_guessing()
     {

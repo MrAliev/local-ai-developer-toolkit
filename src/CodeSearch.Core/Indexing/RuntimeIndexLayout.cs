@@ -138,7 +138,12 @@ public static class RuntimeIndexLayout
     public static string WorktreeKey(string workingRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingRoot);
-        return Hash(OperatingSystem.IsWindows() ? workingRoot.ToUpperInvariant() : workingRoot);
+        // Normalised here rather than by the caller: git prints forward slashes on Windows
+        // and Inspect yields backslashes, so the same worktree hashed to two different keys
+        // depending on who asked — and a key that matches no directory reads as "this
+        // worktree is gone".
+        var normalised = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workingRoot));
+        return Hash(OperatingSystem.IsWindows() ? normalised.ToUpperInvariant() : normalised);
     }
 
     private static string Hash(string value) =>
