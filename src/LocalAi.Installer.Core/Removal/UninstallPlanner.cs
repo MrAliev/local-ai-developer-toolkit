@@ -211,12 +211,14 @@ public sealed class UninstallPlanner
         catch (Exception exception) when (
             exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            return Skipped(repositoryId, repositoryRuntimeRoot, "its manifest is unreadable");
+            return Skipped(repositoryId, repositoryRuntimeRoot, InstallerCulture.Pick(
+                "its manifest is unreadable",
+                "его манифест не читается"));
         }
 
         if (manifest is null)
         {
-            return Skipped(repositoryId, repositoryRuntimeRoot, "it has no manifest");
+            return Skipped(repositoryId, repositoryRuntimeRoot, InstallerCulture.Pick("it has no manifest", "у него нет манифеста"));
         }
 
         if (!Directory.Exists(manifest.CommonDirectory))
@@ -226,7 +228,9 @@ public sealed class UninstallPlanner
             return Skipped(
                 repositoryId,
                 manifest.CommonDirectory,
-                "the repository no longer exists at this path");
+                InstallerCulture.Pick(
+                    "the repository no longer exists at this path",
+                    "репозитория по этому пути больше нет"));
         }
 
         var workingTreeRoot = manifest.ActiveWorktrees

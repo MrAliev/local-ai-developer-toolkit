@@ -18,8 +18,10 @@ public static class GpuAdapterDisplay
     {
         ArgumentNullException.ThrowIfNull(adapter);
         var memory = adapter.DedicatedLocalBytes > 0
-            ? $" ({adapter.DedicatedLocalBytes / (1024d * 1024 * 1024):N1} GB dedicated)"
-            : " (no dedicated memory)";
+            ? string.Format(
+                InstallerCulture.Pick(" ({0:N1} GB dedicated)", " ({0:N1} ГБ выделенной)"),
+                adapter.DedicatedLocalBytes / (1024d * 1024 * 1024))
+            : InstallerCulture.Pick(" (no dedicated memory)", " (выделенной памяти нет)");
         return adapter.Name + memory + (adapter.IsSoftware ? " [software]" : string.Empty);
     }
 }

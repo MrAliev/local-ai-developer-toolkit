@@ -202,8 +202,14 @@ public sealed class UninstallRunner(
             {
                 var detail = Detail(result);
                 journal.FailStep(step, detail);
+                // This sentence is the removal wizard's finish summary, word for word, so
+                // it is prose rather than machine text. The detail after it is the launcher's.
                 throw new UninstallRefusedException(
-                    "LocalAi is still running and would not stop, so nothing was removed. " +
+                    InstallerCulture.Pick(
+                        "LocalAi is still running and would not stop, so nothing was " +
+                        "removed. ",
+                        "LocalAi всё ещё работает и не остановился, поэтому ничего не " +
+                        "удалено. ") +
                     detail);
             }
 
@@ -215,7 +221,10 @@ public sealed class UninstallRunner(
         {
             journal.FailStep(step, exception.Message);
             throw new UninstallRefusedException(
-                "LocalAi could not be asked to stop, so nothing was removed. " +
+                InstallerCulture.Pick(
+                    "LocalAi could not be asked to stop, so nothing was removed. ",
+                    "LocalAi не удалось попросить остановиться, поэтому ничего не " +
+                    "удалено. ") +
                 exception.Message,
                 exception);
         }
