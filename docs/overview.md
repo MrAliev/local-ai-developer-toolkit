@@ -541,7 +541,10 @@ finish before the root is touched, and the release signing key kept unless separ
 confirmed. It says where it has got to while it works — asking the broker to stop, rewriting
 the client configurations, taking out the hook dispatchers, removing files, finishing — because
 the stop alone can take two minutes, and a bar that has not moved for two minutes is what
-makes people kill an installer mid-run.
+makes people kill an installer mid-run. The page itself is one object rather than a part of
+the uninstall window: which boxes a preset ticks is the contract between it and the planner,
+and a clean reinstall needs the same page inside the installer, where a second copy would be a
+second answer to that.
 
 The reinstall-friendly preset keeps the client registrations and the hook dispatchers rather
 than asking about them: the installation that follows rewrites all three, and a question put
