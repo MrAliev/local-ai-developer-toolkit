@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Serialization;
+using LocalAi.Contracts;
 
 namespace CodeSearch.Core.Semantics;
 
@@ -125,6 +126,10 @@ public sealed class ScipAdapterRunner(ScipImporter? importer = null)
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            // Node and Python follow the console, and a command script goes through cmd.exe,
+            // which writes the OEM code page whatever the console says.
+            StandardOutputEncoding = ChildProcessText.ConsoleEncoding,
+            StandardErrorEncoding = ChildProcessText.ConsoleEncoding,
         };
         if (OperatingSystem.IsWindows())
         {

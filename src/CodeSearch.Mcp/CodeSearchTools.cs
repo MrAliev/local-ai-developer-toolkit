@@ -708,7 +708,10 @@ public static class CodeSearchTools
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            // This toolkit's own CLI, which sets its output to UTF-8 on the first line of Main.
+            StandardOutputEncoding = ChildProcessText.Utf8,
+            StandardErrorEncoding = ChildProcessText.Utf8,
         };
         start.ArgumentList.Add("sync");
         start.ArgumentList.Add("--root");

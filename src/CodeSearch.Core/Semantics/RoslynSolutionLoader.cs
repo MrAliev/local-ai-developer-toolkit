@@ -2,6 +2,7 @@ using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using System.Diagnostics;
+using LocalAi.Contracts;
 
 namespace CodeSearch.Core.Semantics;
 
@@ -191,6 +192,12 @@ public static class RoslynSolutionLoader
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            // The SDK follows the console, and under a Git hook or an MCP server there is no
+            // console — so on a Russian Windows it writes code page 866 while this process has
+            // set itself to UTF-8. Read as UTF-8, NuGet's explanation of what is wrong with the
+            // machine's package sources arrived as mojibake (#292).
+            StandardOutputEncoding = ChildProcessText.ConsoleEncoding,
+            StandardErrorEncoding = ChildProcessText.ConsoleEncoding,
         };
         foreach (var argument in new[]
                  {

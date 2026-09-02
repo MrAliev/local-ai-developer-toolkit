@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using LocalAi.Contracts;
 
 namespace CodeSearch.Core.Indexing;
 
@@ -33,7 +34,11 @@ public sealed class CommitSnapshot : IDisposable
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                // Git writes UTF-8 on every platform, so this says so rather than inheriting
+                // whatever the parent chose for printing its own output.
+                StandardOutputEncoding = ChildProcessText.Utf8,
+                StandardErrorEncoding = ChildProcessText.Utf8,
             };
             start.ArgumentList.Add("archive");
             start.ArgumentList.Add("--format=zip");
