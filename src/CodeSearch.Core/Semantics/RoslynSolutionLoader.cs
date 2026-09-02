@@ -120,10 +120,22 @@ public static class RoslynSolutionLoader
             // that is exactly "Dll was not found." — the one anonymous line issue #139 turned
             // on, which five reproduction attempts could not trace because it named neither
             // what was being loaded nor how severe the failure was.
-            workspace.RegisterWorkspaceFailedHandler(
-                args => diagnostic?.Invoke(
-                    $"{args.Diagnostic.Kind} while loading '{selected}': " +
-                    args.Diagnostic.Message));
+            // One root cause, one line. A repository whose NuGet configuration trips
+            // source mapping fails once per project — 53 times on the repository that
+            // reported it — and the hostfxr line, or a genuinely different failure,
+            // drowns in the repetition (#291).
+            var digest = new WorkspaceDiagnosticDigest();
+            workspace.RegisterWorkspaceFailedHandler(args =>
+            {
+                var line = digest.Observe(
+                    args.Diagnostic.Kind.ToString(),
+                    args.Diagnostic.Message);
+                if (line is not null)
+                {
+                    diagnostic?.Invoke(
+                        $"{args.Diagnostic.Kind} while loading '{selected}': {line}");
+                }
+            });
             try
             {
                 var solution = selected.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
@@ -159,6 +171,13 @@ public static class RoslynSolutionLoader
             }
             finally
             {
+                // After the load rather than as they arrive: the count is only known once
+                // every project has been through, and the first of each is already above.
+                foreach (var line in digest.Summarise())
+                {
+                    diagnostic?.Invoke(line);
+                }
+
                 AppContext.SetData(
                     RoslynBuildHostLease.BaseDirectoryDataName,
                     originalBaseDirectory);
