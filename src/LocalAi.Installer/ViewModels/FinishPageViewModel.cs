@@ -1,4 +1,5 @@
-﻿namespace LocalAi.Installer.ViewModels;
+using LocalAi.Installer.Core;
+namespace LocalAi.Installer.ViewModels;
 
 public sealed class FinishPageViewModel : ObservableObject
 {
@@ -78,5 +79,7 @@ public sealed class FinishPageViewModel : ObservableObject
 
     public bool HasRollbackReport => !string.IsNullOrWhiteSpace(rollbackReport);
 
-    public string RestartNotice => RequiresRestart ? "Restart required." : "No restart needed.";
+    public string RestartNotice => RequiresRestart
+        ? InstallerCulture.Pick("Restart required.", "Требуется перезагрузка.")
+        : InstallerCulture.Pick("No restart needed.", "Перезагрузка не нужна.");
 }

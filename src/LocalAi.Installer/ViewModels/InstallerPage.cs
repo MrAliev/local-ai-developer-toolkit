@@ -1,3 +1,4 @@
+using LocalAi.Installer.Core;
 using System.Globalization;
 using LocalAi.Contracts;
 using LocalAi.Installer.Core.Planning;
@@ -60,6 +61,14 @@ public static class AgentChoiceMapping
         };
 
     public static string Title(this AgentChoice choice) =>
+        InstallerCulture.Pick(choice.EnglishTitle(), choice.RussianTitle());
+
+    /// <summary>
+    /// The title for the run log, which is written to a file beside an English journal and is
+    /// therefore English whatever the window is speaking. Without this the log read
+    /// "Claude: Зарегистрировать MCP-серверы applied to …".
+    /// </summary>
+    public static string EnglishTitle(this AgentChoice choice) =>
         choice switch
         {
             AgentChoice.McpOnly => "Register MCP servers",
@@ -69,17 +78,35 @@ public static class AgentChoiceMapping
             _ => string.Empty,
         };
 
+    private static string RussianTitle(this AgentChoice choice) =>
+        choice switch
+        {
+            AgentChoice.McpOnly => "Зарегистрировать MCP-серверы",
+            AgentChoice.InstructionsOnly => "Установить блок инструкций",
+            AgentChoice.McpAndInstructions =>
+                "Зарегистрировать MCP-серверы и установить инструкции",
+            AgentChoice.NoChange => "Оставить без изменений",
+            _ => string.Empty,
+        };
+
     public static string Description(this AgentChoice choice) =>
         choice switch
         {
-            AgentChoice.McpOnly =>
+            AgentChoice.McpOnly => InstallerCulture.Pick(
                 "Adds the LocalAi code search and local model servers to this client.",
-            AgentChoice.InstructionsOnly =>
-                "Adds the managed LocalAi instructions block, without touching server registrations.",
-            AgentChoice.McpAndInstructions =>
+                "Добавляет этому клиенту серверы поиска по коду и локальных " +
+                "моделей LocalAi."),
+            AgentChoice.InstructionsOnly => InstallerCulture.Pick(
+                "Adds the managed LocalAi instructions block, without touching server " +
+                "registrations.",
+                "Добавляет управляемый блок инструкций LocalAi, не трогая " +
+                "регистрации серверов."),
+            AgentChoice.McpAndInstructions => InstallerCulture.Pick(
                 "Both of the above. This is what a first-time setup normally wants.",
-            AgentChoice.NoChange =>
+                "И то и другое. Обычно это то, что нужно при первой настройке."),
+            AgentChoice.NoChange => InstallerCulture.Pick(
                 "This client is left exactly as it is.",
+                "Этот клиент остаётся ровно таким, как есть."),
             _ => string.Empty,
         };
 }
@@ -100,10 +127,10 @@ public sealed record EnvironmentCheck(string Name, CheckStatus Status, string De
 {
     public string StatusText => Status switch
     {
-        CheckStatus.Ok => "OK",
-        CheckStatus.Warning => "Warning",
-        CheckStatus.Missing => "Not found",
-        CheckStatus.Blocking => "Unsupported",
+        CheckStatus.Ok => InstallerCulture.Pick("OK", "ОК"),
+        CheckStatus.Warning => InstallerCulture.Pick("Warning", "Внимание"),
+        CheckStatus.Missing => InstallerCulture.Pick("Not found", "Не найдено"),
+        CheckStatus.Blocking => InstallerCulture.Pick("Unsupported", "Не поддерживается"),
         _ => string.Empty,
     };
 }
@@ -120,7 +147,9 @@ public sealed record DependencySelection(string Id, string Title, bool IsRequire
     /// </summary>
     public bool IsInstallable { get; init; } = true;
 
-    public string StateText => IsInstalled ? "Already installed" : "Not installed";
+    public string StateText => IsInstalled
+        ? InstallerCulture.Pick("Already installed", "Уже установлен")
+        : InstallerCulture.Pick("Not installed", "Не установлен");
 
     /// <summary>
     /// What is given up by skipping this. "Optional" on its own invites skipping everything
@@ -136,12 +165,33 @@ public sealed record DependencySelection(string Id, string Title, bool IsRequire
     /// prompts for capabilities a given user may not want.
     /// </summary>
     public string RequirementText => IsRequired
-        ? "required"
-        : Consequence.Length == 0 ? "optional" : "optional — " + Consequence;
+        ? InstallerCulture.Pick("required", "обязателен")
+        : Consequence.Length == 0
+            ? InstallerCulture.Pick("optional", "необязателен")
+            // A colon, not the em dash this line is already joined by: ".NET SDK 10 — Not
+            // installed · optional — without it, …" made the reader work out which dash
+            // separated what.
+            : string.Format(
+                InstallerCulture.Pick("optional: {0}", "необязателен: {0}"),
+                Consequence);
+
+    /// <summary>
+    /// Everything after the bold title, in one string. The markup used to join three Runs, which
+    /// concatenate in source order — the one thing a translation cannot keep.
+    /// </summary>
+    public string StateLine => " — " + StateText + " · " + RequirementText;
 
     public string ActionText => !IsInstallable
-        ? "Install manually"
-        : IsInstalled ? "Reinstall" : "Install";
+        ? InstallerCulture.Pick("Install manually", "Установить вручную")
+        : IsInstalled
+            ? InstallerCulture.Pick("Reinstall", "Переустановить")
+            : InstallerCulture.Pick("Install", "Установить");
+}
+
+/// <summary>One entry of the client-integration combo box: the choice, and its own title.</summary>
+public sealed record AgentChoiceOption(AgentChoice Choice)
+{
+    public string Title => Choice.Title();
 }
 
 public sealed record RecommendedModel(string Id, string Purpose, string Detail);
@@ -157,7 +207,16 @@ public sealed record AgentOption(string Agent, AgentChoice Choice)
 
     public bool IsDetected { get; init; }
 
-    public string DetectionText => IsDetected ? "detected" : "not detected";
+    public string DetectionText => IsDetected
+        ? InstallerCulture.Pick("detected", "обнаружено")
+        : InstallerCulture.Pick("not detected", "не обнаружено");
+
+    /// <summary>
+    /// The whole row heading, assembled here rather than out of four &lt;Run&gt;s in the markup.
+    /// Runs concatenate in source order, which is the one thing a translation cannot keep: the
+    /// bracket in Russian sits where the sentence puts it, not where the XAML did.
+    /// </summary>
+    public string Heading => $"{DisplayName} ({DetectionText})";
 }
 
 /// <summary>
@@ -166,8 +225,3 @@ public sealed record AgentOption(string Agent, AgentChoice Choice)
 /// have their own page enumerations to keep track of where they are.
 /// </summary>
 public sealed record WizardStep(string Title, bool IsCurrent, bool IsDone);
-
-public static class InstallerCulture
-{
-    public static string CurrentCultureCode { get; set; } = CultureInfo.CurrentUICulture.Name;
-}

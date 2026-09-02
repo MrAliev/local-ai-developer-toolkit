@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using LocalAi.Installer.ViewModels;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer;
 
@@ -17,6 +18,15 @@ public partial class StartWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+    }
+
+    private void OnChooseLanguage(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string name } &&
+            Enum.TryParse<InstallerLanguage>(name, out var language))
+        {
+            viewModel.ChooseLanguage(language);
+        }
     }
 
     private void OnChoose(object sender, RoutedEventArgs e)

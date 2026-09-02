@@ -87,20 +87,28 @@ public sealed class UninstallRunner(
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(journal);
 
-        progress?.Report(new(0, "Asking LocalAi to stop…"));
+        progress?.Report(new(0, InstallerCulture.Pick(
+            "Asking LocalAi to stop…",
+            "Прошу LocalAi остановиться…")));
         var stopped = await StopRunningToolsAsync(plan, journal, cancellationToken);
         var failures = new List<UninstallFailure>();
-        progress?.Report(new(25, "Updating client configurations…"));
+        progress?.Report(new(25, InstallerCulture.Pick(
+            "Updating client configurations…",
+            "Обновляю конфигурации клиентов…")));
         var rewritten = await RewriteClientConfigurationsAsync(
             plan,
             journal,
             failures,
             cancellationToken);
-        progress?.Report(new(45, "Removing Git hook dispatchers…"));
+        progress?.Report(new(45, InstallerCulture.Pick(
+            "Removing Git hook dispatchers…",
+            "Удаляю диспетчеры хуков Git…")));
         var hooks = RemoveHooks(plan, journal, failures, cancellationToken);
-        progress?.Report(new(60, "Removing files…"));
+        progress?.Report(new(60, InstallerCulture.Pick("Removing files…", "Удаляю файлы…")));
         var removed = RemovePaths(plan, journal, failures, cancellationToken);
-        progress?.Report(new(90, "Finishing the removal…"));
+        progress?.Report(new(90, InstallerCulture.Pick(
+            "Finishing the removal…",
+            "Завершаю удаление…")));
         var (unregistered, deferred) = RemoveRegistration(plan, journal, failures);
         RemoveDirectoriesLeftEmptyByTheSweep(plan, removed);
         return new UninstallOutcome(
@@ -194,8 +202,14 @@ public sealed class UninstallRunner(
             {
                 var detail = Detail(result);
                 journal.FailStep(step, detail);
+                // This sentence is the removal wizard's finish summary, word for word, so
+                // it is prose rather than machine text. The detail after it is the launcher's.
                 throw new UninstallRefusedException(
-                    "LocalAi is still running and would not stop, so nothing was removed. " +
+                    InstallerCulture.Pick(
+                        "LocalAi is still running and would not stop, so nothing was " +
+                        "removed. ",
+                        "LocalAi всё ещё работает и не остановился, поэтому ничего не " +
+                        "удалено. ") +
                     detail);
             }
 
@@ -207,7 +221,10 @@ public sealed class UninstallRunner(
         {
             journal.FailStep(step, exception.Message);
             throw new UninstallRefusedException(
-                "LocalAi could not be asked to stop, so nothing was removed. " +
+                InstallerCulture.Pick(
+                    "LocalAi could not be asked to stop, so nothing was removed. ",
+                    "LocalAi не удалось попросить остановиться, поэтому ничего не " +
+                    "удалено. ") +
                 exception.Message,
                 exception);
         }

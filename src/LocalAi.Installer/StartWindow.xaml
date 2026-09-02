@@ -10,6 +10,27 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
+        <Style x:Key="LanguageLink" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#0F62B0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <TextBlock x:Name="Label" Text="{TemplateBinding Content}"
+                                   Foreground="{TemplateBinding Foreground}" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Label" Property="TextDecorations" Value="Underline" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
@@ -31,10 +52,35 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,16">
-            <TextBlock Text="{Binding Headline}" Style="{StaticResource PageTitle}" />
-            <TextBlock Text="{Binding Detail}" Style="{StaticResource Muted}" Margin="0,6,0,0" />
-        </StackPanel>
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="{Binding Headline}" TextWrapping="Wrap" Style="{StaticResource PageTitle}" />
+                <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Style="{StaticResource Muted}" Margin="0,6,0,0" />
+            </StackPanel>
+            <!-- Autonyms, never translated and never a flag: a flag is a country, and a Russian
+                 speaker outside Russia is not served by one. The active language is plain rather
+                 than greyed — grey reads as unavailable, which is backwards. -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top"
+                        Margin="12,2,0,0">
+                <TextBlock Text="English" FontWeight="SemiBold"
+                           Visibility="{Binding IsEnglish, Converter={StaticResource BoolToVisibility}}" />
+                <Button Content="English" Style="{StaticResource LanguageLink}"
+                        AutomationProperties.Name="Switch the installer to English"
+                        Tag="English" Click="OnChooseLanguage"
+                        Visibility="{Binding IsRussian, Converter={StaticResource BoolToVisibility}}" />
+                <TextBlock Text="·" Foreground="#888888" Margin="8,0,8,0" />
+                <TextBlock Text="Русский" FontWeight="SemiBold"
+                           Visibility="{Binding IsRussian, Converter={StaticResource BoolToVisibility}}" />
+                <Button Content="Русский" Style="{StaticResource LanguageLink}"
+                        AutomationProperties.Name="Переключить установщик на русский"
+                        Tag="Russian" Click="OnChooseLanguage"
+                        Visibility="{Binding IsEnglish, Converter={StaticResource BoolToVisibility}}" />
+            </StackPanel>
+        </Grid>
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <ItemsControl ItemsSource="{Binding Actions}">
@@ -48,16 +94,16 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding Description}"
+                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap"
                                                Style="{StaticResource Muted}" Margin="0,3,0,0" />
                                     <!-- Why an option is out of reach, said in place. A greyed
                                          button with no explanation is a worse answer than none. -->
-                                    <TextBlock Text="{Binding UnavailableReason}"
+                                    <TextBlock Text="{Binding UnavailableReason}" TextWrapping="Wrap"
                                                Foreground="#8A5300" Margin="0,4,0,0"
                                                Visibility="{Binding IsUnavailable, Converter={StaticResource BoolToVisibility}}" />
                                 </StackPanel>
-                                <Button Grid.Column="1" Content="Choose" Width="88" Height="28"
+                                <Button Grid.Column="1" Content="{Binding DataContext.ChooseText, RelativeSource={RelativeSource AncestorType=Window}}" MinWidth="88" Height="28"
                                         VerticalAlignment="Top"
                                         IsEnabled="{Binding IsAvailable}"
                                         Tag="{Binding Choice}"
@@ -72,7 +118,7 @@
         <Border Grid.Row="2" BorderBrush="#DDDDDD" BorderThickness="0,1,0,0"
                 Padding="0,10,0,0" Margin="0,10,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Close" Width="96" Height="28" IsCancel="True" Click="OnClose" />
+                <Button Content="{Binding CloseText}" MinWidth="96" Height="28" IsCancel="True" Click="OnClose" />
             </StackPanel>
         </Border>
     </Grid>

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using LocalAi.Installer.Core;
 using LocalAi.Installer.Core.Diagnosis;
 
 namespace LocalAi.Installer.ViewModels;
@@ -35,13 +36,24 @@ public sealed class AgentIntegrationPageViewModel : ObservableObject
     ];
 
     /// <summary>
+    /// The same four choices with something to display. The combo box was bound straight to the
+    /// enum values and had no display projection, so the page where the choice is made read
+    /// "McpAndInstructions" and "NoChange" — the titles existed, and only the review page ever
+    /// used them.
+    /// </summary>
+    public IReadOnlyList<AgentChoiceOption> ChoiceOptions { get; }
+
+    public AgentIntegrationPageViewModel() =>
+        ChoiceOptions = [.. Choices.Select(choice => new AgentChoiceOption(choice))];
+
+    /// <summary>
     /// Every option, including "leave unchanged", is a valid answer, so there is no state in
     /// which the user has failed to decide and this page never blocks navigation.
     /// </summary>
     public bool CanContinue => true;
 
     public string ReviewText =>
-        "Clients: " + string.Join(
+        InstallerCulture.Pick("Clients: ", "Клиенты: ") + string.Join(
             "; ",
             Agents.Select(agent => $"{agent.DisplayName} — {agent.Choice.Title()}"));
 

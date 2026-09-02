@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using LocalAi.Installer.Core.Removal;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -78,10 +79,14 @@ public sealed class RemovalChoicesPageViewModel : ObservableObject
     /// </summary>
     public string SigningKeysDirectory { get; set; } = string.Empty;
 
-    public string SigningKeysWarning =>
-        SigningKeysDirectory +
-        " holds the private half of the release signing pair. Remove it only if you have the " +
-        "offline backup: it becomes the only copy that exists.";
+    // The one line where the path cannot stay in front: Russian puts it behind a preposition.
+    public string SigningKeysWarning => string.Format(
+        InstallerCulture.Pick(
+            "{0} holds the private half of the release signing pair. Remove it only if you " +
+            "have the offline backup: it becomes the only copy that exists.",
+            "В {0} лежит закрытая половина пары ключей подписи релизов. Удаляйте, " +
+            "только если у вас есть офлайн-копия: она останется единственной."),
+        SigningKeysDirectory);
 
     /// <summary>The repositories the dispatchers were found in, listed before anybody chooses.</summary>
     public void ListRepositories(IEnumerable<RepositoryRow> repositories)

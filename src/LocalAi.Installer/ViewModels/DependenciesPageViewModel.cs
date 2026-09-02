@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -30,29 +31,41 @@ public sealed class DependenciesPageViewModel : ObservableObject
             // The repository is public, so releases are read over plain HTTPS with no
             // account at all. Kept for a fork held private, or a network that blocks the
             // release host but not the API.
-            Consequence = "only needed for a private fork, or when the release host is blocked",
+            Consequence = InstallerCulture.Pick(
+                "only needed for a private fork, or when the release host is blocked",
+                "нужен только для закрытого форка или когда хост релизов заблокирован"),
         },
         new("DotNetSdk", ".NET SDK 10", false)
         {
-            Consequence =
+            Consequence = InstallerCulture.Pick(
                 "without it, C# definitions and references are answered by text matching "
                 + "instead of by the compiler",
+                "без него определения и ссылки в C# ищутся текстовым "
+                + "совпадением, а не компилятором"),
         },
         new("NodeJs", "Node.js 20", false)
         {
-            Consequence = "only needed to run the TypeScript indexer",
+            Consequence = InstallerCulture.Pick(
+                "only needed to run the TypeScript indexer",
+                "нужен только для индексатора TypeScript"),
         },
         new("ScipTypeScript", "SCIP TypeScript", false)
         {
-            Consequence = "without it, TypeScript and JavaScript navigate by text matching",
+            Consequence = InstallerCulture.Pick(
+                "without it, TypeScript and JavaScript navigate by text matching",
+                "без него навигация по TypeScript и JavaScript идёт текстовым совпадением"),
         },
         new("Python", "Python 3.10+", false)
         {
-            Consequence = "only needed to run the Python indexer",
+            Consequence = InstallerCulture.Pick(
+                "only needed to run the Python indexer",
+                "нужен только для индексатора Python"),
         },
         new("ScipPython", "SCIP Python", false)
         {
-            Consequence = "without it, Python navigates by text matching",
+            Consequence = InstallerCulture.Pick(
+                "without it, Python navigates by text matching",
+                "без него навигация по Python идёт текстовым совпадением"),
         },
     ];
 
@@ -76,12 +89,19 @@ public sealed class DependenciesPageViewModel : ObservableObject
         {
             var selected = Dependencies
                 .Where(dependency => dependency.IsConsented)
-                .Select(dependency =>
-                    $"{dependency.Title} ({(dependency.IsInstalled ? "reinstall" : "install")})")
+                .Select(dependency => string.Format(
+                    "{0} ({1})",
+                    dependency.Title,
+                    dependency.IsInstalled
+                        ? InstallerCulture.Pick("reinstall", "переустановка")
+                        : InstallerCulture.Pick("install", "установка")))
                 .ToArray();
             return selected.Length == 0
-                ? "Dependencies: nothing selected"
-                : "Dependencies: " + string.Join(", ", selected);
+                ? InstallerCulture.Pick(
+                    "Dependencies: nothing selected",
+                    "Компоненты: ничего не выбрано")
+                : InstallerCulture.Pick("Dependencies: ", "Компоненты: ") +
+                    string.Join(", ", selected);
         }
     }
 

@@ -1,4 +1,5 @@
 using LocalAi.Installer.Core.Releases;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -25,7 +26,9 @@ public sealed class PackagePageViewModel : ObservableObject
     private string sourceFolder = string.Empty;
     private PackageSourceState state = PackageSourceState.NotChecked;
     private string statusText =
-        "Press Check again to look up this release.";
+        InstallerCulture.Pick(
+        "Press Check again to look up this release.",
+        "Нажмите «Проверить снова», чтобы найти этот релиз.");
 
     private bool isResolving;
 
@@ -44,7 +47,9 @@ public sealed class PackagePageViewModel : ObservableObject
             OnPropertyChanged(nameof(ResolvedTag));
             OnPropertyChanged(nameof(WantsLatest));
             State = PackageSourceState.NotChecked;
-            StatusText = "Press Check again to look up this release.";
+            StatusText = InstallerCulture.Pick(
+                "Press Check again to look up this release.",
+                "Нажмите «Проверить снова», чтобы найти этот релиз.");
         }
     }
 
@@ -70,7 +75,9 @@ public sealed class PackagePageViewModel : ObservableObject
             ResolvedTag = null;
             OnPropertyChanged(nameof(ResolvedTag));
             State = PackageSourceState.NotChecked;
-            StatusText = "Press Check again to look up this release.";
+            StatusText = InstallerCulture.Pick(
+                "Press Check again to look up this release.",
+                "Нажмите «Проверить снова», чтобы найти этот релиз.");
         }
     }
 
@@ -150,24 +157,54 @@ public sealed class PackagePageViewModel : ObservableObject
     /// installer while the person reading believes it came from GitHub.
     /// </summary>
     private string Source =>
-        SourceFolder.Length == 0 ? string.Empty : $", from {SourceFolder}";
+        SourceFolder.Length == 0
+            ? string.Empty
+            : string.Format(InstallerCulture.Pick(", from {0}", ", из папки {0}"), SourceFolder);
+
+    /// <summary>
+    /// The label on the button that applies the run — "Install" or "Update". Set by the wizard,
+    /// which is the only thing that knows which errand this is. The lines below used to spell
+    /// "Install" out, which already read wrong on an update run.
+    /// </summary>
+    public string ActionText { get; set; } =
+        InstallerCulture.Pick("Install", "Установить");
 
     public string ReviewText => State switch
     {
-        PackageSourceState.Selected when IsAlreadyInstalled && WantsLatest =>
-            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed{Source} — " +
-            "nothing will change unless a newer one is published before you press Install",
-        PackageSourceState.Selected when IsAlreadyInstalled =>
-            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is already installed{Source} — " +
-            "nothing will change",
-        PackageSourceState.Selected when WantsLatest =>
-            $"LocalAi package: {ResolvedTag ?? ReleaseVersion}{Source} — or whatever is " +
-            "newest when you press Install",
-        PackageSourceState.Selected => $"LocalAi package: {ResolvedTag ?? ReleaseVersion}{Source}",
-        PackageSourceState.Incompatible =>
-            $"LocalAi package: {ResolvedTag ?? ReleaseVersion} is not compatible — " +
-            "it will not be installed",
-        _ => "LocalAi package: not resolved — it will not be installed",
+        PackageSourceState.Selected when IsAlreadyInstalled && WantsLatest => string.Format(
+            InstallerCulture.Pick(
+                "LocalAi package: {0} is already installed{1} — nothing will change unless a " +
+                "newer one is published before you press {2}",
+                "Пакет LocalAi: {0} уже установлен{1} — ничего не изменится, если до " +
+                "нажатия «{2}» не выйдет более новый"),
+            ResolvedTag ?? ReleaseVersion,
+            Source,
+            ActionText),
+        PackageSourceState.Selected when IsAlreadyInstalled => string.Format(
+            InstallerCulture.Pick(
+                "LocalAi package: {0} is already installed{1} — nothing will change",
+                "Пакет LocalAi: {0} уже установлен{1} — ничего не изменится"),
+            ResolvedTag ?? ReleaseVersion,
+            Source),
+        PackageSourceState.Selected when WantsLatest => string.Format(
+            InstallerCulture.Pick(
+                "LocalAi package: {0}{1} — or whatever is newest when you press {2}",
+                "Пакет LocalAi: {0}{1} — или самый новый на момент нажатия «{2}»"),
+            ResolvedTag ?? ReleaseVersion,
+            Source,
+            ActionText),
+        PackageSourceState.Selected => string.Format(
+            InstallerCulture.Pick("LocalAi package: {0}{1}", "Пакет LocalAi: {0}{1}"),
+            ResolvedTag ?? ReleaseVersion,
+            Source),
+        PackageSourceState.Incompatible => string.Format(
+            InstallerCulture.Pick(
+                "LocalAi package: {0} is not compatible — it will not be installed",
+                "Пакет LocalAi: {0} несовместим — он не будет установлен"),
+            ResolvedTag ?? ReleaseVersion),
+        _ => InstallerCulture.Pick(
+            "LocalAi package: not resolved — it will not be installed",
+            "Пакет LocalAi: релиз не определён — он не будет установлен"),
     };
 
     /// <summary>
@@ -243,7 +280,7 @@ public sealed class PackagePageViewModel : ObservableObject
         ResolvedTag = null;
         OnPropertyChanged(nameof(ResolvedTag));
         OnPropertyChanged(nameof(WantsLatest));
-        StatusText = "Checking the release…";
+        StatusText = InstallerCulture.Pick("Checking the release…", "Проверяю релиз…");
         State = PackageSourceState.NotChecked;
     }
 
@@ -258,10 +295,19 @@ public sealed class PackagePageViewModel : ObservableObject
         OnPropertyChanged(nameof(WantsLatest));
         OnPropertyChanged(nameof(IsAlreadyInstalled));
         StatusText = IsAlreadyInstalled
-            ? $"Release {tag} is already installed. Continuing will re-run the other steps " +
-              "and leave the LocalAi version untouched."
-            : $"Release {tag} verified, " +
-              $"{release.Manifest.PackageSize / (1024d * 1024):N0} MB to download.";
+            ? string.Format(
+                InstallerCulture.Pick(
+                    "Release {0} is already installed. Continuing will re-run the other steps " +
+                    "and leave the LocalAi version untouched.",
+                    "Релиз {0} уже установлен. Продолжение повторит остальные шаги " +
+                    "и не тронет версию LocalAi."),
+                tag)
+            : string.Format(
+                InstallerCulture.Pick(
+                    "Release {0} verified, {1:N0} MB to download.",
+                    "Релиз {0} проверен, скачать {1:N0} МБ."),
+                tag,
+                release.Manifest.PackageSize / (1024d * 1024));
         State = PackageSourceState.Selected;
     }
 
@@ -277,7 +323,8 @@ public sealed class PackagePageViewModel : ObservableObject
     {
         IsResolving = false;
         Resolved = null;
-        StatusText = "No release resolved. " + reason;
+        StatusText =
+            InstallerCulture.Pick("No release resolved. ", "Релиз не определён. ") + reason;
         State = PackageSourceState.Unavailable;
     }
 
@@ -290,7 +337,9 @@ public sealed class PackagePageViewModel : ObservableObject
         OnPropertyChanged(nameof(ReleaseVersion));
         OnPropertyChanged(nameof(ResolvedTag));
         OnPropertyChanged(nameof(WantsLatest));
-        StatusText = "Press Check again to look up this release.";
+        StatusText = InstallerCulture.Pick(
+            "Press Check again to look up this release.",
+            "Нажмите «Проверить снова», чтобы найти этот релиз.");
         State = PackageSourceState.NotChecked;
     }
 }

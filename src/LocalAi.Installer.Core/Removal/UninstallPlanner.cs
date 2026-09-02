@@ -211,12 +211,14 @@ public sealed class UninstallPlanner
         catch (Exception exception) when (
             exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            return Skipped(repositoryId, repositoryRuntimeRoot, "its manifest is unreadable");
+            return Skipped(repositoryId, repositoryRuntimeRoot, InstallerCulture.Pick(
+                "its manifest is unreadable",
+                "его манифест не читается"));
         }
 
         if (manifest is null)
         {
-            return Skipped(repositoryId, repositoryRuntimeRoot, "it has no manifest");
+            return Skipped(repositoryId, repositoryRuntimeRoot, InstallerCulture.Pick("it has no manifest", "у него нет манифеста"));
         }
 
         if (!Directory.Exists(manifest.CommonDirectory))
@@ -226,7 +228,9 @@ public sealed class UninstallPlanner
             return Skipped(
                 repositoryId,
                 manifest.CommonDirectory,
-                "the repository no longer exists at this path");
+                InstallerCulture.Pick(
+                    "the repository no longer exists at this path",
+                    "репозитория по этому пути больше нет"));
         }
 
         var workingTreeRoot = manifest.ActiveWorktrees
@@ -357,19 +361,30 @@ public sealed class UninstallPlanner
         var notices = new List<RetainedNotice>
         {
             new(
-                "Prerequisites installed through winget",
-                "Git, Ollama, the .NET SDK, Node, Python and the indexers are machine-wide and " +
-                "other software may use them. Remove the ones you no longer want with " +
-                "`winget uninstall <id>`."),
+                InstallerCulture.Pick(
+                    "Prerequisites installed through winget",
+                    "Компоненты, установленные через winget"),
+                InstallerCulture.Pick(
+                    "Git, Ollama, the .NET SDK, Node, Python and the indexers are machine-wide " +
+                    "and other software may use them. Remove the ones you no longer want with " +
+                    "`winget uninstall <id>`.",
+                    "Git, Ollama, .NET SDK, Node, Python и индексаторы установлены для всей " +
+                    "машины, и ими может пользоваться другое ПО. Ненужные удалите " +
+                    "командой `winget uninstall <id>`.")),
             new(
-                "Ollama models",
-                "They may serve other tools. Remove the ones you no longer want with " +
-                "`ollama rm <tag>`."),
+                InstallerCulture.Pick("Ollama models", "Модели Ollama"),
+                InstallerCulture.Pick(
+                    "They may serve other tools. Remove the ones you no longer want with " +
+                    "`ollama rm <tag>`.",
+                    "Ими могут пользоваться другие инструменты. Ненужные удалите " +
+                    "командой `ollama rm <tag>`.")),
             new(
-                "The installer journal",
-                "%LOCALAPPDATA%\\" + RemovalMatrix.JournalDirectoryName + " stays: it is the " +
-                "record of what installs did to this machine, and this run writes its own " +
-                "entry there too."),
+                InstallerCulture.Pick("The installer journal", "Журнал установщика"),
+                "%LOCALAPPDATA%\\" + RemovalMatrix.JournalDirectoryName + InstallerCulture.Pick(
+                    " stays: it is the record of what installs did to this machine, and this " +
+                    "run writes its own entry there too.",
+                    " остаётся: это запись о том, что установки сделали с этой " +
+                    "машиной, и текущий запуск тоже пишет туда свою.")),
         };
 
         if (!selection.Includes(RemovalItem.SigningKeys))
@@ -377,8 +392,11 @@ public sealed class UninstallPlanner
             notices.Add(new(
                 RemovalMatrix.Title(RemovalItem.SigningKeys),
                 Path.Combine(layout.Root, RemovalMatrix.SigningKeyDirectoryName) +
-                " stays. Removing it needs its own confirmation, because the offline backup " +
-                "would then be the only copy."));
+                InstallerCulture.Pick(
+                    " stays. Removing it needs its own confirmation, because the offline " +
+                    "backup would then be the only copy.",
+                    " остаётся. Для удаления нужно отдельное подтверждение: " +
+                    "офлайн-копия тогда станет единственной.")));
         }
 
         foreach (var item in new[]
@@ -400,20 +418,31 @@ public sealed class UninstallPlanner
             !selection.Includes(RemovalItem.GitHooks))
         {
             notices.Add(new(
-                "Git hook dispatchers",
+                RemovalMatrix.Title(RemovalItem.GitHooks),
                 installationFollows
-                    ? "They stay installed and keep pointing at the launcher this run " +
+                    ? InstallerCulture.Pick(
+                        "They stay installed and keep pointing at the launcher this run " +
                         "removes. Every hook in a connected repository exits non-zero until " +
-                        "the installation that follows puts it back."
-                    : "They stay installed and will call a launcher that is no longer there. " +
-                        "Each hook exits non-zero from then on; remove them here or by hand."));
+                        "the installation that follows puts it back.",
+                        "Они остаются установленными и продолжают указывать на launcher, " +
+                        "который удаляет этот запуск. Каждый хук в подключённом " +
+                        "репозитории будет завершаться ненулевым кодом, пока " +
+                        "следующая установка не вернёт его на место.")
+                    : InstallerCulture.Pick(
+                        "They stay installed and will call a launcher that is no longer there. " +
+                        "Each hook exits non-zero from then on; remove them here or by hand.",
+                        "Они остаются установленными и будут вызывать launcher, " +
+                        "которого больше нет. С этого момента каждый хук завершается " +
+                        "ненулевым кодом; удалите их здесь или вручную.")));
         }
 
         var skipped = hooks.Where(hook => hook.IsSkipped).ToArray();
         if (skipped.Length > 0)
         {
             notices.Add(new(
-                "Repositories that could not be reached",
+                InstallerCulture.Pick(
+                    "Repositories that could not be reached",
+                    "Репозитории, до которых не удалось добраться"),
                 string.Join(
                     "; ",
                     skipped.Select(hook => hook.CommonDirectory + " — " + hook.SkipReason))));

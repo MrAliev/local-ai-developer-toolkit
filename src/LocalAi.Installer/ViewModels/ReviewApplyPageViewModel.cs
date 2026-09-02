@@ -1,4 +1,5 @@
-﻿using LocalAi.Contracts;
+using LocalAi.Installer.Core;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -35,7 +36,9 @@ public sealed class ReviewApplyPageViewModel : ObservableObject
     /// The same sentence `localai policy set --update-check on` prints, held in the contract so
     /// the two cannot drift into describing the same request differently.
     /// </summary>
-    public string UpdateCheckDisclosure => UpdateCheckPolicy.Disclosure;
+    public string UpdateCheckDisclosure => InstallerCulture.Pick(
+        UpdateCheckPolicy.Disclosure,
+        UpdateCheckPolicy.DisclosureRussian);
 
     public bool CanApply =>
         IsConfirmed;

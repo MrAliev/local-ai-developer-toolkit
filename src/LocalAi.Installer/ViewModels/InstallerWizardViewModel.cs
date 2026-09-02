@@ -13,6 +13,7 @@ using LocalAi.Installer.Core.Models;
 using LocalAi.Installer.Core.Releases;
 using LocalAi.Installer.Core.Removal;
 using LocalAi.Installer.Core.Transactions;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.ViewModels;
 
@@ -22,18 +23,6 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     /// <summary>Matches the activation timeout the installation itself runs under.</summary>
     private static readonly TimeSpan RollbackActivationTimeout = TimeSpan.FromMinutes(5);
-
-    private static readonly IReadOnlyList<(InstallerPage Page, string Title)> AllSteps =
-    [
-        (InstallerPage.Diagnose, "System check"),
-        (InstallerPage.Dependencies, "Prerequisites"),
-        (InstallerPage.Package, "LocalAi package"),
-        (InstallerPage.Models, "Models and memory"),
-        (InstallerPage.Agents, "Client apps"),
-        (InstallerPage.Confirm, "Confirm"),
-        (InstallerPage.Progress, "Install"),
-        (InstallerPage.Finish, "Finished"),
-    ];
 
     /// <summary>
     /// What the start screen was asked for. Until now the wizard could not tell an install
@@ -58,8 +47,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     private IReadOnlyList<(InstallerPage Page, string Title)> Steps =>
         Mode == StartChoice.Install
-            ? AllSteps
-            : [.. AllSteps
+            ? WizardText.Steps()
+            : [.. WizardText.Steps()
                 .Where(step =>
                 (releaseRevealed || !FoldedRelease.Contains(step.Page)) &&
                 (settingsRevealed || !FoldedSettings.Contains(step.Page)))];
@@ -340,10 +329,17 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     public string ConsentText => Mode switch
     {
-        StartChoice.UpdateOrRepair => "I have read what will change and want to continue.",
-        StartChoice.CleanReinstall =>
-            "I have read what will be removed and what will be installed, and want to continue.",
-        _ => "I have read what will be installed and want to continue.",
+        StartChoice.UpdateOrRepair => InstallerCulture.Pick(
+            "I have read what will change and want to continue.",
+            "Я понимаю, что изменится, и хочу продолжить."),
+        StartChoice.CleanReinstall => InstallerCulture.Pick(
+            "I have read what will be removed and what will be installed, and want to " +
+            "continue.",
+            "Я понимаю, что будет удалено и что установлено, и хочу " +
+            "продолжить."),
+        _ => InstallerCulture.Pick(
+            "I have read what will be installed and want to continue.",
+            "Я понимаю, что будет установлено, и хочу продолжить."),
     };
 
     /// <summary>
@@ -352,9 +348,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     public string WindowTitle => Mode switch
     {
-        StartChoice.UpdateOrRepair => "LocalAi — Update or repair",
-        StartChoice.CleanReinstall => "LocalAi — Reinstall",
-        _ => "LocalAi Setup",
+        StartChoice.UpdateOrRepair => InstallerCulture.Pick(
+            "LocalAi — Update or repair",
+            "LocalAi — обновление или восстановление"),
+        StartChoice.CleanReinstall => InstallerCulture.Pick(
+            "LocalAi — Reinstall",
+            "LocalAi — переустановка"),
+        _ => InstallerCulture.Pick("LocalAi Setup", "Установка LocalAi"),
     };
 
     /// <summary>
@@ -387,7 +387,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
         // the first page, and a request left at "latest" is checked once more immediately
         // before installing. So it moves until the run settles it.
         var resolved = package.Resolved?.Manifest.ReleaseVersion
-            ?? (package.IsResolving ? "checking…" : "no release");
+            ?? (package.IsResolving
+                ? InstallerCulture.Pick("checking…", "проверяю…")
+                : InstallerCulture.Pick("no release", "релиз не выбран"));
 
         if (heldInstalledVersion is null)
         {
@@ -395,7 +397,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
         }
 
         return string.Equals(heldInstalledVersion, resolved, StringComparison.OrdinalIgnoreCase)
-            ? heldInstalledVersion + " → " + resolved + " (repair)"
+            ? heldInstalledVersion + " → " + resolved +
+                InstallerCulture.Pick(" (repair)", " (восстановление)")
             : heldInstalledVersion + " → " + resolved;
     }
 
@@ -404,7 +407,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// page, and "Install" on a run somebody started as "Update or repair" is exactly the "did
     /// it hear me?" this wording work is about (#257).
     /// </summary>
-    public string ActionText => IsUpdate ? "Update" : "Install";
+    public string ActionText => IsUpdate
+        ? InstallerCulture.Pick("Update", "Обновить")
+        : InstallerCulture.Pick("Install", "Установить");
 
     /// <summary>
     /// True for the errands that change an existing installation rather than create one. Both
@@ -412,52 +417,20 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     private bool IsUpdate => Mode is StartChoice.UpdateOrRepair or StartChoice.CleanReinstall;
 
-    public string StepTitle => CurrentPage switch
-    {
-        InstallerPage.Diagnose => "System check",
-        InstallerPage.Dependencies => "Prerequisites",
-        InstallerPage.Package => "LocalAi package",
-        InstallerPage.Models => "How models run on this computer",
-        InstallerPage.Agents => "Client applications",
-        InstallerPage.Confirm => IsUpdate ? "Ready to update" : "Ready to install",
-        InstallerPage.Progress => IsUpdate ? "Updating" : "Installing",
-        _ => (hasRunError, IsUpdate) switch
-        {
-            (true, true) => "Update not completed",
-            (true, false) => "Installation not completed",
-            (false, true) => "Update complete",
-            (false, false) => "Installation complete",
-        },
-    };
+    public string StepTitle => WizardText.Title(CurrentPage, IsUpdate, hasRunError);
 
-    public string StepDescription => CurrentPage switch
-    {
-        // The shipped line stopped being true the moment results appeared, so it says one
-        // thing while the probe runs and another once there is a table to read.
-        InstallerPage.Diagnose when diagnose.IsChecking =>
-            "Checking this computer. Starting winget, git and ollama to see what is " +
-            "installed — this takes a few seconds.",
-        InstallerPage.Diagnose =>
-            "What was found on this computer. Items marked as a warning still allow " +
-            "installation.",
-        InstallerPage.Dependencies =>
-            "Choose which prerequisites to install. Nothing is selected for you.",
-        InstallerPage.Package => "Choose the LocalAi release to install.",
-        InstallerPage.Models =>
-            "Video memory decides which models fit. Choose the rule first; the list below " +
-            "follows it.",
-        InstallerPage.Agents =>
-            "Choose how each client application should be integrated.",
-        InstallerPage.Confirm =>
-            "Review what is about to happen. To change anything click Back; to apply it " +
-            "click Install.",
-        InstallerPage.Progress => "Applying the selected actions.",
-        _ => hasRunError
-            ? "Some actions did not complete. The log below shows what happened."
-            : "All selected actions completed.",
-    };
+    public string StepDescription =>
+        WizardText.Description(
+            CurrentPage,
+            IsUpdate,
+            ActionText,
+            hasRunError,
+            isChecking: diagnose.IsChecking);
 
-    public string StepStatus => $"Step {StepIndex(CurrentPage) + 1} of {Steps.Count}";
+    public string StepStatus => string.Format(
+        InstallerCulture.Pick("Step {0} of {1}", "Шаг {0} из {1}"),
+        StepIndex(CurrentPage) + 1,
+        Steps.Count);
 
     public bool IsFinishPage => CurrentPage == InstallerPage.Finish;
 
@@ -505,7 +478,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     public void ReportUnexpectedError(Exception exception)
     {
-        unexpectedError = $"Unexpected error: {exception.GetType().Name}: {exception.Message}";
+        unexpectedError = string.Format(
+            InstallerCulture.Pick(
+                "Unexpected error: {0}: {1}",
+                "Непредвиденная ошибка: {0}: {1}"),
+            exception.GetType().Name,
+            exception.Message);
         OnPropertyChanged(nameof(UnexpectedError));
         OnPropertyChanged(nameof(HasUnexpectedError));
     }
@@ -545,7 +523,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
     public bool IsInstallVisible => CurrentPage == InstallerPage.Confirm;
 
-    public string CancelButtonText => IsFinishPage ? "Close" : "Cancel";
+    public string CancelButtonText => IsFinishPage
+        ? InstallerCulture.Pick("Close", "Закрыть")
+        : InstallerCulture.Pick("Cancel", "Отмена");
 
     public string? ReviewText => BuildReview();
 
@@ -631,16 +611,24 @@ public sealed class InstallerWizardViewModel : ObservableObject
     private static string BuildInterruptedRunNotice(InstallerRunJournalSnapshot snapshot)
     {
         var notice = new StringBuilder();
-        notice.AppendLine(
-            $"A previous installer run ({snapshot.StartedAtUtc:yyyy-MM-dd HH:mm} UTC) was " +
-            "interrupted before it could finish. What it recorded:");
+        notice.AppendLine(string.Format(
+            InstallerCulture.Pick(
+                "A previous installer run ({0:yyyy-MM-dd HH:mm} UTC) was interrupted before " +
+                "it could finish. What it recorded:",
+                "Предыдущий запуск установщика ({0:yyyy-MM-dd HH:mm} UTC) был " +
+                "прерван до завершения. Что он записал:"),
+            snapshot.StartedAtUtc));
         foreach (var step in snapshot.Steps)
         {
             var state = step.Status switch
             {
-                InstallerRunStepStatus.Completed => "applied",
-                InstallerRunStepStatus.Running => "started, state unknown",
-                InstallerRunStepStatus.Failed => "failed",
+                InstallerRunStepStatus.Completed =>
+                    InstallerCulture.Pick("applied", "применено"),
+                InstallerRunStepStatus.Running => InstallerCulture.Pick(
+                    "started, state unknown",
+                    "начато, состояние неизвестно"),
+                InstallerRunStepStatus.Failed =>
+                    InstallerCulture.Pick("failed", "не удалось"),
                 _ => step.Status.ToString(),
             };
             notice.AppendLine($"  - {step.Description}: {state}.");
@@ -648,14 +636,22 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
         if (snapshot.Steps.Count == 0)
         {
-            notice.AppendLine("  - Nothing was applied before it stopped.");
+            notice.AppendLine(InstallerCulture.Pick(
+                "  - Nothing was applied before it stopped.",
+                "  - До остановки ничего не применялось."));
         }
 
         notice.Append(snapshot.HasReversibleWork
-            ? "You can roll back the reversible changes now, or continue and leave them " +
-                "in place."
-            : "Nothing it recorded is reversible by this installer. Continue to leave it " +
-                "as it is.");
+            ? InstallerCulture.Pick(
+                "You can roll back the reversible changes now, or continue and leave them " +
+                "in place.",
+                "Обратимые изменения можно откатить сейчас или продолжить " +
+                "и оставить их как есть.")
+            : InstallerCulture.Pick(
+                "Nothing it recorded is reversible by this installer. Continue to leave it " +
+                "as it is.",
+                "Ничего из записанного этот установщик откатить не может. " +
+                "Продолжите, чтобы оставить как есть."));
         return notice.ToString();
     }
 
@@ -784,8 +780,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
             if (!EnableDependencyActions)
             {
                 finish.Progress = report.ToString().Trim();
-                finish.Summary = "Dry run completed. Nothing was installed.";
-                SetProgress(100, "Completed");
+                finish.Summary = InstallerCulture.Pick(
+                    "Dry run completed. Nothing was installed.",
+                    "Пробный прогон завершён. Ничего не установлено.");
+                SetProgress(100, InstallerCulture.Pick("Completed", "Завершено"));
                 isComplete = true;
                 CurrentPage = InstallerPage.Finish;
                 return true;
@@ -826,7 +824,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 token.ThrowIfCancellationRequested();
                 SetProgress(
                     10 + (80 * step++ / Math.Max(selected.Length, 1)),
-                    $"Installing {dependency.Title}...");
+                    string.Format(
+                        InstallerCulture.Pick("Installing {0}...", "Устанавливаю {0}…"),
+                        dependency.Title));
 
                 var definition = ResolveDependencyDefinition(dependency.Id);
                 if (definition is null)
@@ -898,14 +898,18 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // would hand every client a path to nothing.
             await ApplyAgentConfigurationAsync(report, token);
 
-            SetProgress(95, "Finalising...");
+            SetProgress(95, InstallerCulture.Pick("Finalising...", "Завершаю…"));
             AppendLog(report, "Finalising.");
             finish.Summary = BuildFinishSummary(
                 requested,
                 successfulActions,
                 skippedActions,
                 failedActions);
-            SetProgress(100, hasRunError ? "Failed" : "Completed");
+            SetProgress(
+                100,
+                hasRunError
+                    ? InstallerCulture.Pick("Failed", "Ошибка")
+                    : InstallerCulture.Pick("Completed", "Завершено"));
             isComplete = !hasRunError;
             JournalFinish(hasRunError
                 ? InstallerRunOutcome.Failed
@@ -924,13 +928,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
             wasCancelled = true;
             hasRunError = true;
             isComplete = false;
-            SetProgress(progress, "Cancelled");
+            SetProgress(progress, InstallerCulture.Pick("Cancelled", "Отменено"));
             finish.Summary = BuildFinishSummary(
                 requested,
                 successfulActions,
                 skippedActions,
                 failedActions,
-                "Cancelled by the user.");
+                InstallerCulture.Pick("Cancelled by the user.", "Отменено пользователем."));
             finish.Progress = report.ToString().Trim();
             CurrentPage = InstallerPage.Finish;
             return false;
@@ -942,7 +946,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             AppendRollbackAvailability(report);
             hasRunError = true;
             isComplete = false;
-            SetProgress(100, "Failed");
+            SetProgress(100, InstallerCulture.Pick("Failed", "Ошибка"));
             finish.Summary = BuildFinishSummary(
                 requested,
                 successfulActions,
@@ -988,8 +992,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
                 $"install-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllText(path, report.ToString());
             finish.Summary = string.IsNullOrWhiteSpace(finish.Summary)
-                ? $"Report saved to {path}."
-                : $"{finish.Summary}{Environment.NewLine}Report saved to {path}.";
+                ? string.Format(SavedTo, path)
+                : finish.Summary + Environment.NewLine + string.Format(SavedTo, path);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
@@ -1102,9 +1106,12 @@ public sealed class InstallerWizardViewModel : ObservableObject
         AppendLog(
             report,
             journal.Snapshot.HasReversibleWork
-                ? "Some of the applied actions are reversible. Use \"Roll back changes\" " +
-                    "below to undo them; the journal at " + journal.JournalPath +
-                    " records exactly what was done."
+                // The log is English, but this sentence points at a button, and the button
+                // carries whatever label the window is showing. An instruction naming a
+                // control that is not on screen cannot be followed.
+                ? "Some of the applied actions are reversible. Use \"" +
+                    PageLabels.RollBackChanges + "\" below to undo them; the journal at " +
+                    journal.JournalPath + " records exactly what was done."
                 : "Nothing this run applied is reversible by the installer. The journal " +
                     "at " + journal.JournalPath + " records exactly what was done.");
     }
@@ -1237,7 +1244,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return;
         }
 
-        SetProgress(94, "Configuring client applications...");
+        SetProgress(94, InstallerCulture.Pick("Configuring client applications...", "Настраиваю клиентские приложения…"));
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var binRoot = InstallationLayout.CreateDefault().BinRoot;
         foreach (var agent in requested)
@@ -1280,7 +1287,7 @@ public sealed class InstallerWizardViewModel : ObservableObject
                         Files: plan.Files.Select(BuildAgentFileUndo).ToArray()));
                 AppendLog(
                     report,
-                    $"{plan.AgentName}: {agent.Choice.Title()} applied to " +
+                    $"{plan.AgentName}: {agent.Choice.EnglishTitle()} applied to " +
                     string.Join(", ", plan.Files.Select(file => file.Path)) +
                     ". Restart the client to pick it up.");
             }
@@ -1534,6 +1541,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
         return 0;
     }
 
+    /// <summary>Where the run wrote its report, said on the finish page.</summary>
+    private static string SavedTo => InstallerCulture.Pick(
+        "Report saved to {0}.",
+        "Отчёт сохранён в {0}.");
+
     /// <summary>
     /// Says when this run replaces a setting the machine already had.
     ///
@@ -1543,7 +1555,11 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     private string StoredResidencyNote() =>
         storedResidency is { } stored && stored != residency.Policy
-            ? $" (currently {ResidencyPageViewModel.Name(stored)} - this run changes it)"
+            ? string.Format(
+                InstallerCulture.Pick(
+                    " (currently {0} — this run changes it)",
+                    " (сейчас {0} — этот запуск это меняет)"),
+                ResidencyPageViewModel.Name(stored))
             : string.Empty;
 
     /// <summary>
@@ -1552,19 +1568,32 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// </summary>
     private string UpdateCheckReviewLine()
     {
-        var wanted = review.EnableUpdateCheck ? "on" : "off";
+        var wanted = Switch(review.EnableUpdateCheck);
         if (storedUpdateCheck is { } stored && stored != review.EnableUpdateCheck)
         {
-            return $"Update check: {wanted} (currently {(stored ? "on" : "off")} - this run " +
-                "changes it)";
+            return string.Format(
+                InstallerCulture.Pick(
+                    "Update check: {0} (currently {1} — this run changes it)",
+                    "Проверка обновлений: {0} (сейчас {1} — этот запуск это меняет)"),
+                wanted,
+                Switch(stored));
         }
 
-        return "Update check: " + wanted;
+        return string.Format(
+            InstallerCulture.Pick("Update check: {0}", "Проверка обновлений: {0}"),
+            wanted);
+
+        static string Switch(bool on) => on
+            ? InstallerCulture.Pick("on", "включена")
+            : InstallerCulture.Pick("off", "выключена");
     }
 
     private string BuildReview()
     {
         var builder = new StringBuilder();
+        // The release lines name the button that applies the run; only the wizard knows
+        // whether that button reads Install or Update.
+        package.ActionText = ActionText;
         builder.AppendLine(package.ReviewText);
         builder.AppendLine(dependencies.ReviewText);
         builder.AppendLine(models.ReviewText);
@@ -1574,7 +1603,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
         if (residency.HasWarning)
         {
             builder.AppendLine();
-            builder.AppendLine("Warning: " + residency.Warning);
+            builder.AppendLine(
+                InstallerCulture.Pick("Warning: ", "Внимание: ") + residency.Warning);
         }
 
         // The package is the point of the run, and its absence is the one line on this page a
@@ -1591,13 +1621,22 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // (#264).
             var remaining = dependencies.Dependencies
                 .Any(dependency => dependency.IsConsented && dependency.IsInstallable)
-                ? "Only the prerequisites above will be applied."
-                : "Nothing will be applied.";
-            builder.AppendLine(
-                "Warning: no release has been verified, so LocalAi itself will not be " +
-                "installed and the client applications will be left unconfigured. " +
-                remaining +
-                " Choose a release below and verify it before continuing.");
+                ? InstallerCulture.Pick(
+                    "Only the prerequisites above will be applied.",
+                    "Будут применены только компоненты, перечисленные выше.")
+                : InstallerCulture.Pick(
+                    "Nothing will be applied.",
+                    "Ничего применено не будет.");
+            builder.AppendLine(string.Format(
+                InstallerCulture.Pick(
+                    "Warning: no release has been verified, so LocalAi itself will not be " +
+                    "installed and the client applications will be left unconfigured. {0} " +
+                    "Choose a release below and verify it before continuing.",
+                    "Внимание: ни один релиз не проверен, поэтому сам LocalAi " +
+                    "установлен не будет, а клиентские приложения останутся " +
+                    "ненастроенными. {0} Выберите релиз ниже и проверьте его, " +
+                    "прежде чем продолжать."),
+                remaining));
         }
 
         return builder.ToString().Trim();
@@ -1681,6 +1720,38 @@ public sealed class InstallerWizardViewModel : ObservableObject
         finish.Progress = report.ToString().TrimEnd();
     }
 
+    /// <summary>
+    /// What the package installer did, in words rather than in the name of its enum member.
+    /// The summary is read by a person; "ImmutableConflict" tells them nothing about what to
+    /// do next, and on a Russian run it also arrives in the wrong language.
+    /// </summary>
+    private static string PackageOutcomeName(LocalAiPackageInstallStatus status) => status switch
+    {
+        LocalAiPackageInstallStatus.Installed =>
+            InstallerCulture.Pick("installed", "установлен"),
+        LocalAiPackageInstallStatus.AlreadyInstalled =>
+            InstallerCulture.Pick("already installed", "уже был установлен"),
+        LocalAiPackageInstallStatus.Refused =>
+            InstallerCulture.Pick("refused", "отказано"),
+        LocalAiPackageInstallStatus.ImmutableConflict => InstallerCulture.Pick(
+            "not installed: that version directory already holds different files",
+            "не установлен: в каталоге этой версии уже лежат другие файлы"),
+        LocalAiPackageInstallStatus.RolledBack =>
+            InstallerCulture.Pick("rolled back", "откачено"),
+        LocalAiPackageInstallStatus.RollbackFailed =>
+            InstallerCulture.Pick("rollback failed", "откат не удался"),
+        LocalAiPackageInstallStatus.ManualRecoveryRequired => InstallerCulture.Pick(
+            "manual recovery required",
+            "требуется ручное восстановление"),
+        LocalAiPackageInstallStatus.Indeterminate => InstallerCulture.Pick(
+            "state could not be determined",
+            "состояние определить не удалось"),
+        LocalAiPackageInstallStatus.Busy => InstallerCulture.Pick(
+            "another install or uninstall was running",
+            "шла другая установка или деинсталляция"),
+        _ => status.ToString(),
+    };
+
     private string BuildFinishSummary(
         int requestedActions,
         int successfulActions,
@@ -1692,12 +1763,22 @@ public sealed class InstallerWizardViewModel : ObservableObject
         // The package is the point of the whole run, so it is reported first and by name.
         // The counters below cover prerequisites only, and on their own they read as "0, 0,
         // 0, 0" even when the package failed.
-        summary.AppendLine($"LocalAi package: {packageOutcome ?? "not attempted"}.");
+        summary.AppendLine(string.Format(
+            InstallerCulture.Pick("LocalAi package: {0}.", "Пакет LocalAi: {0}."),
+            packageOutcome ?? InstallerCulture.Pick("not attempted", "не выполнялось")));
         summary.AppendLine();
-        summary.AppendLine($"Prerequisites requested: {requestedActions}.");
-        summary.AppendLine($"Installed: {successfulActions}.");
-        summary.AppendLine($"Skipped: {skippedActions}.");
-        summary.AppendLine($"Failed: {failedActions}.");
+        summary.AppendLine(string.Format(
+            InstallerCulture.Pick("Prerequisites requested: {0}.", "Запрошено компонентов: {0}."),
+            requestedActions));
+        summary.AppendLine(string.Format(
+            InstallerCulture.Pick("Installed: {0}.", "Установлено: {0}."),
+            successfulActions));
+        summary.AppendLine(string.Format(
+            InstallerCulture.Pick("Skipped: {0}.", "Пропущено: {0}."),
+            skippedActions));
+        summary.AppendLine(string.Format(
+            InstallerCulture.Pick("Failed: {0}.", "Не удалось: {0}."),
+            failedActions));
         if (!string.IsNullOrWhiteSpace(fatalMessage))
         {
             summary.AppendLine(fatalMessage);
@@ -1737,7 +1818,8 @@ public sealed class InstallerWizardViewModel : ObservableObject
             .FirstOrDefault();
         residency.AdapterFound = weighed is null
             ? string.Empty
-            : "Found: " + GpuAdapterDisplay.Describe(weighed);
+            : InstallerCulture.Pick("Found: ", "Найден: ") +
+                GpuAdapterDisplay.Describe(weighed);
         agents.ApplyDetection(diagnosis.Agents);
         await RefreshRecommendationAsync(diagnosis, cancellationToken);
 
@@ -2089,7 +2171,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // Not a skip: installing the package is the entire point of this wizard. Returning
             // quietly here let the run finish as "Installation complete" while nothing had been
             // installed at all, which is the one outcome worse than a visible failure.
-            packageOutcome = "not installed, no verified release was selected";
+            packageOutcome = InstallerCulture.Pick(
+                "not installed, no verified release was selected",
+                "не установлен, проверенный релиз не выбран");
             AppendLog(
                 report,
                 "LocalAi package: no verified release was selected, so nothing was installed. " +
@@ -2119,10 +2203,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
 
             SetProgress(
                 40 + (int)(50 * Math.Clamp(bytes, 0, total) / Math.Max(total, 1)),
-                $"Downloading the LocalAi package: " +
-                $"{bytes / (1024d * 1024):N0} of {total / (1024d * 1024):N0} MB");
+                string.Format(
+                    InstallerCulture.Pick(
+                        "Downloading the LocalAi package: {0:N0} of {1:N0} MB",
+                        "Скачиваю пакет LocalAi: {0:N0} из {1:N0} МБ"),
+                    bytes / (1024d * 1024),
+                    total / (1024d * 1024)));
         });
-        SetProgress(40, "Downloading the LocalAi package...");
+        SetProgress(40, InstallerCulture.Pick("Downloading the LocalAi package...", "Скачиваю пакет LocalAi…"));
 
         var service = new ReleaseInstallService(
             CreateFeed(),
@@ -2137,7 +2225,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
             SetProgress(
                 90 + share,
                 step.Total > 0
-                    ? $"Local models: {step.Completed} of {step.Total} — {step.Message}"
+                    ? string.Format(
+                        InstallerCulture.Pick(
+                            "Local models: {0} of {1} — {2}",
+                            "Локальные модели: {0} из {1} — {2}"),
+                        step.Completed,
+                        step.Total,
+                        step.Message)
                     : step.Message);
             AppendLog(report, step.Message);
         });
@@ -2189,7 +2283,9 @@ public sealed class InstallerWizardViewModel : ObservableObject
             // defect. It is caught here so the advice can name the directory and say what is
             // in it, and so the run still finishes its own reporting instead of aborting.
             packageInstalled = false;
-            packageOutcome = $"not installed — {exception.Message}";
+            packageOutcome = string.Format(
+                InstallerCulture.Pick("not installed — {0}", "не установлен — {0}"),
+                exception.Message);
             AppendLog(report, $"LocalAi package: {exception.Message}");
             var layout = InstallationLayout.CreateDefault();
             var advice = InstallationFailureAdvice.ForLayoutFailure(
@@ -2205,12 +2301,18 @@ public sealed class InstallerWizardViewModel : ObservableObject
             return;
         }
 
-        SetProgress(90, "Installing the LocalAi package...");
+        SetProgress(90, InstallerCulture.Pick("Installing the LocalAi package...", "Устанавливаю пакет LocalAi…"));
 
         packageInstalled = result.Installed;
+        // result.Status is an enum name. It used to be printed straight into the summary a
+        // person reads — "ImmutableConflict" — which is the same defect the review page fixed
+        // for the residency policy, one page further on.
         packageOutcome = result.Installed
-            ? $"{result.Status}, version {result.Version}"
-            : $"{result.Status} — {result.Reason}".TrimEnd(' ', '—');
+            ? string.Format(
+                InstallerCulture.Pick("{0}, version {1}", "{0}, версия {1}"),
+                PackageOutcomeName(result.Status),
+                result.Version)
+            : $"{PackageOutcomeName(result.Status)} — {result.Reason}".TrimEnd(' ', '—');
         AppendLog(
             report,
             result.Installed

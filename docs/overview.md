@@ -539,6 +539,13 @@ host is unreachable but the API is not — and it reuses the sign-in already est
 same either way: the manifest is verified against the key embedded in the build, the
 package against the SHA-256 inside the manifest.
 
+The screen that asks also asks which language you read, and both wizards answer in it: the
+rail, every page, the review a run is consented to, and the removal preview above its
+checkbox. The choice is remembered beside the installer's own logs, so removing LocalAi months
+later opens in the language the installation was chosen in. Two things stay English on a
+Russian run, for one reason: the run journal and the report written next to it exist to be
+read against each other.
+
 The same executable is also the uninstaller, the updater and the repair tool, so starting it
 asks which of those this run is and offers only what the machine allows, naming the reason for
 the rest. An update also stops re-asking what it already has: prerequisites that are installed, models
@@ -552,8 +559,8 @@ changed. On one page the rule sits above its consequence, and a line inside the 
 restates it with the count, so the dependency is legible after the radio buttons scroll away. The
 release is folded with them — the errand settled which one it is, so resolving it is work
 rather than a question, and it happens behind the first page instead of behind a button.
-That page is called `Preparing` on this path rather than `System check`: its content is one
-line and a spinner, and what the reader waits for is the release as much as the machine.
+The page is still `System check` and still shows what was found; on this path what the reader
+waits for is the release as much as the machine.
 Two buttons on the review page bring back what was folded — one for the release, one for the
 settings, because they are different questions. What the review says a run will do is what it
 will do: when nothing is selected and no release verified, it says nothing will be applied

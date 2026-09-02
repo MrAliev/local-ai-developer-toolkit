@@ -119,7 +119,11 @@ public sealed class InstallerWizardViewModelTests
         Assert.All(optional, dependency =>
         {
             Assert.NotEmpty(dependency.Consequence);
-            Assert.Contains("optional — ", dependency.RequirementText, StringComparison.Ordinal);
+            // A colon, not the em dash the whole line is already joined by.
+            Assert.Contains(
+                "optional: ",
+                dependency.RequirementText,
+                StringComparison.Ordinal);
         });
     }
 

@@ -93,7 +93,9 @@ public sealed record UninstallPlan(
                 text.AppendLine(RemovalMatrix.Title(item) + ":");
                 foreach (var path in paths)
                 {
-                    text.AppendLine("  remove " + path.Path + (path.IsDirectory ? "\\" : string.Empty));
+                    text.AppendLine(
+                        "  " + InstallerCulture.Pick("remove", "удалить") + " " +
+                        path.Path + (path.IsDirectory ? "\\" : string.Empty));
                 }
 
                 if (registration)
@@ -101,13 +103,16 @@ public sealed record UninstallPlan(
                     // The entry is what made this removable from Apps & features in the first
                     // place, and the copy it points at is this very executable — so it is named
                     // here, and it goes last.
-                    text.AppendLine(
-                        "  remove the Apps & features entry, and the uninstaller's own copy last");
+                    text.AppendLine(InstallerCulture.Pick(
+                        "  remove the Apps & features entry, and the uninstaller's own copy last",
+                        "  удалить запись в «Приложениях и возможностях» и, последней, " +
+                        "собственную копию деинсталлятора"));
                 }
 
                 foreach (var file in agents.SelectMany(plan => plan.Files))
                 {
-                    text.AppendLine("  rewrite " + file.Path);
+                    text.AppendLine(
+                        "  " + InstallerCulture.Pick("rewrite", "переписать") + " " + file.Path);
                 }
 
                 foreach (var hook in hooks)
@@ -115,18 +120,21 @@ public sealed record UninstallPlan(
                     text.AppendLine(HookLine(hook));
                     foreach (var dispatcher in hook.Dispatchers)
                     {
-                        text.AppendLine("    remove " + dispatcher);
+                        text.AppendLine(
+                            "    " + InstallerCulture.Pick("remove", "удалить") + " " + dispatcher);
                     }
 
                     foreach (var restored in hook.RestoredHooks)
                     {
-                        text.AppendLine("    restore " + restored);
+                        text.AppendLine(
+                            "    " + InstallerCulture.Pick("restore", "восстановить") + " " + restored);
                     }
 
                     if (hook.ExcludePatterns.Count > 0 && hook.ExcludePath is not null)
                     {
                         text.AppendLine(
-                            "    clean " + hook.ExcludePath + ": " +
+                            "    " + InstallerCulture.Pick("clean", "очистить") + " " +
+                            hook.ExcludePath + ": " +
                             string.Join(", ", hook.ExcludePatterns));
                     }
                 }
@@ -134,21 +142,27 @@ public sealed record UninstallPlan(
 
             if (!HasWork)
             {
-                text.AppendLine("Nothing selected: this run would change nothing.");
+                text.AppendLine(InstallerCulture.Pick(
+                    "Nothing selected: this run would change nothing.",
+                    "Ничего не выбрано: этот запуск ничего не изменит."));
             }
 
             if (RetainedPaths.Count > 0)
             {
-                text.AppendLine("Left in " + RuntimeRoot + ":");
+                text.AppendLine(
+                    InstallerCulture.Pick("Left in ", "Остаётся в ") + RuntimeRoot + ":");
                 foreach (var path in RetainedPaths)
                 {
-                    text.AppendLine("  keep " + path);
+                    text.AppendLine(
+                        "  " + InstallerCulture.Pick("keep", "оставить") + " " + path);
                 }
             }
 
             foreach (var notice in Retained)
             {
-                text.AppendLine("Kept: " + notice.Title + " — " + notice.Detail);
+                text.AppendLine(
+                    InstallerCulture.Pick("Kept: ", "Оставлено: ") +
+                    notice.Title + " — " + notice.Detail);
             }
 
             return text.ToString();
@@ -174,7 +188,12 @@ public sealed record UninstallPlan(
 
     private static string HookLine(HookRemovalEntry hook) =>
         hook.IsSkipped
-            ? "  skip " + hook.CommonDirectory + " — " + hook.SkipReason
+            ? "  " + InstallerCulture.Pick("skip", "пропустить") + " " +
+                hook.CommonDirectory + " — " + hook.SkipReason
             : "  " + hook.CommonDirectory +
-                (hook.HasWork ? string.Empty : " — no managed dispatchers found");
+                (hook.HasWork
+                    ? string.Empty
+                    : InstallerCulture.Pick(
+                        " — no managed dispatchers found",
+                        " — управляемых диспетчеров не найдено"));
 }

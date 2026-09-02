@@ -3,6 +3,7 @@ using LocalAi.Installer.Core.Diagnosis;
 using LocalAi.Installer.Core.Removal;
 using LocalAi.Installer.ViewModels;
 using LocalAi.TestFixtures;
+using LocalAi.Installer.Core;
 
 namespace LocalAi.Installer.Tests;
 
@@ -13,6 +14,14 @@ namespace LocalAi.Installer.Tests;
 /// </summary>
 public sealed class InstallerStartViewModelTests : IDisposable
 {
+    // The language is process state now, so a class that asserts English says so. Run
+    // after one that chose Russian, it would otherwise read that choice as its own — which
+    // is exactly how this first failed.
+    // xunit builds one instance per test, so this runs before each of them — a
+    // static constructor runs once and lets whichever class went first decide.
+    public InstallerStartViewModelTests() => InstallerCulture.Current = InstallerLanguage.English;
+
+
     private readonly RemovalFixture machine = new();
 
     public void Dispose() => machine.Dispose();
@@ -24,7 +33,13 @@ public sealed class InstallerStartViewModelTests : IDisposable
 
         Assert.Equal(ExistingLocalAiState.Compatible, start.State);
         Assert.Equal(RemovalFixture.InstalledVersion, start.InstalledVersion);
-        Assert.Contains(RemovalFixture.InstalledVersion, start.Headline, StringComparison.Ordinal);
+        // The fixture writes no release record, so this machine cannot say which release
+        // it is — the headline says what it knows, and the build id is named below it.
+        Assert.Equal("LocalAi is installed on this computer.", start.Headline);
+        Assert.Contains(
+            "Build " + RemovalFixture.InstalledVersion,
+            start.Detail,
+            StringComparison.Ordinal);
         Assert.False(start.Option(StartChoice.Install).IsAvailable);
         Assert.Contains(
             "already installed",
