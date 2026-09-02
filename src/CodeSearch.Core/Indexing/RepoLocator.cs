@@ -138,7 +138,10 @@ public static class RepoLocator
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                // Standard output here is an archive, copied byte for byte. Only the error
+                // stream is read as text, and Git writes UTF-8.
+                StandardErrorEncoding = ChildProcessText.Utf8,
             };
             foreach (var argument in arguments)
             {
@@ -319,6 +322,8 @@ public static class RepoLocator
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                StandardOutputEncoding = ChildProcessText.Utf8,
+                StandardErrorEncoding = ChildProcessText.Utf8,
             });
 
             if (process is null)

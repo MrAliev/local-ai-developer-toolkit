@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using LocalAi.Contracts;
 
 namespace LocalAi.Installer.Core.Abstractions;
 
@@ -322,6 +323,10 @@ public sealed class SystemProcessRunner : IProcessRunner, IProcessFileRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            // winget, git and ollama follow the console, and the installer has no console at
+            // all — so their messages arrive in the OEM code page, and the wizard shows them.
+            StandardOutputEncoding = ChildProcessText.ConsoleEncoding,
+            StandardErrorEncoding = ChildProcessText.ConsoleEncoding,
         };
         if (isCommandScript)
         {

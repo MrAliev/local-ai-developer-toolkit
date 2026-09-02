@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using LocalAi.Contracts;
 
 namespace LocalAi.Repository;
 
@@ -96,7 +97,11 @@ public sealed class GitClient
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            // Git writes UTF-8 on every platform. Inherited from the console instead, a path
+            // with non-ASCII in it came back wrong on any machine that had not overridden it.
+            StandardOutputEncoding = ChildProcessText.Utf8,
+            StandardErrorEncoding = ChildProcessText.Utf8,
         };
         foreach (var argument in arguments)
         {
