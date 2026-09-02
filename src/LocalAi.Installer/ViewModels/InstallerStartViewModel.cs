@@ -57,20 +57,20 @@ public sealed class InstallerStartViewModel : ObservableObject
     /// </summary>
     private readonly InstalledVersion installed;
 
-    private readonly InstallerLanguageStore languages;
+    private readonly InstallerPreferencesStore preferences;
 
     public InstallerStartViewModel(
         string? localAppData = null,
         IExistingLocalAiInspector? inspector = null,
         Func<InstalledVersion>? readInstalledVersion = null,
-        InstallerLanguageStore? languageStore = null)
+        InstallerPreferencesStore? preferencesStore = null)
     {
         var root = localAppData ??
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         // Rooted where the caller said its state lives. Defaulting to the real profile even
         // when the rest of the view model was redirected let the test suite rewrite the
         // language of the installer actually installed on the machine, once per run.
-        languages = languageStore ?? new InstallerLanguageStore(
+        preferences = preferencesStore ?? new InstallerPreferencesStore(
             Path.Combine(root, RemovalMatrix.JournalDirectoryName));
         existing = (inspector ?? new ExistingLocalAiInspector(new SystemFileSystemProbe()))
             .Inspect(root);
@@ -118,7 +118,7 @@ public sealed class InstallerStartViewModel : ObservableObject
     public void ChooseLanguage(InstallerLanguage language)
     {
         InstallerCulture.Current = language;
-        languages.Write(language);
+        preferences.WriteLanguage(language);
         Actions.Clear();
         foreach (var option in BuildOptions())
         {

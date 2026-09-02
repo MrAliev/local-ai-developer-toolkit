@@ -1,0 +1,54 @@
+<!--
+    The light palette. Every key here exists in Dark.xaml under the same name: swapping themes
+    is one dictionary assignment, and a key present in only one of them is a crash or a
+    silently unstyled control at the moment somebody switches.
+
+    Contrast targets, against the surface each colour sits on: body text at least 7:1,
+    secondary and muted at least 4.5:1, accent-as-text at least 4.5:1 on the window fill, white
+    on the accent fill at least 4.5:1. TextDisabled is deliberately below all of those — it has
+    to read as disabled.
+-->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Surfaces. The rail stays darker than the content in both themes: flipping it lighter
+         makes the eye read the rail as the active surface. -->
+    <SolidColorBrush x:Key="WindowFill" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="RailFill" Color="#F3F3F3" />
+    <SolidColorBrush x:Key="Surface" Color="#FAFAFA" />
+    <SolidColorBrush x:Key="ControlFill" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ControlBorder" Color="#8A8A8A" />
+    <SolidColorBrush x:Key="Divider" Color="#E1E1E1" />
+
+    <!-- Text. Mono text — versions, paths, the log — uses TextPrimary untinted in both. -->
+    <SolidColorBrush x:Key="TextPrimary" Color="#1A1A1A" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#5A5A5A" />
+    <SolidColorBrush x:Key="TextMuted" Color="#767676" />
+    <SolidColorBrush x:Key="TextDisabled" Color="#A0A0A0" />
+
+    <!-- The accent splits into two tokens because no single hex is legible as 12px text on the
+         dark window fill and also carries white at 4.5:1. Light sets both the same. -->
+    <SolidColorBrush x:Key="Accent" Color="#0067C0" />
+    <SolidColorBrush x:Key="AccentFill" Color="#0067C0" />
+    <SolidColorBrush x:Key="Success" Color="#107C10" />
+
+    <!-- Advisory strips keep their hue and swap their weight between themes: here the fill is
+         pale and the text is dark. -->
+    <SolidColorBrush x:Key="WarnText" Color="#8A5300" />
+    <SolidColorBrush x:Key="WarnFill" Color="#FFF4E5" />
+    <SolidColorBrush x:Key="WarnLine" Color="#E8B44A" />
+    <SolidColorBrush x:Key="ErrText" Color="#B3261E" />
+    <SolidColorBrush x:Key="ErrFill" Color="#FDECEA" />
+    <SolidColorBrush x:Key="ErrLine" Color="#B3261E" />
+
+    <!-- Chrome the stock templates draw in colours belonging to neither theme. -->
+    <SolidColorBrush x:Key="FocusRing" Color="#0067C0" />
+    <SolidColorBrush x:Key="SelectionFill" Color="#CCE4F7" />
+    <SolidColorBrush x:Key="ScrollTrack" Color="#F5F5F5" />
+    <SolidColorBrush x:Key="ScrollThumb" Color="#C4C4C4" />
+    <SolidColorBrush x:Key="ScrollThumbHover" Color="#A0A0A0" />
+
+    <!-- The raised edge a card gets in dark. Light has none: on white there is nothing to
+         lighten, and the card states itself with its border. Present so the key sets match. -->
+    <SolidColorBrush x:Key="RaisedEdge" Color="#E1E1E1" />
+</ResourceDictionary>

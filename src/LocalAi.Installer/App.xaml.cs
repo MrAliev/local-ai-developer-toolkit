@@ -40,7 +40,8 @@ public partial class App : Application
         // Before any window is built, and on both paths. The uninstall path arrives from Apps
         // and features, never sees the start screen, and would otherwise inherit nothing —
         // somebody who chose Russian to install would be removed from in English.
-        InstallerCulture.Current = InstallerLanguageStore.Default.Read(CultureInfo.CurrentUICulture);
+        InstallerCulture.Current =
+            InstallerPreferencesStore.Default.ReadLanguage(CultureInfo.CurrentUICulture);
 
         Window window = IsUninstallRequested(e.Args)
             ? new UninstallWindow()

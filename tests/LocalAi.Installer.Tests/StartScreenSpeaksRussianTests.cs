@@ -127,7 +127,7 @@ public sealed class StartScreenSpeaksRussianTests : IDisposable
             File.Exists(Path.Combine(
                 machine.LocalAppData,
                 "LocalAi-installer-logs",
-                "ui-language.json")),
+                "ui-preferences.json")),
             "the choice was written somewhere other than the root the view model was given");
     }
 
