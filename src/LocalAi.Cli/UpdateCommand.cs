@@ -1,4 +1,5 @@
 using LocalAi.Broker;
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
@@ -73,7 +74,7 @@ public static class UpdateCommand
             argument is not ("--wait" or "--force"));
         if (unknown is not null)
         {
-            error.WriteLine($"Unknown option '{unknown}'.");
+            error.WriteLine(CliText.UpdateUnknownOption(unknown));
             return Usage(error);
         }
 
@@ -81,8 +82,7 @@ public static class UpdateCommand
         if (!installed.Exists)
         {
             error.WriteLine(
-                "There is no LocalAi installation at " + runtimeRoot + " to update. Run the " +
-                "installer to set one up.");
+                CliText.UpdateNoInstallation(runtimeRoot));
             return 1;
         }
 
@@ -95,7 +95,7 @@ public static class UpdateCommand
             "localai-update-" + Guid.NewGuid().ToString("N"));
         try
         {
-            output.WriteLine("Looking for the newest release...");
+            output.WriteLine(CliText.UpdateLookingForRelease);
             tag = await releases.ResolveTagAsync("latest", cancellationToken)
                 .ConfigureAwait(false);
             Directory.CreateDirectory(working);
@@ -113,14 +113,15 @@ public static class UpdateCommand
         var available = resolved.Manifest.ReleaseVersion;
         if (!force && IsCurrent(resolved.Manifest, installed))
         {
-            output.WriteLine(
-                $"LocalAi {installed.DisplayName} is already the newest release ({available}).");
+            output.WriteLine(CliText.UpdateNothingToInstall(available));
             Delete(working);
             return 0;
         }
 
+        // The doctor report's sentence, reused rather than paraphrased. Its third hole is a
+        // release page URL, which this command does not have: the feed resolves a package URI.
         output.WriteLine(
-            $"LocalAi {available} is available; this installation is {installed.DisplayName}.");
+            CliText.UpdateAvailable(available, installed.DisplayName, null).TrimEnd());
         if (!await QueueIsQuietAsync(runtimeRoot, wait, output, error, cancellationToken)
             .ConfigureAwait(false))
         {
@@ -154,27 +155,25 @@ public static class UpdateCommand
                 .ConfigureAwait(false);
             if (!result.Installed)
             {
-                error.WriteLine($"Update did not complete: {result.Status}. {result.Reason}".TrimEnd());
+                error.WriteLine(
+                    CliText.UpdateDidNotComplete(result.Status, result.Reason).TrimEnd());
                 return 1;
             }
 
-            output.WriteLine(
-                $"Installed LocalAi {result.Version} at {result.VersionPath}.");
-            output.WriteLine(
-                "Clients pick it up the next time they start a tool; nothing running was " +
-                "restarted for you.");
+            output.WriteLine(CliText.UpdateInstalled(available, result.VersionPath));
+            output.WriteLine(CliText.UpdateClientsPickItUp);
             return 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            error.WriteLine("Update cancelled. The installed version was not changed.");
+            error.WriteLine(CliText.UpdateCancelled);
             return 1;
         }
         catch (Exception exception) when (
             exception is LocalAiPackageInstallationException or ReleaseResolutionException or
                 ReleaseVerificationException or IOException or UnauthorizedAccessException)
         {
-            error.WriteLine("Update failed: " + exception.Message);
+            error.WriteLine(CliText.UpdateFailed(exception.Message));
             return 1;
         }
         finally
@@ -185,20 +184,7 @@ public static class UpdateCommand
 
     private static int Usage(TextWriter error)
     {
-        error.WriteLine(
-            """
-            Usage: localai update [--wait] [--force]
-
-              Installs the newest signed release over this one. The manifest is verified
-              against the embedded release key before anything is downloaded, and the version
-              pointer is swapped atomically once the package checks out.
-
-              --wait   Wait for queued broker jobs to finish instead of refusing.
-              --force  Install the newest release even when it is not newer than this one.
-
-            Prerequisites, models and client integrations are not touched; run the installer
-            for those.
-            """);
+        error.WriteLine(CliText.UpdateUsage((int)MaximumWait.TotalMinutes));
         return 2;
     }
 
@@ -245,23 +231,21 @@ public static class UpdateCommand
 
             if (!wait)
             {
-                error.WriteLine(
-                    $"The broker has {queued} queued job(s). Updating now would stop the tools " +
-                    "running them. Run `localai update --wait` to update once they finish.");
+                error.WriteLine(CliText.UpdateQueueBusy(queued));
                 return false;
             }
 
             if (DateTimeOffset.UtcNow >= deadline)
             {
-                error.WriteLine(
-                    $"Still {queued} queued job(s) after {MaximumWait.TotalMinutes:N0} minutes. " +
-                    "Nothing was changed; try again when the queue is quieter.");
+                error.WriteLine(CliText.UpdateQueueStillBusy(
+                    queued,
+                    (int)MaximumWait.TotalMinutes));
                 return false;
             }
 
             if (!announced)
             {
-                output.WriteLine($"Waiting for {queued} queued job(s) to finish...");
+                output.WriteLine(CliText.UpdateQueueWaiting(queued));
                 announced = true;
             }
 

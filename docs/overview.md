@@ -693,6 +693,8 @@ fetches the latest manifest and its signature at most once per interval — noth
 machine is sent — and believes the version only after the signature verifies. What it learns
 goes into a state file that `localai doctor` and `index_status` read; nothing installs until
 `localai update` is run, which refuses while the broker has queued jobs unless asked to wait.
+Activation stops everything running out of the outgoing version and does not restart it;
+clients start the new one the next time they reach for a tool.
 
 Each run writes a journal of its effects to `%LOCALAPPDATA%\LocalAi-installer-logs` — the
 intent before each effect, the outcome after — so a run killed mid-install still leaves a

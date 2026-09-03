@@ -234,20 +234,79 @@
   <data name="UpdateAvailable" xml:space="preserve">
     <value>доступна {0}, установлена {1}. {2}</value>
   </data>
+  <data name="UpdateCancelled" xml:space="preserve">
+    <value>Обновление отменено. Установленная версия не изменилась.</value>
+    <comment>Deliberately narrow: a version directory may already have been published, and only the installed version is claimed unchanged.</comment>
+  </data>
   <data name="UpdateCheckDisabled" xml:space="preserve">
     <value>проверка выключена; чтобы искать релизы — localai policy set --update-check on</value>
+  </data>
+  <data name="UpdateClientsPickItUp" xml:space="preserve">
+    <value>Всё, что работало из прежней версии, остановлено и заново не запускалось; клиенты запустят новую при следующем обращении к инструменту.</value>
+    <comment>The old wording said nothing was restarted without saying it was stopped, which contradicted this command's own refusal message.</comment>
+  </data>
+  <data name="UpdateDidNotComplete" xml:space="preserve">
+    <value>Обновление не завершено: {0}. {1}</value>
+    <comment>0 is a LocalAiPackageInstallStatus enum name and stays Latin; 1 is an English literal from the installer core.</comment>
+  </data>
+  <data name="UpdateFailed" xml:space="preserve">
+    <value>Обновление не удалось: {0}</value>
   </data>
   <data name="UpdateIncomparable" xml:space="preserve">
     <value>последний проверенный релиз — {0}; эта установка не хранит, из какого релиза она собрана, поэтому сравнивать не с чем. Следующая установка или обновление это запишет.</value>
   </data>
+  <data name="UpdateInstalled" xml:space="preserve">
+    <value>Установлена LocalAi {0}, каталог {1}.</value>
+    <comment>0 is the release version, not the version directory: the old code passed a commit id where the run had just announced a release number.</comment>
+  </data>
+  <data name="UpdateLookingForRelease" xml:space="preserve">
+    <value>Поиск самого нового релиза на GitHub...</value>
+  </data>
   <data name="UpdateNeverChecked" xml:space="preserve">
     <value>неизвестно — проверок ещё не было</value>
+  </data>
+  <data name="UpdateNoInstallation" xml:space="preserve">
+    <value>В {0} нет установки LocalAi, которую можно обновить. Запустите установщик, чтобы её создать.</value>
+  </data>
+  <data name="UpdateNothingToInstall" xml:space="preserve">
+    <value>Устанавливать нечего: {0} — самый новый релиз, и эта установка от него не отстаёт.</value>
+    <comment>The old wording named the installation twice with two different identifiers, because DisplayName falls back to a version directory when no release version was recorded.</comment>
+  </data>
+  <data name="UpdateQueueBusy" xml:space="preserve">
+    <value>В очереди брокера заданий {0}. Обновление сейчас остановит инструменты, которые их выполняют. Чтобы обновиться после их завершения — localai update --wait</value>
+    <comment>Noun-first in Russian: genitive plural is correct for every count.</comment>
+  </data>
+  <data name="UpdateQueueStillBusy" xml:space="preserve">
+    <value>Прошло {1} мин, а в очереди всё ещё заданий {0}. Ничего не изменено; попробуйте снова, когда очередь освободится.</value>
+    <comment>The Russian reorders the holes, which indexed string.Format allows: it is the only way to avoid opening on a numeral.</comment>
+  </data>
+  <data name="UpdateQueueWaiting" xml:space="preserve">
+    <value>В очереди заданий {0}; ожидание их завершения...</value>
+  </data>
+  <data name="UpdateUnknownOption" xml:space="preserve">
+    <value>Неизвестная опция: '{0}'.</value>
   </data>
   <data name="UpdateUnknownUnavailable" xml:space="preserve">
     <value>неизвестно — последняя проверка не дала ничего, чему можно верить (попытка {0} UTC)</value>
   </data>
   <data name="UpdateUpToDate" xml:space="preserve">
     <value>обновлений нет, установлена {0} (проверено {1} UTC)</value>
+  </data>
+  <data name="UpdateUsage" xml:space="preserve">
+    <value>Usage: localai update [--wait] [--force]
+
+  Ставит поверх текущей самый новый подписанный релиз. Манифест проверяется
+  встроенным ключом релиза до того, как будет скачан пакет; пакет — по
+  манифесту до распаковки; указатель версии переключается атомарно, когда
+  оба проверены.
+
+  --wait   Ждать завершения заданий в очереди брокера, не больше {0} мин,
+           вместо отказа.
+  --force  Ставить самый новый релиз, даже если он не новее текущего.
+
+Требования, модели и интеграции с клиентами не затрагиваются — для них
+запустите установщик.</value>
+    <comment>Usage: and both option names are byte-identical in both languages. The wait ceiling is a hole fed from MaximumWait so the block cannot name a limit the code does not enforce.</comment>
   </data>
   <data name="UpdateVerifiedRelease" xml:space="preserve">
     <value>{0} (проверено {1} UTC)</value>
