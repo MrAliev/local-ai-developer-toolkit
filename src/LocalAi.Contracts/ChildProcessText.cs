@@ -59,8 +59,8 @@ public static class ChildProcessText
 
     /// <summary>
     /// For a child that writes UTF-8 whatever the machine's code page is: Git, this toolkit's
-    /// own executables — which set their output to UTF-8 on the first line of Main — and a
-    /// language server, whose protocol fixes the encoding.
+    /// own executables — which say so through <see cref="ConsoleOutputText"/> before they print
+    /// anything — and a language server, whose protocol fixes the encoding.
     ///
     /// Stated rather than inherited. On a machine where nothing had overridden the console
     /// encoding, a Git path with non-ASCII in it was being decoded as the OEM code page: the

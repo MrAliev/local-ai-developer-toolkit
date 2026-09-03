@@ -5,6 +5,7 @@ using CodeSearch.Core.Semantics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using LocalAi.Contracts;
 
 // The language every line below is written in, decided before the first one is. Numbers stay
 // invariant whatever the language is; only the words move.
@@ -15,14 +16,7 @@ OutputCulture.Apply();
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 
-try
-{
-    Console.OutputEncoding = Encoding.UTF8;
-}
-catch (IOException)
-{
-    // No console attached - the pipe is UTF-8 already.
-}
+ConsoleOutputText.UseUtf8();
 
 builder.Services.AddSingleton(new SearchService());
 builder.Services.AddSingleton(new LanguageServerPolicyStore(
