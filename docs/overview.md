@@ -580,6 +580,10 @@ servers take the language from this computer, fall back to English wherever ther
 translation, and are overridden by `localai policy set --language <en|ru|system>` for every
 process started afterwards. Their strings live in `.resx` pairs rather than in the code, so a
 language is added by adding a file and a test refuses one that carries only some of the strings.
+The one exception is the update-check disclosure. It is consent, and it has to make the same
+promises in every language it is asked in — which a parity test cannot check — so it stays a
+pair of constants in a single file, chosen by the language this process resolved to, with a
+test of its own that refuses a supported language it has no answer for.
 What does not follow the language is anything a machine reads back: commands, option names,
 identifiers, the MCP tool descriptions, and every number, duration and date, which stay invariant
 so that a line quoted verbatim by an agent means the same thing wherever it was produced.
