@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    What the CLI says. The same rule as CodeSearch decides what is here: anything left of the first colon — or of a two-space column, which is the same thing wearing different punctuation — is a field name and stays English, and so does every status marker, enum name, option, command and wire-format token. Sentences and clauses are translated. Numbers arrive already formatted invariantly.
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <data name="BrokerAlive" xml:space="preserve">
+    <value>процесс {0}, сигнал {1} с назад</value>
+  </data>
+  <data name="BrokerNotRunning" xml:space="preserve">
+    <value>Не запущен. Запускается по требованию, так что это просто к сведению.</value>
+  </data>
+  <data name="BrokerSilent" xml:space="preserve">
+    <value>процесс {0}, последний сигнал {1} мин назад — либо остановлен без очистки host.json, либо завис.</value>
+  </data>
+  <data name="BrokerStateEmpty" xml:space="preserve">
+    <value>host.json пуст.</value>
+  </data>
+  <data name="BrokerStateUnreadable" xml:space="preserve">
+    <value>host.json не читается: {0}</value>
+  </data>
+  <data name="GenerationNone" xml:space="preserve">
+    <value>не записано</value>
+    <comment>Was "none", which rendered as "generation none" and read as a value rather than as its absence.</comment>
+  </data>
+  <data name="LauncherMissing" xml:space="preserve">
+    <value>Стабильной точки входа нет: {0}. Регистрации, указывающие на неё, работать не будут, а регистрации внутрь каталога версии сломаются при следующем обновлении.</value>
+  </data>
+  <data name="PolicyDefaults" xml:space="preserve">
+    <value>{0} (по умолчанию, файла нет)</value>
+  </data>
+  <data name="PolicyLanguageServersDisabled" xml:space="preserve">
+    <value>выключены</value>
+  </data>
+  <data name="PolicyLanguageServersEnabled" xml:space="preserve">
+    <value>включены для {0}</value>
+  </data>
+  <data name="PolicyModels" xml:space="preserve">
+    <value>резидентность {0}, удержание {1} с</value>
+    <comment>0 is a ModelResidencyPolicy enum name and stays Latin.</comment>
+  </data>
+  <data name="PolicyRetention" xml:space="preserve">
+    <value>поколений {0}, версий {1}, телеметрия {2} дн</value>
+  </data>
+  <data name="QueueClean" xml:space="preserve">
+    <value>в очереди {0}, карантин пуст</value>
+  </data>
+  <data name="QueueQuarantined" xml:space="preserve">
+    <value>в очереди {0}, в карантине {1}. Задания из карантина не перезапускаются никогда.</value>
+  </data>
+  <data name="RepositoryNotConnected" xml:space="preserve">
+    <value>{0} не подключён. Проиндексировать: localai sync --root {0}</value>
+    <comment>The old wording named the option without its argument, so the command it offered could not be run as written.</comment>
+  </data>
+  <data name="RepositoryState" xml:space="preserve">
+    <value>{0}, поколение {1}</value>
+    <comment>0 is a RepositoryIndexState enum name and stays Latin.</comment>
+  </data>
+  <data name="SummaryNoProblems" xml:space="preserve">
+    <value>Проблем нет.</value>
+  </data>
+  <data name="SummaryNoProblemsWithNotes" xml:space="preserve">
+    <value>Проблем нет. Стоит прочитать {0}.</value>
+  </data>
+  <data name="SummaryProblems" xml:space="preserve">
+    <value>Проблем {0}, стоит прочитать {1}.</value>
+    <comment>Noun-first in Russian: ResourceManager has no plural support and genitive plural is correct for every count.</comment>
+  </data>
+  <data name="UpdateAvailable" xml:space="preserve">
+    <value>доступна {0}, установлена {1}. {2}</value>
+  </data>
+  <data name="UpdateCheckDisabled" xml:space="preserve">
+    <value>проверка выключена; чтобы искать релизы — localai policy set --update-check on</value>
+  </data>
+  <data name="UpdateIncomparable" xml:space="preserve">
+    <value>последний проверенный релиз — {0}; эта установка не хранит, из какого релиза она собрана, поэтому сравнивать не с чем. Следующая установка или обновление это запишет.</value>
+  </data>
+  <data name="UpdateNeverChecked" xml:space="preserve">
+    <value>неизвестно: проверок ещё не было</value>
+  </data>
+  <data name="UpdateUnknownUnavailable" xml:space="preserve">
+    <value>неизвестно: последняя проверка не дала ничего, чему можно верить (попытка {0} UTC)</value>
+  </data>
+  <data name="UpdateUpToDate" xml:space="preserve">
+    <value>обновлений нет, установлена {0} (проверено {1} UTC)</value>
+  </data>
+  <data name="VersionComplete" xml:space="preserve">
+    <value>{0}, все двоичные файлы на месте ({1})</value>
+  </data>
+  <data name="VersionDirectoryMissing" xml:space="preserve">
+    <value>Указатель называет {0}, а такого каталога нет.</value>
+  </data>
+  <data name="VersionFilesMissing" xml:space="preserve">
+    <value>{0} — не хватает: {1}</value>
+  </data>
+  <data name="VersionNoPointer" xml:space="preserve">
+    <value>В {0} нет current.json. Здесь ничего не установлено.</value>
+  </data>
+  <data name="VersionPointerEmpty" xml:space="preserve">
+    <value>current.json не называет версию.</value>
+  </data>
+  <data name="VersionPointerUnreadable" xml:space="preserve">
+    <value>current.json не читается: {0}</value>
+    <comment>0 is a .NET runtime message and arrives in whatever language the framework speaks.</comment>
+  </data>
+</root>

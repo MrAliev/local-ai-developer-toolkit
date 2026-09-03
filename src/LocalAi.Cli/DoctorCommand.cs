@@ -1,6 +1,8 @@
-﻿using System.Text;
+﻿using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using CodeSearch.Core.Semantics;
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Activation;
 using LocalAi.Repository;
@@ -80,7 +82,7 @@ public static class DoctorCommand
             return new DoctorCheck(
                 "version",
                 DoctorStatus.Failed,
-                $"No current.json under {binRoot}. Nothing is installed here.");
+                CliText.VersionNoPointer(binRoot));
         }
 
         string? version;
@@ -97,7 +99,7 @@ public static class DoctorCommand
             return new DoctorCheck(
                 "version",
                 DoctorStatus.Failed,
-                $"current.json cannot be read: {exception.Message}");
+                CliText.VersionPointerUnreadable(exception.Message));
         }
 
         if (string.IsNullOrWhiteSpace(version))
@@ -105,7 +107,7 @@ public static class DoctorCommand
             return new DoctorCheck(
                 "version",
                 DoctorStatus.Failed,
-                "current.json names no version.");
+                CliText.VersionPointerEmpty);
         }
 
         var directory = Path.Combine(binRoot, "versions", version);
@@ -114,7 +116,7 @@ public static class DoctorCommand
             return new DoctorCheck(
                 "version",
                 DoctorStatus.Failed,
-                $"The pointer names {version} and that directory does not exist.");
+                CliText.VersionDirectoryMissing(version));
         }
 
         // The pointer agreeing with a directory that is missing half its binaries is the shape a
@@ -126,11 +128,11 @@ public static class DoctorCommand
             ? new DoctorCheck(
                 "version",
                 DoctorStatus.Failed,
-                $"{version} is missing: {string.Join(", ", missing)}")
+                CliText.VersionFilesMissing(version, string.Join(", ", missing)))
             : new DoctorCheck(
                 "version",
                 DoctorStatus.Ok,
-                $"{version}, all {LocalAiPackageLayout.VersionRequiredFiles.Count} binaries present");
+                CliText.VersionComplete(version, LocalAiPackageLayout.VersionRequiredFiles.Count));
     }
 
     private static DoctorCheck CheckLauncher(string root)
@@ -145,9 +147,7 @@ public static class DoctorCommand
             : new DoctorCheck(
                 "launcher",
                 DoctorStatus.Failed,
-                $"The stable entry point is missing: {launcher}. Registrations pointing at it " +
-                "will fail, and registrations pointing inside a version directory break on the " +
-                "next upgrade.");
+                CliText.LauncherMissing(launcher));
     }
 
     private static DoctorCheck CheckBroker(string root)
@@ -160,7 +160,7 @@ public static class DoctorCommand
             return new DoctorCheck(
                 "broker",
                 DoctorStatus.Warning,
-                "Not running. It starts on demand, so this is only worth noting.");
+                CliText.BrokerNotRunning);
         }
 
         BrokerProcessState? state;
@@ -176,12 +176,12 @@ public static class DoctorCommand
             return new DoctorCheck(
                 "broker",
                 DoctorStatus.Failed,
-                $"host.json cannot be read: {exception.Message}");
+                CliText.BrokerStateUnreadable(exception.Message));
         }
 
         if (state is null)
         {
-            return new DoctorCheck("broker", DoctorStatus.Failed, "host.json is empty.");
+            return new DoctorCheck("broker", DoctorStatus.Failed, CliText.BrokerStateEmpty);
         }
 
         var silence = DateTimeOffset.UtcNow - state.HeartbeatAtUtc;
@@ -189,12 +189,15 @@ public static class DoctorCommand
             ? new DoctorCheck(
                 "broker",
                 DoctorStatus.Warning,
-                $"process {state.ProcessId}, last heartbeat {silence.TotalMinutes:F0} min ago — " +
-                "either stopped without clearing host.json, or wedged.")
+                CliText.BrokerSilent(
+                    state.ProcessId,
+                    silence.TotalMinutes.ToString("F0", CultureInfo.InvariantCulture)))
             : new DoctorCheck(
                 "broker",
                 DoctorStatus.Ok,
-                $"process {state.ProcessId}, heartbeat {silence.TotalSeconds:F0}s ago");
+                CliText.BrokerAlive(
+                    state.ProcessId,
+                    silence.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture)));
     }
 
     private static DoctorCheck CheckQueue(string root)
@@ -208,8 +211,8 @@ public static class DoctorCommand
             ? new DoctorCheck(
                 "queue",
                 DoctorStatus.Warning,
-                $"{queued} queued, {quarantined} quarantined. Quarantined jobs are never retried.")
-            : new DoctorCheck("queue", DoctorStatus.Ok, $"{queued} queued, none quarantined");
+                CliText.QueueQuarantined(queued, quarantined))
+            : new DoctorCheck("queue", DoctorStatus.Ok, CliText.QueueClean(queued));
 
         static int Count(string path) =>
             Directory.Exists(path)
@@ -229,24 +232,28 @@ public static class DoctorCommand
             "policy: models",
             RuntimeDirectories.SettingsFile(root, BrokerPolicy.FileName),
             () => new ModelResidencyPolicyStore(root).Read(),
-            policy => $"residency {policy.ModelResidency}, keep-alive {policy.IdleModelKeepAliveSeconds}s");
+            policy => CliText.PolicyModels(
+                policy.ModelResidency,
+                policy.IdleModelKeepAliveSeconds));
 
         yield return PolicyCheck(
             "policy: retention",
             RuntimeDirectories.SettingsFile(root, RuntimeRetentionPolicy.FileName),
             () => new RuntimeRetentionPolicyStore(root).Read(),
-            policy =>
-                $"{policy.GenerationsPerRepository} generations, " +
-                $"{policy.InstalledVersions} versions, " +
-                $"telemetry {policy.TelemetryRetentionDays}d");
+            policy => CliText.PolicyRetention(
+                policy.GenerationsPerRepository,
+                policy.InstalledVersions,
+                policy.TelemetryRetentionDays));
 
         yield return PolicyCheck(
             "policy: language servers",
             RuntimeDirectories.SettingsFile(root, LanguageServerPolicy.FileName),
             () => new LanguageServerPolicyStore(root).Read(),
             policy => policy.Enabled
-                ? $"enabled for {string.Join(", ", policy.Languages.Where(l => l.Value.Enabled).Select(l => l.Key))}"
-                : "disabled");
+                ? CliText.PolicyLanguageServersEnabled(string.Join(
+                    ", ",
+                    policy.Languages.Where(l => l.Value.Enabled).Select(l => l.Key)))
+                : CliText.PolicyLanguageServersDisabled);
 
         yield return CheckUpdates(root);
     }
@@ -268,8 +275,7 @@ public static class DoctorCommand
             return new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                "check disabled; run `localai policy set --update-check on` to look for " +
-                "releases");
+                CliText.UpdateCheckDisabled);
         }
 
         var state = new UpdateCheckStateStore(root).Read();
@@ -279,18 +285,24 @@ public static class DoctorCommand
             UpdateAvailability.Available => new DoctorCheck(
                 "update",
                 DoctorStatus.Warning,
-                $"{state.LatestVersion} is available; this installation is " +
-                $"{installed.DisplayName}. {state.ReleaseUrl}"),
+                CliText.UpdateAvailable(
+                    state.LatestVersion,
+                    installed.DisplayName,
+                    state.ReleaseUrl)),
             UpdateAvailability.UpToDate => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                $"up to date at {installed.DisplayName} " +
-                $"(checked {state.CheckedAtUtc:yyyy-MM-dd HH:mm} UTC)"),
+                CliText.UpdateUpToDate(
+                    installed.DisplayName,
+                    state.CheckedAtUtc?.ToString(
+                        "yyyy-MM-dd HH:mm",
+                        CultureInfo.InvariantCulture))),
             _ when state.Status == UpdateCheckStatus.Unavailable => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                "unknown; the last check produced nothing to believe " +
-                $"(tried {state.CheckedAtUtc:yyyy-MM-dd HH:mm} UTC)"),
+                CliText.UpdateUnknownUnavailable(state.CheckedAtUtc?.ToString(
+                    "yyyy-MM-dd HH:mm",
+                    CultureInfo.InvariantCulture))),
             // Verified, but nothing here can be compared against it: an installation made
             // before the release version was recorded knows only its directory name. Said
             // plainly, because answering "up to date" from a comparison that failed is the
@@ -298,13 +310,11 @@ public static class DoctorCommand
             _ when state.Status == UpdateCheckStatus.Verified => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                $"latest verified release is {state.LatestVersion}; this installation does " +
-                "not record which release it came from, so the two cannot be compared. The " +
-                "next install or update records it."),
+                CliText.UpdateIncomparable(state.LatestVersion)),
             _ => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                "unknown; nothing has been checked yet"),
+                CliText.UpdateNeverChecked),
         };
     }
 
@@ -343,19 +353,22 @@ public static class DoctorCommand
                 return new DoctorCheck(
                     "repository",
                     DoctorStatus.Warning,
-                    $"{identity.RepositoryRoot.Value} is not connected. " +
-                    "Run localai sync --root to index it.");
+                    CliText.RepositoryNotConnected(identity.RepositoryRoot.Value));
             }
 
             return manifest.State == RepositoryIndexState.Current
                 ? new DoctorCheck(
                     "repository",
                     DoctorStatus.Ok,
-                    $"{manifest.State}, generation {Short(manifest.CurrentGenerationId)}")
+                    CliText.RepositoryState(
+                        manifest.State,
+                        Short(manifest.CurrentGenerationId)))
                 : new DoctorCheck(
                     "repository",
                     DoctorStatus.Warning,
-                    $"{manifest.State}, generation {Short(manifest.CurrentGenerationId)}");
+                    CliText.RepositoryState(
+                        manifest.State,
+                        Short(manifest.CurrentGenerationId)));
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or InvalidOperationException
@@ -365,7 +378,7 @@ public static class DoctorCommand
         }
 
         static string Short(string? id) =>
-            string.IsNullOrEmpty(id) ? "none" : id[..Math.Min(12, id.Length)];
+            string.IsNullOrEmpty(id) ? CliText.GenerationNone : id[..Math.Min(12, id.Length)];
     }
 
     public static string Render(DoctorReport report)
@@ -387,10 +400,10 @@ public static class DoctorCommand
         text.AppendLine();
         text.AppendLine(
             failed > 0
-                ? $"{failed} problem(s), {warned} worth reading."
+                ? CliText.SummaryProblems(failed, warned)
                 : warned > 0
-                    ? $"No problems. {warned} worth reading."
-                    : "No problems.");
+                    ? CliText.SummaryNoProblemsWithNotes(warned)
+                    : CliText.SummaryNoProblems);
         return text.ToString();
     }
 
