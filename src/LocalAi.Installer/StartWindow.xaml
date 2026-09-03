@@ -30,7 +30,7 @@
             </Style.Triggers>
         </Style>
 
-        <Style x:Key="CardTitle" TargetType="TextBlock">
+        <Style x:Key="CardTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Style.Triggers>
@@ -99,13 +99,13 @@
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
 
-        <Style x:Key="PageTitle" TargetType="TextBlock">
+        <Style x:Key="PageTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
             <Setter Property="FontSize" Value="18" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
-        <Style x:Key="Muted" TargetType="TextBlock">
+        <Style x:Key="Muted" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
         </Style>
     </Window.Resources>

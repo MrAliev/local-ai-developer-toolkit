@@ -102,6 +102,44 @@ public sealed class ThemeReferencesAreDynamicTests
     }
 
     /// <summary>
+    /// A named style does not inherit the themed one for its type unless it says so. So a style
+    /// that sets a size and a margin and nothing else hands the control back to the stock
+    /// template — an Aero gradient button, light in both themes — while looking like it only
+    /// adjusted the spacing.
+    ///
+    /// Either is fine: name the themed style as its base, or draw the whole control yourself.
+    /// What is not fine is neither, which is how the wizard's Back, Next and Install buttons
+    /// would have stayed light on a dark page.
+    /// </summary>
+    [Theory]
+    [InlineData("MainWindow.xaml")]
+    [InlineData("UninstallWindow.xaml")]
+    [InlineData("StartWindow.xaml")]
+    public void Every_named_control_style_either_inherits_the_theme_or_replaces_it(string window)
+    {
+        var themed = ThemedTypes();
+        var offenders = Regex
+            .Matches(
+                Read(window),
+                "<Style x:Key=\"(?<key>[^\"]+)\" TargetType=\"(?<type>[A-Za-z]+)\"(?<head>[^>]*)>" +
+                "(?<body>.*?)</Style>",
+                RegexOptions.Singleline)
+            .Where(match => themed.Contains(match.Groups["type"].Value))
+            .Where(match =>
+                !match.Groups["head"].Value.Contains("BasedOn", StringComparison.Ordinal) &&
+                !match.Groups["body"].Value.Contains("Property=\"Template\"", StringComparison.Ordinal))
+            .Select(match =>
+                $"{window}  {match.Groups["key"].Value} ({match.Groups["type"].Value})")
+            .ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "A named style that neither inherits the themed one nor draws the control itself " +
+            "falls back to the stock template, which is light in both themes:" +
+            Environment.NewLine + string.Join(Environment.NewLine, offenders));
+    }
+
+    /// <summary>
     /// And the window itself, which is what every unstyled element inherits from.
     /// </summary>
     [Theory]
@@ -128,6 +166,14 @@ public sealed class ThemeReferencesAreDynamicTests
 
         Assert.DoesNotMatch(Literal, File.ReadAllText(path));
     }
+
+    /// <summary>The control types Controls.xaml gives a themed style of their own.</summary>
+    private static HashSet<string> ThemedTypes() =>
+        [.. Regex
+            .Matches(
+                File.ReadAllText(Path.Combine(ThemesDirectory(), "Controls.xaml")),
+                "<Style TargetType=\"(?<type>[A-Za-z]+)\">")
+            .Select(match => match.Groups["type"].Value)];
 
     private static HashSet<string> PaletteKeys() =>
         [.. PaletteKey
