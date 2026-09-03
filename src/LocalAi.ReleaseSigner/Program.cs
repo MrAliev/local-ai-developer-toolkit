@@ -30,6 +30,8 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        // English text, but the em dashes and ellipses in it are not in code page 866.
+        ConsoleOutputText.UseUtf8();
         try
         {
             return args.FirstOrDefault() switch

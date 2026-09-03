@@ -6,17 +6,11 @@ using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Search;
 using LocalAi.Broker.Client;
+using LocalAi.Contracts;
 
 // Redirected stdout on Windows otherwise falls back to the legacy console codepage and mangles
 // every Cyrillic character - which matters, this codebase's comments are mostly Russian.
-try
-{
-    Console.OutputEncoding = Encoding.UTF8;
-}
-catch (IOException)
-{
-    // No console attached (piped into a harness); the default encoding is already UTF-8 there.
-}
+ConsoleOutputText.UseUtf8();
 
 // Quality-first default, and it fits a single 16GB card - the bare `:8b` tag is Q4_K_M, and fp16
 // only runs by splitting across two GPUs, which this machine will not have for much longer.

@@ -4,8 +4,13 @@ using LocalAi.Contracts;
 using LocalAi.Contracts.Localization;
 using System.Text.Json;
 
-// The language every command answers in, decided before any of them runs. Numbers stay
-// invariant whatever the language is; only the words move.
+// Before the guard below, because the guard's own failure path prints: an exit code and a
+// mangled reason is worse than either alone.
+ConsoleOutputText.UseUtf8();
+
+// The language every command answers in, decided before any of them runs — and after the
+// encoding, because the first thing this can produce is a sentence the console has to be able
+// to write. Numbers stay invariant whatever the language is; only the words move.
 OutputCulture.Apply();
 
 // Every command runs under one guard. A broker or Git failure used to leave the runtime's own
