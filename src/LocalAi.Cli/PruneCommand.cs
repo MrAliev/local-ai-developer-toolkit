@@ -248,9 +248,24 @@ public static class PruneCommand
             return false;
         }
 
-        if (!Directory.Exists(manifest.CommonDirectory))
+        // Through IsGone rather than Directory.Exists, for the reason IsGone was written: an
+        // unmounted volume, a disconnected share and an absent subst drive all answer false, and
+        // reading that as "deleted" here costs the whole record — its manifest and every
+        // generation under it. The overlay pass has always asked the volume first; this check
+        // deleted far more on the same evidence.
+        try
         {
-            return true;
+            if (IsGone(manifest.CommonDirectory))
+            {
+                return true;
+            }
+        }
+        catch (IOException)
+        {
+            // The volume could not be asked about. Doubt leaves the record alone: keeping an
+            // abandoned one costs disk until the next prune, and removing a live one costs hours
+            // of embedding.
+            return false;
         }
 
         var generations = Path.Combine(repositoryRuntimeRoot, "generations");
