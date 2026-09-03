@@ -95,6 +95,16 @@ public static class CodeSearchText
 
     public static string NavigationPrecise => Catalogue.Get(nameof(NavigationPrecise));
 
+    /// <summary>
+    /// A position nobody could have meant, refused by name. Passing it on would answer
+    /// about the line above and look like an answer.
+    /// </summary>
+    public static string PositionNotFromOne(int line, int column) =>
+        Catalogue.Format(nameof(PositionNotFromOne), line, column);
+
+    /// <summary>The form the locations below are printed in, said once, in the open.</summary>
+    public static string LocationNumbering => Catalogue.Get(nameof(LocationNumbering));
+
     public static string NavigationHeuristicCoversNothing(string root) =>
         Catalogue.Format(nameof(NavigationHeuristicCoversNothing), root);
 

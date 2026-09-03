@@ -13,13 +13,13 @@ public class SemanticNavigationMcpTests
         var response = CodeSearchTools.GoToDefinition(
             gateway,
             "Src/Use.cs",
-            line: 4,
-            utf16Column: 12);
+            line: 5,
+            column: 13);
 
         Assert.StartsWith("Definitions: 1", response, StringComparison.Ordinal);
         Assert.Contains("<untrusted-content", response, StringComparison.Ordinal);
         Assert.Contains("origin=\"go_to_definition:Src/A.cs\"", response, StringComparison.Ordinal);
-        Assert.Contains("Src/A.cs:2:16-2:18", response, StringComparison.Ordinal);
+        Assert.Contains("Src/A.cs:3:17-3:19", response, StringComparison.Ordinal);
         Assert.Contains(MethodId, response, StringComparison.Ordinal);
     }
 
@@ -31,13 +31,13 @@ public class SemanticNavigationMcpTests
         var response = CodeSearchTools.FindReferences(
             gateway,
             "Src/Use.cs",
-            line: 4,
-            utf16Column: 12,
+            line: 5,
+            column: 13,
             includeDefinition: false);
 
         Assert.StartsWith("References: 1", response, StringComparison.Ordinal);
-        Assert.Contains("Src/Use.cs:4:10-4:14", response, StringComparison.Ordinal);
-        Assert.DoesNotContain("Src/A.cs:2:16-2:18", response, StringComparison.Ordinal);
+        Assert.Contains("Src/Use.cs:5:11-5:15", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("Src/A.cs:3:17-3:19", response, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -46,8 +46,8 @@ public class SemanticNavigationMcpTests
         var response = CodeSearchTools.FindImplementations(
             Gateway(),
             "Src/A.cs",
-            line: 2,
-            utf16Column: 17);
+            line: 3,
+            column: 18);
 
         Assert.StartsWith("Implementations: 1", response, StringComparison.Ordinal);
         Assert.Contains(
@@ -62,15 +62,15 @@ public class SemanticNavigationMcpTests
         var response = CodeSearchTools.FindRelationships(
             Gateway(),
             "Src/Impl.cs",
-            line: 3,
-            utf16Column: 17,
+            line: 4,
+            column: 18,
             direction: "outgoing",
             kind: "implementation");
 
         Assert.StartsWith("Relationships: 1", response, StringComparison.Ordinal);
         Assert.Contains("relationship: Implementation", response, StringComparison.Ordinal);
         Assert.Contains("direction: Outgoing", response, StringComparison.Ordinal);
-        Assert.Contains("Src/A.cs:2:16-2:18", response, StringComparison.Ordinal);
+        Assert.Contains("Src/A.cs:3:17-3:19", response, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -82,10 +82,49 @@ public class SemanticNavigationMcpTests
         var response = CodeSearchTools.GoToDefinition(
             gateway,
             "Src/Use.cs",
-            line: 4,
-            utf16Column: 12);
+            line: 5,
+            column: 13);
 
         Assert.StartsWith("semantic_navigation_not_ready:", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("<untrusted-content", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The promise the tool descriptions make, asserted rather than described: the start line a
+    /// hit is printed with is the line that navigates, and no column has to be worked out.
+    ///
+    /// `search_code` prints one-based lines and the navigation tools took zero-based ones, with
+    /// nothing converting between them. Pasting a printed line landed one line into the body —
+    /// a refusal when nothing was there, and a confident `Precise` answer about the wrong symbol
+    /// when an identifier happened to be.
+    /// </summary>
+    [Fact]
+    public void A_hit_navigates_at_the_line_it_is_printed_with()
+    {
+        // What search_code would print for the declaration this fixture puts at zero-based 2.
+        const int printedStartLine = 3;
+
+        var response = CodeSearchTools.GoToDefinition(
+            Gateway(),
+            "Src/A.cs",
+            line: printedStartLine);
+
+        Assert.StartsWith("Definitions: 1", response, StringComparison.Ordinal);
+        Assert.Contains("Src/A.cs:3:17-3:19", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A zero can only be a position somebody counted from zero, so it is refused by name rather
+    /// than passed to a core that would answer about the line above.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 0)]
+    public void A_position_counted_from_zero_is_refused_by_name(int line, int column)
+    {
+        var response = CodeSearchTools.GoToDefinition(Gateway(), "Src/A.cs", line, column);
+
+        Assert.StartsWith("invalid_position:", response, StringComparison.Ordinal);
         Assert.DoesNotContain("<untrusted-content", response, StringComparison.Ordinal);
     }
 

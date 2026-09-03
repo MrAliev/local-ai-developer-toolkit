@@ -62,6 +62,10 @@
   <data name="EtaMinutes" xml:space="preserve">
     <value>{0} min</value>
   </data>
+  <data name="LocationNumbering" xml:space="preserve">
+    <value>(path:line:column, counted from 1)</value>
+    <comment>Printed beside the heading so the output carries its own contract rather than depending on a tool description read elsewhere.</comment>
+  </data>
   <data name="LspDocumentClosed" xml:space="preserve">
     <value>LSP document closed: {0}.</value>
   </data>
@@ -104,6 +108,10 @@
   </data>
   <data name="NothingLoaded" xml:space="preserve">
     <value>Nothing is loaded — the memory is already free.</value>
+  </data>
+  <data name="PositionNotFromOne" xml:space="preserve">
+    <value>invalid_position: lines and columns are counted from 1; got line {0}, column {1}.</value>
+    <comment>invalid_position: is a status token left of the first colon and stays English, like semantic_navigation_not_ready: beside it.</comment>
   </data>
   <data name="ProcessMemory" xml:space="preserve">
     <value>The process was ~{0} MB larger; it now holds ~{1} MB ({2}).</value>

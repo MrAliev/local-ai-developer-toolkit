@@ -40,27 +40,37 @@ public static class CodeSearchTools
 
     [McpServerTool(Name = "go_to_definition")]
     [Description("""
-        Resolves the symbol at a zero-based line and UTF-16 column. Prefers precise live LSP and
+        Resolves the symbol at a line and column counted from 1, the column a UTF-16 offset —
+        the same numbering search_code prints and an editor shows. Prefers precise live LSP and
         snapshot SIDX locations, then uses an explicitly Heuristic bounded text fallback.
         A position that names nothing resolves to the line's outermost declaration — a method
-        rather than its parameters — so the start line of a search_code hit navigates as it
-        stands, with column 0. Sibling declarations (const a = f(), b = g()) stay unresolved.
+        rather than its parameters — so a search_code hit's start line navigates exactly as
+        printed, at column 1. Sibling declarations (const a = f(), b = g()) stay unresolved.
         Source-derived output is wrapped in nonce-bound <untrusted-content> markers.
         """)]
     public static string GoToDefinition(
         SemanticNavigationGateway gateway,
         [Description("Repository-relative source path.")]
         string path,
-        [Description("Zero-based line number.")]
+        [Description("Line number as search_code prints it and an editor shows it, counted from 1.")]
         int line,
-        [Description("Zero-based UTF-16 column.")]
-        int utf16Column,
+        [Description("Column on that line, counted from 1, as a UTF-16 offset. Defaults to 1 — the start of the line, which is what navigates a search_code hit.")]
+        int column = 1,
         [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
+        if (!SourcePosition.TryFromOneBased(line, column, out var position))
+        {
+            return CodeSearchText.PositionNotFromOne(line, column);
+        }
+
         try
         {
-            var outcome = gateway.ResolveDefinition(path, line, utf16Column, root);
+            var outcome = gateway.ResolveDefinition(
+                path,
+                position.Line,
+                position.Utf16Column,
+                root);
             return Degradation(outcome) + (outcome.Locations.Count == 0
                 ? CodeSearchText.NoDefinition
                 : FormatSemanticLocations(
@@ -84,32 +94,38 @@ public static class CodeSearchTools
 
     [McpServerTool(Name = "find_references")]
     [Description("""
-        Resolves the symbol at a zero-based line and UTF-16 column. Prefers precise live LSP and
+        Resolves the symbol at a line and column counted from 1, the column a UTF-16 offset —
+        the same numbering search_code prints and an editor shows. Prefers precise live LSP and
         snapshot SIDX references, then uses an explicitly Heuristic bounded text fallback.
         A position that names nothing resolves to the line's outermost declaration — a method
-        rather than its parameters — so the start line of a search_code hit navigates as it
-        stands, with column 0. Sibling declarations (const a = f(), b = g()) stay unresolved.
+        rather than its parameters — so a search_code hit's start line navigates exactly as
+        printed, at column 1. Sibling declarations (const a = f(), b = g()) stay unresolved.
         Source-derived output is wrapped in nonce-bound <untrusted-content> markers.
         """)]
     public static string FindReferences(
         SemanticNavigationGateway gateway,
         [Description("Repository-relative source path.")]
         string path,
-        [Description("Zero-based line number.")]
+        [Description("Line number as search_code prints it and an editor shows it, counted from 1.")]
         int line,
-        [Description("Zero-based UTF-16 column.")]
-        int utf16Column,
+        [Description("Column on that line, counted from 1, as a UTF-16 offset. Defaults to 1 — the start of the line, which is what navigates a search_code hit.")]
+        int column = 1,
         [Description("Include definition locations in the result. Defaults to true.")]
         bool includeDefinition = true,
         [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
+        if (!SourcePosition.TryFromOneBased(line, column, out var position))
+        {
+            return CodeSearchText.PositionNotFromOne(line, column);
+        }
+
         try
         {
             var outcome = gateway.ResolveReferences(
                 path,
-                line,
-                utf16Column,
+                position.Line,
+                position.Utf16Column,
                 includeDefinition,
                 root);
             return Degradation(outcome) + (outcome.Locations.Count == 0
@@ -135,8 +151,10 @@ public static class CodeSearchTools
 
     [McpServerTool(Name = "find_implementations")]
     [Description("""
-        Finds precise implementations, overrides, and derived types for the symbol at a zero-based
-        line and UTF-16 column. Prefers an authoritative open-document LSP result, then queries the
+        Finds precise implementations, overrides, and derived types for the symbol at a line and
+        column counted from 1, the column a UTF-16 offset — the same numbering search_code prints.
+        A start line at column 1 resolves to that line's outermost declaration, as in
+        go_to_definition. Prefers an authoritative open-document LSP result, then queries the
         snapshot-bound SIDX relationship graph. No text heuristic is used.
         Source-derived output is wrapped in nonce-bound <untrusted-content> markers.
         """)]
@@ -144,19 +162,24 @@ public static class CodeSearchTools
         SemanticNavigationGateway gateway,
         [Description("Repository-relative source path.")]
         string path,
-        [Description("Zero-based line number.")]
+        [Description("Line number as search_code prints it and an editor shows it, counted from 1.")]
         int line,
-        [Description("Zero-based UTF-16 column.")]
-        int utf16Column,
+        [Description("Column on that line, counted from 1, as a UTF-16 offset. Defaults to 1 — the start of the line, which is what navigates a search_code hit.")]
+        int column = 1,
         [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
+        if (!SourcePosition.TryFromOneBased(line, column, out var position))
+        {
+            return CodeSearchText.PositionNotFromOne(line, column);
+        }
+
         try
         {
             var locations = gateway.FindImplementations(
                 path,
-                line,
-                utf16Column,
+                position.Line,
+                position.Utf16Column,
                 root);
             return locations.Count == 0
                 ? CodeSearchText.NoImplementations
@@ -181,18 +204,20 @@ public static class CodeSearchTools
 
     [McpServerTool(Name = "find_relationships")]
     [Description("""
-        Queries the exact snapshot-bound SIDX relationship graph for the symbol at a zero-based
-        line and UTF-16 column. Direction is incoming or outgoing; kind can be implementation,
+        Queries the exact snapshot-bound SIDX relationship graph for the symbol at a line and
+        column counted from 1, the column a UTF-16 offset — the same numbering search_code prints.
+        A start line at column 1 resolves to that line's outermost declaration, as in
+        go_to_definition. Direction is incoming or outgoing; kind can be implementation,
         override, or type-definition. Omitting kind returns every relationship kind.
         """)]
     public static string FindRelationships(
         SemanticNavigationGateway gateway,
         [Description("Repository-relative source path.")]
         string path,
-        [Description("Zero-based line number.")]
+        [Description("Line number as search_code prints it and an editor shows it, counted from 1.")]
         int line,
-        [Description("Zero-based UTF-16 column.")]
-        int utf16Column,
+        [Description("Column on that line, counted from 1, as a UTF-16 offset. Defaults to 1 — the start of the line, which is what navigates a search_code hit.")]
+        int column = 1,
         [Description("incoming or outgoing")]
         string direction = "outgoing",
         [Description("Optional: implementation, override, or type-definition")]
@@ -200,6 +225,11 @@ public static class CodeSearchTools
         [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
+        if (!SourcePosition.TryFromOneBased(line, column, out var position))
+        {
+            return CodeSearchText.PositionNotFromOne(line, column);
+        }
+
         try
         {
             var parsedDirection = Enum.Parse<SemanticRelationshipDirection>(
@@ -210,20 +240,25 @@ public static class CodeSearchTools
                     kind.Replace("-", string.Empty, StringComparison.Ordinal),
                     ignoreCase: true);
             var locations = gateway.FindRelationships(
-                path, line, utf16Column, parsedDirection, parsedKind, root);
+                path,
+                position.Line,
+                position.Utf16Column,
+                parsedDirection,
+                parsedKind,
+                root);
             if (locations.Count == 0)
             {
                 return CodeSearchText.NoRelationships;
             }
 
             var report = new StringBuilder()
-                .Append("Relationships: ").Append(locations.Count).AppendLine();
+                .Append("Relationships: ").Append(locations.Count)
+                .Append("  ").Append(CodeSearchText.LocationNumbering).AppendLine();
             foreach (var related in locations)
             {
                 var location = related.Location;
-                var body = $"{location.DocumentPath}:{location.Range.StartLine}:" +
-                           $"{location.Range.StartCharacter}-{location.Range.EndLine}:" +
-                           $"{location.Range.EndCharacter}\nsymbol: {location.SymbolId}\n" +
+                var body = FormatLocation(location) +
+                           $"\nsymbol: {location.SymbolId}\n" +
                            $"relationship: {related.Kind}\ndirection: {related.Direction}\n" +
                            $"precision: {location.Precision}";
                 report.AppendLine(UntrustedContent.Wrap(
@@ -310,6 +345,8 @@ public static class CodeSearchTools
         language, and any region no definition covers - imports, module-level statements, the
         gap between two functions - is chunked by a sliding window over lines, and a hit there
         names the file and its line range instead.
+        Line numbers are counted from 1, as an editor shows them, and a hit's start line is what
+        the navigation tools take.
         Use this INSTEAD of grep/glob as the first step for any
         "where does X live", "which code handles Y", "what already does something like Z"
         question - it answers by meaning, so it finds the right code without knowing its name,
@@ -881,22 +918,39 @@ public static class CodeSearchTools
 
     private static string Short(string commit) => commit.Length >= 9 ? commit[..9] : commit;
 
+    /// <summary>
+    /// A location as a reader would type it back: `path:line:column-line:column`, every number
+    /// counted from one.
+    ///
+    /// Stored positions count from zero, which is the wire convention of LSP, SCIP and Roslyn.
+    /// Printing them raw beside a `search_code` hit — which has always printed from one — put
+    /// two meanings of the same number in one server's output, and the difference was invisible
+    /// until a navigation call answered about the line below the one it was given.
+    ///
+    /// All four numbers move together on purpose: an end line names a line the span occupies, so
+    /// it must move, and a column left behind would make the same pair mean two things.
+    /// </summary>
+    private static string FormatLocation(SemanticLocation location) =>
+        new StringBuilder()
+            .Append(location.DocumentPath)
+            .Append(':').Append(SourcePosition.ToOneBased(location.Range.StartLine))
+            .Append(':').Append(SourcePosition.ToOneBased(location.Range.StartCharacter))
+            .Append('-').Append(SourcePosition.ToOneBased(location.Range.EndLine))
+            .Append(':').Append(SourcePosition.ToOneBased(location.Range.EndCharacter))
+            .ToString();
+
     private static string FormatSemanticLocations(
         string heading,
         string origin,
         IReadOnlyList<SemanticLocation> locations)
     {
         var report = new StringBuilder()
-            .Append(heading).Append(": ").Append(locations.Count).AppendLine();
+            .Append(heading).Append(": ").Append(locations.Count)
+            .Append("  ").Append(CodeSearchText.LocationNumbering).AppendLine();
         foreach (var location in locations)
         {
             var body = new StringBuilder()
-                .Append(location.DocumentPath)
-                .Append(':').Append(location.Range.StartLine)
-                .Append(':').Append(location.Range.StartCharacter)
-                .Append('-').Append(location.Range.EndLine)
-                .Append(':').Append(location.Range.EndCharacter)
-                .AppendLine()
+                .AppendLine(FormatLocation(location))
                 .Append("symbol: ").AppendLine(location.SymbolId)
                 .Append("roles: ").AppendLine(location.Roles.ToString())
                 .Append("precision: ").Append(location.Precision)

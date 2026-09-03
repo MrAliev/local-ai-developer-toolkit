@@ -20,9 +20,9 @@ else got a bare protocol error naming nothing.
 
 | Tool | Purpose | The constraint that matters |
 | --- | --- | --- |
-| `search_code` | Semantic and literal search over indexed chunks. The first step for "where does X live". | C#, TypeScript and Python are chunked by symbol; every other language, and every region no definition covers, by a 60-line window with 12 lines of overlap. Every hit is wrapped in `<untrusted-content>`. |
+| `search_code` | Semantic and literal search over indexed chunks. The first step for "where does X live". | C#, TypeScript and Python are chunked by symbol; every other language, and every region no definition covers, by a 60-line window with 12 lines of overlap. Every hit is wrapped in `<untrusted-content>`. Line numbers are printed counting from 1, and a hit's start line is what the navigation tools take. |
 | `get_code_chunk` | The full body of one result, by `chunk_id`. | The id is bound to repository, generation, git tree and dirty overlay; a stale one is refused. |
-| `go_to_definition` | The definition of the symbol at a zero-based line and UTF-16 column. | Source order: live LSP, then snapshot SIDX, then text tagged `Heuristic`. A position that names nothing resolves to the line's outermost declaration — a method rather than its parameters — so the start line of a `search_code` hit navigates as it stands with column 0; sibling declarations stay unresolved. |
+| `go_to_definition` | The definition of the symbol at a line and column, both counted from 1 — the column as a UTF-16 offset. | Source order: live LSP, then snapshot SIDX, then text tagged `Heuristic`. A position that names nothing resolves to the line's outermost declaration — a method rather than its parameters — so a `search_code` hit's start line navigates exactly as printed, at column 1; sibling declarations stay unresolved. |
 | `find_references` | References to that symbol. | Same source order. |
 | `find_implementations` | Implementations, overrides, derived types. | No text fallback: an approximate answer is worse than none here. |
 | `find_relationships` | The snapshot's relationship graph. | SIDX only. Direction `incoming`/`outgoing`, kind `implementation`/`override`/`type-definition`. |

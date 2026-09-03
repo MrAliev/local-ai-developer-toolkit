@@ -63,6 +63,18 @@ internal static class SemanticNavigationCommand
             return Usage();
         }
 
+        // The same numbering the MCP tools take, because this command is what the instruction
+        // block offers when that server is unreachable. A fallback that reads a position
+        // differently from the tool it stands in for is a trap set for the moment somebody is
+        // already dealing with a breakage.
+        if (!SourcePosition.TryFromOneBased(line, column, out var position))
+        {
+            Console.Error.WriteLine(
+                $"invalid_position: lines and columns are counted from 1; " +
+                $"got line {line}, column {column}.");
+            return 2;
+        }
+
         try
         {
             var gateway = new SemanticNavigationGateway(
@@ -81,13 +93,16 @@ internal static class SemanticNavigationCommand
                         kindText.Replace("-", string.Empty, StringComparison.Ordinal),
                         ignoreCase: true);
                 foreach (var related in gateway.FindRelationships(
-                             path, line, column, direction, kind, root))
+                             path, position.Line, position.Utf16Column, direction, kind, root))
                 {
                     var location = related.Location;
                     Console.WriteLine(
-                        $"{location.DocumentPath}:{location.Range.StartLine}:" +
-                        $"{location.Range.StartCharacter}-{location.Range.EndLine}:" +
-                        $"{location.Range.EndCharacter} {related.Direction} " +
+                        $"{location.DocumentPath}:" +
+                        $"{SourcePosition.ToOneBased(location.Range.StartLine)}:" +
+                        $"{SourcePosition.ToOneBased(location.Range.StartCharacter)}-" +
+                        $"{SourcePosition.ToOneBased(location.Range.EndLine)}:" +
+                        $"{SourcePosition.ToOneBased(location.Range.EndCharacter)} " +
+                        $"{related.Direction} " +
                         $"{related.Kind} {location.SymbolId}");
                 }
 
@@ -96,26 +111,29 @@ internal static class SemanticNavigationCommand
 
             var locations = operation switch
             {
-                "definition" => gateway.GoToDefinition(path, line, column, root),
+                "definition" => gateway.GoToDefinition(path, position.Line, position.Utf16Column, root),
                 "references" => gateway.FindReferences(
                     path,
-                    line,
-                    column,
+                    position.Line,
+                    position.Utf16Column,
                     !args.Contains("--exclude-definition", StringComparer.Ordinal),
                     root),
                 "implementations" => gateway.FindImplementations(
                     path,
-                    line,
-                    column,
+                    position.Line,
+                    position.Utf16Column,
                     root),
                 _ => throw new ArgumentException($"Unknown semantic operation '{operation}'."),
             };
             foreach (var location in locations)
             {
                 Console.WriteLine(
-                    $"{location.DocumentPath}:{location.Range.StartLine}:" +
-                    $"{location.Range.StartCharacter}-{location.Range.EndLine}:" +
-                    $"{location.Range.EndCharacter} {location.SymbolId}");
+                    $"{location.DocumentPath}:" +
+                    $"{SourcePosition.ToOneBased(location.Range.StartLine)}:" +
+                    $"{SourcePosition.ToOneBased(location.Range.StartCharacter)}-" +
+                    $"{SourcePosition.ToOneBased(location.Range.EndLine)}:" +
+                    $"{SourcePosition.ToOneBased(location.Range.EndCharacter)} " +
+                    $"{location.SymbolId}");
             }
 
             return 0;
@@ -365,14 +383,14 @@ internal static class SemanticNavigationCommand
             "       localai semantic lsp-config show|path|init\n" +
             "       localai semantic fallback-config show|path|init\n" +
             "       localai semantic evaluate --cases <json> [--iterations <n>] [--root <path>]\n" +
-            "       localai semantic definition --path <relative> --line <zero-based> " +
-            "--column <utf16> [--root <path>]\n" +
-            "       localai semantic references --path <relative> --line <zero-based> " +
-            "--column <utf16> [--exclude-definition] [--root <path>]\n" +
-            "       localai semantic implementations --path <relative> --line <zero-based> " +
-            "--column <utf16> [--root <path>]\n" +
-            "       localai semantic relationships --path <relative> --line <zero-based> " +
-            "--column <utf16> [--direction incoming|outgoing] " +
+            "       localai semantic definition --path <relative> --line <1-based> " +
+            "--column <1-based utf16> [--root <path>]\n" +
+            "       localai semantic references --path <relative> --line <1-based> " +
+            "--column <1-based utf16> [--exclude-definition] [--root <path>]\n" +
+            "       localai semantic implementations --path <relative> --line <1-based> " +
+            "--column <1-based utf16> [--root <path>]\n" +
+            "       localai semantic relationships --path <relative> --line <1-based> " +
+            "--column <1-based utf16> [--direction incoming|outgoing] " +
             "[--kind implementation|override|type-definition] [--root <path>]");
         return 2;
     }

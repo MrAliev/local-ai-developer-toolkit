@@ -62,6 +62,10 @@
   <data name="EtaMinutes" xml:space="preserve">
     <value>{0} мин</value>
   </data>
+  <data name="LocationNumbering" xml:space="preserve">
+    <value>(путь:строка:колонка, счёт с единицы)</value>
+    <comment>Printed beside the heading so the output carries its own contract rather than depending on a tool description read elsewhere.</comment>
+  </data>
   <data name="LspDocumentClosed" xml:space="preserve">
     <value>Документ LSP закрыт: {0}.</value>
   </data>
@@ -104,6 +108,10 @@
   </data>
   <data name="NothingLoaded" xml:space="preserve">
     <value>Ничего не загружено — память уже свободна.</value>
+  </data>
+  <data name="PositionNotFromOne" xml:space="preserve">
+    <value>invalid_position: строки и колонки считаются с единицы; получено: строка {0}, колонка {1}.</value>
+    <comment>invalid_position: is a status token left of the first colon and stays English, like semantic_navigation_not_ready: beside it.</comment>
   </data>
   <data name="ProcessMemory" xml:space="preserve">
     <value>Процесс занимал больше на ~{0} МБ, сейчас ~{1} МБ ({2}).</value>
