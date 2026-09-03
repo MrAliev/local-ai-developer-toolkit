@@ -79,6 +79,41 @@ public sealed class BackReachesTheChoiceTests
         Assert.Equal(UninstallPage.Choose, wizard.CurrentPage);
     }
 
+    /// <summary>
+    /// The flag is read in one place — <c>CanMovePrevious</c> — and <c>MovePrevious</c> leans on
+    /// that reading rather than repeating it. That is the arrangement worth pinning: asking to
+    /// leave a wizard with nothing behind it closes the only window the process has, and the
+    /// installer disappears rather than going back. A future edit that raises the event before
+    /// the guard compiles perfectly and breaks exactly this.
+    /// </summary>
+    [Fact]
+    public void With_nothing_behind_it_the_first_page_does_not_ask_to_leave_either()
+    {
+        var wizard = new InstallerWizardViewModel(
+            StartChoice.UpdateOrRepair,
+            canReturnToStart: false);
+        var asked = 0;
+        wizard.ReturnToStartRequested += (_, _) => asked++;
+
+        Assert.False(wizard.MovePrevious());
+
+        Assert.Equal(0, asked);
+        Assert.Equal(InstallerPage.Diagnose, wizard.CurrentPage);
+    }
+
+    [Fact]
+    public void The_removal_wizard_stays_put_the_same_way()
+    {
+        var wizard = Removal(canReturnToStart: false);
+        var asked = 0;
+        wizard.ReturnToStartRequested += (_, _) => asked++;
+
+        Assert.False(wizard.MovePrevious());
+
+        Assert.Equal(0, asked);
+        Assert.Equal(UninstallPage.Choose, wizard.CurrentPage);
+    }
+
     private static UninstallWizardViewModel Removal(bool canReturnToStart) =>
         new(
             RemovalPreset.FullUninstall,
