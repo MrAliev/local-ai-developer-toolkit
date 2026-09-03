@@ -53,14 +53,15 @@ public sealed record UpdateCheckPolicy(
     /// checkbox for the reason the constant exists at all: consent has to be described the same
     /// way wherever it is asked for, and two texts that must not drift belong in one diff.
     ///
-    /// The CLI keeps printing the English one. A terminal that answers in English everywhere
-    /// else must not produce one Russian paragraph.
+    /// Both surfaces pick by the reader's language — the installer window through
+    /// <c>InstallerCulture.Pick</c>, the CLI through <c>OutputCulture.Pick</c> — so a
+    /// terminal that answers in Russian takes consent in Russian too.
     /// </summary>
     public const string DisclosureRussian =
-        "Запрашивает у GitHub последний манифест релиза и его подпись по " +
-        "обычному HTTPS, без учётной записи, не чаще одного раза за заданный " +
-        "интервал, и проверяет подпись, прежде чем принять указанную в " +
-        "манифесте версию. Об этом компьютере ничего не отправляется: ни " +
+        "Получает от GitHub последний манифест релиза и его подпись анонимным " +
+        "запросом по HTTPS, не чаще одного раза за заданный интервал, и " +
+        "проверяет подпись, прежде чем принять указанную в манифесте " +
+        "версию. Об этом компьютере ничего не отправляется: ни " +
         "идентификатора, ни учётной записи, ни данных об использовании. " +
         "Ничего никогда не скачивается и не устанавливается без вашего запроса.";
 }

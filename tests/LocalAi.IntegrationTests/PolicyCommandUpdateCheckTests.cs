@@ -1,5 +1,6 @@
 using LocalAi.Cli;
 using LocalAi.Contracts;
+using LocalAi.Tests.Shared;
 
 namespace LocalAi.IntegrationTests;
 
@@ -43,15 +44,44 @@ public sealed class PolicyCommandUpdateCheckTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The language is named rather than inherited. The suite pins English, so an assertion
+    /// about the English paragraph would pass here whatever the command decided — including
+    /// if it decided nothing and kept printing one language at every reader.
+    /// </summary>
     [Fact]
     public void Switching_it_on_writes_the_consent_and_says_what_it_agreed_to()
     {
+        using var reading = TestCulture.Reading("en");
+
         var exit = Run("set", "--update-check", "on");
 
         Assert.Equal(0, exit);
         Assert.True(new UpdateCheckPolicyStore(root).Read().Enabled);
         Assert.Contains("update check: on", output.ToString(), StringComparison.Ordinal);
         Assert.Contains(
+            UpdateCheckPolicy.Disclosure,
+            output.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Consent is taken in the language it is read in. A terminal that answers in Russian
+    /// everywhere else must not ask for this one permission in English — the paragraph is
+    /// the whole of what the reader is agreeing to.
+    /// </summary>
+    [Fact]
+    public void The_consent_is_taken_in_the_language_the_reader_reads()
+    {
+        using var reading = TestCulture.Reading("ru");
+
+        Assert.Equal(0, Run("set", "--update-check", "on"));
+
+        Assert.Contains(
+            UpdateCheckPolicy.DisclosureRussian,
+            output.ToString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
             UpdateCheckPolicy.Disclosure,
             output.ToString(),
             StringComparison.Ordinal);
@@ -150,7 +180,7 @@ public sealed class PolicyCommandUpdateCheckTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.Contains(
-            "unknown — the last check produced nothing to believe",
+            "unknown; the last check produced nothing to believe",
             output.ToString(),
             StringComparison.Ordinal);
     }

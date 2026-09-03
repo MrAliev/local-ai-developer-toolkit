@@ -69,18 +69,97 @@
   <data name="PolicyDefaults" xml:space="preserve">
     <value>{0} (по умолчанию, файла нет)</value>
   </data>
+  <data name="PolicyKeepAlive" xml:space="preserve">
+    <value>idle model keep-alive: {0} с</value>
+    <comment>The field name is the option's own name and is byte-identical in both languages.</comment>
+  </data>
+  <data name="PolicyKeepAliveInvalid" xml:space="preserve">
+    <value>Некорректное удержание модели: '{0}'; ожидалось целое неотрицательное число.</value>
+  </data>
+  <data name="PolicyLanguageRestartNote" xml:space="preserve">
+    <value>note: уже запущенные процессы — брокер, MCP-сервер, оболочка — сохраняют прежний язык до перезапуска.</value>
+  </data>
   <data name="PolicyLanguageServersDisabled" xml:space="preserve">
     <value>выключены</value>
   </data>
   <data name="PolicyLanguageServersEnabled" xml:space="preserve">
     <value>включены для {0}</value>
   </data>
+  <data name="PolicyLanguageSystem" xml:space="preserve">
+    <value>language: system — язык, на который настроен этот компьютер; английский там, где перевода нет</value>
+    <comment>The field name and the value 'system' are what the reader types back and stay Latin in both languages.</comment>
+  </data>
+  <data name="PolicyLanguageUnknown" xml:space="preserve">
+    <value>Неизвестный язык: '{0}'. Эта установка знает {1}, а также 'system' — следовать настройке операционной системы.</value>
+    <comment>1 is the list of language codes and stays Latin.</comment>
+  </data>
   <data name="PolicyModels" xml:space="preserve">
     <value>резидентность {0}, удержание {1} с</value>
     <comment>0 is a ModelResidencyPolicy enum name and stays Latin.</comment>
   </data>
+  <data name="PolicyResidencyMarks" xml:space="preserve">
+    <value>warning: ответы инструментов LocalLm помечаются как ухудшенные в строке, которую они печатают; эмбеддинги и поиск через эту строку не проходят и метки не несут. Вернуть строгий режим: localai policy set --residency RequireFullVram</value>
+    <comment>The command is never translated and takes no trailing full stop: a period gets copied into a shell.</comment>
+  </data>
+  <data name="PolicyResidencyNowCpu" xml:space="preserve">
+    <value>warning: модели теперь могут работать целиком на процессоре. Ожидайте сильного замедления; ответы инструментов LocalLm помечаются как ухудшенные в строке, которую они печатают.</value>
+  </data>
+  <data name="PolicyResidencyNowPartial" xml:space="preserve">
+    <value>warning: часть модели теперь может уходить в системную память. Ожидайте замедления; ответы инструментов LocalLm помечаются как ухудшенные в строке, которую они печатают.</value>
+  </data>
+  <data name="PolicyResidencyRelaxed" xml:space="preserve">
+    <value>warning: правило резидентности смягчено; ответы могут быть значительно медленнее, чем при полной загрузке в видеопамять.</value>
+  </data>
+  <data name="PolicyResidencyUnknown" xml:space="preserve">
+    <value>Неизвестное правило резидентности: '{0}'.</value>
+  </data>
+  <data name="PolicyRestartNote" xml:space="preserve">
+    <value>note: уже запущенный брокер сохраняет прежнюю политику до перезапуска.</value>
+  </data>
   <data name="PolicyRetention" xml:space="preserve">
     <value>поколений {0}, версий {1}, телеметрия {2} дн</value>
+  </data>
+  <data name="PolicyUpdateCheckIntervalInvalid" xml:space="preserve">
+    <value>Некорректный интервал проверки обновлений: '{0}'; ожидалось от {1} до {2} ч.</value>
+  </data>
+  <data name="PolicyUpdateCheckNothingFetched" xml:space="preserve">
+    <value>Информация о релизах запрашиваться не будет. Результат последней проверки останется на диске, но пока проверка выключена, обновляться он не будет.</value>
+    <comment>The old tail named the next check as what would replace the stored answer, and no check happens while this is off.</comment>
+  </data>
+  <data name="PolicyUpdateCheckOffWithInterval" xml:space="preserve">
+    <value>update check: off; интервал {0} ч сохранён и вступит в силу после включения проверки</value>
+    <comment>on and off are what the reader types back and stay Latin in both languages.</comment>
+  </data>
+  <data name="PolicyUpdateCheckOn" xml:space="preserve">
+    <value>update check: on, интервал {0} ч</value>
+    <comment>Noun-first in Russian: ResourceManager has no plural support, and a leading numeral forces an agreement it cannot make.</comment>
+  </data>
+  <data name="PolicyUpdateCheckUnknown" xml:space="preserve">
+    <value>Неизвестное значение проверки обновлений: '{0}'.</value>
+  </data>
+  <data name="PolicyUsage" xml:space="preserve">
+    <value>Usage: localai policy show
+       localai policy set --residency &lt;RequireFullVram|AllowPartialOffload|AllowCpu&gt;
+       localai policy set --idle-model-keep-alive-seconds &lt;non-negative integer&gt;
+       localai policy set --update-check &lt;on|off&gt;
+       localai policy set --update-check-interval-hours &lt;{0}..{1}&gt;
+       localai policy set --language &lt;en|ru|system&gt;
+
+  RequireFullVram      Модель должна быть целиком в видеопамяти. По умолчанию.
+  AllowPartialOffload  Часть модели может уйти в системную память. Нужен
+                       адаптер, вмещающий хотя бы часть модели. Медленнее.
+  AllowCpu             Модели могут работать целиком на процессоре. Работает
+                       без пригодного адаптера; намного медленнее.
+  Удержание модели     Сколько секунд держать загруженной простаивающую модель.
+                       Ноль выгружает её сразу — это значение по умолчанию.
+  Обновления           Может ли эта установка спрашивать у GitHub, есть ли
+                       релиз новее. По умолчанию выключена; ничего никогда не
+                       скачивается и не устанавливается без вашего запроса.
+  Язык вывода          На каком языке отвечают CLI и MCP-инструменты. По
+                       умолчанию — как настроен этот компьютер, а где перевода
+                       нет — по-английски. Команды и имена опций никогда
+                       не переводятся.</value>
+    <comment>Usage: and every syntax line are byte-identical in both languages. The description column is 23; a Russian caption longer than 19 characters moves it for all six rows.</comment>
   </data>
   <data name="QueueClean" xml:space="preserve">
     <value>в очереди {0}, карантин пуст</value>
@@ -116,13 +195,17 @@
     <value>последний проверенный релиз — {0}; эта установка не хранит, из какого релиза она собрана, поэтому сравнивать не с чем. Следующая установка или обновление это запишет.</value>
   </data>
   <data name="UpdateNeverChecked" xml:space="preserve">
-    <value>неизвестно: проверок ещё не было</value>
+    <value>неизвестно — проверок ещё не было</value>
   </data>
   <data name="UpdateUnknownUnavailable" xml:space="preserve">
-    <value>неизвестно: последняя проверка не дала ничего, чему можно верить (попытка {0} UTC)</value>
+    <value>неизвестно — последняя проверка не дала ничего, чему можно верить (попытка {0} UTC)</value>
   </data>
   <data name="UpdateUpToDate" xml:space="preserve">
     <value>обновлений нет, установлена {0} (проверено {1} UTC)</value>
+  </data>
+  <data name="UpdateVerifiedRelease" xml:space="preserve">
+    <value>{0} (проверено {1} UTC)</value>
+    <comment>1 arrives already formatted invariantly.</comment>
   </data>
   <data name="VersionComplete" xml:space="preserve">
     <value>{0}, все двоичные файлы на месте ({1})</value>

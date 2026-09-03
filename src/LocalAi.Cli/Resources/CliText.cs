@@ -74,6 +74,75 @@ public static class CliText
     public static string PolicyDefaults(string detail) =>
         Catalogue.Format(nameof(PolicyDefaults), detail);
 
+    // What `localai policy` itself prints. The report above answers about a machine; these
+    // answer to somebody changing it, and say what the change costs.
+
+    /// <summary>
+    /// The whole usage block, holes and all.
+    ///
+    /// One string rather than a line each because its two columns only mean anything together:
+    /// the description column sits at 23, set by the longest caption, and a caption translated a
+    /// few characters longer moves it for every row at once. The interval range is a hole because
+    /// the validator reads those same two constants, and a usage block naming a range nothing
+    /// enforces is a lie no parity test can catch.
+    ///
+    /// Line endings are normalised because XML normalises them the other way: a resource file
+    /// written with CRLF hands back LF, and this prints beside a WriteLine.
+    /// </summary>
+    public static string PolicyUsage(int minimumIntervalHours, int maximumIntervalHours) =>
+        Catalogue.Format(nameof(PolicyUsage), minimumIntervalHours, maximumIntervalHours)
+            .ReplaceLineEndings();
+
+    public static string PolicyLanguageUnknown(string requested, string supported) =>
+        Catalogue.Format(nameof(PolicyLanguageUnknown), requested, supported);
+
+    public static string PolicyLanguageSystem => Catalogue.Get(nameof(PolicyLanguageSystem));
+
+    public static string PolicyLanguageRestartNote =>
+        Catalogue.Get(nameof(PolicyLanguageRestartNote));
+
+    public static string PolicyKeepAlive(int seconds) =>
+        Catalogue.Format(nameof(PolicyKeepAlive), seconds);
+
+    public static string PolicyKeepAliveInvalid(string requested) =>
+        Catalogue.Format(nameof(PolicyKeepAliveInvalid), requested);
+
+    public static string PolicyResidencyRelaxed => Catalogue.Get(nameof(PolicyResidencyRelaxed));
+
+    public static string PolicyResidencyMarks => Catalogue.Get(nameof(PolicyResidencyMarks));
+
+    public static string PolicyResidencyNowCpu => Catalogue.Get(nameof(PolicyResidencyNowCpu));
+
+    public static string PolicyResidencyNowPartial =>
+        Catalogue.Get(nameof(PolicyResidencyNowPartial));
+
+    public static string PolicyResidencyUnknown(string requested) =>
+        Catalogue.Format(nameof(PolicyResidencyUnknown), requested);
+
+    public static string PolicyRestartNote => Catalogue.Get(nameof(PolicyRestartNote));
+
+    public static string PolicyUpdateCheckOn(int intervalHours) =>
+        Catalogue.Format(nameof(PolicyUpdateCheckOn), intervalHours);
+
+    public static string PolicyUpdateCheckOffWithInterval(int intervalHours) =>
+        Catalogue.Format(nameof(PolicyUpdateCheckOffWithInterval), intervalHours);
+
+    public static string PolicyUpdateCheckUnknown(string requested) =>
+        Catalogue.Format(nameof(PolicyUpdateCheckUnknown), requested);
+
+    public static string PolicyUpdateCheckIntervalInvalid(
+        string requested,
+        int minimumIntervalHours,
+        int maximumIntervalHours) =>
+        Catalogue.Format(
+            nameof(PolicyUpdateCheckIntervalInvalid),
+            requested,
+            minimumIntervalHours,
+            maximumIntervalHours);
+
+    public static string PolicyUpdateCheckNothingFetched =>
+        Catalogue.Get(nameof(PolicyUpdateCheckNothingFetched));
+
     public static string UpdateCheckDisabled => Catalogue.Get(nameof(UpdateCheckDisabled));
 
     public static string UpdateAvailable(string? latest, string? installed, string? url) =>
@@ -89,6 +158,13 @@ public static class CliText
         Catalogue.Format(nameof(UpdateIncomparable), latest);
 
     public static string UpdateNeverChecked => Catalogue.Get(nameof(UpdateNeverChecked));
+
+    /// <summary>
+    /// What the last check verified. The timestamp arrives already formatted, so the resource
+    /// carries no format specifier for a translator to alter.
+    /// </summary>
+    public static string UpdateVerifiedRelease(string? latest, string? checkedAt) =>
+        Catalogue.Format(nameof(UpdateVerifiedRelease), latest, checkedAt);
 
     public static string RepositoryNotConnected(string root) =>
         Catalogue.Format(nameof(RepositoryNotConnected), root);

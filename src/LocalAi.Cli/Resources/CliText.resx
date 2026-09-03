@@ -69,18 +69,97 @@
   <data name="PolicyDefaults" xml:space="preserve">
     <value>{0} (defaults, no file)</value>
   </data>
+  <data name="PolicyKeepAlive" xml:space="preserve">
+    <value>idle model keep-alive: {0} seconds</value>
+    <comment>The field name is the option's own name and is byte-identical in both languages.</comment>
+  </data>
+  <data name="PolicyKeepAliveInvalid" xml:space="preserve">
+    <value>Invalid idle model keep-alive '{0}'; expected a non-negative integer.</value>
+  </data>
+  <data name="PolicyLanguageRestartNote" xml:space="preserve">
+    <value>note: a broker, an MCP server or a shell that is already running keeps the previous language until it is restarted.</value>
+  </data>
   <data name="PolicyLanguageServersDisabled" xml:space="preserve">
     <value>disabled</value>
   </data>
   <data name="PolicyLanguageServersEnabled" xml:space="preserve">
     <value>enabled for {0}</value>
   </data>
+  <data name="PolicyLanguageSystem" xml:space="preserve">
+    <value>language: system — the language this computer is set to, English where there is no translation</value>
+    <comment>The field name and the value 'system' are what the reader types back and stay Latin in both languages.</comment>
+  </data>
+  <data name="PolicyLanguageUnknown" xml:space="preserve">
+    <value>Unknown language '{0}'. This installation speaks {1}, or 'system' to follow the operating system.</value>
+    <comment>1 is the list of language codes and stays Latin.</comment>
+  </data>
   <data name="PolicyModels" xml:space="preserve">
     <value>residency {0}, keep-alive {1}s</value>
     <comment>0 is a ModelResidencyPolicy enum name and stays Latin.</comment>
   </data>
+  <data name="PolicyResidencyMarks" xml:space="preserve">
+    <value>warning: answers from the LocalLm tools are labelled as degraded in the line they print; embedding and search do not route through that line and carry no mark. Restore strict residency with: localai policy set --residency RequireFullVram</value>
+    <comment>The command is never translated and takes no trailing full stop: a period gets copied into a shell.</comment>
+  </data>
+  <data name="PolicyResidencyNowCpu" xml:space="preserve">
+    <value>warning: models may now run entirely on the CPU. Expect a large slowdown; answers from the LocalLm tools are labelled as degraded in the line they print.</value>
+  </data>
+  <data name="PolicyResidencyNowPartial" xml:space="preserve">
+    <value>warning: models may now be partially offloaded to system memory. Expect a slowdown; answers from the LocalLm tools are labelled as degraded in the line they print.</value>
+  </data>
+  <data name="PolicyResidencyRelaxed" xml:space="preserve">
+    <value>warning: residency is relaxed; responses may be substantially slower than a fully resident load.</value>
+  </data>
+  <data name="PolicyResidencyUnknown" xml:space="preserve">
+    <value>Unknown residency policy '{0}'.</value>
+  </data>
+  <data name="PolicyRestartNote" xml:space="preserve">
+    <value>note: a broker that is already running keeps the previous policy until it is restarted.</value>
+  </data>
   <data name="PolicyRetention" xml:space="preserve">
     <value>{0} generations, {1} versions, telemetry {2}d</value>
+  </data>
+  <data name="PolicyUpdateCheckIntervalInvalid" xml:space="preserve">
+    <value>Invalid update check interval '{0}'; expected {1} to {2} hours.</value>
+  </data>
+  <data name="PolicyUpdateCheckNothingFetched" xml:space="preserve">
+    <value>No release information will be fetched. What the last check stored stays on disk, and nothing will update it while this is off.</value>
+    <comment>The old tail named the next check as what would replace the stored answer, and no check happens while this is off.</comment>
+  </data>
+  <data name="PolicyUpdateCheckOffWithInterval" xml:space="preserve">
+    <value>update check: off; interval set to {0} hours, in effect once the check is turned on</value>
+    <comment>on and off are what the reader types back and stay Latin in both languages.</comment>
+  </data>
+  <data name="PolicyUpdateCheckOn" xml:space="preserve">
+    <value>update check: on, every {0} hours</value>
+    <comment>Noun-first in Russian: ResourceManager has no plural support, and a leading numeral forces an agreement it cannot make.</comment>
+  </data>
+  <data name="PolicyUpdateCheckUnknown" xml:space="preserve">
+    <value>Unknown update check setting '{0}'.</value>
+  </data>
+  <data name="PolicyUsage" xml:space="preserve">
+    <value>Usage: localai policy show
+       localai policy set --residency &lt;RequireFullVram|AllowPartialOffload|AllowCpu&gt;
+       localai policy set --idle-model-keep-alive-seconds &lt;non-negative integer&gt;
+       localai policy set --update-check &lt;on|off&gt;
+       localai policy set --update-check-interval-hours &lt;{0}..{1}&gt;
+       localai policy set --language &lt;en|ru|system&gt;
+
+  RequireFullVram      Models must sit entirely in video memory. Default.
+  AllowPartialOffload  Part of a model may spill to system memory. Requires an
+                       adapter that holds at least some of it. Slower.
+  AllowCpu             Models may run entirely on the CPU. Works without a
+                       usable adapter; substantially slower.
+  Idle keep-alive      Seconds to keep an idle model loaded. Zero unloads it
+                       immediately and is the default.
+  Update check         Whether this installation may ask GitHub if a newer
+                       release exists. Off by default; nothing is ever
+                       downloaded or installed without you asking.
+  Language             What the CLI and the MCP tools answer in. Follows this
+                       computer by default, and falls back to English where
+                       there is no translation. Commands and option names are
+                       never translated.</value>
+    <comment>Usage: and every syntax line are byte-identical in both languages. The description column is 23; a Russian caption longer than 19 characters moves it for all six rows.</comment>
   </data>
   <data name="QueueClean" xml:space="preserve">
     <value>{0} queued, none quarantined</value>
@@ -123,6 +202,10 @@
   </data>
   <data name="UpdateUpToDate" xml:space="preserve">
     <value>up to date at {0} (checked {1} UTC)</value>
+  </data>
+  <data name="UpdateVerifiedRelease" xml:space="preserve">
+    <value>{0} (checked {1} UTC)</value>
+    <comment>1 arrives already formatted invariantly.</comment>
   </data>
   <data name="VersionComplete" xml:space="preserve">
     <value>{0}, all {1} binaries present</value>

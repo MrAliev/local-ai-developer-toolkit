@@ -120,6 +120,23 @@ public static class OutputCulture
         PinInvariantFormatting();
     }
 
+    /// <summary>
+    /// One of two texts, by the language this process resolved to.
+    ///
+    /// For the paragraph that cannot live in a catalogue: the update-check disclosure is
+    /// consent, and consent has to make the same promises in every language it is asked in.
+    /// A parity test proves a key exists in both files; nothing can prove two paragraphs
+    /// still say the same four things, so they are kept as a pair in one file and chosen
+    /// here.
+    ///
+    /// Deliberately not the installer's <c>InstallerCulture.Pick</c>: that is a settable
+    /// static which only the installer window ever sets, so a CLI asking it would be told
+    /// English on every machine and would look like it was working.
+    /// </summary>
+    public static string Pick(string english, string russian) =>
+        CultureInfo.CurrentUICulture.TwoLetterISOLanguageName
+            .Equals("ru", StringComparison.OrdinalIgnoreCase) ? russian : english;
+
     private static string? Stored()
     {
         try

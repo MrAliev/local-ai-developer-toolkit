@@ -95,4 +95,19 @@ public sealed class UpdateCheckPolicyTests : IDisposable
     [InlineData("without you asking")]
     public void The_disclosure_says_what_is_sent_and_what_is_not(string claim) =>
         Assert.Contains(claim, UpdateCheckPolicy.Disclosure, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The same four claims in the second language, pinned the same way.
+    ///
+    /// Until the CLI learned to pick, nothing read this constant except an installer window,
+    /// and so nothing checked that it still promised what its English twin promises. Consent
+    /// described differently in two languages is consent taken under two different terms.
+    /// </summary>
+    [Theory]
+    [InlineData("Об этом компьютере ничего не отправляется")]
+    [InlineData("проверяет подпись")]
+    [InlineData("анонимным запросом")]
+    [InlineData("без вашего запроса")]
+    public void The_Russian_disclosure_makes_the_same_promises(string claim) =>
+        Assert.Contains(claim, UpdateCheckPolicy.DisclosureRussian, StringComparison.Ordinal);
 }
