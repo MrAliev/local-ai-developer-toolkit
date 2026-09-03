@@ -59,6 +59,60 @@ public sealed class InstallationLayoutSharedRootTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The installer writes a record of which release a version directory came from, into bin,
+    /// and then the next run refused the installation for containing it: the name was never
+    /// added to the list of what bin is allowed to hold.
+    ///
+    /// So every machine that installed a release could not update. The failure names the check
+    /// — "the layout is unsafe (check: ValidateBinNames)" — and nothing else, so it reads as a
+    /// tampered installation rather than as the installer's own file.
+    /// </summary>
+    [Fact]
+    public void The_record_of_which_release_is_installed_does_not_make_the_layout_unsafe()
+    {
+        var layout = Layout();
+        Directory.CreateDirectory(layout.Root);
+        Directory.CreateDirectory(layout.BinRoot);
+        Directory.CreateDirectory(layout.VersionsRoot);
+        Directory.CreateDirectory(layout.LauncherDirectory);
+        File.WriteAllText(
+            Path.Combine(layout.BinRoot, LocalAi.Contracts.Activation.InstalledRelease.FileName),
+            "{}");
+
+        // A temp directory cannot carry the ACLs a full lease demands, so this asserts on the
+        // name check specifically: it must not be what refuses the installer's own file.
+        var error = Record.Exception(
+            () => InstallationLayoutLease.Acquire(layout, requireFreshInstallerTree: false));
+
+        Assert.DoesNotContain(
+            "ValidateBinNames",
+            error?.Message ?? string.Empty,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And the other direction: an installation made before that record existed does not have
+    /// the file, and must still be accepted. The list says what bin may hold, not what it must.
+    /// </summary>
+    [Fact]
+    public void An_installation_made_before_that_record_existed_is_still_accepted()
+    {
+        var layout = Layout();
+        Directory.CreateDirectory(layout.Root);
+        Directory.CreateDirectory(layout.BinRoot);
+        Directory.CreateDirectory(layout.VersionsRoot);
+        Directory.CreateDirectory(layout.LauncherDirectory);
+
+        var error = Record.Exception(
+            () => InstallationLayoutLease.Acquire(layout, requireFreshInstallerTree: false));
+
+        Assert.DoesNotContain(
+            "ValidateBinNames",
+            error?.Message ?? string.Empty,
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public void An_acl_stricter_than_required_is_accepted()
     {
