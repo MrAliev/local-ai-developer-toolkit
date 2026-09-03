@@ -1,6 +1,6 @@
 using System.Globalization;
-using System.Resources;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Localization;
 
 namespace LocalLm.Core.Resources;
 
@@ -19,35 +19,17 @@ namespace LocalLm.Core.Resources;
 /// </summary>
 public static class LocalLmText
 {
-    private static readonly ResourceManager Manager = new(
+    /// <summary>The strings themselves, and the rules for reading them.</summary>
+    public static TextCatalogue Catalogue { get; } = new(
         "LocalLm.Core.Resources.LocalLmText",
         typeof(LocalLmText).Assembly);
 
-    /// <summary>
-    /// The raw string for a key, for the parity test and for callers that only need the words.
-    /// A missing key returns its own name rather than null: a line reading "SavedNothing" is a
-    /// bug report, and an empty line is not.
-    /// </summary>
-    public static string Get(string key) =>
-        Manager.GetString(key, CultureInfo.CurrentUICulture) ?? key;
+    /// <summary>The raw string for a key, for callers that only need the words.</summary>
+    public static string Get(string key) => Catalogue.Get(key);
 
-    /// <summary>
-    /// The keys a language carries, for the test that refuses a half-translated language.
-    ///
-    /// The set is not disposed, and that is not an oversight: <see cref="ResourceManager"/>
-    /// hands back the one it caches, so disposing it closes the resource for the whole process.
-    /// Doing that here cost a suite in which every later lookup threw
-    /// <see cref="ObjectDisposedException"/> — from a method whose only job was to count.
-    /// </summary>
-    public static IReadOnlyCollection<string> Keys(CultureInfo culture)
-    {
-        ArgumentNullException.ThrowIfNull(culture);
-        var set = Manager.GetResourceSet(culture, createIfNotExists: true, tryParents: false);
-        return set is null
-            ? []
-            : [.. set.Cast<System.Collections.DictionaryEntry>()
-                .Select(entry => (string)entry.Key)];
-    }
+    /// <summary>The keys a language carries, for the parity test.</summary>
+    public static IReadOnlyCollection<string> Keys(CultureInfo culture) =>
+        Catalogue.Keys(culture);
 
     /// <summary>The line every local tool returns, so a delegation is never silent.</summary>
     public static string Notice(
@@ -254,5 +236,5 @@ public static class LocalLmText
     public static string ValidatorPlaceholders => Get(nameof(ValidatorPlaceholders));
 
     private static string Format(string key, params object?[] arguments) =>
-        string.Format(CultureInfo.InvariantCulture, Get(key), arguments);
+        Catalogue.Format(key, arguments);
 }

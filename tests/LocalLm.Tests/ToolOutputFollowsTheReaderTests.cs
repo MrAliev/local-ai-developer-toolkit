@@ -1,4 +1,3 @@
-using System.Globalization;
 using LocalAi.Contracts;
 using LocalLm.Core;
 using LocalLm.Core.Resources;
@@ -92,20 +91,9 @@ public sealed class ToolOutputFollowsTheReaderTests
     [Fact]
     public void Every_language_carries_every_string()
     {
-        var neutral = LocalLmText.Keys(CultureInfo.InvariantCulture);
+        var gaps = LocalLmText.Catalogue.Gaps();
 
-        foreach (var language in LocalAi.Contracts.Localization.OutputCulture.Supported
-                     .Where(name => !name.Equals("en", StringComparison.Ordinal)))
-        {
-            var translated = LocalLmText.Keys(CultureInfo.GetCultureInfo(language));
-            var missing = neutral.Except(translated, StringComparer.Ordinal).Order(StringComparer.Ordinal);
-            var extra = translated.Except(neutral, StringComparer.Ordinal).Order(StringComparer.Ordinal);
-
-            Assert.True(
-                !missing.Any() && !extra.Any(),
-                $"'{language}' is not the same set of strings as the neutral resource. " +
-                $"Missing: {string.Join(", ", missing)}. Unknown: {string.Join(", ", extra)}.");
-        }
+        Assert.True(gaps.Count == 0, string.Join(Environment.NewLine, gaps));
     }
 
     private static LocalResult Result(ResidencyShortfall? shortfall, int? residentPercent) =>
