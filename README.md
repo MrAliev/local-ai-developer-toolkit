@@ -942,8 +942,11 @@ localai prune
 `prune` never removes the generation a repository's pointer names, the version
 `bin\current.json` names, or a job that has not been terminal for longer than the response
 grace. A version whose files are still mapped by a running tool refuses to be deleted, which is
-the right answer — the next prune collects it. It also forgets repository records whose
-checkout no longer exists, which is what a throwaway worktree leaves behind.
+the right answer — the next prune collects it. It also forgets repository records in two
+cases, and the report says which: a checkout that no longer exists, which is what a
+throwaway worktree leaves behind, and a record that started indexing and never finished. A
+checkout whose volume is merely offline — an external disk, a share, a subst mapping from
+another session — is not gone, and its record is left alone.
 
 Most of what accumulates is overlays. Each is keyed by worktree and by the tree its commit
 named, so every commit on every branch leaves one behind, and they outnumber the generation

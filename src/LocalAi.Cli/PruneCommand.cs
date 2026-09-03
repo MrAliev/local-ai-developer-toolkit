@@ -1,8 +1,10 @@
 using CodeSearch.Core.Indexing;
 using LocalAi.Broker;
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Activation;
 using LocalAi.Repository;
+using System.Globalization;
 using System.Text.Json;
 
 namespace LocalAi.Cli;
@@ -36,6 +38,13 @@ public static class PruneCommand
         var policy = new RuntimeRetentionPolicyStore(runtimeRoot).Read();
         var lines = new List<string>();
         var reclaimed = 0L;
+        if (dryRun)
+        {
+            // First, not last. The rows below are counts and read the same either way, so the
+            // report used to claim nine deletions and correct itself with one word in capitals
+            // after all of them.
+            lines.Add(CliText.PruneDryRun);
+        }
 
         // A backlog is not a sweep. The per-sweep cap keeps the broker's hot path short; a
         // deliberate prune has no such constraint and should finish in one pass.
@@ -44,25 +53,27 @@ public static class PruneCommand
                 retention: policy with { MaximumActionsPerSweep = int.MaxValue })
             .SweepArchive(force: true, dryRun: dryRun);
         reclaimed += archive.BytesReclaimed;
-        lines.Add(
-            $"archive: {archive.JobsDeleted} job(s) removed, " +
-            $"{archive.ResponsesDropped} response bod(ies) dropped, " +
-            $"{Megabytes(archive.BytesReclaimed)}");
+        lines.Add(CliText.PruneArchive(
+            archive.JobsDeleted,
+            archive.ResponsesDropped,
+            Megabytes(archive.BytesReclaimed)));
         if (archive.QuarantineDeleted > 0)
         {
-            lines.Add($"quarantine: {archive.QuarantineDeleted} entr(ies) removed");
+            lines.Add(CliText.PruneQuarantine(archive.QuarantineDeleted));
         }
 
         foreach (var repository in Repositories(runtimeRoot))
         {
             var name = Path.GetFileName(repository);
-            if (IsAbandoned(repository, policy, now))
+            if (IsAbandoned(repository, policy, now) is { } abandonment)
             {
                 var size = DirectorySize(repository);
                 if (TryRemove(repository, dryRun))
                 {
                     reclaimed += size;
-                    lines.Add($"repository {name[..12]}: abandoned record removed, {Megabytes(size)}");
+                    lines.Add(abandonment == Abandonment.CheckoutGone
+                        ? CliText.PruneRecordCheckoutGone(name[..12], Megabytes(size))
+                        : CliText.PruneRecordNeverIndexed(name[..12], Megabytes(size)));
                 }
 
                 continue;
@@ -80,19 +91,19 @@ public static class PruneCommand
             }
 
             reclaimed += result.BytesReclaimed;
-            lines.Add(
-                $"repository {name[..12]}: {result.GenerationsRemoved.Count} generation(s), " +
-                $"{result.OverlaysRemoved.Count} overlay set(s), " +
-                $"{result.StagingRemoved.Count} stale file(s), " +
-                Megabytes(result.BytesReclaimed));
+            lines.Add(CliText.PruneRepositorySwept(
+                name[..12],
+                result.GenerationsRemoved.Count,
+                result.OverlaysRemoved.Count,
+                result.StagingRemoved.Count,
+                Megabytes(result.BytesReclaimed)));
         }
 
         var telemetry = PruneTelemetry(runtimeRoot, policy, now, dryRun);
         if (telemetry.Removed > 0)
         {
             reclaimed += telemetry.Bytes;
-            lines.Add(
-                $"telemetry: {telemetry.Removed} record(s) removed, {Megabytes(telemetry.Bytes)}");
+            lines.Add(CliText.PruneTelemetry(telemetry.Removed, Megabytes(telemetry.Bytes)));
         }
 
         var versions = PruneVersions(runtimeRoot, policy, dryRun);
@@ -165,9 +176,9 @@ public static class PruneCommand
             // checksum that does not decode or does not match. Leaving it out did not merely
             // skip this repository: it escaped Execute and ended the whole run, so telemetry,
             // installed versions and launcher backups were never swept.
-            Console.Error.WriteLine(
-                $"localai: {Path.GetFileName(repositoryRuntimeRoot)[..12]}: overlays left alone, " +
-                $"its worktrees could not be established ({exception.Message})");
+            Console.Error.WriteLine(CliText.PruneOverlaysLeftAlone(
+                Path.GetFileName(repositoryRuntimeRoot)[..12],
+                exception.Message));
             return null;
         }
     }
@@ -192,9 +203,7 @@ public static class PruneCommand
         var root = Path.GetPathRoot(Path.GetFullPath(worktreePath));
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
         {
-            throw new IOException(
-                $"The volume holding '{worktreePath}' is not available, so whether that worktree " +
-                "still exists cannot be established.");
+            throw new IOException(CliText.PruneVolumeUnavailable(worktreePath));
         }
 
         return true;
@@ -226,7 +235,20 @@ public static class PruneCommand
     /// been touched since. Both otherwise sit in the runtime forever advertising a state that will
     /// never change.
     /// </summary>
-    private static bool IsAbandoned(
+    /// <summary>
+    /// Which of the two shapes was matched, or null for a record that is neither.
+    ///
+    /// They are unrelated, and the report used to print one sentence for both. Only the cause
+    /// tells a reader whether a deletion was right: a checkout that is gone is expected, while a
+    /// record that never finished indexing may be one somebody is still waiting on.
+    /// </summary>
+    private enum Abandonment
+    {
+        CheckoutGone,
+        NeverIndexed,
+    }
+
+    private static Abandonment? IsAbandoned(
         string repositoryRuntimeRoot,
         RuntimeRetentionPolicy policy,
         DateTimeOffset now)
@@ -240,12 +262,12 @@ public static class PruneCommand
             exception is JsonException or IOException or UnauthorizedAccessException or
                 InvalidDataException)
         {
-            return false;
+            return null;
         }
 
         if (manifest is null)
         {
-            return false;
+            return null;
         }
 
         // Through IsGone rather than Directory.Exists, for the reason IsGone was written: an
@@ -257,7 +279,7 @@ public static class PruneCommand
         {
             if (IsGone(manifest.CommonDirectory))
             {
-                return true;
+                return Abandonment.CheckoutGone;
             }
         }
         catch (IOException)
@@ -265,7 +287,7 @@ public static class PruneCommand
             // The volume could not be asked about. Doubt leaves the record alone: keeping an
             // abandoned one costs disk until the next prune, and removing a live one costs hours
             // of embedding.
-            return false;
+            return null;
         }
 
         var generations = Path.Combine(repositoryRuntimeRoot, "generations");
@@ -273,7 +295,9 @@ public static class PruneCommand
                         Directory.EnumerateDirectories(generations).Any();
         return !published &&
                manifest.State == RepositoryIndexState.Initializing &&
-               now - manifest.UpdatedAtUtc >= policy.ArchiveRetention;
+               now - manifest.UpdatedAtUtc >= policy.ArchiveRetention
+            ? Abandonment.NeverIndexed
+            : null;
     }
 
     /// <summary>
@@ -365,14 +389,12 @@ public static class PruneCommand
             exception is ActivationCoordinationException or CurrentPointerException or
                 JsonException or IOException or UnauthorizedAccessException)
         {
-            return (
-                ["versions: skipped, the current-version pointer could not be read safely"],
-                0);
+            return ([CliText.PruneVersionsPointerUnreadable(exception.Message)], 0);
         }
 
         if (current is null)
         {
-            return (["versions: skipped, no current version is installed"], 0);
+            return ([CliText.PruneVersionsNoPointer], 0);
         }
 
         var lines = new List<string>();
@@ -412,7 +434,7 @@ public static class PruneCommand
 
         if (removed > 0)
         {
-            lines.Add($"versions: {removed} removed, {Megabytes(bytes)}");
+            lines.Add(CliText.PruneVersions(removed, Megabytes(bytes)));
         }
 
         var backupsRoot = Path.Combine(runtimeRoot, "installer", "backups");
@@ -441,7 +463,7 @@ public static class PruneCommand
 
         if (backupsRemoved > 0)
         {
-            lines.Add($"installer backups: {backupsRemoved} removed, {Megabytes(backupBytes)}");
+            lines.Add(CliText.PruneLauncherBackups(backupsRemoved, Megabytes(backupBytes)));
         }
 
         return (lines, bytes + backupBytes);
@@ -492,6 +514,11 @@ public static class PruneCommand
         }
     }
 
+    /// <summary>
+    /// The number alone, invariantly. The unit belongs to whichever sentence prints it, because
+    /// `localai sync` already writes it in the reader's language and the two commands must not
+    /// disagree about it on the same machine in the same minute.
+    /// </summary>
     internal static string Megabytes(long bytes) =>
-        $"{bytes / (1024.0 * 1024.0):F1} MB";
+        (bytes / (1024.0 * 1024.0)).ToString("F1", CultureInfo.InvariantCulture);
 }

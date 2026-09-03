@@ -205,6 +205,52 @@ public static class CliText
     public static string UpdateUsage(int maximumWaitMinutes) =>
         Catalogue.Format(nameof(UpdateUsage), maximumWaitMinutes).ReplaceLineEndings();
 
+    // What `localai prune` accounts for. Every row is a count of what went, not a sentence
+    // about it: the same rows print under --dry-run, where nothing went at all.
+
+    public static string PruneArchive(int jobs, int responseBodies, string megabytes) =>
+        Catalogue.Format(nameof(PruneArchive), jobs, responseBodies, megabytes);
+
+    public static string PruneDryRun => Catalogue.Get(nameof(PruneDryRun));
+
+    public static string PruneLauncherBackups(int removed, string megabytes) =>
+        Catalogue.Format(nameof(PruneLauncherBackups), removed, megabytes);
+
+    public static string PruneOverlaysLeftAlone(string repositoryId, string reason) =>
+        Catalogue.Format(nameof(PruneOverlaysLeftAlone), repositoryId, reason);
+
+    public static string PruneQuarantine(int entries) =>
+        Catalogue.Format(nameof(PruneQuarantine), entries);
+
+    public static string PruneReclaimed(string megabytes) =>
+        Catalogue.Format(nameof(PruneReclaimed), megabytes);
+
+    public static string PruneRecordCheckoutGone(string repositoryId, string megabytes) =>
+        Catalogue.Format(nameof(PruneRecordCheckoutGone), repositoryId, megabytes);
+
+    public static string PruneRecordNeverIndexed(string repositoryId, string megabytes) =>
+        Catalogue.Format(nameof(PruneRecordNeverIndexed), repositoryId, megabytes);
+
+    public static string PruneRepositorySwept(string repositoryId, int generations, int overlays, int staleFiles, string megabytes) =>
+        Catalogue.Format(nameof(PruneRepositorySwept), repositoryId, generations, overlays, staleFiles, megabytes);
+
+    public static string PruneTelemetry(int records, string megabytes) =>
+        Catalogue.Format(nameof(PruneTelemetry), records, megabytes);
+
+    public static string PruneVersions(int removed, string megabytes) =>
+        Catalogue.Format(nameof(PruneVersions), removed, megabytes);
+
+    public static string PruneVersionsNoPointer => Catalogue.Get(nameof(PruneVersionsNoPointer));
+
+    public static string PruneVersionsPointerUnreadable(string reason) =>
+        Catalogue.Format(nameof(PruneVersionsPointerUnreadable), reason);
+
+    public static string PruneVolumeUnavailable(string worktreePath) =>
+        Catalogue.Format(nameof(PruneVolumeUnavailable), worktreePath);
+
+    public static string PruneWouldReclaim(string megabytes) =>
+        Catalogue.Format(nameof(PruneWouldReclaim), megabytes);
+
     public static string RepositoryNotConnected(string root) =>
         Catalogue.Format(nameof(RepositoryNotConnected), root);
 

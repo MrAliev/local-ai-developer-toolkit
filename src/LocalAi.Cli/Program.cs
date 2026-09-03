@@ -1,5 +1,6 @@
 ﻿using CodeSearch.Core.Embedding;
 using LocalAi.Cli;
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Localization;
 using System.Text.Json;
@@ -284,9 +285,9 @@ static async Task<int> RunAsync(string[] args)
             Console.WriteLine(line);
         }
 
-        Console.WriteLine(
-            (dryRun ? "WOULD RECLAIM " : "RECLAIMED ") +
-            PruneCommand.Megabytes(report.BytesReclaimed));
+        Console.WriteLine(dryRun
+            ? CliText.PruneWouldReclaim(PruneCommand.Megabytes(report.BytesReclaimed))
+            : CliText.PruneReclaimed(PruneCommand.Megabytes(report.BytesReclaimed)));
         return 0;
     }
 

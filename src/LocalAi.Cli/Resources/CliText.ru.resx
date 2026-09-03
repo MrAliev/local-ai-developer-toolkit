@@ -185,6 +185,63 @@
                        не переводятся.</value>
     <comment>Usage: and every syntax line are byte-identical in both languages. The description column is 23; a Russian caption longer than 19 characters moves it for all six rows.</comment>
   </data>
+  <data name="PruneArchive" xml:space="preserve">
+    <value>archive: заданий {0}, тел ответов {1}, {2} МБ</value>
+    <comment>Two different events on one row: a job record deleted, and a response body deleted from a record that stays. The Russian keeps both nouns for that reason, noun-first.</comment>
+  </data>
+  <data name="PruneDryRun" xml:space="preserve">
+    <value>--dry-run: ничего не удалено; размеры ниже — то, что освободил бы запуск без этой опции.</value>
+    <comment>The rows below count what would go and are identical in both modes, so this line is what tells the two apart. It used to be one word in capitals at the end of the report.</comment>
+  </data>
+  <data name="PruneLauncherBackups" xml:space="preserve">
+    <value>installer backups: {0}, {1} МБ</value>
+  </data>
+  <data name="PruneOverlaysLeftAlone" xml:space="preserve">
+    <value>localai: repository {0}: не удалось установить, какие worktree живы ({1}); overlay в этом проходе не удаляются</value>
+    <comment>The localai: stderr prefix stays inside the value. The word repository is new: the line used to print twelve bare hex characters between two colons. The Russian tail is WorktreeNotInspectable's, verbatim, so the two read as a pair.</comment>
+  </data>
+  <data name="PruneQuarantine" xml:space="preserve">
+    <value>quarantine: записей {0}</value>
+    <comment>No megabytes: quarantine bytes are counted inside the archive row, and a size here would double-count them.</comment>
+  </data>
+  <data name="PruneReclaimed" xml:space="preserve">
+    <value>Освобождено {0} МБ.</value>
+  </data>
+  <data name="PruneRecordCheckoutGone" xml:space="preserve">
+    <value>repository {0}: запись целиком, checkout больше не существует, {1} МБ</value>
+    <comment>Kept apart from PruneRecordNeverIndexed on purpose: only the cause tells a reader whether the deletion was right. checkout stays Latin and indeclinable.</comment>
+  </data>
+  <data name="PruneRecordNeverIndexed" xml:space="preserve">
+    <value>repository {0}: запись целиком, индексация так и не завершилась, {1} МБ</value>
+    <comment>The other shape the abandoned check matches: a record stuck in Initializing past the archive retention.</comment>
+  </data>
+  <data name="PruneRepositorySwept" xml:space="preserve">
+    <value>repository {0}: поколений {1}, наборов overlay {2}, устаревших файлов {3}, {4} МБ</value>
+    <comment>Noun-first for all three counts. overlay stays Latin, matching RetentionRemoved.</comment>
+  </data>
+  <data name="PruneTelemetry" xml:space="preserve">
+    <value>telemetry: записей {0}, {1} МБ</value>
+  </data>
+  <data name="PruneVersions" xml:space="preserve">
+    <value>versions: {0}, {1} МБ</value>
+    <comment>The field name supplies the noun; repeating it stutters in English.</comment>
+  </data>
+  <data name="PruneVersionsNoPointer" xml:space="preserve">
+    <value>versions: пропущено, current.json нет — назвать используемую версию нечем</value>
+    <comment>The old wording said no version is installed, which is wrong whenever bin\versions is not empty — the normal case. Only the pointer is missing.</comment>
+  </data>
+  <data name="PruneVersionsPointerUnreadable" xml:space="preserve">
+    <value>versions: пропущено, current.json не читается ({0})</value>
+    <comment>Deliberately echoes VersionPointerUnreadable, which cannot be reused here: its 'versions: skipped,' prefix would have to be hoisted into C#. The reason is new information the code used to discard. Parenthesised because these messages end in a full stop.</comment>
+  </data>
+  <data name="PruneVolumeUnavailable" xml:space="preserve">
+    <value>Том, на котором лежит '{0}', недоступен, поэтому нельзя установить, существует ли ещё этот worktree</value>
+    <comment>No trailing full stop: it is always rendered inside the parentheses of PruneOverlaysLeftAlone.</comment>
+  </data>
+  <data name="PruneWouldReclaim" xml:space="preserve">
+    <value>Ничего не удалено. Запуск без --dry-run освободил бы {0} МБ.</value>
+    <comment>Shares no words with PruneReclaimed. The two used to differ by one word in capitals, and that word was the only thing separating a preview from a deletion.</comment>
+  </data>
   <data name="QueueClean" xml:space="preserve">
     <value>в очереди {0}, карантин пуст</value>
   </data>
@@ -200,7 +257,7 @@
     <comment>0 is a RepositoryIndexState enum name and stays Latin.</comment>
   </data>
   <data name="RetentionRemoved" xml:space="preserve">
-    <value>Retention: удалено устаревших поколений {0}, наборов overlay {1}, файлов в staging {2}; освобождено {3} МБ.</value>
+    <value>Retention: удалено устаревших поколений {0}, наборов overlay {1}, устаревших файлов {2}; освобождено {3} МБ.</value>
     <comment>Noun-first in Russian: ResourceManager has no plural support and genitive plural is correct for every count. 3 arrives already formatted to one decimal, invariantly.</comment>
   </data>
   <data name="RetentionSweepSkipped" xml:space="preserve">
