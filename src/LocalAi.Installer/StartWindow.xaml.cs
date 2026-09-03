@@ -97,23 +97,55 @@ public partial class StartWindow : Window
         {
             // The errand travels with the window: an update that asks every question an
             // install asks is a wizard that did not hear the answer already given (#257).
-            StartChoice.Install or StartChoice.UpdateOrRepair => new MainWindow(choice),
+            StartChoice.Install or StartChoice.UpdateOrRepair => new MainWindow(choice, canReturnToStart: true),
             // The removal half opens on the reinstall-friendly row and offers the install half
             // when it finishes; two deliberate wizards, because the install has prerequisites
             // and a release choice of its own to confirm.
             StartChoice.CleanReinstall => new UninstallWindow(
                 InstallerStartViewModel.PresetFor(choice),
-                offersInstallAfterwards: true),
-            _ => new UninstallWindow(InstallerStartViewModel.PresetFor(choice)),
+                offersInstallAfterwards: true,
+                canReturnToStart: true),
+            _ => new UninstallWindow(
+                InstallerStartViewModel.PresetFor(choice),
+                canReturnToStart: true),
         });
     }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 
+    /// <summary>
+    /// Hidden rather than closed, so Back from the wizard's first page finds this screen
+    /// exactly as it was left — the errand still chosen, the language and theme untouched.
+    /// Rebuilding it instead would mean carrying that state out and back through a
+    /// constructor, and losing whatever was forgotten.
+    ///
+    /// A wizard closed any other way — the caption's X, Cancel, a finished run — takes this
+    /// screen with it, or the process would linger behind an invisible window.
+    /// </summary>
     private void Open(Window window)
     {
+        var returning = false;
+        if (window is IReturnsToStart wizard)
+        {
+            wizard.ReturnToStart += (_, _) => returning = true;
+        }
+
+        window.Closed += (_, _) =>
+        {
+            if (returning)
+            {
+                Application.Current.MainWindow = this;
+                Show();
+                Activate();
+            }
+            else
+            {
+                Close();
+            }
+        };
+
         Application.Current.MainWindow = window;
         window.Show();
-        Close();
+        Hide();
     }
 }

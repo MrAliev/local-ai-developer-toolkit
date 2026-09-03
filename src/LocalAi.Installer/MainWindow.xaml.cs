@@ -8,16 +8,26 @@ namespace LocalAi.Installer;
 /// Navigation lives in the view model and is bound through commands, so this file only
 /// forwards the few control events that WPF cannot express as a two-way binding.
 /// </summary>
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IReturnsToStart
 {
     private readonly InstallerWizardViewModel viewModel;
 
-    public MainWindow(StartChoice mode = StartChoice.Install)
+    public MainWindow(StartChoice mode = StartChoice.Install, bool canReturnToStart = false)
     {
-        viewModel = new InstallerWizardViewModel(mode) { EnableDependencyActions = true };
+        viewModel = new InstallerWizardViewModel(mode, canReturnToStart: canReturnToStart)
+        {
+            EnableDependencyActions = true,
+        };
         InitializeComponent();
         // The caption is the desktop manager's, not the palette's.
         DarkCaption.Follow(this);
+        // Back on the first page leaves the wizard; the start window is what knows
+        // where to.
+        viewModel.ReturnToStartRequested += (_, _) =>
+        {
+            ReturnToStart?.Invoke(this, EventArgs.Empty);
+            Close();
+        };
         DataContext = viewModel;
         viewModel.CloseRequested += (_, _) => Close();
     }
@@ -35,6 +45,8 @@ public partial class MainWindow : Window
             viewModel.ReportUnexpectedError(exception);
         }
     }
+
+    public event EventHandler? ReturnToStart;
 
     private void OnDependencyConsentChanged(object sender, RoutedEventArgs e)
     {

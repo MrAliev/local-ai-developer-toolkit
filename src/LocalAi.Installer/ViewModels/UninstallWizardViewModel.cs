@@ -70,9 +70,11 @@ public sealed class UninstallWizardViewModel : ObservableObject
         InstallationLayout? layout = null,
         string? homeDirectory = null,
         IProcessRunner? processRunner = null,
-        Func<string, CancellationToken, Task<string?>>? readHooksPath = null)
+        Func<string, CancellationToken, Task<string?>>? readHooksPath = null,
+        bool canReturnToStart = false)
     {
         OffersInstallAfterwards = offersInstallAfterwards;
+        this.canReturnToStart = canReturnToStart;
         this.layout = layout ?? InstallationLayout.CreateDefault();
         this.homeDirectory = homeDirectory ??
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -314,8 +316,18 @@ public sealed class UninstallWizardViewModel : ObservableObject
                     "Всё выбранное удалено."),
     };
 
+    private readonly bool canReturnToStart;
+
+    /// <summary>
+    /// Raised when Back is pressed on the first page, which leaves the wizard rather than
+    /// moving inside it.
+    /// </summary>
+    public event EventHandler? ReturnToStartRequested;
+
     public bool CanMovePrevious =>
-        CurrentPage == UninstallPage.Confirm && !isRunning;
+        !isRunning &&
+        (CurrentPage == UninstallPage.Confirm ||
+            (CurrentPage == UninstallPage.Choose && canReturnToStart));
 
     public bool CanMoveNext =>
         !isRunning && !IsBlocked && CurrentPage == UninstallPage.Choose;
@@ -419,6 +431,14 @@ public sealed class UninstallWizardViewModel : ObservableObject
         if (!CanMovePrevious)
         {
             return false;
+        }
+
+        // The first page has no page before it, so Back leaves the wizard. Only the window
+        // knows what is behind it, which is why this is asked rather than done.
+        if (CurrentPage == UninstallPage.Choose)
+        {
+            ReturnToStartRequested?.Invoke(this, EventArgs.Empty);
+            return true;
         }
 
         // Going back invalidates the plan: the next Next builds a fresh one from whatever the

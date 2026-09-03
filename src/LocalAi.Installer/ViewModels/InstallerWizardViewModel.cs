@@ -199,8 +199,10 @@ public sealed class InstallerWizardViewModel : ObservableObject
     public InstallerWizardViewModel(
         StartChoice mode = StartChoice.Install,
         Func<string?>? readInstalledVersion = null,
-        IReleaseFeed? releaseFeed = null)
+        IReleaseFeed? releaseFeed = null,
+        bool canReturnToStart = false)
     {
+        this.canReturnToStart = canReturnToStart;
         feedForTests = releaseFeed;
         this.readInstalledVersion = readInstalledVersion ?? (() => InstalledVersionReader
             .Read(ModelResidencyPolicyStore.DefaultRuntimeRoot)
@@ -498,10 +500,25 @@ public sealed class InstallerWizardViewModel : ObservableObject
     /// Back and Next stay on screen for the whole wizard and only change availability.
     /// Buttons that vanish make the panel jump and hide where the user is.
     /// </summary>
+    private readonly bool canReturnToStart;
+
+    /// <summary>
+    /// Raised when Back is pressed on the first page: there is no page before it, so leaving
+    /// the wizard is the answer, and only the window knows how.
+    /// </summary>
+    public event EventHandler? ReturnToStartRequested;
+
+    /// <summary>
+    /// Every choice can be revisited until the run starts. The first page is included when
+    /// there is a screen behind it — the one that asked which errand this is. Reached from
+    /// Apps and features there is none, and a Back that opens something the person never saw
+    /// is not going back.
+    /// </summary>
     public bool CanMovePrevious =>
-        CurrentPage is not (InstallerPage.Diagnose or InstallerPage.Progress) &&
         !isRunning &&
-        !IsFinishPage;
+        !IsFinishPage &&
+        CurrentPage != InstallerPage.Progress &&
+        (CurrentPage != InstallerPage.Diagnose || canReturnToStart);
 
     public bool CanMoveNext => !isRunning && CurrentPage switch
     {
@@ -722,6 +739,14 @@ public sealed class InstallerWizardViewModel : ObservableObject
         if (!CanMovePrevious)
         {
             return false;
+        }
+
+        // The first page has no page before it, so Back leaves the wizard. Only the window
+        // knows what is behind it, which is why this is asked rather than done.
+        if (CurrentPage == InstallerPage.Diagnose)
+        {
+            ReturnToStartRequested?.Invoke(this, EventArgs.Empty);
+            return true;
         }
 
         if (CurrentPage == InstallerPage.Package && returnFromReleaseToConfirm)
