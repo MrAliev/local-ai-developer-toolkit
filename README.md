@@ -160,10 +160,11 @@ localai semantic fallback-config show
 localai semantic evaluate --cases tests/CodeSearch.Tests/Fixtures/SemanticNavigation/cases.json --root C:\path\to\repository
 ```
 
-`--line` and `--column` are **zero-based**, and the column is a UTF-16 offset, matching what
-the MCP tools take. An editor showing line 10 means `--line 9`. Positions that land on no
-symbol return nothing rather than an error, so an off-by-one reads as "there is nothing here"
-rather than as a mistake.
+`--line` and `--column` are **counted from 1** — the same as the MCP tools, the same as
+`search_code` prints and an editor shows; the column is a UTF-16 offset. Line 0 or column 0
+is refused by name, because it can only be a position counted from zero. Positions that land
+on no symbol return nothing rather than an error, so an off-by-one reads as "there is nothing
+here" rather than as a mistake.
 
 The installation-wide `%LOCALAPPDATA%\LocalAi\settings\semantic-indexing.json` file configures adapter
 enablement, executable paths and arguments, output paths, timeout, captured process output, and
