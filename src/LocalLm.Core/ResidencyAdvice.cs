@@ -1,4 +1,5 @@
 using LocalAi.Contracts;
+using LocalLm.Core.Resources;
 
 namespace LocalLm.Core;
 
@@ -48,8 +49,6 @@ public sealed class ResidencyAdvice
         // One sentence for both kinds: which shortfall it is has already been named beside the
         // model, and the way back is the same. "after a restart" is not decoration — the broker
         // holds the policy it started with, so without it the command looks like it did nothing.
-        return "⚠️ Неполная загрузка в видеопамять разрешена политикой этой машины. " +
-            "Вернуть строгий режим: localai policy set --residency RequireFullVram — " +
-            "брокер применит его после перезапуска.";
+        return LocalLmText.ResidencyAdvice;
     }
 }

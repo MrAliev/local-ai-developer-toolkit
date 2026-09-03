@@ -1,4 +1,5 @@
 using LocalAi.Contracts;
+using LocalAi.Contracts.Localization;
 
 namespace LocalAi.Cli;
 
@@ -31,11 +32,13 @@ public static class PolicyCommand
         ArgumentNullException.ThrowIfNull(error);
         var store = new ModelResidencyPolicyStore(runtimeRoot);
         var updates = new UpdateCheckPolicyStore(runtimeRoot);
+        var languages = new OutputLanguageStore(runtimeRoot);
 
         return args switch
         {
             ["show", ..] or [] =>
-                Show(store, updates, new UpdateCheckStateStore(runtimeRoot), output),
+                Show(store, updates, new UpdateCheckStateStore(runtimeRoot), languages, output),
+            ["set", "--language", var value, ..] => SetLanguage(languages, value, output, error),
             ["set", "--residency", var value, ..] => Set(store, value, output, error),
             ["set", "--idle-model-keep-alive-seconds", var value, ..] =>
                 SetIdleModelKeepAlive(store, value, output, error),
@@ -56,6 +59,7 @@ public static class PolicyCommand
                    localai policy set --idle-model-keep-alive-seconds <non-negative integer>
                    localai policy set --update-check <on|off>
                    localai policy set --update-check-interval-hours <1..720>
+                   localai policy set --language <en|ru|system>
 
               RequireFullVram      Models must sit entirely in video memory. Default.
               AllowPartialOffload  Part of a model may spill to system memory. Requires an
@@ -67,14 +71,62 @@ public static class PolicyCommand
               Update check         Whether this installation may look up whether a newer
                                    release exists. Off by default; nothing is ever downloaded
                                    or installed without you asking.
+              Language             What the CLI and the MCP tools answer in. Follows this
+                                   computer by default, and falls back to English where there
+                                   is no translation. Commands and option names never change.
             """);
         return 2;
     }
+
+    /// <summary>
+    /// Stores the language every process that prints will answer in, or clears the choice so
+    /// they follow the machine again.
+    ///
+    /// A language with no resources behind it is refused here rather than stored and quietly
+    /// ignored later: a setting that reads back as something else is worse than an error.
+    /// </summary>
+    private static int SetLanguage(
+        OutputLanguageStore languages,
+        string value,
+        TextWriter output,
+        TextWriter error)
+    {
+        var wanted = value.Trim();
+        var following = wanted.Equals("system", StringComparison.OrdinalIgnoreCase) ||
+            wanted.Equals("auto", StringComparison.OrdinalIgnoreCase);
+        if (!following &&
+            !OutputCulture.Supported.Contains(wanted, StringComparer.OrdinalIgnoreCase))
+        {
+            error.WriteLine(
+                $"Unknown language '{value}'. This installation speaks " +
+                string.Join(", ", OutputCulture.Supported) +
+                ", or 'system' to follow the operating system.");
+            return Usage(error);
+        }
+
+        languages.Write(following ? null : wanted.ToLowerInvariant());
+        output.WriteLine(Describe(languages));
+        output.WriteLine(
+            "note: a broker, an MCP server or a shell that is already running keeps the " +
+            "previous language until it is restarted.");
+        return 0;
+    }
+
+    /// <summary>
+    /// What the language setting is, in the one form both `show` and `set` print, so the two
+    /// cannot describe the same file differently.
+    /// </summary>
+    private static string Describe(OutputLanguageStore languages) =>
+        languages.Read() is { } chosen
+            ? $"language: {chosen}"
+            : "language: system — the language this computer is set to, English where there is " +
+                "no translation";
 
     private static int Show(
         ModelResidencyPolicyStore store,
         UpdateCheckPolicyStore updates,
         UpdateCheckStateStore states,
+        OutputLanguageStore languages,
         TextWriter output)
     {
         var policy = store.Read();
@@ -98,6 +150,7 @@ public static class PolicyCommand
             ? $"update check: on, every {updatePolicy.IntervalHours} hours"
             : "update check: off");
         output.WriteLine(Describe(states.Read()));
+        output.WriteLine(Describe(languages));
         return 0;
     }
 

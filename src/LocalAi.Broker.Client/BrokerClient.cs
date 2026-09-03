@@ -1,4 +1,5 @@
 using System.Text.Json;
+using LocalAi.Broker.Client.Resources;
 using LocalAi.Contracts;
 
 namespace LocalAi.Broker.Client;
@@ -147,7 +148,7 @@ public sealed class BrokerBackendUnreachableException(string endpoint)
 }
 
 public sealed class BrokerJobFailedException(Guid jobId, string failureCode)
-    : InvalidOperationException($"Broker job '{jobId}' failed with '{failureCode}'.")
+    : InvalidOperationException(BrokerClientText.BrokerJobFailed(jobId, failureCode))
 {
     public Guid JobId { get; } = jobId;
 

@@ -69,7 +69,7 @@ public class TokenEstimatorTests
     }
 
     [Theory]
-    [InlineData(100, "менее")]
+    [InlineData(100, "under")]
     [InlineData(20_000, "–")]
     [InlineData(250_000, "–")]
     public void DescribeAlwaysReportsARangeNeverAnExactCount(int saved, string expected)
@@ -84,8 +84,8 @@ public class TokenEstimatorTests
     public void A_job_too_small_to_save_anything_says_so_instead_of_reporting_zero()
     {
         // A 336x52 screenshot is about two dozen tokens to look at directly, and any useful
-        // answer about it is longer than that. Zero is the correct arithmetic; "Сэкономлено
-        // примерно 0 облачных токенов" reads as a broken counter rather than as a job not worth
+        // answer about it is longer than that. Zero is the correct arithmetic; "Saved
+        // about 0 cloud tokens" reads as a broken counter rather than as a job not worth
         // delegating.
         var image = TokenEstimator.ForImage(new ImageInfo(336, 52, "png"));
         var saved = TokenEstimator.Saved(image, new string('a', 4_000));
@@ -93,8 +93,8 @@ public class TokenEstimatorTests
         var sentence = TokenEstimator.DescribeSaving(saved);
 
         Assert.Equal(0, saved);
-        Assert.DoesNotContain("примерно 0", sentence, StringComparison.Ordinal);
-        Assert.Contains("не сэкономило", sentence, StringComparison.Ordinal);
+        Assert.DoesNotContain("0", sentence, StringComparison.Ordinal);
+        Assert.Contains("Saved no cloud tokens", sentence, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class TokenEstimatorTests
     {
         var sentence = TokenEstimator.DescribeSaving(100);
 
-        Assert.Contains("пренебрежимо мало", sentence, StringComparison.Ordinal);
+        Assert.Contains("negligible", sentence, StringComparison.Ordinal);
         Assert.DoesNotContain("100", sentence, StringComparison.Ordinal);
     }
 

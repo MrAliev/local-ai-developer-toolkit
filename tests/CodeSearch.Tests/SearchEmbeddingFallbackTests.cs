@@ -120,7 +120,7 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
             _root,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain("Search failed:", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("search_code failed:", response, StringComparison.Ordinal);
         Assert.Contains("Example.ExactSymbol", response, StringComparison.Ordinal);
         Assert.Contains("cos=0.000", response, StringComparison.Ordinal);
     }
@@ -152,10 +152,10 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
         Assert.Same(cancellation, cancellationError);
         Assert.Same(unrelated, unrelatedError);
         // The type as well as the message: an exception whose message names nothing used to
-        // reach the caller as "Search failed:" and nothing else. What this test is about is that
+        // reach the caller as "search_code failed:" and nothing else. What this test is about is that
         // an unrelated failure is not dressed up as embeddings being unavailable, and it still
         // is not.
-        Assert.Equal("Search failed: InvalidOperationException: bug", mcpResponse);
+        Assert.Equal("search_code failed: InvalidOperationException: bug", mcpResponse);
         Assert.DoesNotContain("unavailable", mcpResponse, StringComparison.OrdinalIgnoreCase);
     }
 

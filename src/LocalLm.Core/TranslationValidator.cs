@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using LocalLm.Core.Resources;
 
 namespace LocalLm.Core;
 
@@ -21,7 +22,7 @@ public static partial class TranslationValidator
         ArgumentNullException.ThrowIfNull(translated);
         if (string.IsNullOrWhiteSpace(translated))
         {
-            return new TranslationValidationResult(false, "empty translation");
+            return new TranslationValidationResult(false, LocalLmText.ValidatorEmptyTranslation);
         }
 
         if (translated.Contains("```", StringComparison.Ordinal) &&
@@ -29,7 +30,7 @@ public static partial class TranslationValidator
         {
             return new TranslationValidationResult(
                 false,
-                "unexpected fenced content");
+                LocalLmText.ValidatorUnexpectedFence);
         }
 
         if (PlainPromptLeakMarkers.Any(
@@ -39,7 +40,7 @@ public static partial class TranslationValidator
         {
             return new TranslationValidationResult(
                 false,
-                "translation prompt leaked into output");
+                LocalLmText.ValidatorPromptLeak);
         }
 
         var maximumPlausibleLength = Math.Max(64, source.Length * 8);
@@ -47,10 +48,10 @@ public static partial class TranslationValidator
         {
             return new TranslationValidationResult(
                 false,
-                $"translation expanded from {source.Length} to {translated.Length} characters");
+                LocalLmText.ValidatorExpanded(source.Length, translated.Length));
         }
 
-        return new TranslationValidationResult(true, "plausible plain translation");
+        return new TranslationValidationResult(true, LocalLmText.ValidatorPlausible);
     }
 
     public static TranslationValidationResult ValidateMarkdown(
@@ -61,16 +62,16 @@ public static partial class TranslationValidator
         ArgumentNullException.ThrowIfNull(translated);
         var checks = new[]
         {
-            CompareCount("headings", Heading().Matches(source).Count, Heading().Matches(translated).Count),
-            CompareCount("fenced code markers", Fence().Matches(source).Count, Fence().Matches(translated).Count),
-            CompareCount("list markers", ListMarker().Matches(source).Count, ListMarker().Matches(translated).Count),
-            CompareTokens("fenced code", FencedCode().Matches(source), translated),
-            CompareTokens("inline code", InlineCode().Matches(source), translated),
-            CompareTokens("URLs", Url().Matches(source), translated),
-            CompareTokens("placeholders", Placeholder().Matches(source), translated)
+            CompareCount(LocalLmText.ValidatorHeadings, Heading().Matches(source).Count, Heading().Matches(translated).Count),
+            CompareCount(LocalLmText.ValidatorFenceMarkers, Fence().Matches(source).Count, Fence().Matches(translated).Count),
+            CompareCount(LocalLmText.ValidatorListMarkers, ListMarker().Matches(source).Count, ListMarker().Matches(translated).Count),
+            CompareTokens(LocalLmText.ValidatorFencedCode, FencedCode().Matches(source), translated),
+            CompareTokens(LocalLmText.ValidatorInlineCode, InlineCode().Matches(source), translated),
+            CompareTokens(LocalLmText.ValidatorUrls, Url().Matches(source), translated),
+            CompareTokens(LocalLmText.ValidatorPlaceholders, Placeholder().Matches(source), translated)
         };
         var failure = checks.FirstOrDefault(result => !result.Passed);
-        return failure ?? new TranslationValidationResult(true, "structure preserved");
+        return failure ?? new TranslationValidationResult(true, LocalLmText.ValidatorStructurePreserved);
     }
 
     private static TranslationValidationResult CompareCount(
@@ -81,7 +82,7 @@ public static partial class TranslationValidator
             ? new TranslationValidationResult(true, name)
             : new TranslationValidationResult(
                 false,
-                $"{name}: expected {expected}, got {actual}");
+                LocalLmText.ValidatorCountMismatch(name, expected, actual));
 
     private static TranslationValidationResult CompareTokens(
         string name,
@@ -101,7 +102,7 @@ public static partial class TranslationValidator
             {
                 return new TranslationValidationResult(
                     false,
-                    $"{name}: protected token count changed");
+                    LocalLmText.ValidatorProtectedTokensChanged(name));
             }
         }
 

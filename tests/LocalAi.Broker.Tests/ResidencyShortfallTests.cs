@@ -53,8 +53,8 @@ public sealed class ResidencyShortfallTests
 
     /// <summary>
     /// A sliver in video memory is the processor running the model, whatever the arithmetic
-    /// rounds to. Reported as PartialOffload it renders as "в видеопамяти 0% модели — ответы
-    /// медленнее", which says "slower" about the case that is not slower but slowest.
+    /// rounds to. Reported as PartialOffload it renders as "0% of the model in VRAM —
+    /// answers are slower", which says "slower" about the case that is not slower but slowest.
     /// </summary>
     [Fact]
     public void A_sliver_in_video_memory_is_the_processor_running_it()

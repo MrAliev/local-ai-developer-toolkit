@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Text;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
+using LocalLm.Core.Resources;
 
 namespace LocalLm.Core;
 
@@ -19,9 +21,12 @@ public sealed record LocalResult(
     /// long it ran — and then went only into experiment telemetry, so a caller asked to report
     /// it could only guess. It comes from the receipt now.
     /// </summary>
-    public string Notice =>
-        $"🔧 Локально: {Model}{DescribeResidency(Receipt)}. {Detail}. {DescribeDuration()}. " +
-        TokenEstimator.DescribeSaving(SavedTokens);
+    public string Notice => LocalLmText.Notice(
+        Model,
+        DescribeResidency(Receipt),
+        Detail,
+        DescribeDuration(),
+        TokenEstimator.DescribeSaving(SavedTokens));
 
     /// <summary>
     /// The mark beside the model when it did not fit in video memory.
@@ -38,9 +43,8 @@ public sealed record LocalResult(
         receipt.Routing?.ResidencyShortfall switch
         {
             ResidencyShortfall.PartialOffload =>
-                $" (в видеопамяти {receipt.Routing.VramResidentPercent ?? 0}% модели — " +
-                "ответы медленнее)",
-            ResidencyShortfall.Cpu => " (целиком на процессоре — ответы намного медленнее)",
+                LocalLmText.ResidencyPartialOffload(receipt.Routing.VramResidentPercent ?? 0),
+            ResidencyShortfall.Cpu => LocalLmText.ResidencyCpu,
             _ => string.Empty,
         };
 
@@ -62,14 +66,14 @@ public sealed record LocalResult(
         var total = receipt.QueueDuration + receipt.ExecutionDuration;
         var queued = receipt.QueueDuration;
         return queued >= TimeSpan.FromSeconds(0.5) && queued >= total * 0.2
-            ? $"{Seconds(total)} (в очереди {Seconds(queued)})"
+            ? LocalLmText.DurationWithQueue(Seconds(total), Seconds(queued))
             : Seconds(total);
     }
 
     private static string Seconds(TimeSpan span) =>
-        span < TimeSpan.FromSeconds(10)
-            ? $"{span.TotalSeconds:0.0} с"
-            : $"{span.TotalSeconds:0} с";
+        LocalLmText.DurationSeconds(span < TimeSpan.FromSeconds(10)
+            ? span.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture)
+            : span.TotalSeconds.ToString("0", CultureInfo.InvariantCulture));
 }
 
 /// <summary>
@@ -145,19 +149,18 @@ public sealed class LocalTasks
         {
             throw new ArgumentOutOfRangeException(
                 nameof(profile),
-                "Image tasks support VisualAnalysis, Ocr, or ImageTranslation.");
+                LocalLmText.ImageProfileUnsupported);
         }
 
         if (paths.Count == 0)
         {
-            throw new ArgumentException("No image paths given.", nameof(paths));
+            throw new ArgumentException(LocalLmText.NoImagePaths, nameof(paths));
         }
 
         if (paths.Count > MaxImageCount)
         {
             throw new ArgumentException(
-                $"{paths.Count} images exceed the {MaxImageCount}-image limit for one call; " +
-                "split the request.",
+                LocalLmText.TooManyImages(paths.Count, MaxImageCount),
                 nameof(paths));
         }
 
@@ -174,21 +177,23 @@ public sealed class LocalTasks
             var full = Resolve(path);
             if (!ImageExtensions.Contains(Path.GetExtension(full)))
             {
-                throw new ArgumentException($"'{full}' does not look like an image.", nameof(paths));
+                throw new ArgumentException(LocalLmText.NotAnImage(full), nameof(paths));
             }
 
             var length = new FileInfo(full).Length;
             if (length > MaxImageBytes)
             {
-                throw new ArgumentException($"'{full}' is {length / 1024 / 1024}MB, past the {MaxImageBytes / 1024 / 1024}MB limit.");
+                throw new ArgumentException(LocalLmText.ImageTooLarge(
+                    full,
+                    length / 1024 / 1024,
+                    MaxImageBytes / 1024 / 1024));
             }
 
             totalImageBytes = checked(totalImageBytes + length);
             if (totalImageBytes > MaxTotalImageBytes)
             {
                 throw new ArgumentException(
-                    $"The images together exceed the {MaxTotalImageBytes / 1024 / 1024}MB " +
-                    "total limit for one call; split the request.",
+                    LocalLmText.ImagesTooLargeTogether(MaxTotalImageBytes / 1024 / 1024),
                     nameof(paths));
             }
 
@@ -199,8 +204,7 @@ public sealed class LocalTasks
             if (totalImagePixels > MaxTotalImagePixels)
             {
                 throw new ArgumentException(
-                    $"The images together exceed the {MaxTotalImagePixels:N0}-pixel " +
-                    "total limit for one call; split the request.",
+                    LocalLmText.ImagesTooManyPixels(MaxTotalImagePixels),
                     nameof(paths));
             }
 
@@ -291,7 +295,7 @@ public sealed class LocalTasks
             result.Value,
             TokenEstimator.Saved(wouldHaveCost, result.Value),
             chosen,
-            $"прочитано изображений: {images.Count} — {string.Join(", ", described)}",
+            LocalLmText.ImagesRead(images.Count, string.Join(", ", described)),
             result.Receipt);
     }
 
@@ -335,14 +339,13 @@ public sealed class LocalTasks
         {
             throw new ArgumentOutOfRangeException(
                 nameof(profile),
-                $"Task profile '{profile}' is not a text-chat profile.");
+                LocalLmText.NotATextChatProfile(profile));
         }
 
         if (files.Count > MaxAskFiles)
         {
             throw new ArgumentException(
-                $"{files.Count} files exceed the {MaxAskFiles}-file limit for one call; " +
-                "split the request.",
+                LocalLmText.TooManyFiles(files.Count, MaxAskFiles),
                 nameof(files));
         }
 
@@ -384,8 +387,8 @@ public sealed class LocalTasks
 
         var body = Clamp(bundle.ToString());
         var boundedNote = omitted > 0 || remaining == 0
-            ? $"; ввод усечён общим бюджетом {MaxPromptChars} символов" +
-              (omitted > 0 ? $", файлов пропущено: {omitted}" : string.Empty)
+            ? LocalLmText.InputTruncated(MaxPromptChars) +
+              (omitted > 0 ? LocalLmText.FilesSkipped(omitted) : string.Empty)
             : string.Empty;
 
         var requestBody = files.Count == 0 ? prompt : $"{prompt}\n\n{body}";
@@ -411,8 +414,11 @@ public sealed class LocalTasks
         var chosen = result.Receipt.Routing?.SelectedModel ?? result.Receipt.Model;
 
         var detail = (files.Count == 0
-            ? "выполнен запрос без файлов"
-            : $"обработано файлов: {files.Count} — {string.Join(", ", names.Take(5))}{(names.Count > 5 ? ", …" : string.Empty)}") +
+            ? LocalLmText.PromptOnly
+            : LocalLmText.FilesProcessed(
+                files.Count,
+                string.Join(", ", names.Take(5)),
+                names.Count > 5 ? ", …" : string.Empty)) +
             boundedNote;
 
         return new LocalResult(
@@ -517,7 +523,7 @@ public sealed class LocalTasks
                 translated.ToString(),
                 lastReceipt
                     ?? throw new InvalidOperationException(
-                        "Translation produced no model receipt."),
+                        LocalLmText.TranslationNoReceipt),
                 Array.AsReadOnly(receipts.ToArray()),
                 inputTokens,
                 outputTokens);
@@ -608,8 +614,7 @@ public sealed class LocalTasks
         if (!validation.Passed)
         {
             throw new InvalidDataException(
-                $"Local translation failed structural validation after fallback: " +
-                $"{validation.Detail}.");
+                LocalLmText.TranslationValidationFailed(validation.Detail));
         }
 
         var everyCall = attempts.SelectMany(candidate => candidate.Receipts).ToArray();
@@ -741,12 +746,12 @@ public sealed record LocalTranslationResult(
     TranslationValidationResult Validation,
     LocalUsageReceipt Receipt)
 {
-    public string Notice =>
-        $"🔧 Локально: {Model}{LocalResult.DescribeResidency(Receipt)}. " +
-        $"Перевод проверен: {Validation.Detail}. " +
-        $"{LocalResult.DescribeDuration(Receipt)}. " +
-        $"Локально обработано примерно {TokenEstimator.Describe(LocalTokensProcessed)} токенов; " +
-        $"на облачной генерации сэкономлено примерно {TokenEstimator.Describe(SavedTokens)}; " +
-        $"чистое сокращение облачного контекста — " +
-        $"{TokenEstimator.Describe(NetCloudContextTokensSaved)}.";
+    public string Notice => LocalLmText.TranslationNotice(
+        Model,
+        LocalResult.DescribeResidency(Receipt),
+        Validation.Detail,
+        LocalResult.DescribeDuration(Receipt),
+        TokenEstimator.Describe(LocalTokensProcessed),
+        TokenEstimator.Describe(SavedTokens),
+        TokenEstimator.Describe(NetCloudContextTokensSaved));
 }

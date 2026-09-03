@@ -11,4 +11,9 @@
     <ProjectReference Include="..\..\src\LocalAi.Repository\LocalAi.Repository.csproj" />
     <ProjectReference Include="..\..\src\LocalAi.Contracts\LocalAi.Contracts.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The entry points pin the language and invariant formatting; a test calling a tool
+         method directly never goes through one, so they are pinned here too. -->
+    <Compile Include="..\Shared\TestCulture.cs" Link="TestCulture.cs" />
+  </ItemGroup>
 </Project>

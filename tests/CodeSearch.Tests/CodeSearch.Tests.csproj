@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -43,4 +43,9 @@
     <Compile Include="..\Shared\FixturePrerequisite.cs" Link="FixturePrerequisite.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The entry points pin the language and invariant formatting; a test calling a tool
+         method directly never goes through one, so they are pinned here too. -->
+    <Compile Include="..\Shared\TestCulture.cs" Link="TestCulture.cs" />
+  </ItemGroup>
 </Project>

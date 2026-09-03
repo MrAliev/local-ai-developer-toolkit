@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    What the CodeSearch tools say. One rule decides what is here and what stays literal: anything left of the first colon on a line is a field name and stays English, and so does any status token, enum name, identifier, path or command to the right of one. Sentences and clauses are translated. The field names are English because the agent instruction block keys behaviour on STALE, INITIALIZING and CONFIGURED, and the Russian documentation quotes them as literals.
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <data name="BuildItBackground" xml:space="preserve">
+    <value>Build it (runs for minutes on a large repository, so run it in the background):</value>
+  </data>
+  <data name="BuildItWith" xml:space="preserve">
+    <value>Build it with:</value>
+  </data>
+  <data name="BuiltAtCommit" xml:space="preserve">
+    <value>{0} at commit {1}</value>
+  </data>
+  <data name="CliUnavailable" xml:space="preserve">
+    <value>LocalAi CLI is unavailable. Expected: {0}</value>
+  </data>
+  <data name="EtaCalculating" xml:space="preserve">
+    <value>calculating</value>
+  </data>
+  <data name="EtaMinutes" xml:space="preserve">
+    <value>{0} min</value>
+  </data>
+  <data name="LspDocumentClosed" xml:space="preserve">
+    <value>LSP document closed: {0}.</value>
+  </data>
+  <data name="LspDocumentOpen" xml:space="preserve">
+    <value>LSP document open: {0} version {1} ({2}).</value>
+  </data>
+  <data name="ModelWithDims" xml:space="preserve">
+    <value>{0} ({1} dims)</value>
+  </data>
+  <data name="NavigationHeuristicCoversNothing" xml:space="preserve">
+    <value>HEURISTIC - this generation has a semantic.sidx that covers no document, so go_to_definition, find_references, find_implementations and find_relationships fall back to bounded text matching. Semantic indexing ran and produced nothing; the sync output says why. Re-sync after fixing that: localai-launcher.exe run localai sync --root {0}</value>
+  </data>
+  <data name="NavigationHeuristicMissing" xml:space="preserve">
+    <value>HEURISTIC - this generation has no semantic.sidx, so go_to_definition, find_references, find_implementations and find_relationships fall back to bounded text matching. Re-sync to build it: localai-launcher.exe run localai sync --root {0}</value>
+  </data>
+  <data name="NavigationPrecise" xml:space="preserve">
+    <value>precise (semantic.sidx present)</value>
+    <comment>precise is the other value of a two-value field whose partner is HEURISTIC; only the parenthetical moves.</comment>
+  </data>
+  <data name="NoDefinition" xml:space="preserve">
+    <value>No definition found.</value>
+  </data>
+  <data name="NoImplementations" xml:space="preserve">
+    <value>No implementations found.</value>
+  </data>
+  <data name="NoIndexForRoot" xml:space="preserve">
+    <value>No index exists for {0}.</value>
+  </data>
+  <data name="NoMatches" xml:space="preserve">
+    <value>No matches.</value>
+  </data>
+  <data name="NoReferences" xml:space="preserve">
+    <value>No references found.</value>
+  </data>
+  <data name="NoRelationships" xml:space="preserve">
+    <value>No relationships found.</value>
+  </data>
+  <data name="NothingHappened" xml:space="preserve">
+    <value>Nothing was read, embedded or written: the refusal happens before the work starts.</value>
+  </data>
+  <data name="NothingLoaded" xml:space="preserve">
+    <value>Nothing is loaded — the memory is already free.</value>
+  </data>
+  <data name="ProcessMemory" xml:space="preserve">
+    <value>The process was ~{0} MB larger; it now holds ~{1} MB ({2}).</value>
+  </data>
+  <data name="ProgressChunks" xml:space="preserve">
+    <value>{0}/{1} chunks ({2} remaining)</value>
+  </data>
+  <data name="ProgressNotCounted" xml:space="preserve">
+    <value>not counted in this phase</value>
+  </data>
+  <data name="RateChunks" xml:space="preserve">
+    <value>{0} chunks/s</value>
+  </data>
+  <data name="ReloadsInASecond" xml:space="preserve">
+    <value>The next search reloads the index in about a second.</value>
+  </data>
+  <data name="RunInBackground" xml:space="preserve">
+    <value>Run it in the background instead:</value>
+  </data>
+  <data name="SearchIndexHeader" xml:space="preserve">
+    <value>Index: {0} chunks over {1} files, model {2}, {3}</value>
+    <comment>Noun-first in Russian: ResourceManager has no plural support, and genitive plural is correct for every count.</comment>
+  </data>
+  <data name="SearchIndexHeaderStale" xml:space="preserve">
+    <value> (STALE: built at {0}, HEAD is {1})</value>
+  </data>
+  <data name="Seconds" xml:space="preserve">
+    <value>{0}s</value>
+  </data>
+  <data name="SizeMegabytes" xml:space="preserve">
+    <value>{0} MB</value>
+  </data>
+  <data name="StatusNotRefreshed" xml:space="preserve">
+    <value>NOT REFRESHED - {0} files to re-read, over the inline limit of {1}</value>
+  </data>
+  <data name="StatusStale" xml:space="preserve">
+    <value>STALE - built at {0}, HEAD is now {1}</value>
+    <comment>The token and the ASCII separator are a contract; only the clause after it moves.</comment>
+  </data>
+  <data name="SyncFailed" xml:space="preserve">
+    <value>LocalAi sync failed with {0}: {1}</value>
+  </data>
+  <data name="SyncReached" xml:space="preserve">
+    <value>; a sync reached {0} at {1}</value>
+    <comment>0 is a phase enum name and stays Latin.</comment>
+  </data>
+  <data name="TooBigForToolCall" xml:space="preserve">
+    <value>A refresh this size runs for minutes, so it does not belong inside a tool call.</value>
+  </data>
+  <data name="ToolFailed" xml:space="preserve">
+    <value>{0} failed: {1}</value>
+    <comment>0 is the tool name and is never translated. One key for all eight tools.</comment>
+  </data>
+  <data name="Unloaded" xml:space="preserve">
+    <value>Unloaded: {0}</value>
+  </data>
+  <data name="UpdateAvailable" xml:space="preserve">
+    <value>LocalAi {0} is available (this installation is {1}). {2}</value>
+    <comment>The `Update:` label and its padding stay literal, aligned to the same column as the rest.</comment>
+  </data>
+  <data name="WhileItRuns" xml:space="preserve">
+    <value>While it runs, index_status reports the sync phase, the rate in chunks/s and an ETA.</value>
+  </data>
+  <data name="WorkingSetNotTrimmed" xml:space="preserve">
+    <value>the working set was not trimmed (not Windows, or the call was refused)</value>
+  </data>
+  <data name="WorkingSetTrimmed" xml:space="preserve">
+    <value>the process working set was trimmed</value>
+  </data>
+</root>

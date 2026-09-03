@@ -829,8 +829,9 @@ reloading is preferable to releasing video memory promptly.
 Degradation stays visible, and visible where it is read: every load admitted below full
 residency carries a warning naming the share that reached video memory, `FullyResident`
 reports the truth rather than a constant, and the report line a local tool prints marks the
-shortfall beside the model on every answer produced that way — `qwen3-coder:30b (в
-видеопамяти 42% модели — ответы медленнее)`. How to restore strict residency is said once per
+shortfall beside the model on every answer produced that way — `qwen3-coder:30b (42% of the
+model in VRAM — answers are slower)` on an English system, and the same sentence in Russian on
+a Russian one. How to restore strict residency is said once per
 process rather than on every call. Note that the agent instruction block still asks for full-VRAM validation, so
 relaxing this diverges from what those instructions promise.
 
@@ -1101,6 +1102,15 @@ failed.
 - Every document in the repository exists in English and in Russian, as `name.md` and
   `name.ru.md`, and each one links to the other in its opening lines. A document that
   exists in one language only is unfinished.
+- Every string the software itself prints is chosen by the reader's machine, not written into
+  the code: English by default, Russian on a Russian system, English again wherever a language
+  has no translation. They live in `.resx` pairs, a language is added by adding a file beside
+  the neutral one, and a test refuses a language that carries only some of the strings.
+  `localai policy set --language <en|ru|system>` overrides the machine. Commands, option names,
+  identifiers and tool descriptions are never translated, and numbers, durations and dates stay
+  invariant in every language — the lines are quoted verbatim by agents and parsed by tests. The
+  rule above is about documents; this one is about program output, and they are not the same
+  rule.
 - Preserve UTF-8 without BOM and Windows CRLF line endings for repository documentation.
 
 ## Contributing

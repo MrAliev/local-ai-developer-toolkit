@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
+using LocalLm.Core.Resources;
 
 namespace LocalLm.Core;
 
@@ -39,7 +40,7 @@ internal sealed class LogTriagePipeline(
         if (availableCharacters < 128)
         {
             throw new ArgumentException(
-                "The question and configured prompt overhead do not fit the selected context.",
+                LocalLmText.QuestionDoesNotFitContext,
                 nameof(question));
         }
 
@@ -105,14 +106,18 @@ internal sealed class LogTriagePipeline(
 
         var answer = reduced.Text;
         var receipt = (lastReceipt
-            ?? throw new InvalidOperationException("Log triage produced no model receipt."))
+            ?? throw new InvalidOperationException(LocalLmText.LogTriageNoReceipt))
             with { QueueDuration = queued, ExecutionDuration = executed };
         var detail = source.Path is null
-            ? $"разобран текстовый лог ({source.Text!.Length} символов), " +
-              $"фрагментов: {fragmentCount}, контекст: {capacity.ContextTokens}"
-            : $"разобран лог {Path.GetFileName(source.Path)} " +
-              $"({new FileInfo(source.Path).Length / 1024} КБ), " +
-              $"фрагментов: {fragmentCount}, контекст: {capacity.ContextTokens}";
+            ? LocalLmText.LogTextRead(
+                source.Text!.Length,
+                fragmentCount,
+                capacity.ContextTokens)
+            : LocalLmText.LogFileRead(
+                Path.GetFileName(source.Path),
+                new FileInfo(source.Path).Length / 1024,
+                fragmentCount,
+                capacity.ContextTokens);
         return new LocalResult(
             answer,
             TokenEstimator.Saved((int)originalTokens, answer),
@@ -133,8 +138,9 @@ internal sealed class LogTriagePipeline(
                 StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                $"Local model catalog mismatch: client '{catalog.CatalogVersion}', " +
-                $"broker '{status.CatalogVersion}'.");
+                LocalLmText.CatalogMismatch(
+                    catalog.CatalogVersion,
+                    status.CatalogVersion));
         }
 
         var route = catalog.Routes.Single(candidate =>
@@ -147,7 +153,7 @@ internal sealed class LogTriagePipeline(
             !permitted.Contains(modelOverride, StringComparer.Ordinal))
         {
             throw new ArgumentException(
-                $"Model '{modelOverride}' is not configured for log triage.",
+                LocalLmText.ModelNotConfiguredForTriage(modelOverride),
                 nameof(modelOverride));
         }
 
@@ -200,8 +206,9 @@ internal sealed class LogTriagePipeline(
         }
 
         throw new InvalidOperationException(
-            "No full-VRAM log-triage model/context is available. Tried: " +
-            (attempted.Count == 0 ? "none" : string.Join(", ", attempted)) + ".");
+            attempted.Count == 0
+                ? LocalLmText.NoTriageModelNoneTried
+                : LocalLmText.NoTriageModel(string.Join(", ", attempted)));
     }
 
     private static IReadOnlyList<string> OrderRouteModels(
@@ -477,7 +484,7 @@ internal sealed class LogTriagePipeline(
         var hasText = text is not null;
         if (hasPath == hasText)
         {
-            throw new ArgumentException("Provide exactly one of path or text.");
+            throw new ArgumentException(LocalLmText.ExactlyOneSource);
         }
 
         if (!hasPath)
@@ -521,7 +528,7 @@ internal sealed class LogTriagePipeline(
                     if (level.Items.Count == 0)
                     {
                         return new ReducedSummary(
-                            "The supplied log is empty; no failure is present.",
+                            LocalLmText.EmptyLog,
                             lastReceipt);
                     }
 
