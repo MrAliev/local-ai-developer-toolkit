@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Resources;
+using LocalAi.Contracts;
 
 namespace LocalLm.Core.Resources;
 
@@ -131,6 +132,126 @@ public static class LocalLmText
 
     public static string LocalModelFailed(string reason) =>
         Format(nameof(LocalModelFailed), reason);
+
+    /// <summary>
+    /// What a tool says when the request itself cannot be run. These reach the caller as the
+    /// tool's answer rather than as a protocol error, so they are read by the same person as
+    /// the notice line and belong in the same language.
+    /// </summary>
+    public static string ImageProfileUnsupported => Get(nameof(ImageProfileUnsupported));
+
+    public static string NoImagePaths => Get(nameof(NoImagePaths));
+
+    public static string TooManyImages(int given, int limit) =>
+        Format(nameof(TooManyImages), given, limit);
+
+    public static string NotAnImage(string path) => Format(nameof(NotAnImage), path);
+
+    public static string ImageTooLarge(string path, long megabytes, long limit) =>
+        Format(nameof(ImageTooLarge), path, megabytes, limit);
+
+    public static string ImagesTooLargeTogether(long limitMegabytes) =>
+        Format(nameof(ImagesTooLargeTogether), limitMegabytes);
+
+    public static string ImagesTooManyPixels(long limit) =>
+        Format(nameof(ImagesTooManyPixels), limit);
+
+    public static string NotATextChatProfile(LocalTaskProfile profile) =>
+        Format(nameof(NotATextChatProfile), profile);
+
+    public static string TooManyFiles(int given, int limit) =>
+        Format(nameof(TooManyFiles), given, limit);
+
+    public static string TranslationNoReceipt => Get(nameof(TranslationNoReceipt));
+
+    public static string TranslationValidationFailed(string detail) =>
+        Format(nameof(TranslationValidationFailed), detail);
+
+    /// <summary>What to tell somebody whose task has no model to run on.</summary>
+    public static string NoModelAndCatalogNamesNone(LocalTaskProfile profile) =>
+        Format(nameof(NoModelAndCatalogNamesNone), profile);
+
+    public static string NoModelInstalledWithInstall(
+        LocalTaskProfile profile,
+        string models,
+        string firstModel,
+        string catalogVersion) =>
+        Format(
+            nameof(NoModelInstalledWithInstall),
+            profile,
+            models,
+            firstModel,
+            catalogVersion);
+
+    public static string NoModelInstalled(LocalTaskProfile profile, string models) =>
+        Format(nameof(NoModelInstalled), profile, models);
+
+    public static string IneligibleWithModels(LocalTaskProfile profile, string models) =>
+        Format(nameof(IneligibleWithModels), profile, models);
+
+    public static string Ineligible(LocalTaskProfile profile) =>
+        Format(nameof(Ineligible), profile);
+
+    public static string QuestionDoesNotFitContext => Get(nameof(QuestionDoesNotFitContext));
+
+    public static string LogTriageNoReceipt => Get(nameof(LogTriageNoReceipt));
+
+    public static string CatalogMismatch(string client, string broker) =>
+        Format(nameof(CatalogMismatch), client, broker);
+
+    public static string ModelNotConfiguredForTriage(string model) =>
+        Format(nameof(ModelNotConfiguredForTriage), model);
+
+    public static string NoTriageModelNoneTried => Get(nameof(NoTriageModelNoneTried));
+
+    public static string NoTriageModel(string attempted) =>
+        Format(nameof(NoTriageModel), attempted);
+
+    public static string ExactlyOneSource => Get(nameof(ExactlyOneSource));
+
+    /// <summary>Not a failure: the answer triage_log gives for a log with nothing in it.</summary>
+    public static string EmptyLog => Get(nameof(EmptyLog));
+
+    public static string UnknownValue(string parameter, string value) =>
+        Format(nameof(UnknownValue), parameter, value);
+
+    /// <summary>
+    /// What the translation validator found, lowercase because each one lands after a colon
+    /// inside a sentence the notice line already started. The successful ones reach every
+    /// translated answer, which is how a Russian notice line came to end in an English clause.
+    /// </summary>
+    public static string ValidatorEmptyTranslation => Get(nameof(ValidatorEmptyTranslation));
+
+    public static string ValidatorUnexpectedFence => Get(nameof(ValidatorUnexpectedFence));
+
+    public static string ValidatorPromptLeak => Get(nameof(ValidatorPromptLeak));
+
+    public static string ValidatorExpanded(int from, int to) =>
+        Format(nameof(ValidatorExpanded), from, to);
+
+    public static string ValidatorPlausible => Get(nameof(ValidatorPlausible));
+
+    public static string ValidatorStructurePreserved => Get(nameof(ValidatorStructurePreserved));
+
+    public static string ValidatorCountMismatch(string what, int expected, int actual) =>
+        Format(nameof(ValidatorCountMismatch), what, expected, actual);
+
+    public static string ValidatorProtectedTokensChanged(string what) =>
+        Format(nameof(ValidatorProtectedTokensChanged), what);
+
+    public static string ValidatorHeadings => Get(nameof(ValidatorHeadings));
+
+    public static string ValidatorFenceMarkers => Get(nameof(ValidatorFenceMarkers));
+
+    public static string ValidatorListMarkers => Get(nameof(ValidatorListMarkers));
+
+    public static string ValidatorFencedCode => Get(nameof(ValidatorFencedCode));
+
+    public static string ValidatorInlineCode => Get(nameof(ValidatorInlineCode));
+
+    public static string ValidatorUrls => Get(nameof(ValidatorUrls));
+
+    public static string ValidatorPlaceholders => Get(nameof(ValidatorPlaceholders));
 
     private static string Format(string key, params object?[] arguments) =>
         string.Format(CultureInfo.InvariantCulture, Get(key), arguments);

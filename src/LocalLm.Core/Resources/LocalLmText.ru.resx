@@ -44,6 +44,9 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
   </resheader>
+  <data name="CatalogMismatch" xml:space="preserve">
+    <value>Каталоги моделей разошлись: у клиента '{0}', у брокера '{1}'.</value>
+  </data>
   <data name="DurationSeconds" xml:space="preserve">
     <value>{0} с</value>
     <comment>The number arrives already formatted invariantly.</comment>
@@ -51,6 +54,14 @@
   <data name="DurationWithQueue" xml:space="preserve">
     <value>{0} (в очереди {1})</value>
     <comment>Only when the wait is a real share of the total; the ordinary line stays short.</comment>
+  </data>
+  <data name="EmptyLog" xml:space="preserve">
+    <value>Переданный лог пуст — сбоев в нём нет.</value>
+    <comment>Not an error: this is the answer triage_log returns for an empty log.</comment>
+  </data>
+  <data name="ExactlyOneSource" xml:space="preserve">
+    <value>Указать ровно одно из двух: path или text.</value>
+    <comment>path and text are parameter names and stay Latin.</comment>
   </data>
   <data name="FileNotFound" xml:space="preserve">
     <value>Файл не найден: {0}</value>
@@ -62,8 +73,28 @@
   <data name="FilesSkipped" xml:space="preserve">
     <value>, файлов пропущено: {0}</value>
   </data>
+  <data name="ImageProfileUnsupported" xml:space="preserve">
+    <value>Задачи с изображениями поддерживают только VisualAnalysis, Ocr и ImageTranslation.</value>
+    <comment>Profile names are identifiers and are never translated.</comment>
+  </data>
+  <data name="ImageTooLarge" xml:space="preserve">
+    <value>Файл '{0}' — {1} МБ, больше предела в {2} МБ.</value>
+  </data>
   <data name="ImagesRead" xml:space="preserve">
     <value>Прочитано изображений: {0} — {1}</value>
+  </data>
+  <data name="ImagesTooLargeTogether" xml:space="preserve">
+    <value>Изображения вместе превышают общий предел {0} МБ на один вызов. Разделить запрос.</value>
+  </data>
+  <data name="ImagesTooManyPixels" xml:space="preserve">
+    <value>Изображения вместе превышают общий предел {0:N0} пикселей на один вызов. Разделить запрос.</value>
+    <comment>N0 formats invariantly in both languages, by the rule the notice line follows.</comment>
+  </data>
+  <data name="Ineligible" xml:space="preserve">
+    <value>Установленные локальные модели для задачи {0} этот запрос принять не могут. Запросить меньший контекст или — для изображения — изображение меньшего размера: каждая модель объявляет, какие размеры контекста и какое число пикселей она принимает.</value>
+  </data>
+  <data name="IneligibleWithModels" xml:space="preserve">
+    <value>Установленные локальные модели для задачи {0} этот запрос принять не могут. Модели для неё: {1}. Запросить меньший контекст или — для изображения — изображение меньшего размера: каждая модель объявляет, какие размеры контекста и какое число пикселей она принимает.</value>
   </data>
   <data name="InputTruncated" xml:space="preserve">
     <value>; ввод усечён общим бюджетом {0} символов</value>
@@ -80,12 +111,46 @@
   <data name="LogTextRead" xml:space="preserve">
     <value>Разобран текстовый лог ({0} символов), фрагментов: {1}, контекст: {2}</value>
   </data>
+  <data name="LogTriageNoReceipt" xml:space="preserve">
+    <value>При разборе лога не получено ни одного ответа модели.</value>
+  </data>
+  <data name="ModelNotConfiguredForTriage" xml:space="preserve">
+    <value>Модель '{0}' не назначена для разбора логов.</value>
+  </data>
+  <data name="NoImagePaths" xml:space="preserve">
+    <value>Пути к изображениям не переданы.</value>
+  </data>
+  <data name="NoModelAndCatalogNamesNone" xml:space="preserve">
+    <value>Локальных моделей для задачи {0} не установлено, и каталог маршрутизации ни одной для неё не называет. Посмотреть, что установлено: local_models_status.</value>
+  </data>
+  <data name="NoModelInstalled" xml:space="preserve">
+    <value>Локальных моделей для задачи {0} не установлено. Задача выполняется на моделях: {1}.</value>
+  </data>
+  <data name="NoModelInstalledWithInstall" xml:space="preserve">
+    <value>Локальных моделей для задачи {0} не установлено. Задача выполняется на моделях: {1}. Установить одну из них через брокер: localai-launcher.exe run localai model pull --model {2} --catalog-version {3}</value>
+    <comment>No full stop after the command in either language: a trailing period gets copied into a shell.</comment>
+  </data>
+  <data name="NoTriageModel" xml:space="preserve">
+    <value>Ни одна пара модель/контекст для разбора логов не помещается в видеопамять целиком. Проверено: {0}.</value>
+  </data>
+  <data name="NoTriageModelNoneTried" xml:space="preserve">
+    <value>Ни одна пара модель/контекст для разбора логов не помещается в видеопамять целиком. Проверять было нечего.</value>
+  </data>
+  <data name="NotATextChatProfile" xml:space="preserve">
+    <value>Профиль задачи '{0}' не относится к текстовому чату.</value>
+  </data>
+  <data name="NotAnImage" xml:space="preserve">
+    <value>Файл '{0}' не похож на изображение.</value>
+  </data>
   <data name="Notice" xml:space="preserve">
     <value>🔧 Локально: {0}{1}. {2}. {3}. {4}</value>
     <comment>0 model, 1 residency mark or empty, 2 detail, 3 duration, 4 saving sentence.</comment>
   </data>
   <data name="PromptOnly" xml:space="preserve">
     <value>Выполнен запрос без файлов</value>
+  </data>
+  <data name="QuestionDoesNotFitContext" xml:space="preserve">
+    <value>Вопрос и заданный политикой запас на служебную часть запроса не помещаются в выбранный контекст.</value>
   </data>
   <data name="ResidencyAdvice" xml:space="preserve">
     <value>⚠️ Неполная загрузка в видеопамять разрешена политикой этой машины. Вернуть строгий режим: localai policy set --residency RequireFullVram — брокер применит его после перезапуска.</value>
@@ -113,10 +178,73 @@
     <value>менее ~0.5K</value>
     <comment>The band on its own, for a caller composing its own sentence.</comment>
   </data>
+  <data name="TooManyFiles" xml:space="preserve">
+    <value>Файлов в запросе: {0}; предел на один вызов — {1}. Разделить запрос.</value>
+  </data>
+  <data name="TooManyImages" xml:space="preserve">
+    <value>Изображений в запросе: {0}; предел на один вызов — {1}. Разделить запрос.</value>
+    <comment>The Russian puts the count after a colon so the numeral does not have to agree.</comment>
+  </data>
   <data name="TranslationFailed" xml:space="preserve">
     <value>Локальный перевод не выполнен: {0}</value>
   </data>
+  <data name="TranslationNoReceipt" xml:space="preserve">
+    <value>При переводе не получено ни одного ответа модели.</value>
+  </data>
   <data name="TranslationNotice" xml:space="preserve">
     <value>🔧 Локально: {0}{1}. Перевод проверен: {2}. {3}. Локально обработано примерно {4} токенов; на облачной генерации сэкономлено примерно {5}; чистое сокращение облачного контекста — {6}.</value>
+  </data>
+  <data name="TranslationValidationFailed" xml:space="preserve">
+    <value>Проверка структуры не пройдена даже после перехода на запасную модель: {0}.</value>
+  </data>
+  <data name="UnknownValue" xml:space="preserve">
+    <value>Неизвестное значение {0}: '{1}'.</value>
+    <comment>0 is a parameter identifier and stays Latin in both languages.</comment>
+  </data>
+  <data name="ValidatorCountMismatch" xml:space="preserve">
+    <value>{0}: ожидалось {1}, получено {2}</value>
+  </data>
+  <data name="ValidatorEmptyTranslation" xml:space="preserve">
+    <value>перевод пуст</value>
+    <comment>Validator details are lowercase: they only ever appear after a colon inside another sentence.</comment>
+  </data>
+  <data name="ValidatorExpanded" xml:space="preserve">
+    <value>перевод вырос с {0} до {1} символов</value>
+  </data>
+  <data name="ValidatorFenceMarkers" xml:space="preserve">
+    <value>маркеры блоков кода</value>
+  </data>
+  <data name="ValidatorFencedCode" xml:space="preserve">
+    <value>блоки кода</value>
+  </data>
+  <data name="ValidatorHeadings" xml:space="preserve">
+    <value>заголовки</value>
+  </data>
+  <data name="ValidatorInlineCode" xml:space="preserve">
+    <value>код в строке</value>
+  </data>
+  <data name="ValidatorListMarkers" xml:space="preserve">
+    <value>маркеры списков</value>
+  </data>
+  <data name="ValidatorPlaceholders" xml:space="preserve">
+    <value>подстановки</value>
+  </data>
+  <data name="ValidatorPlausible" xml:space="preserve">
+    <value>отклонений не найдено</value>
+  </data>
+  <data name="ValidatorPromptLeak" xml:space="preserve">
+    <value>в ответ попал текст запроса</value>
+  </data>
+  <data name="ValidatorProtectedTokensChanged" xml:space="preserve">
+    <value>{0}: изменилось число защищённых фрагментов</value>
+  </data>
+  <data name="ValidatorStructurePreserved" xml:space="preserve">
+    <value>структура сохранена</value>
+  </data>
+  <data name="ValidatorUnexpectedFence" xml:space="preserve">
+    <value>неожиданный блок кода</value>
+  </data>
+  <data name="ValidatorUrls" xml:space="preserve">
+    <value>URL</value>
   </data>
 </root>

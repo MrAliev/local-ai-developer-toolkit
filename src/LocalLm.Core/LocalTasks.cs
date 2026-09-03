@@ -149,19 +149,18 @@ public sealed class LocalTasks
         {
             throw new ArgumentOutOfRangeException(
                 nameof(profile),
-                "Image tasks support VisualAnalysis, Ocr, or ImageTranslation.");
+                LocalLmText.ImageProfileUnsupported);
         }
 
         if (paths.Count == 0)
         {
-            throw new ArgumentException("No image paths given.", nameof(paths));
+            throw new ArgumentException(LocalLmText.NoImagePaths, nameof(paths));
         }
 
         if (paths.Count > MaxImageCount)
         {
             throw new ArgumentException(
-                $"{paths.Count} images exceed the {MaxImageCount}-image limit for one call; " +
-                "split the request.",
+                LocalLmText.TooManyImages(paths.Count, MaxImageCount),
                 nameof(paths));
         }
 
@@ -178,21 +177,23 @@ public sealed class LocalTasks
             var full = Resolve(path);
             if (!ImageExtensions.Contains(Path.GetExtension(full)))
             {
-                throw new ArgumentException($"'{full}' does not look like an image.", nameof(paths));
+                throw new ArgumentException(LocalLmText.NotAnImage(full), nameof(paths));
             }
 
             var length = new FileInfo(full).Length;
             if (length > MaxImageBytes)
             {
-                throw new ArgumentException($"'{full}' is {length / 1024 / 1024}MB, past the {MaxImageBytes / 1024 / 1024}MB limit.");
+                throw new ArgumentException(LocalLmText.ImageTooLarge(
+                    full,
+                    length / 1024 / 1024,
+                    MaxImageBytes / 1024 / 1024));
             }
 
             totalImageBytes = checked(totalImageBytes + length);
             if (totalImageBytes > MaxTotalImageBytes)
             {
                 throw new ArgumentException(
-                    $"The images together exceed the {MaxTotalImageBytes / 1024 / 1024}MB " +
-                    "total limit for one call; split the request.",
+                    LocalLmText.ImagesTooLargeTogether(MaxTotalImageBytes / 1024 / 1024),
                     nameof(paths));
             }
 
@@ -203,8 +204,7 @@ public sealed class LocalTasks
             if (totalImagePixels > MaxTotalImagePixels)
             {
                 throw new ArgumentException(
-                    $"The images together exceed the {MaxTotalImagePixels:N0}-pixel " +
-                    "total limit for one call; split the request.",
+                    LocalLmText.ImagesTooManyPixels(MaxTotalImagePixels),
                     nameof(paths));
             }
 
@@ -339,14 +339,13 @@ public sealed class LocalTasks
         {
             throw new ArgumentOutOfRangeException(
                 nameof(profile),
-                $"Task profile '{profile}' is not a text-chat profile.");
+                LocalLmText.NotATextChatProfile(profile));
         }
 
         if (files.Count > MaxAskFiles)
         {
             throw new ArgumentException(
-                $"{files.Count} files exceed the {MaxAskFiles}-file limit for one call; " +
-                "split the request.",
+                LocalLmText.TooManyFiles(files.Count, MaxAskFiles),
                 nameof(files));
         }
 
@@ -524,7 +523,7 @@ public sealed class LocalTasks
                 translated.ToString(),
                 lastReceipt
                     ?? throw new InvalidOperationException(
-                        "Translation produced no model receipt."),
+                        LocalLmText.TranslationNoReceipt),
                 Array.AsReadOnly(receipts.ToArray()),
                 inputTokens,
                 outputTokens);
@@ -615,8 +614,7 @@ public sealed class LocalTasks
         if (!validation.Passed)
         {
             throw new InvalidDataException(
-                $"Local translation failed structural validation after fallback: " +
-                $"{validation.Detail}.");
+                LocalLmText.TranslationValidationFailed(validation.Detail));
         }
 
         var everyCall = attempts.SelectMany(candidate => candidate.Receipts).ToArray();

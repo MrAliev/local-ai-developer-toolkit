@@ -1,4 +1,5 @@
 using LocalAi.Contracts;
+using LocalLm.Core.Resources;
 
 namespace LocalLm.Core;
 
@@ -26,17 +27,13 @@ public static class MissingModelAdvice
         var models = ModelsFor(profile, out var catalogVersion);
         if (models.Count == 0)
         {
-            return $"No local model able to do {profile} is installed, and the routing catalog " +
-                "names none for it. Run local_models_status to see what is installed.";
+            return LocalLmText.NoModelAndCatalogNamesNone(profile);
         }
 
-        var install = string.IsNullOrWhiteSpace(catalogVersion)
-            ? string.Empty
-            : " Install one through the broker: localai-launcher.exe run localai model pull " +
-              $"--model {models[0]} --catalog-version {catalogVersion}";
-
-        return $"No local model able to do {profile} is installed. This task runs on " +
-            string.Join(", ", models) + "." + install;
+        var named = string.Join(", ", models);
+        return string.IsNullOrWhiteSpace(catalogVersion)
+            ? LocalLmText.NoModelInstalled(profile, named)
+            : LocalLmText.NoModelInstalledWithInstall(profile, named, models[0], catalogVersion);
     }
 
     /// <summary>
@@ -47,14 +44,9 @@ public static class MissingModelAdvice
     public static string ForIneligibleRequest(LocalTaskProfile profile)
     {
         var models = ModelsFor(profile, out _);
-        var named = models.Count == 0
-            ? string.Empty
-            : " The models for it are " + string.Join(", ", models) + ".";
-
-        return $"A local model for {profile} is installed, but none can take this request." +
-            named +
-            " Ask for a smaller context, or — for an image — a smaller one: each model declares " +
-            "the context sizes and the pixel count it accepts.";
+        return models.Count == 0
+            ? LocalLmText.Ineligible(profile)
+            : LocalLmText.IneligibleWithModels(profile, string.Join(", ", models));
     }
 
     private static IReadOnlyList<string> ModelsFor(

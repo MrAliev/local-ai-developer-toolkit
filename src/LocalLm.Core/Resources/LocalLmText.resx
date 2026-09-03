@@ -44,6 +44,9 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
   </resheader>
+  <data name="CatalogMismatch" xml:space="preserve">
+    <value>Local model catalog mismatch: client '{0}', broker '{1}'.</value>
+  </data>
   <data name="DurationSeconds" xml:space="preserve">
     <value>{0} s</value>
     <comment>The number arrives already formatted invariantly.</comment>
@@ -51,6 +54,14 @@
   <data name="DurationWithQueue" xml:space="preserve">
     <value>{0} ({1} of that queued)</value>
     <comment>Only when the wait is a real share of the total; the ordinary line stays short.</comment>
+  </data>
+  <data name="EmptyLog" xml:space="preserve">
+    <value>The supplied log is empty; no failure is present.</value>
+    <comment>Not an error: this is the answer triage_log returns for an empty log.</comment>
+  </data>
+  <data name="ExactlyOneSource" xml:space="preserve">
+    <value>Provide exactly one of path or text.</value>
+    <comment>path and text are parameter names and stay Latin.</comment>
   </data>
   <data name="FileNotFound" xml:space="preserve">
     <value>File not found: {0}</value>
@@ -62,8 +73,28 @@
   <data name="FilesSkipped" xml:space="preserve">
     <value>, files skipped: {0}</value>
   </data>
+  <data name="ImageProfileUnsupported" xml:space="preserve">
+    <value>Image tasks support VisualAnalysis, Ocr, or ImageTranslation.</value>
+    <comment>Profile names are identifiers and are never translated.</comment>
+  </data>
+  <data name="ImageTooLarge" xml:space="preserve">
+    <value>'{0}' is {1}MB, past the {2}MB limit.</value>
+  </data>
   <data name="ImagesRead" xml:space="preserve">
     <value>Images read: {0} — {1}</value>
+  </data>
+  <data name="ImagesTooLargeTogether" xml:space="preserve">
+    <value>The images together exceed the {0}MB total limit for one call; split the request.</value>
+  </data>
+  <data name="ImagesTooManyPixels" xml:space="preserve">
+    <value>The images together exceed the {0:N0}-pixel total limit for one call; split the request.</value>
+    <comment>N0 formats invariantly in both languages, by the rule the notice line follows.</comment>
+  </data>
+  <data name="Ineligible" xml:space="preserve">
+    <value>A local model for {0} is installed, but none can take this request. Ask for a smaller context, or — for an image — a smaller one: each model declares the context sizes and the pixel count it accepts.</value>
+  </data>
+  <data name="IneligibleWithModels" xml:space="preserve">
+    <value>A local model for {0} is installed, but none can take this request. The models for it are {1}. Ask for a smaller context, or — for an image — a smaller one: each model declares the context sizes and the pixel count it accepts.</value>
   </data>
   <data name="InputTruncated" xml:space="preserve">
     <value>; input truncated at the shared {0}-character budget</value>
@@ -80,12 +111,46 @@
   <data name="LogTextRead" xml:space="preserve">
     <value>Log text read: {0} characters, fragments: {1}, context: {2}</value>
   </data>
+  <data name="LogTriageNoReceipt" xml:space="preserve">
+    <value>Log triage produced no model receipt.</value>
+  </data>
+  <data name="ModelNotConfiguredForTriage" xml:space="preserve">
+    <value>Model '{0}' is not configured for log triage.</value>
+  </data>
+  <data name="NoImagePaths" xml:space="preserve">
+    <value>No image paths given.</value>
+  </data>
+  <data name="NoModelAndCatalogNamesNone" xml:space="preserve">
+    <value>No local model able to do {0} is installed, and the routing catalog names none for it. Run local_models_status to see what is installed.</value>
+  </data>
+  <data name="NoModelInstalled" xml:space="preserve">
+    <value>No local model able to do {0} is installed. This task runs on {1}.</value>
+  </data>
+  <data name="NoModelInstalledWithInstall" xml:space="preserve">
+    <value>No local model able to do {0} is installed. This task runs on {1}. Install one through the broker: localai-launcher.exe run localai model pull --model {2} --catalog-version {3}</value>
+    <comment>No full stop after the command in either language: a trailing period gets copied into a shell.</comment>
+  </data>
+  <data name="NoTriageModel" xml:space="preserve">
+    <value>No full-VRAM log-triage model/context is available. Tried: {0}.</value>
+  </data>
+  <data name="NoTriageModelNoneTried" xml:space="preserve">
+    <value>No full-VRAM log-triage model/context is available. Tried: none.</value>
+  </data>
+  <data name="NotATextChatProfile" xml:space="preserve">
+    <value>Task profile '{0}' is not a text-chat profile.</value>
+  </data>
+  <data name="NotAnImage" xml:space="preserve">
+    <value>'{0}' does not look like an image.</value>
+  </data>
   <data name="Notice" xml:space="preserve">
     <value>🔧 Local: {0}{1}. {2}. {3}. {4}</value>
     <comment>0 model, 1 residency mark or empty, 2 detail, 3 duration, 4 saving sentence.</comment>
   </data>
   <data name="PromptOnly" xml:space="preserve">
     <value>No files, prompt only</value>
+  </data>
+  <data name="QuestionDoesNotFitContext" xml:space="preserve">
+    <value>The question and configured prompt overhead do not fit the selected context.</value>
   </data>
   <data name="ResidencyAdvice" xml:space="preserve">
     <value>⚠️ This machine's policy allows models to load below full video-memory residency. To require full residency again: localai policy set --residency RequireFullVram — the broker applies it after a restart.</value>
@@ -113,10 +178,73 @@
     <value>under ~0.5K</value>
     <comment>The band on its own, for a caller composing its own sentence.</comment>
   </data>
+  <data name="TooManyFiles" xml:space="preserve">
+    <value>{0} files exceed the {1}-file limit for one call; split the request.</value>
+  </data>
+  <data name="TooManyImages" xml:space="preserve">
+    <value>{0} images exceed the {1}-image limit for one call; split the request.</value>
+    <comment>The Russian puts the count after a colon so the numeral does not have to agree.</comment>
+  </data>
   <data name="TranslationFailed" xml:space="preserve">
     <value>Local translation failed: {0}</value>
   </data>
+  <data name="TranslationNoReceipt" xml:space="preserve">
+    <value>Translation produced no model receipt.</value>
+  </data>
   <data name="TranslationNotice" xml:space="preserve">
     <value>🔧 Local: {0}{1}. Translation checked: {2}. {3}. Processed locally: {4} tokens; cloud generation saved: {5}; net cloud context reduced by {6}.</value>
+  </data>
+  <data name="TranslationValidationFailed" xml:space="preserve">
+    <value>Local translation failed structural validation after fallback: {0}.</value>
+  </data>
+  <data name="UnknownValue" xml:space="preserve">
+    <value>Unknown {0} '{1}'.</value>
+    <comment>0 is a parameter identifier and stays Latin in both languages.</comment>
+  </data>
+  <data name="ValidatorCountMismatch" xml:space="preserve">
+    <value>{0}: expected {1}, got {2}</value>
+  </data>
+  <data name="ValidatorEmptyTranslation" xml:space="preserve">
+    <value>empty translation</value>
+    <comment>Validator details are lowercase: they only ever appear after a colon inside another sentence.</comment>
+  </data>
+  <data name="ValidatorExpanded" xml:space="preserve">
+    <value>translation expanded from {0} to {1} characters</value>
+  </data>
+  <data name="ValidatorFenceMarkers" xml:space="preserve">
+    <value>fenced code markers</value>
+  </data>
+  <data name="ValidatorFencedCode" xml:space="preserve">
+    <value>fenced code</value>
+  </data>
+  <data name="ValidatorHeadings" xml:space="preserve">
+    <value>headings</value>
+  </data>
+  <data name="ValidatorInlineCode" xml:space="preserve">
+    <value>inline code</value>
+  </data>
+  <data name="ValidatorListMarkers" xml:space="preserve">
+    <value>list markers</value>
+  </data>
+  <data name="ValidatorPlaceholders" xml:space="preserve">
+    <value>placeholders</value>
+  </data>
+  <data name="ValidatorPlausible" xml:space="preserve">
+    <value>plausible plain translation</value>
+  </data>
+  <data name="ValidatorPromptLeak" xml:space="preserve">
+    <value>translation prompt leaked into output</value>
+  </data>
+  <data name="ValidatorProtectedTokensChanged" xml:space="preserve">
+    <value>{0}: protected token count changed</value>
+  </data>
+  <data name="ValidatorStructurePreserved" xml:space="preserve">
+    <value>structure preserved</value>
+  </data>
+  <data name="ValidatorUnexpectedFence" xml:space="preserve">
+    <value>unexpected fenced content</value>
+  </data>
+  <data name="ValidatorUrls" xml:space="preserve">
+    <value>URLs</value>
   </data>
 </root>

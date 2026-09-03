@@ -372,11 +372,12 @@ public static class ManagedInstructionBlock
 
         ### Reading what the tools report
 
-        The LocalLm line carries model, duration and saving, in Russian whatever language you
-        work in. Quote its numbers as they come — `6.2 с`, or `6.1 с (в очереди 4.1 с)` where
-        a wait is named apart from the work, worth carrying because waiting and running point
-        at different things. A shortfall appears beside the model as `в видеопамяти 42%
-        модели` or `целиком на процессоре`.
+        The LocalLm line carries model, duration and saving, in the language this computer is
+        set to. Quote its numbers as they come: they do not move with the language, so a
+        duration reads the same either way, and a wait named apart from the work is worth
+        carrying because waiting and running point at different things. A shortfall appears
+        beside the model, as the share of it that reached video memory or as a note that it ran
+        on the processor.
 
         `index_status` prints the phase when there is one, and while embedding it adds
         processed and total chunks with an ETA; the other phases print `not counted in this
@@ -594,11 +595,12 @@ public static class ManagedInstructionBlock
 
         ### Reading what the tools report
 
-        The LocalLm line carries model, duration and saving, in Russian whatever language you
-        work in. Quote its numbers as they come — `6.2 с`, or `6.1 с (в очереди 4.1 с)` where
-        a wait is named apart from the work, worth carrying because waiting and running point
-        at different things. A shortfall appears beside the model as `в видеопамяти 42%
-        модели` or `целиком на процессоре`.
+        The LocalLm line carries model, duration and saving, in the language this computer is
+        set to. Quote its numbers as they come: they do not move with the language, so a
+        duration reads the same either way, and a wait named apart from the work is worth
+        carrying because waiting and running point at different things. A shortfall appears
+        beside the model, as the share of it that reached video memory or as a note that it ran
+        on the processor.
 
         `index_status` prints the phase when there is one, and while embedding it adds
         processed and total chunks with an ETA; the other phases print `not counted in this
