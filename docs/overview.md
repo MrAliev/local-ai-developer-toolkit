@@ -550,9 +550,10 @@ package against the SHA-256 inside the manifest.
 The screen that asks also asks which language you read, and both wizards answer in it: the
 rail, every page, the review a run is consented to, and the removal preview above its
 checkbox. The choice is remembered beside the installer's own logs, so removing LocalAi months
-later opens in the language the installation was chosen in. Two things stay English on a
-Russian run, for one reason: the run journal and the report written next to it exist to be
-read against each other.
+later opens in the language the installation was chosen in. The log the run writes as it goes,
+and the report saved beside it afterwards, answer in that language too. What stays English there
+is what is not prose: commands, paths, versions, package identifiers, and the messages Windows
+itself produced.
 
 It also asks which of the two palettes to paint in, and remembers that beside the language in
 the same file. Light and dark are the explicit answers; System is the third and the default, and

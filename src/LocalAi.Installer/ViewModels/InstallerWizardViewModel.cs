@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -1015,7 +1015,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
             var path = Path.Combine(
                 directory,
                 $"install-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-            File.WriteAllText(path, report.ToString());
+            // With a byte order mark, now that the report is prose rather than ASCII: a
+            // BOM-less UTF-8 file is what an editor guessing the ANSI code page turns into
+            // mojibake, and this file exists to be opened by whoever the install failed on.
+            File.WriteAllText(
+                path,
+                report.ToString(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
             finish.Summary = string.IsNullOrWhiteSpace(finish.Summary)
                 ? string.Format(SavedTo, path)
                 : finish.Summary + Environment.NewLine + string.Format(SavedTo, path);
