@@ -44,6 +44,9 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
   </resheader>
+  <data name="AdaptersFailed" xml:space="preserve">
+    <value>Семантическое поколение не опубликовано, потому что обязательные адаптеры не отработали: {0}</value>
+  </data>
   <data name="BrokerAlive" xml:space="preserve">
     <value>процесс {0}, сигнал {1} с назад</value>
   </data>
@@ -59,12 +62,33 @@
   <data name="BrokerStateUnreadable" xml:space="preserve">
     <value>host.json не читается: {0}</value>
   </data>
+  <data name="CoverageNoCsharp" xml:space="preserve">
+    <value>Семантическая индексация не покрыла ни одного документа C#, хотя в репозитории есть исходники C#. go_to_definition, find_references, find_implementations и find_relationships будут отвечать ограниченным поиском по тексту, пока это не исправлено. Причину, по которой не загрузилось рабочее пространство, называет строка 'Roslyn:' выше, если она есть.</value>
+    <comment>Tool names and the 'Roslyn:' prefix stay Latin; the prefix is written literally elsewhere in this same file.</comment>
+  </data>
+  <data name="CoverageProjectsUncovered" xml:space="preserve">
+    <value>Семантическая индексация покрыла один проект; не покрыто проектов {0} — в этом репозитории нет файла решения, а без него загружается только одна точка входа. В остальном коде навигация отвечает ограниченным поиском по тексту. Добавьте решение, которое их перечисляет, или примите этот пробел. Не покрыто: {1}</value>
+    <comment>The old English said precise navigation answers from bounded text matching, which contradicts itself. The Russian reuses CodeSearchText.ru's wording for the same fact.</comment>
+  </data>
+  <data name="EmbeddingCheckpointNotRemoved" xml:space="preserve">
+    <value>Не удалось удалить checkpoint эмбеддингов '{0}': {1}</value>
+  </data>
   <data name="GenerationNone" xml:space="preserve">
     <value>не записано</value>
     <comment>Was "none", which rendered as "generation none" and read as a value rather than as its absence.</comment>
   </data>
   <data name="LauncherMissing" xml:space="preserve">
     <value>Стабильной точки входа нет: {0}. Регистрации, указывающие на неё, работать не будут, а регистрации внутрь каталога версии сломаются при следующем обновлении.</value>
+  </data>
+  <data name="MainlineMissing" xml:space="preserve">
+    <value>Для индексации нужна локальная основная ветка. Ни одной из этих веток здесь нет: {0}</value>
+    <comment>0 is the refs actually tried, which starts with the manifest's DevRef — the old wording named dev and main even for a repository configured for neither.</comment>
+  </data>
+  <data name="OverlayDegraded" xml:space="preserve">
+    <value>Семантический overlay для '{0}' ухудшен: {1}. Файлы, изменённые в этом worktree, режутся скользящим окном по строкам, пока адаптер не заработает снова; на базовое поколение это не влияет.</value>
+  </data>
+  <data name="OverlayDiscarded" xml:space="preserve">
+    <value>Worktree {0} изменился, пока собирался его overlay; overlay отброшен, следующая синхронизация соберёт его заново из нового состояния.</value>
   </data>
   <data name="PolicyDefaults" xml:space="preserve">
     <value>{0} (по умолчанию, файла нет)</value>
@@ -175,6 +199,24 @@
     <value>{0}, поколение {1}</value>
     <comment>0 is a RepositoryIndexState enum name and stays Latin.</comment>
   </data>
+  <data name="RetentionRemoved" xml:space="preserve">
+    <value>Retention: удалено устаревших поколений {0}, наборов overlay {1}, файлов в staging {2}; освобождено {3} МБ.</value>
+    <comment>Noun-first in Russian: ResourceManager has no plural support and genitive plural is correct for every count. 3 arrives already formatted to one decimal, invariantly.</comment>
+  </data>
+  <data name="RetentionSweepSkipped" xml:space="preserve">
+    <value>Retention: очистка пропущена ({0}). На опубликованный индекс это не влияет.</value>
+    <comment>Parenthesised rather than after a colon: an IOException message ends in a full stop, and the old wording rendered two in a row.</comment>
+  </data>
+  <data name="SemanticCheckpointNotRemoved" xml:space="preserve">
+    <value>Не удалось удалить семантический checkpoint '{0}': {1}</value>
+  </data>
+  <data name="SemanticCheckpointUnusable" xml:space="preserve">
+    <value>Семантический checkpoint '{0}' не годится и будет собран заново: {1}</value>
+    <comment>checkpoint stays Latin: the embedding one is literally named &lt;id&gt;.embedding-checkpoint.</comment>
+  </data>
+  <data name="SemanticPhaseResumed" xml:space="preserve">
+    <value>Семантическая фаза продолжена из '{0}'.</value>
+  </data>
   <data name="SummaryNoProblems" xml:space="preserve">
     <value>Проблем нет.</value>
   </data>
@@ -184,6 +226,10 @@
   <data name="SummaryProblems" xml:space="preserve">
     <value>Проблем {0}, стоит прочитать {1}.</value>
     <comment>Noun-first in Russian: ResourceManager has no plural support and genitive plural is correct for every count.</comment>
+  </data>
+  <data name="SyncBusy" xml:space="preserve">
+    <value>Этот репозиторий уже собирает другая синхронизация. Запустите синхронизацию снова, когда она завершится. Repository: {0}</value>
+    <comment>The hole is last because a 64-character repository id in the middle pushes the actionable clause past the wrap in a hook log. Repository: stays English, matching this command's own SYNCED repository= and REFUSED repository=.</comment>
   </data>
   <data name="UpdateAvailable" xml:space="preserve">
     <value>доступна {0}, установлена {1}. {2}</value>
@@ -225,5 +271,17 @@
   <data name="VersionPointerUnreadable" xml:space="preserve">
     <value>current.json не читается: {0}</value>
     <comment>0 is a .NET runtime message and arrives in whatever language the framework speaks.</comment>
+  </data>
+  <data name="WorktreeGone" xml:space="preserve">
+    <value>Worktree {0} больше не существует; его overlay пропущен.</value>
+    <comment>worktree and overlay stay Latin and indeclinable: they name a git command and a file on disk the reader would look for.</comment>
+  </data>
+  <data name="WorktreeNotInspectable" xml:space="preserve">
+    <value>Worktree {0} не удалось проверить ({1}); overlay в этом проходе не удаляются.</value>
+    <comment>1 is a .NET runtime message and arrives in whatever language the framework speaks.</comment>
+  </data>
+  <data name="WorktreeVanished" xml:space="preserve">
+    <value>Worktree {0} исчез во время проверки; его overlay пропущен.</value>
+    <comment>Kept apart from WorktreeGone on purpose: one is a stale listing, the other a race during the run, and the exception filter exists to tell them apart.</comment>
   </data>
 </root>

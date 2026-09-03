@@ -174,6 +174,57 @@ public static class CliText
 
     public static string GenerationNone => Catalogue.Get(nameof(GenerationNone));
 
+    // What `localai sync` says while it works. The `SYNCED` and `REFUSED` lines are not
+    // here and never will be: another process parses them out of stdout, so they are a wire
+    // format rather than prose, and they stay ASCII for every reader.
+
+    public static string AdaptersFailed(string reasons) =>
+        Catalogue.Format(nameof(AdaptersFailed), reasons);
+
+    public static string CoverageNoCsharp => Catalogue.Get(nameof(CoverageNoCsharp));
+
+    public static string CoverageProjectsUncovered(int uncovered, string projects) =>
+        Catalogue.Format(nameof(CoverageProjectsUncovered), uncovered, projects);
+
+    public static string EmbeddingCheckpointNotRemoved(string checkpoint, string reason) =>
+        Catalogue.Format(nameof(EmbeddingCheckpointNotRemoved), checkpoint, reason);
+
+    public static string MainlineMissing(string refs) =>
+        Catalogue.Format(nameof(MainlineMissing), refs);
+
+    public static string OverlayDegraded(string workingRoot, string reasons) =>
+        Catalogue.Format(nameof(OverlayDegraded), workingRoot, reasons);
+
+    public static string OverlayDiscarded(string worktree) =>
+        Catalogue.Format(nameof(OverlayDiscarded), worktree);
+
+    public static string RetentionRemoved(int generations, int overlays, int stagingFiles, string megabytes) =>
+        Catalogue.Format(nameof(RetentionRemoved), generations, overlays, stagingFiles, megabytes);
+
+    public static string RetentionSweepSkipped(string reason) =>
+        Catalogue.Format(nameof(RetentionSweepSkipped), reason);
+
+    public static string SemanticCheckpointNotRemoved(string checkpoint, string reason) =>
+        Catalogue.Format(nameof(SemanticCheckpointNotRemoved), checkpoint, reason);
+
+    public static string SemanticCheckpointUnusable(string checkpoint, string reason) =>
+        Catalogue.Format(nameof(SemanticCheckpointUnusable), checkpoint, reason);
+
+    public static string SemanticPhaseResumed(string checkpoint) =>
+        Catalogue.Format(nameof(SemanticPhaseResumed), checkpoint);
+
+    public static string SyncBusy(string repositoryId) =>
+        Catalogue.Format(nameof(SyncBusy), repositoryId);
+
+    public static string WorktreeGone(string worktree) =>
+        Catalogue.Format(nameof(WorktreeGone), worktree);
+
+    public static string WorktreeNotInspectable(string worktree, string reason) =>
+        Catalogue.Format(nameof(WorktreeNotInspectable), worktree, reason);
+
+    public static string WorktreeVanished(string worktree) =>
+        Catalogue.Format(nameof(WorktreeVanished), worktree);
+
     public static string SummaryProblems(int failed, int warned) =>
         Catalogue.Format(nameof(SummaryProblems), failed, warned);
 

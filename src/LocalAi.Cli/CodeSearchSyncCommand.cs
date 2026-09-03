@@ -3,9 +3,11 @@ using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using CodeSearch.Core.Semantics;
 using LocalAi.Broker.Client;
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Indexing;
 using LocalAi.Repository;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -18,8 +20,7 @@ namespace LocalAi.Cli;
 /// the minutes a full generation build can take.
 /// </summary>
 public sealed class RepositorySyncBusyException(string repositoryId) : Exception(
-    $"Another sync is already building repository {repositoryId}. " +
-    "Its progress is visible in `localai repo status`; run sync again once it completes.")
+    CliText.SyncBusy(repositoryId))
 {
     public string RepositoryId { get; } = repositoryId;
 }
@@ -251,8 +252,7 @@ public static class CodeSearchSyncCommand
             var overlaysBuilt = 0;
             var present = SelectPresentWorktrees(
                 targets.Where(item => !item.IsPrunable),
-                path => Console.Error.WriteLine(
-                    $"Worktree {path} no longer exists; skipping its overlay."));
+                path => Console.Error.WriteLine(CliText.WorktreeGone(path)));
             var worktreesSkipped = present.Skipped;
             foreach (var worktree in present.Worktrees)
             {
@@ -267,8 +267,7 @@ public static class CodeSearchSyncCommand
                     !Directory.Exists(worktree.Path))
                 {
                     Console.Error.WriteLine(
-                        $"Worktree {worktree.Path} disappeared while it was being inspected; " +
-                        "skipping its overlay.");
+                        CliText.WorktreeVanished(worktree.Path));
                     worktreesSkipped++;
                     continue;
                 }
@@ -516,8 +515,7 @@ public static class CodeSearchSyncCommand
         }
 
         Console.Error.WriteLine(
-            $"Worktree {captured.WorkingRoot.Value} changed while its overlay was building; " +
-            "the overlay was discarded and the next sync rebuilds it from the new state.");
+            CliText.OverlayDiscarded(captured.WorkingRoot.Value));
         return true;
     }
 
@@ -567,9 +565,9 @@ public static class CodeSearchSyncCommand
                 // files, so the throw lands exactly on a worktree with uncommitted work — the
                 // one whose overlay matters most. Abandoning the sweep costs disk until the
                 // next sync; guessing costs that worktree its index.
-                Console.Error.WriteLine(
-                    $"Worktree {worktree.Path} could not be inspected " +
-                    $"({exception.Message}); leaving overlays alone this pass.");
+                Console.Error.WriteLine(CliText.WorktreeNotInspectable(
+                    worktree.Path,
+                    exception.Message));
                 return null;
             }
         }
@@ -595,18 +593,21 @@ public static class CodeSearchSyncCommand
                 reachable: reachable);
             if (result.ActionCount > 0)
             {
-                Console.Error.WriteLine(
-                    $"Retention: removed {result.GenerationsRemoved.Count} superseded " +
-                    $"generation(s), {result.OverlaysRemoved.Count} overlay set(s) and " +
-                    $"{result.StagingRemoved.Count} staging file(s), " +
-                    $"{result.BytesReclaimed / (1024 * 1024)} MB.");
+                Console.Error.WriteLine(CliText.RetentionRemoved(
+                    result.GenerationsRemoved.Count,
+                    result.OverlaysRemoved.Count,
+                    result.StagingRemoved.Count,
+                    // One decimal, invariantly: integer division printed "0 MB" for every sweep
+                    // under a megabyte, which reads as a contradiction beside a non-zero count.
+                    (result.BytesReclaimed / 1024.0 / 1024.0)
+                        .ToString("F1", CultureInfo.InvariantCulture)));
             }
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             Console.Error.WriteLine(
-                $"Retention sweep skipped: {exception.Message}. The published index is unaffected.");
+                CliText.RetentionSweepSkipped(exception.Message));
         }
     }
 
@@ -614,6 +615,9 @@ public static class CodeSearchSyncCommand
         WorkingIndexIdentity requested,
         string? configuredRef)
     {
+        // Materialised, so the message below names the refs this loop actually tried. It used
+        // to name dev and main from a literal, which is wrong for a repository whose manifest
+        // configures neither.
         var candidates = new[]
             {
                 configuredRef,
@@ -621,7 +625,8 @@ public static class CodeSearchSyncCommand
                 "refs/heads/main"
             }
             .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
-            .Distinct(StringComparer.Ordinal);
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         foreach (var candidate in candidates)
         {
             var commit = GitValue(
@@ -650,8 +655,7 @@ public static class CodeSearchSyncCommand
         }
 
         throw new InvalidOperationException(
-            "A local mainline branch is required before indexing. " +
-            "Expected refs/heads/dev or refs/heads/main.");
+            CliText.MainlineMissing(string.Join(", ", candidates)));
     }
 
     private static async Task<GenerationManifest> BuildGenerationAsync(
@@ -840,7 +844,7 @@ public static class CodeSearchSyncCommand
             // is the one thing the semantic phase exists to prevent.
             EnsureSemanticAdaptersSucceeded(statuses);
             Console.Error.WriteLine(
-                $"Semantic phase resumed from '{Path.GetFileName(path)}'.");
+                CliText.SemanticPhaseResumed(Path.GetFileName(path)));
             return new SemanticBuildResult(index, statuses);
         }
         catch (Exception exception) when (
@@ -848,8 +852,7 @@ public static class CodeSearchSyncCommand
                 InvalidDataException or JsonException)
         {
             Console.Error.WriteLine(
-                $"Semantic checkpoint '{path}' was not reusable and will be rebuilt: " +
-                exception.Message);
+                CliText.SemanticCheckpointUnusable(path, exception.Message));
             return null;
         }
     }
@@ -890,7 +893,7 @@ public static class CodeSearchSyncCommand
                 exception is IOException or UnauthorizedAccessException)
             {
                 Console.Error.WriteLine(
-                    $"Semantic checkpoint '{file}' could not be removed: {exception.Message}");
+                    CliText.SemanticCheckpointNotRemoved(file, exception.Message));
             }
         }
     }
@@ -913,11 +916,9 @@ public static class CodeSearchSyncCommand
             return;
         }
 
-        Console.Error.WriteLine(
-            $"Semantic overlay for '{workingRoot}' is degraded: " +
-            string.Join("; ", failures.Select(failure => $"{failure.Name}: {failure.Message}")) +
-            ". Files this worktree changed are cut by line window until the adapter works " +
-            "again; the base generation is unaffected.");
+        Console.Error.WriteLine(CliText.OverlayDegraded(
+            workingRoot,
+            string.Join("; ", failures.Select(failure => $"{failure.Name}: {failure.Message}"))));
     }
 
     /// <summary>
@@ -947,11 +948,9 @@ public static class CodeSearchSyncCommand
         if (uncoveredProjects is { Count: > 0 })
         {
             Report(
-                $"Semantic indexing covered one project; {uncoveredProjects.Count} more in this " +
-                "repository were not covered, because it has no solution file and only one entry " +
-                "point is loaded without one. Precise navigation answers from bounded text " +
-                "matching everywhere else. Add a solution that lists them, or accept the gap: " +
-                string.Join(", ", uncoveredProjects),
+                CliText.CoverageProjectsUncovered(
+                    uncoveredProjects.Count,
+                    string.Join(", ", uncoveredProjects)),
                 requireSemantics);
             return;
         }
@@ -962,12 +961,7 @@ public static class CodeSearchSyncCommand
             return;
         }
 
-        Report(
-            "Semantic indexing covered no C# document, yet this repository has C# sources. " +
-            "go_to_definition, find_references, find_implementations and find_relationships " +
-            "will fall back to bounded text matching until this is fixed. Any 'Roslyn:' line " +
-            "above says why the workspace did not load.",
-            requireSemantics);
+        Report(CliText.CoverageNoCsharp, requireSemantics);
     }
 
     private static void Report(string message, bool requireSemantics)
@@ -998,9 +992,7 @@ public static class CodeSearchSyncCommand
         var details = string.Join(
             "; ",
             failures.Select(failure => $"{failure.Name}: {failure.Message}"));
-        throw new InvalidOperationException(
-            "Semantic generation was not published because required adapters failed: " +
-            details);
+        throw new InvalidOperationException(CliText.AdaptersFailed(details));
     }
 
     private static void DeleteEmbeddingCheckpoint(string path)
@@ -1015,7 +1007,7 @@ public static class CodeSearchSyncCommand
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine(
-                $"Embedding checkpoint '{path}' could not be removed: {exception.Message}");
+                CliText.EmbeddingCheckpointNotRemoved(path, exception.Message));
         }
     }
 
@@ -1383,8 +1375,10 @@ public static class CodeSearchSyncCommand
 
     private static IReadOnlyList<GitWorktree> ReadWorktrees(string root)
     {
-        var output = RepoLocator.GitOutput(root, "worktree list --porcelain")
-            ?? throw new InvalidOperationException("Git worktree inventory is unavailable.");
+        var output = RepoLocator.GitOutputOrThrow(
+            root,
+            "worktree list --porcelain",
+            "This repository's worktree list");
         return WorktreeInventory.ParsePorcelain(output);
     }
 
