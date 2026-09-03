@@ -762,6 +762,11 @@ public sealed class InstallationLayoutLease : IDisposable
         "uninstall",
         "current.json",
         "current.lock",
+        // Which release a version directory came from. The installer writes it after every
+        // successful activation, and leaving it out of this list meant the next run refused
+        // the installation for holding the installer's own file — so every machine that had
+        // installed a release could no longer update.
+        InstalledRelease.FileName,
     ];
 
     private static void ValidateBinShape(InstallationLayout layout)
