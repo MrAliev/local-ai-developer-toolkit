@@ -253,10 +253,7 @@ static async Task<int> RunAsync(string[] args)
         var root = rootIndex >= 0 && rootIndex + 1 < args.Length
             ? args[rootIndex + 1]
             : Environment.CurrentDirectory;
-        if (!Enum.TryParse<RepositoryHookEvent>(
-                hookName.Replace("-", string.Empty),
-                ignoreCase: true,
-                out _))
+        if (!HookCommand.IsDispatchedEvent(hookName))
         {
             Console.Error.WriteLine(
                 $"Unsupported LocalAi hook '{hookName}'. " +
@@ -269,9 +266,8 @@ static async Task<int> RunAsync(string[] args)
             $"LocalAi index synchronized: generation={result.GenerationId}, " +
             $"overlays={result.OverlaysBuilt}" +
             (result.WorktreesSkipped > 0
-                ? $", skipped worktrees={result.WorktreesSkipped}"
-                : string.Empty) +
-            ".");
+                ? $", skipped={result.WorktreesSkipped}"
+                : string.Empty));
         return 0;
     }
 
