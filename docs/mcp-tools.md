@@ -91,6 +91,13 @@ The estimate is computed from what was actually processed — 4.0 characters per
 2.2 for Cyrillic, pixel area over 750 for images — and is reported as a range, because there is no
 live token counter here. Zero is a correct answer: a job too small to save anything says so.
 
+The line comes in the language this computer is set to — English unless a translation exists for
+it — and so does everything else these tools return, refusals included. Its numbers do not follow
+the language: durations, sizes and counts are invariant whatever the words are, so quoting them
+verbatim is safe. `localai policy set --language <en|ru|system>` overrides the machine for every
+process started afterwards. Tool names, parameter names, commands and the tool descriptions
+themselves are never translated.
+
 ## What these tools do not replace
 
 - **Reading a file before editing it.** Never delegated.

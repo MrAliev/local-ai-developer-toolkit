@@ -546,6 +546,15 @@ later opens in the language the installation was chosen in. Two things stay Engl
 Russian run, for one reason: the run journal and the report written next to it exist to be
 read against each other.
 
+Everything outside the wizards answers the same question without asking it. The CLI and both MCP
+servers take the language from this computer, fall back to English wherever there is no
+translation, and are overridden by `localai policy set --language <en|ru|system>` for every
+process started afterwards. Their strings live in `.resx` pairs rather than in the code, so a
+language is added by adding a file and a test refuses one that carries only some of the strings.
+What does not follow the language is anything a machine reads back: commands, option names,
+identifiers, the MCP tool descriptions, and every number, duration and date, which stay invariant
+so that a line quoted verbatim by an agent means the same thing wherever it was produced.
+
 The same executable is also the uninstaller, the updater and the repair tool, so starting it
 asks which of those this run is and offers only what the machine allows, naming the reason for
 the rest. An update also stops re-asking what it already has: prerequisites that are installed, models

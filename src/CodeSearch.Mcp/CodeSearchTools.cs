@@ -7,6 +7,7 @@ using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
 using LocalAi.Contracts.Security;
 using CodeSearch.Core.Search;
+using CodeSearch.Mcp.Resources;
 using CodeSearch.Core.Semantics;
 using LocalAi.Contracts;
 using LocalAi.Repository;
@@ -61,7 +62,7 @@ public static class CodeSearchTools
         {
             var outcome = gateway.ResolveDefinition(path, line, utf16Column, root);
             return Degradation(outcome) + (outcome.Locations.Count == 0
-                ? "No definition found."
+                ? CodeSearchText.NoDefinition
                 : FormatSemanticLocations(
                     "Definitions",
                     "go_to_definition",
@@ -77,7 +78,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"go_to_definition failed: {Describe(ex)}";
+            return CodeSearchText.ToolFailed("go_to_definition", Describe(ex));
         }
     }
 
@@ -112,7 +113,7 @@ public static class CodeSearchTools
                 includeDefinition,
                 root);
             return Degradation(outcome) + (outcome.Locations.Count == 0
-                ? "No references found."
+                ? CodeSearchText.NoReferences
                 : FormatSemanticLocations(
                     "References",
                     "find_references",
@@ -128,7 +129,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"find_references failed: {Describe(ex)}";
+            return CodeSearchText.ToolFailed("find_references", Describe(ex));
         }
     }
 
@@ -158,7 +159,7 @@ public static class CodeSearchTools
                 utf16Column,
                 root);
             return locations.Count == 0
-                ? "No implementations found."
+                ? CodeSearchText.NoImplementations
                 : FormatSemanticLocations(
                     "Implementations",
                     "find_implementations",
@@ -174,7 +175,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"find_implementations failed: {Describe(ex)}";
+            return CodeSearchText.ToolFailed("find_implementations", Describe(ex));
         }
     }
 
@@ -212,7 +213,7 @@ public static class CodeSearchTools
                 path, line, utf16Column, parsedDirection, parsedKind, root);
             if (locations.Count == 0)
             {
-                return "No relationships found.";
+                return CodeSearchText.NoRelationships;
             }
 
             var report = new StringBuilder()
@@ -242,7 +243,7 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"find_relationships failed: {Describe(ex)}";
+            return CodeSearchText.ToolFailed("find_relationships", Describe(ex));
         }
     }
 
@@ -274,11 +275,11 @@ public static class CodeSearchTools
                 languageId,
                 version,
                 text);
-            return $"LSP document open: {path} version {version} ({languageId}).";
+            return CodeSearchText.LspDocumentOpen(path, version, languageId);
         }
         catch (Exception exception)
         {
-            return $"lsp_open_document failed: {exception.Message}";
+            return CodeSearchText.ToolFailed("lsp_open_document", exception.Message);
         }
     }
 
@@ -294,11 +295,11 @@ public static class CodeSearchTools
         try
         {
             await sessions.CloseAsync(RepoLocator.ResolveWorkingRoot(root).Value, path);
-            return $"LSP document closed: {path}.";
+            return CodeSearchText.LspDocumentClosed(path);
         }
         catch (Exception exception)
         {
-            return $"lsp_close_document failed: {exception.Message}";
+            return CodeSearchText.ToolFailed("lsp_close_document", exception.Message);
         }
     }
 
@@ -352,14 +353,14 @@ public static class CodeSearchTools
         {
             var status = service.Status(root);
             return $"""
-                No index exists for {status.RepositoryRoot}.
-                Build it (runs for minutes on a large repository, so run it in the background):
+                {CodeSearchText.NoIndexForRoot(status.RepositoryRoot)}
+                {CodeSearchText.BuildItBackground}
                   {IndexCommand(status.RepositoryRoot)}
                 """;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // The host cancelled the request: "Search failed: The operation was canceled"
+            // The host cancelled the request: "search_code failed: The operation was canceled"
             // invites a retry nobody is waiting for, so cancellation surfaces as itself
             // (#209/m3). The token filter keeps internally-timed-out operations — which
             // also throw OperationCanceledException — on the readable-text path.
@@ -367,25 +368,28 @@ public static class CodeSearchTools
         }
         catch (Exception ex)
         {
-            return $"Search failed: {Describe(ex)}";
+            return CodeSearchText.ToolFailed("search_code", Describe(ex));
         }
 
         if (hits.Count == 0)
         {
-            return "No matches.";
+            return CodeSearchText.NoMatches;
         }
 
         var report = new StringBuilder();
         var status2 = service.Status(root);
-        report.Append("Index: ").Append(status2.ChunkCount).Append(" chunks over ")
-            .Append(status2.FileCount).Append(" files, model ").Append(status2.Model)
-            // How long this took, so the caller can report it rather than estimate it. The
-            // embedding of the query dominates; the rest is memory.
-            .Append(", ").Append(Seconds(started.Elapsed));
+        // The elapsed time is in there so the caller can report what this cost rather than
+        // estimate it. The embedding of the query dominates; the rest is memory.
+        report.Append(CodeSearchText.SearchIndexHeader(
+            status2.ChunkCount,
+            status2.FileCount,
+            status2.Model,
+            Seconds(started.Elapsed)));
         if (status2.CommitDrifted)
         {
-            report.Append(" (STALE: built at ").Append(Short(status2.IndexedCommit))
-                .Append(", HEAD is ").Append(Short(status2.CurrentCommit)).Append(')');
+            report.Append(CodeSearchText.SearchIndexHeaderStale(
+                Short(status2.IndexedCommit),
+                Short(status2.CurrentCommit)));
         }
 
         report.AppendLine().AppendLine();
@@ -476,7 +480,7 @@ public static class CodeSearchTools
             // The type as well as the message: two of the three failures reported in #140 came
             // back with a message that named nothing, and a caller left holding "get_code_chunk
             // failed" has nothing to retry, report or look up.
-            return $"get_code_chunk failed: {Describe(ex)}";
+            return CodeSearchText.ToolFailed("get_code_chunk", Describe(ex));
         }
     }
 
@@ -516,24 +520,26 @@ public static class CodeSearchTools
                 Status:     NOT BUILT
                 {progressText}
 
-                Build it with:
+                {CodeSearchText.BuildItWith}
                   {IndexCommand(status.RepositoryRoot)}
                 """;
         }
 
         var staleness = status.CommitDrifted
-            ? $"STALE - built at {Short(status.IndexedCommit)}, HEAD is now {Short(status.CurrentCommit)}" +
+            ? CodeSearchText.StatusStale(
+                  Short(status.IndexedCommit),
+                  Short(status.CurrentCommit)) +
               InFlight(progress)
             : "current";
 
         return $"""
             Repository: {status.RepositoryRoot}
             Index:      {status.IndexPath}
-            Model:      {status.Model} ({status.Dim} dims)
+            Model:      {CodeSearchText.ModelWithDims(status.Model, status.Dim)}
             Files:      {status.FileCount}
             Chunks:     {status.ChunkCount}
-            Size:       {status.SizeBytes / 1024.0 / 1024.0:F1} MB
-            Built:      {status.IndexedAtUtc:u} at commit {Short(status.IndexedCommit)}
+            Size:       {CodeSearchText.SizeMegabytes((status.SizeBytes / 1024.0 / 1024.0).ToString("F1", CultureInfo.InvariantCulture))}
+            Built:      {CodeSearchText.BuiltAtCommit(status.IndexedAtUtc.ToString("u", CultureInfo.InvariantCulture), Short(status.IndexedCommit))}
             Status:     {staleness}
             Navigation: {Navigation(status)}
             {progressText}
@@ -556,17 +562,10 @@ public static class CodeSearchTools
         // was how a broken C# workspace stayed invisible: the file is there, the checksum agrees,
         // and every answer is a text match wearing the wrong label.
         { SemanticIndexPresent: true, SemanticIndexCoversNothing: true } =>
-            "HEURISTIC - this generation has a semantic.sidx that covers no document, so " +
-            "go_to_definition, find_references, find_implementations and find_relationships " +
-            "fall back to bounded text matching. Semantic indexing ran and produced nothing; " +
-            "the sync output says why. Re-sync after fixing that: " +
-            $"localai-launcher.exe run localai sync --root {status.RepositoryRoot}",
-        { SemanticIndexPresent: true } => "precise (semantic.sidx present)",
+            CodeSearchText.NavigationHeuristicCoversNothing(status.RepositoryRoot),
+        { SemanticIndexPresent: true } => CodeSearchText.NavigationPrecise,
         _ =>
-            "HEURISTIC - this generation has no semantic.sidx, so go_to_definition, " +
-            "find_references, find_implementations and find_relationships fall back to " +
-            "bounded text matching. Re-sync to build it: " +
-            $"localai-launcher.exe run localai sync --root {status.RepositoryRoot}",
+            CodeSearchText.NavigationHeuristicMissing(status.RepositoryRoot),
     };
 
     /// <summary>
@@ -596,7 +595,9 @@ public static class CodeSearchTools
         progress.Phase is RepositoryIndexProgressPhase.Completed
             or RepositoryIndexProgressPhase.Failed
             ? string.Empty
-            : $"; a sync reached {progress.Phase} at {progress.UpdatedAtUtc:u}";
+            : CodeSearchText.SyncReached(
+                progress.Phase,
+                progress.UpdatedAtUtc.ToString("u", CultureInfo.InvariantCulture));
 
     private static RepositoryIndexProgress? ReadProgress(
         string workingRoot,
@@ -632,7 +633,7 @@ public static class CodeSearchTools
         {
             return $"""
                 Sync phase: {progress.Phase}
-                Progress:   not counted in this phase
+                Progress:   {CodeSearchText.ProgressNotCounted}
                 Updated:    {progress.UpdatedAtUtc:u}
                 """;
         }
@@ -641,12 +642,13 @@ public static class CodeSearchTools
         var eta = progress.EstimatedRemaining is { } estimate
             ? estimate == TimeSpan.Zero
                 ? "0"
-                : $"{estimate.TotalMinutes:F1} min"
-            : "calculating";
+                : CodeSearchText.EtaMinutes(
+                    estimate.TotalMinutes.ToString("F1", CultureInfo.InvariantCulture))
+            : CodeSearchText.EtaCalculating;
         return $"""
             Sync phase: {progress.Phase}
-            Progress:   {progress.ProcessedChunks}/{progress.TotalChunks} chunks ({remaining} remaining)
-            Rate:       {progress.ChunksPerSecond:F1} chunks/s
+            Progress:   {CodeSearchText.ProgressChunks(progress.ProcessedChunks, progress.TotalChunks, remaining)}
+            Rate:       {CodeSearchText.RateChunks(progress.ChunksPerSecond.ToString("F1", CultureInfo.InvariantCulture))}
             ETA:        {eta}
             Updated:    {progress.UpdatedAtUtc:u}
             """;
@@ -664,19 +666,19 @@ public static class CodeSearchTools
         var loaded = service.Loaded();
         if (loaded.Count == 0)
         {
-            return "Ничего не загружено — память уже свободна.";
+            return CodeSearchText.NothingLoaded;
         }
 
         var names = string.Join(", ", loaded.Select(l => Path.GetFileName(l.Path)));
         var report = service.UnloadAll();
         var trim = report.WorkingSetTrimmed
-            ? "рабочий набор процесса сжат"
-            : "рабочий набор не сжимался (не Windows или вызов отклонён)";
+            ? CodeSearchText.WorkingSetTrimmed
+            : CodeSearchText.WorkingSetNotTrimmed;
 
         return $"""
-            Выгружено из памяти: {names}
-            Процесс занимал больше на ~{report.FreedMb} МБ, сейчас ~{report.RemainingMb} МБ ({trim}).
-            Следующий поиск перезагрузит индекс за ~1 с.
+            {CodeSearchText.Unloaded(names)}
+            {CodeSearchText.ProcessMemory(report.FreedMb, report.RemainingMb, trim)}
+            {CodeSearchText.ReloadsInASecond}
             """;
     }
 
@@ -700,7 +702,7 @@ public static class CodeSearchTools
         var executable = Path.Combine(AppContext.BaseDirectory, "localai.exe");
         if (!File.Exists(executable))
         {
-            return $"LocalAi CLI is unavailable. Expected: {executable}";
+            return CodeSearchText.CliUnavailable(executable);
         }
 
         var start = new ProcessStartInfo(executable)
@@ -723,7 +725,7 @@ public static class CodeSearchTools
             cancellationToken);
         if (exitCode != 0)
         {
-            return $"LocalAi sync failed with {exitCode}: {error.Trim()}";
+            return CodeSearchText.SyncFailed(exitCode, error.Trim());
         }
 
         return RefusalMessage(
@@ -824,14 +826,14 @@ public static class CodeSearchTools
 
         return $"""
             Repository: {root}
-            Status:     NOT REFRESHED - {files} files to re-read, over the inline limit of {limit}
-            Nothing was read, embedded or written: the refusal happens before the work starts.
+            Status:     {CodeSearchText.StatusNotRefreshed(files, limit)}
+            {CodeSearchText.NothingHappened}
 
-            A refresh this size runs for minutes, so it does not belong inside a tool call.
-            Run it in the background instead:
+            {CodeSearchText.TooBigForToolCall}
+            {CodeSearchText.RunInBackground}
               {command}
 
-            While it runs, index_status reports the sync phase, the rate in chunks/s and an ETA.
+            {CodeSearchText.WhileItRuns}
             """;
     }
 
@@ -840,9 +842,9 @@ public static class CodeSearchTools
     /// above, because nobody needs a millisecond from a call that took half a minute.
     /// </summary>
     private static string Seconds(TimeSpan span) =>
-        span < TimeSpan.FromSeconds(10)
-            ? $"{span.TotalSeconds:0.0}s"
-            : $"{span.TotalSeconds:0}s";
+        CodeSearchText.Seconds(span < TimeSpan.FromSeconds(10)
+            ? span.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture)
+            : span.TotalSeconds.ToString("0", CultureInfo.InvariantCulture));
 
     private static string Short(string commit) => commit.Length >= 9 ? commit[..9] : commit;
 

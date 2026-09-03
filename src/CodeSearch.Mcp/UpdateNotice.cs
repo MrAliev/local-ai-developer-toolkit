@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeSearch.Mcp.Resources;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Activation;
 
@@ -36,8 +37,10 @@ public static class UpdateNotice
             var state = new UpdateCheckStateStore(root).Read();
             var installed = InstalledVersionReader.Read(root);
             return UpdateComparison.Compare(state, installed) == UpdateAvailability.Available
-                ? $"\nUpdate:     LocalAi {state.LatestVersion} is available " +
-                    $"(this installation is {installed.DisplayName}). {state.ReleaseUrl}"
+                ? "\nUpdate:     " + CodeSearchText.UpdateAvailable(
+                    state.LatestVersion,
+                    installed.DisplayName,
+                    state.ReleaseUrl)
                 : string.Empty;
         }
         catch (Exception exception) when (
