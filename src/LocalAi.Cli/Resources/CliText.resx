@@ -44,6 +44,9 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
   </resheader>
+  <data name="AdaptersFailed" xml:space="preserve">
+    <value>Semantic generation was not published because required adapters failed: {0}</value>
+  </data>
   <data name="BrokerAlive" xml:space="preserve">
     <value>process {0}, heartbeat {1}s ago</value>
   </data>
@@ -59,12 +62,33 @@
   <data name="BrokerStateUnreadable" xml:space="preserve">
     <value>host.json cannot be read: {0}</value>
   </data>
+  <data name="CoverageNoCsharp" xml:space="preserve">
+    <value>Semantic indexing covered no C# document, yet this repository has C# sources. go_to_definition, find_references, find_implementations and find_relationships will fall back to bounded text matching until this is fixed. Any 'Roslyn:' line above says why the workspace did not load.</value>
+    <comment>Tool names and the 'Roslyn:' prefix stay Latin; the prefix is written literally elsewhere in this same file.</comment>
+  </data>
+  <data name="CoverageProjectsUncovered" xml:space="preserve">
+    <value>Semantic indexing covered one project; {0} more in this repository were not covered, because it has no solution file and only one entry point is loaded without one. Navigation falls back to bounded text matching everywhere else. Add a solution that lists them, or accept the gap. Not covered: {1}</value>
+    <comment>The old English said precise navigation answers from bounded text matching, which contradicts itself. The Russian reuses CodeSearchText.ru's wording for the same fact.</comment>
+  </data>
+  <data name="EmbeddingCheckpointNotRemoved" xml:space="preserve">
+    <value>Embedding checkpoint '{0}' could not be removed: {1}</value>
+  </data>
   <data name="GenerationNone" xml:space="preserve">
     <value>not recorded</value>
     <comment>Was "none", which rendered as "generation none" and read as a value rather than as its absence.</comment>
   </data>
   <data name="LauncherMissing" xml:space="preserve">
     <value>The stable entry point is missing: {0}. Registrations pointing at it will fail, and registrations pointing inside a version directory break on the next upgrade.</value>
+  </data>
+  <data name="MainlineMissing" xml:space="preserve">
+    <value>A local mainline branch is required before indexing. None of these branches exists here: {0}</value>
+    <comment>0 is the refs actually tried, which starts with the manifest's DevRef — the old wording named dev and main even for a repository configured for neither.</comment>
+  </data>
+  <data name="OverlayDegraded" xml:space="preserve">
+    <value>Semantic overlay for '{0}' is degraded: {1}. Files this worktree changed are cut by line window until the adapter works again; the base generation is unaffected.</value>
+  </data>
+  <data name="OverlayDiscarded" xml:space="preserve">
+    <value>Worktree {0} changed while its overlay was building; the overlay was discarded and the next sync rebuilds it from the new state.</value>
   </data>
   <data name="PolicyDefaults" xml:space="preserve">
     <value>{0} (defaults, no file)</value>
@@ -175,6 +199,24 @@
     <value>{0}, generation {1}</value>
     <comment>0 is a RepositoryIndexState enum name and stays Latin.</comment>
   </data>
+  <data name="RetentionRemoved" xml:space="preserve">
+    <value>Retention: removed {0} superseded generation(s), {1} overlay set(s) and {2} staging file(s); reclaimed {3} MB.</value>
+    <comment>Noun-first in Russian: ResourceManager has no plural support and genitive plural is correct for every count. 3 arrives already formatted to one decimal, invariantly.</comment>
+  </data>
+  <data name="RetentionSweepSkipped" xml:space="preserve">
+    <value>Retention: sweep skipped ({0}). The published index is unaffected.</value>
+    <comment>Parenthesised rather than after a colon: an IOException message ends in a full stop, and the old wording rendered two in a row.</comment>
+  </data>
+  <data name="SemanticCheckpointNotRemoved" xml:space="preserve">
+    <value>Semantic checkpoint '{0}' could not be removed: {1}</value>
+  </data>
+  <data name="SemanticCheckpointUnusable" xml:space="preserve">
+    <value>Semantic checkpoint '{0}' was not reusable and will be rebuilt: {1}</value>
+    <comment>checkpoint stays Latin: the embedding one is literally named &lt;id&gt;.embedding-checkpoint.</comment>
+  </data>
+  <data name="SemanticPhaseResumed" xml:space="preserve">
+    <value>Semantic phase resumed from '{0}'.</value>
+  </data>
   <data name="SummaryNoProblems" xml:space="preserve">
     <value>No problems.</value>
   </data>
@@ -184,6 +226,10 @@
   <data name="SummaryProblems" xml:space="preserve">
     <value>{0} problem(s), {1} worth reading.</value>
     <comment>Noun-first in Russian: ResourceManager has no plural support and genitive plural is correct for every count.</comment>
+  </data>
+  <data name="SyncBusy" xml:space="preserve">
+    <value>Another sync is already building this repository. Run sync again once it finishes. Repository: {0}</value>
+    <comment>The hole is last because a 64-character repository id in the middle pushes the actionable clause past the wrap in a hook log. Repository: stays English, matching this command's own SYNCED repository= and REFUSED repository=.</comment>
   </data>
   <data name="UpdateAvailable" xml:space="preserve">
     <value>{0} is available; this installation is {1}. {2}</value>
@@ -225,5 +271,17 @@
   <data name="VersionPointerUnreadable" xml:space="preserve">
     <value>current.json cannot be read: {0}</value>
     <comment>0 is a .NET runtime message and arrives in whatever language the framework speaks.</comment>
+  </data>
+  <data name="WorktreeGone" xml:space="preserve">
+    <value>Worktree {0} no longer exists; skipping its overlay.</value>
+    <comment>worktree and overlay stay Latin and indeclinable: they name a git command and a file on disk the reader would look for.</comment>
+  </data>
+  <data name="WorktreeNotInspectable" xml:space="preserve">
+    <value>Worktree {0} could not be inspected ({1}); leaving overlays alone this pass.</value>
+    <comment>1 is a .NET runtime message and arrives in whatever language the framework speaks.</comment>
+  </data>
+  <data name="WorktreeVanished" xml:space="preserve">
+    <value>Worktree {0} disappeared while it was being inspected; skipping its overlay.</value>
+    <comment>Kept apart from WorktreeGone on purpose: one is a stale listing, the other a race during the run, and the exception filter exists to tell them apart.</comment>
   </data>
 </root>
