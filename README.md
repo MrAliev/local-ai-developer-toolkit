@@ -387,7 +387,9 @@ The instruction block is delimited by `<!-- BEGIN LOCALAI MANAGED INSTRUCTIONS -
 matching end marker. Everything between them is replaced wholesale on the next install and
 everything outside them is preserved, so upgrading the rules never costs a user their own
 notes. The block covers routing — when to reach for `search_code` instead of a text search,
-what belongs to `read_image`, `triage_log` and `ask_local` — as well as the transport
+which question goes to `find_references` rather than back to search, why a recursive sweep of
+the tree is the rule being broken rather than a shortcut to it, and what belongs to
+`read_image`, `triage_log` and `ask_local` — as well as the transport
 invariants: the shared broker only, never Ollama directly, full-VRAM validation. Routing is
 included because transport rules alone describe how a call must travel without saying when
 to make one.

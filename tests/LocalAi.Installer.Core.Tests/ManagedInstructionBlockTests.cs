@@ -93,6 +93,20 @@ public sealed class ManagedInstructionBlockTests
     // from one that never happened.
     [InlineData("the one figure you estimate")]
     // The first thing to check when the index lags HEAD, and the one people never think of.
+    // Naming only search_code left the tool that answers "who calls X" unnamed anywhere in the
+    // block, so a long session drifted back to grep for exactly the questions the navigation
+    // tools answer better. Each rule is pinned by a phrase unique in the flattened block.
+    [InlineData("`find_references` answers who calls X and where X is used")]
+    [InlineData("those three take that path and that start line unchanged")]
+    // Why a text sweep is not an equivalent answer, rather than merely a slower one.
+    [InlineData("answers a different question: every same-named member of every other type matches")]
+    // The prohibition itself. "Begin every ..." governed only the first move.
+    [InlineData("is the rule being broken, not a quicker way to keep it")]
+    // Grep keeps one job, narrowed from "target already known" — which is what licensed a
+    // recursive sweep for a string whose text was known but whose file was not.
+    [InlineData("a literal sweep for one exact token in a file already identified")]
+    // The failure was drift, and nothing in the block survived a lengthening session.
+    [InlineData("the tenth question is routed like the first")]
     [InlineData("localai repo status --root")]
     public void The_block_states_every_rule_the_installation_depends_on(string rule) =>
         // Whitespace-normalised: the block is wrapped to a column, so a required phrase can
@@ -273,6 +287,46 @@ public sealed class ManagedInstructionBlockTests
     /// The number is not sacred: raise it on purpose when something genuinely belongs here.
     /// What must not happen is drifting past it a paragraph at a time.
     /// </summary>
+    /// <summary>
+    /// Codex gets both halves inline — it has no import mechanism — so its block is honestly
+    /// larger, and until now it was measured by nothing at all: both this test and the
+    /// no-repetition one took <see cref="ManagedInstructionBlock.Block"/> alone. It had been
+    /// past the number this project chose for itself, unnoticed, in a file read on every session.
+    /// </summary>
+    [Fact]
+    public void The_codex_block_stays_within_its_own_budget()
+    {
+        // Larger on purpose, and chosen rather than drifted into: the split saved characters for
+        // Claude and spent them here.
+        const int budget = 13_000;
+
+        var measured = ManagedInstructionBlock.CodexBlock.Length
+            - ManagedInstructionBlock.CodexBlock.Count(character => character == (char)13);
+
+        Assert.True(
+            measured <= budget,
+            $"the Codex block is {measured} characters, over its {budget} budget; " +
+            "cut something or raise the budget on purpose");
+    }
+
+    [Fact]
+    public void The_codex_block_says_nothing_twice()
+    {
+        var normalised = string.Join(" ", ManagedInstructionBlock.CodexBlock.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries));
+        var repeated = normalised
+            .Split(['.', ':'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(sentence => sentence.Trim())
+            .Where(sentence => sentence.Length > 45)
+            .GroupBy(sentence => sentence, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+
+        Assert.Empty(repeated);
+    }
+
     [Fact]
     public void The_block_stays_within_its_budget()
     {
