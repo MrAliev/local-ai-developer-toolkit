@@ -71,6 +71,52 @@ public sealed class ThemeReferencesAreDynamicTests
     }
 
     /// <summary>
+    /// Foreground is inherited, and what it is inherited from is the window — whose own default
+    /// is the system's near-black. A TextBlock style that sets everything but the colour
+    /// therefore paints dark text on a dark page, and the implicit style cannot rescue it: an
+    /// element that names a style of its own does not get the implicit one as well.
+    ///
+    /// This is not hypothetical. The headline of the start window read as black on #1F1F1F in
+    /// the first dark build, because its style set the size and the weight and nothing else.
+    /// </summary>
+    [Theory]
+    [InlineData("MainWindow.xaml")]
+    [InlineData("UninstallWindow.xaml")]
+    [InlineData("StartWindow.xaml")]
+    public void Every_text_style_names_its_colour(string window)
+    {
+        var text = Read(window);
+        var offenders = Regex
+            .Matches(
+                text,
+                "<Style x:Key=\"(?<key>[^\"]+)\" TargetType=\"TextBlock\">(?<body>.*?)</Style>",
+                RegexOptions.Singleline)
+            .Where(match => !match.Groups["body"].Value.Contains("Foreground", StringComparison.Ordinal))
+            .Select(match => $"{window}  {match.Groups["key"].Value}")
+            .ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "A text style that names no colour inherits the system's, which is near-black:" +
+            Environment.NewLine + string.Join(Environment.NewLine, offenders));
+    }
+
+    /// <summary>
+    /// And the window itself, which is what every unstyled element inherits from.
+    /// </summary>
+    [Theory]
+    [InlineData("MainWindow.xaml")]
+    [InlineData("UninstallWindow.xaml")]
+    [InlineData("StartWindow.xaml")]
+    public void Every_window_names_the_colour_its_content_inherits(string window)
+    {
+        Assert.Contains(
+            "Foreground=\"{DynamicResource TextPrimary}\"",
+            Read(window),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The control styles are as much a part of the window as the window: a hardcoded colour in
     /// a ControlTemplate is the same permanently light control, one level down.
     /// </summary>
