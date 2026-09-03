@@ -186,9 +186,21 @@ public static class ManagedInstructionBlock
         Begin every "where does X live", "what handles Y", "is there already something like
         Z" with `search_code` from the `codesearch` MCP server rather than a text search. It
         matches by meaning and by exact symbol name, and costs a fraction of reading the
-        candidate files. A literal sweep for one exact token, once the target is already
-        known, is still a job for grep. Reading a file before editing it is never delegated to
-        anything.
+        candidate files.
+
+        A symbol already located goes to the navigation tools rather than back to search:
+        `find_references` answers who calls X and where X is used, `go_to_definition` what a name
+        refers to, `find_implementations` who overrides or derives from it. A hit prints
+        `path:start-end`, and those three take that path and that start line unchanged;
+        `get_code_chunk` takes the hit's `chunk_id` instead and returns it in full.
+
+        Searching the tree with grep to find something is the rule being broken, not a quicker way
+        to keep it. A recursive sweep of `src/` for call sites reads whole files to answer by name
+        what `find_references` answers by position, and it answers a different question: every
+        same-named member of every other type matches, and so does the name in a comment. Grep
+        keeps one job, a literal sweep for one exact token in a file already identified, and none
+        of this lapses as a session lengthens: the tenth question is routed like the first. Reading
+        a file before editing it is never delegated to anything.
 
         A refusal is the tool working correctly rather than a tool that is broken: uncommitted
         work is not in the index yet, and the overlay it needs has to be built — the skill
@@ -361,6 +373,21 @@ public static class ManagedInstructionBlock
         answer too, and those need no model at all — they read the published index by
         position.
 
+        ### Navigating from a hit
+
+        `search_code` finds the region; the navigation tools work over it. `find_references`,
+        `go_to_definition`, `find_implementations` and `find_relationships` each resolve whatever
+        symbol sits at a path, a line and a column, all counted from one — the numbering a hit is
+        printed with and an editor shows. The column defaults to the start of the line and rarely
+        needs setting: a position that names nothing resolves to the outermost declaration
+        beginning on that line, so a method resolves without hunting for the column its name
+        starts at.
+
+        Anything below one is refused by name — `invalid_position: lines and columns are counted
+        from 1`. Everything else is accepted, so subtracting one from a printed line still gives a
+        valid position, one line above the declaration, and a quiet answer about whatever sits
+        there. A note that says to subtract is out of date; nothing needs subtracting.
+
         ### The tools in detail
 
         | Tool | What it is for |
@@ -413,9 +440,21 @@ public static class ManagedInstructionBlock
         Begin every "where does X live", "what handles Y", "is there already something like
         Z" with `search_code` from the `codesearch` MCP server rather than a text search. It
         matches by meaning and by exact symbol name, and costs a fraction of reading the
-        candidate files. A literal sweep for one exact token, once the target is already
-        known, is still a job for grep. Reading a file before editing it is never delegated to
-        anything.
+        candidate files.
+
+        A symbol already located goes to the navigation tools rather than back to search:
+        `find_references` answers who calls X and where X is used, `go_to_definition` what a name
+        refers to, `find_implementations` who overrides or derives from it. A hit prints
+        `path:start-end`, and those three take that path and that start line unchanged;
+        `get_code_chunk` takes the hit's `chunk_id` instead and returns it in full.
+
+        Searching the tree with grep to find something is the rule being broken, not a quicker way
+        to keep it. A recursive sweep of `src/` for call sites reads whole files to answer by name
+        what `find_references` answers by position, and it answers a different question: every
+        same-named member of every other type matches, and so does the name in a comment. Grep
+        keeps one job, a literal sweep for one exact token in a file already identified, and none
+        of this lapses as a session lengthens: the tenth question is routed like the first. Reading
+        a file before editing it is never delegated to anything.
 
         A refusal is the tool working correctly rather than a tool that is broken: uncommitted
         work is not in the index yet, and the overlay it needs has to be built — see "Building the
@@ -583,6 +622,21 @@ public static class ManagedInstructionBlock
         `localai semantic definition`, `references`, `implementations` and `relationships`
         answer too, and those need no model at all — they read the published index by
         position.
+
+        ### Navigating from a hit
+
+        `search_code` finds the region; the navigation tools work over it. `find_references`,
+        `go_to_definition`, `find_implementations` and `find_relationships` each resolve whatever
+        symbol sits at a path, a line and a column, all counted from one — the numbering a hit is
+        printed with and an editor shows. The column defaults to the start of the line and rarely
+        needs setting: a position that names nothing resolves to the outermost declaration
+        beginning on that line, so a method resolves without hunting for the column its name
+        starts at.
+
+        Anything below one is refused by name — `invalid_position: lines and columns are counted
+        from 1`. Everything else is accepted, so subtracting one from a printed line still gives a
+        valid position, one line above the declaration, and a quiet answer about whatever sits
+        there. A note that says to subtract is out of date; nothing needs subtracting.
 
         ### The tools in detail
 
