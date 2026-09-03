@@ -30,14 +30,44 @@ public enum StartChoice
 /// One option on the start page: what it does, and — when it cannot be done here — why not.
 /// A greyed-out button with no explanation is a worse answer than no button at all.
 /// </summary>
-public sealed record StartActionOption(
+public sealed class StartActionOption(
     StartChoice Choice,
     string Title,
     string Description,
     bool IsAvailable,
-    string UnavailableReason)
+    string UnavailableReason) : ObservableObject
 {
+    private bool isSelected;
+
+    public StartChoice Choice { get; } = Choice;
+
+    public string Title { get; } = Title;
+
+    public string Description { get; } = Description;
+
+    public bool IsAvailable { get; } = IsAvailable;
+
+    public string UnavailableReason { get; } = UnavailableReason;
+
     public bool IsUnavailable => !IsAvailable;
+
+    /// <summary>
+    /// Whether this is the errand the button at the bottom would run. One row at a time: the
+    /// view model releases the others, which is what makes four rows one question.
+    /// </summary>
+    public bool IsSelected
+    {
+        get => isSelected;
+        set => SetProperty(ref isSelected, value);
+    }
+
+    /// <summary>
+    /// What a screen reader announces. A disabled row's reason is not optional information, and
+    /// help text is only spoken at some verbosity levels, so it goes into the name itself.
+    /// </summary>
+    public string AccessibleName => IsAvailable
+        ? Title
+        : Title + ". " + UnavailableReason;
 }
 
 /// <summary>
@@ -57,30 +87,33 @@ public sealed class InstallerStartViewModel : ObservableObject
     /// </summary>
     private readonly InstalledVersion installed;
 
-    private readonly InstallerLanguageStore languages;
+    private readonly InstallerPreferencesStore preferences;
 
     public InstallerStartViewModel(
         string? localAppData = null,
         IExistingLocalAiInspector? inspector = null,
         Func<InstalledVersion>? readInstalledVersion = null,
-        InstallerLanguageStore? languageStore = null)
+        InstallerPreferencesStore? preferencesStore = null)
     {
         var root = localAppData ??
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         // Rooted where the caller said its state lives. Defaulting to the real profile even
         // when the rest of the view model was redirected let the test suite rewrite the
         // language of the installer actually installed on the machine, once per run.
-        languages = languageStore ?? new InstallerLanguageStore(
+        preferences = preferencesStore ?? new InstallerPreferencesStore(
             Path.Combine(root, RemovalMatrix.JournalDirectoryName));
         existing = (inspector ?? new ExistingLocalAiInspector(new SystemFileSystemProbe()))
             .Inspect(root);
         installed = readInstalledVersion is null
             ? InstalledVersionReader.Read(Path.Combine(root, "LocalAi"))
             : readInstalledVersion();
+        Theme = preferences.ReadTheme();
         foreach (var option in BuildOptions())
         {
             Actions.Add(option);
         }
+
+        SelectTheOnlyErrandIfThereIsOne();
     }
 
     public ObservableCollection<StartActionOption> Actions { get; } = [];
@@ -118,26 +151,127 @@ public sealed class InstallerStartViewModel : ObservableObject
     public void ChooseLanguage(InstallerLanguage language)
     {
         InstallerCulture.Current = language;
-        languages.Write(language);
+        preferences.WriteLanguage(language);
+        // The rows are rebuilt in the other language, so the choice has to be carried across
+        // them: somebody who picked an errand and then switched language would otherwise watch
+        // it un-choose itself.
+        var chosen = Selected;
+        Selected = null;
         Actions.Clear();
         foreach (var option in BuildOptions())
         {
             Actions.Add(option);
         }
 
+        if (chosen is { } errand)
+        {
+            Select(errand);
+        }
+        else
+        {
+            SelectTheOnlyErrandIfThereIsOne();
+        }
+
         OnPropertyChanged(nameof(Headline));
         OnPropertyChanged(nameof(Detail));
         OnPropertyChanged(nameof(IsEnglish));
         OnPropertyChanged(nameof(IsRussian));
-        OnPropertyChanged(nameof(ChooseText));
         OnPropertyChanged(nameof(CloseText));
+        OnPropertyChanged(nameof(NextText));
+        OnPropertyChanged(nameof(ActionsGroupName));
+        OnPropertyChanged(nameof(ThemeSystemText));
+        OnPropertyChanged(nameof(ThemeLightText));
+        OnPropertyChanged(nameof(ThemeDarkText));
+    }
+
+    /// <summary>
+    /// Which of the three the person has chosen. "System" is the default and is not a third
+    /// colour scheme: it means the installer keeps following Windows, including a change made
+    /// while it is open.
+    /// </summary>
+    /// <summary>
+    /// The errand the button at the bottom would run, or null while nobody has chosen. The
+    /// screen used to carry a button per row, so there were four primary actions on one page
+    /// and no way to read the four descriptions without one of them a click from happening.
+    /// </summary>
+    public StartChoice? Selected { get; private set; }
+
+    public bool HasSelection => Selected is not null;
+
+    /// <summary>
+    /// Chooses one errand and releases the rest. An errand that cannot run is refused rather
+    /// than selected: its row is not reachable by mouse or keyboard, but this is what decides,
+    /// and a screen reader reaches further than either.
+    /// </summary>
+    public void Select(StartChoice choice)
+    {
+        if (Actions.SingleOrDefault(option => option.Choice == choice) is not
+            { IsAvailable: true } chosen)
+        {
+            return;
+        }
+
+        foreach (var option in Actions)
+        {
+            option.IsSelected = ReferenceEquals(option, chosen);
+        }
+
+        Selected = choice;
+        OnPropertyChanged(nameof(Selected));
+        OnPropertyChanged(nameof(HasSelection));
+    }
+
+    /// <summary>
+    /// Stated by count rather than by state: when exactly one errand can run, choosing it is
+    /// not a question and the screen answers it — three greyed rows, nothing selected and a
+    /// dead button is a puzzle on the easiest screen in the product. When several can, one of
+    /// them deletes things, and that is where "nothing chosen for you" earns its keep.
+    /// </summary>
+    private void SelectTheOnlyErrandIfThereIsOne()
+    {
+        if (Actions.Count(option => option.IsAvailable) == 1)
+        {
+            Select(Actions.Single(option => option.IsAvailable).Choice);
+        }
+    }
+
+    public InstallerTheme Theme { get; private set; }
+
+    public bool IsSystemTheme => Theme == InstallerTheme.System;
+
+    public bool IsLightTheme => Theme == InstallerTheme.Light;
+
+    public bool IsDarkTheme => Theme == InstallerTheme.Dark;
+
+    /// <summary>
+    /// Remembers the choice, repaints the running application, and moves the selection. The
+    /// application is asked rather than told: this view model also runs in tests, where there
+    /// is no application to repaint.
+    /// </summary>
+    public void ChooseTheme(InstallerTheme theme)
+    {
+        Theme = theme;
+        preferences.WriteTheme(theme);
+        App.Themes?.Choose(theme);
+        OnPropertyChanged(nameof(Theme));
+        OnPropertyChanged(nameof(IsSystemTheme));
+        OnPropertyChanged(nameof(IsLightTheme));
+        OnPropertyChanged(nameof(IsDarkTheme));
     }
 
     public bool IsEnglish => InstallerCulture.Current == InstallerLanguage.English;
 
     public bool IsRussian => InstallerCulture.Current == InstallerLanguage.Russian;
 
-    public string ChooseText => InstallerCulture.Pick("Choose", "Выбрать");
+    public string NextText => PageLabels.Next;
+
+    public string ActionsGroupName => PageLabels.ChooseWhatToDo;
+
+    public string ThemeSystemText => PageLabels.ThemeSystem;
+
+    public string ThemeLightText => PageLabels.ThemeLight;
+
+    public string ThemeDarkText => PageLabels.ThemeDark;
 
     public string CloseText => InstallerCulture.Pick("Close", "Закрыть");
 
@@ -195,6 +329,12 @@ public sealed class InstallerStartViewModel : ObservableObject
         // installed" is the answer — naming a build id there repeats the headline's old
         // mistake in smaller type.
         var version = Release;
+        // The row this sentence sends the reader to is titled "Repair this installation" on an
+        // unrecognised installation, so naming "Update or repair" there sent them to a label
+        // that was not on the screen. Hoisted because BuildOptions yields Install first.
+        var repairTitle = installed && existing.State == ExistingLocalAiState.Unrecognized
+            ? InstallerCulture.Pick("Repair this installation", "Восстановить эту установку")
+            : InstallerCulture.Pick("Update or repair", "Обновить или восстановить");
         yield return new StartActionOption(
             StartChoice.Install,
             InstallerCulture.Pick("Install LocalAi", "Установить LocalAi"),
@@ -204,20 +344,22 @@ public sealed class InstallerStartViewModel : ObservableObject
                 "приложениями."),
             !installed,
             existing.State == ExistingLocalAiState.Compatible
-                ? InstallerCulture.Pick(
-                    "LocalAi" + version + " is already installed — use Update or repair.",
-                    "LocalAi" + version + " уже установлен — выберите «Обновить или " +
-                    "восстановить».")
-                : InstallerCulture.Pick(
-                    "There is already a LocalAi directory here — use Update or repair, which " +
-                    "installs over it.",
-                    "Каталог LocalAi здесь уже есть — выберите «Обновить или восстановить»: " +
-                    "этот вариант устанавливает поверх."));
+                ? string.Format(
+                    InstallerCulture.Pick(
+                        "LocalAi{0} is already installed — choose “{1}”.",
+                        "LocalAi{0} уже установлен — выберите «{1}»."),
+                    version,
+                    repairTitle)
+                : string.Format(
+                    InstallerCulture.Pick(
+                        "There is already a LocalAi directory here — choose “{0}”, which " +
+                        "installs over it.",
+                        "Каталог LocalAi здесь уже есть — выберите «{0}»: этот вариант " +
+                        "устанавливает поверх."),
+                    repairTitle));
         yield return new StartActionOption(
             StartChoice.UpdateOrRepair,
-            installed && existing.State == ExistingLocalAiState.Unrecognized
-                ? InstallerCulture.Pick("Repair this installation", "Восстановить эту установку")
-                : InstallerCulture.Pick("Update or repair", "Обновить или восстановить"),
+            repairTitle,
             // Not "the release you choose": this path folds the release page away and resolves
             // it behind the first screen. The sentence advertised a question the wizard
             // deliberately stopped asking, which leaves the reader waiting for it.

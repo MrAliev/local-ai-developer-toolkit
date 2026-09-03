@@ -150,6 +150,18 @@ public static class PageLabels
 
     public static string Next => InstallerCulture.Pick("Next", "Далее");
 
+    /// <summary>The group of errands, for a screen reader. Never rendered.</summary>
+    public static string ChooseWhatToDo => InstallerCulture.Pick(
+        "Choose what to do",
+        "Выберите, что сделать");
+
+    // --- The theme control, on the start screen beside the language ------------------
+    public static string ThemeSystem => InstallerCulture.Pick("System", "Системная");
+
+    public static string ThemeLight => InstallerCulture.Pick("Light", "Светлая");
+
+    public static string ThemeDark => InstallerCulture.Pick("Dark", "Тёмная");
+
     // --- The removal wizard -------------------------------------------------------------
     public static string RemoveLocalAi => InstallerCulture.Pick(
         "Remove LocalAi",

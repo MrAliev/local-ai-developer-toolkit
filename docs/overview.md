@@ -546,6 +546,26 @@ later opens in the language the installation was chosen in. Two things stay Engl
 Russian run, for one reason: the run journal and the report written next to it exist to be
 read against each other.
 
+It also asks which of the two palettes to paint in, and remembers that beside the language in
+the same file. Light and dark are the explicit answers; System is the third and the default, and
+it means the installer reads what Windows was told and keeps reading it — switch Windows to dark
+while the installer is open and it follows, caption and all, rather than waiting to be reopened.
+A machine nobody has ever changed carries no such setting at all, which reads as light, and so
+does a setting that cannot be read: a preference nobody can see is not a reason to fail a run.
+
+The errands themselves are a list to choose from rather than a button apiece. Four buttons were
+four ways to commit and no way to compare; one column of rows means the reader picks a row and
+then presses the single button at the bottom, which stays dead until they have. An errand the
+machine does not allow stays on the list, recessed rather than hidden, with the reason in place
+beside it — hiding it would leave somebody hunting for something that is right there. When
+exactly one errand can run at all, choosing it is not a question, so the screen answers it and
+the button is live on arrival.
+
+Back on the wizard's first page returns to that list with the choice still on it. Nothing has
+been changed by then, and every choice is meant to be revisitable until a run starts. Reached
+from Apps and features there is no such list behind the wizard, so Back stays unavailable there
+rather than opening a screen the person never saw.
+
 Everything outside the wizards answers the same question without asking it. The CLI and both MCP
 servers take the language from this computer, fall back to English wherever there is no
 translation, and are overridden by `localai policy set --language <en|ru|system>` for every

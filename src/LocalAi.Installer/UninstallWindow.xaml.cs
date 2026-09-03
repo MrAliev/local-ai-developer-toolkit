@@ -9,16 +9,29 @@ namespace LocalAi.Installer;
 /// The wizard in uninstall mode. Navigation lives in the view model, so this file only
 /// forwards the events WPF cannot express as a binding.
 /// </summary>
-public partial class UninstallWindow : Window
+public partial class UninstallWindow : Window, IReturnsToStart
 {
     private readonly UninstallWizardViewModel viewModel;
 
     public UninstallWindow(
         RemovalPreset preset = RemovalPreset.FullUninstall,
-        bool offersInstallAfterwards = false)
+        bool offersInstallAfterwards = false,
+        bool canReturnToStart = false)
     {
-        viewModel = new UninstallWizardViewModel(preset, offersInstallAfterwards);
+        viewModel = new UninstallWizardViewModel(
+            preset,
+            offersInstallAfterwards,
+            canReturnToStart: canReturnToStart);
         InitializeComponent();
+        // The caption is the desktop manager's, not the palette's.
+        DarkCaption.Follow(this);
+        // Back on the first page leaves the wizard; the start window is what knows
+        // where to.
+        viewModel.ReturnToStartRequested += (_, _) =>
+        {
+            ReturnToStart?.Invoke(this, EventArgs.Empty);
+            Close();
+        };
         DataContext = viewModel;
         viewModel.CloseRequested += (_, _) => Close();
         viewModel.InstallRequested += (_, _) =>
@@ -46,6 +59,8 @@ public partial class UninstallWindow : Window
             viewModel.ReportUnexpectedError(exception);
         }
     }
+
+    public event EventHandler? ReturnToStart;
 
     private void OnPresetChecked(object sender, RoutedEventArgs e)
     {

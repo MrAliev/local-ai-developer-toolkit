@@ -15,8 +15,16 @@ public partial class App : Application
     /// </summary>
     public const string UninstallSwitch = "--uninstall";
 
+    private InstallerThemeSwitch? themes;
+
     public App() =>
         InstallerWindowsEnvironment.EnsureValidWindowsDirectory();
+
+    /// <summary>
+    /// The live palette, for the windows that have chrome the resources cannot reach — the
+    /// caption is drawn by the desktop manager and has to be told separately.
+    /// </summary>
+    public static InstallerThemeSwitch? Themes => (Current as App)?.themes;
 
     /// <summary>
     /// Whether this command line asks for removal. Case-insensitive, and accepts the
@@ -40,12 +48,30 @@ public partial class App : Application
         // Before any window is built, and on both paths. The uninstall path arrives from Apps
         // and features, never sees the start screen, and would otherwise inherit nothing —
         // somebody who chose Russian to install would be removed from in English.
-        InstallerCulture.Current = InstallerLanguageStore.Default.Read(CultureInfo.CurrentUICulture);
+        var preferences = InstallerPreferencesStore.Default;
+        InstallerCulture.Current = preferences.ReadLanguage(CultureInfo.CurrentUICulture);
+
+        // Before any window is built, for the same reason as the language: a window that
+        // opened light and repainted a frame later is a flash of the wrong theme on the one
+        // screen somebody is looking at while they wait.
+        themes = new InstallerThemeSwitch(Resources, preferences.ReadTheme());
+        themes.Apply();
 
         Window window = IsUninstallRequested(e.Args)
             ? new UninstallWindow()
             : new StartWindow();
         MainWindow = window;
         window.Show();
+    }
+
+    /// <summary>
+    /// SystemEvents is a static root: left subscribed, it keeps the switch — and through it the
+    /// window it repaints — alive for the life of the process.
+    /// </summary>
+    protected override void OnExit(ExitEventArgs e)
+    {
+        themes?.Dispose();
+        themes = null;
+        base.OnExit(e);
     }
 }
