@@ -50,7 +50,7 @@ public sealed class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.Contains(
-            "0.1.50 is already the newest release",
+            "0.1.50 is the newest release",
             output.ToString(),
             StringComparison.Ordinal);
     }
@@ -67,7 +67,7 @@ public sealed class UpdateCommandTests : IDisposable
 
         Assert.Equal(1, exit);
         Assert.Contains(
-            "LocalAi 0.1.51 is available; this installation is 0.1.50",
+            "0.1.51 is available; this installation is 0.1.50",
             output.ToString(),
             StringComparison.Ordinal);
         Assert.Contains("the package never arrived", error.ToString(), StringComparison.Ordinal);
@@ -89,7 +89,7 @@ public sealed class UpdateCommandTests : IDisposable
         await Run(feed);
 
         Assert.Contains(
-            "LocalAi 0.1.10 is available",
+            "0.1.10 is available",
             output.ToString(),
             StringComparison.Ordinal);
     }

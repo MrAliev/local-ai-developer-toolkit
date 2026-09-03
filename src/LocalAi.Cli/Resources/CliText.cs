@@ -166,6 +166,45 @@ public static class CliText
     public static string UpdateVerifiedRelease(string? latest, string? checkedAt) =>
         Catalogue.Format(nameof(UpdateVerifiedRelease), latest, checkedAt);
 
+    // What `localai update` prints while it installs. The keys above answer "is there a
+    // newer one"; these answer to somebody who decided to take it.
+
+    public static string UpdateCancelled => Catalogue.Get(nameof(UpdateCancelled));
+
+    public static string UpdateClientsPickItUp => Catalogue.Get(nameof(UpdateClientsPickItUp));
+
+    public static string UpdateDidNotComplete(object status, string? reason) =>
+        Catalogue.Format(nameof(UpdateDidNotComplete), status, reason);
+
+    public static string UpdateFailed(string reason) =>
+        Catalogue.Format(nameof(UpdateFailed), reason);
+
+    public static string UpdateInstalled(string? version, string versionPath) =>
+        Catalogue.Format(nameof(UpdateInstalled), version, versionPath);
+
+    public static string UpdateLookingForRelease => Catalogue.Get(nameof(UpdateLookingForRelease));
+
+    public static string UpdateNoInstallation(string runtimeRoot) =>
+        Catalogue.Format(nameof(UpdateNoInstallation), runtimeRoot);
+
+    public static string UpdateNothingToInstall(string? latest) =>
+        Catalogue.Format(nameof(UpdateNothingToInstall), latest);
+
+    public static string UpdateQueueBusy(int queued) =>
+        Catalogue.Format(nameof(UpdateQueueBusy), queued);
+
+    public static string UpdateQueueStillBusy(int queued, int minutes) =>
+        Catalogue.Format(nameof(UpdateQueueStillBusy), queued, minutes);
+
+    public static string UpdateQueueWaiting(int queued) =>
+        Catalogue.Format(nameof(UpdateQueueWaiting), queued);
+
+    public static string UpdateUnknownOption(string option) =>
+        Catalogue.Format(nameof(UpdateUnknownOption), option);
+
+    public static string UpdateUsage(int maximumWaitMinutes) =>
+        Catalogue.Format(nameof(UpdateUsage), maximumWaitMinutes).ReplaceLineEndings();
+
     public static string RepositoryNotConnected(string root) =>
         Catalogue.Format(nameof(RepositoryNotConnected), root);
 

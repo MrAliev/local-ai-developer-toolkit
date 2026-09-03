@@ -234,20 +234,79 @@
   <data name="UpdateAvailable" xml:space="preserve">
     <value>{0} is available; this installation is {1}. {2}</value>
   </data>
+  <data name="UpdateCancelled" xml:space="preserve">
+    <value>Update cancelled. The installed version was not changed.</value>
+    <comment>Deliberately narrow: a version directory may already have been published, and only the installed version is claimed unchanged.</comment>
+  </data>
   <data name="UpdateCheckDisabled" xml:space="preserve">
     <value>check disabled; run `localai policy set --update-check on` to look for releases</value>
+  </data>
+  <data name="UpdateClientsPickItUp" xml:space="preserve">
+    <value>Anything running out of the previous version was stopped and not restarted; clients start the new one the next time they use a tool.</value>
+    <comment>The old wording said nothing was restarted without saying it was stopped, which contradicted this command's own refusal message.</comment>
+  </data>
+  <data name="UpdateDidNotComplete" xml:space="preserve">
+    <value>Update did not complete: {0}. {1}</value>
+    <comment>0 is a LocalAiPackageInstallStatus enum name and stays Latin; 1 is an English literal from the installer core.</comment>
+  </data>
+  <data name="UpdateFailed" xml:space="preserve">
+    <value>Update failed: {0}</value>
   </data>
   <data name="UpdateIncomparable" xml:space="preserve">
     <value>latest verified release is {0}; this installation does not record which release it came from, so the two cannot be compared. The next install or update records it.</value>
   </data>
+  <data name="UpdateInstalled" xml:space="preserve">
+    <value>Installed LocalAi {0} at {1}.</value>
+    <comment>0 is the release version, not the version directory: the old code passed a commit id where the run had just announced a release number.</comment>
+  </data>
+  <data name="UpdateLookingForRelease" xml:space="preserve">
+    <value>Looking for the newest release on GitHub...</value>
+  </data>
   <data name="UpdateNeverChecked" xml:space="preserve">
     <value>unknown; nothing has been checked yet</value>
+  </data>
+  <data name="UpdateNoInstallation" xml:space="preserve">
+    <value>There is no LocalAi installation at {0} to update. Run the installer to set one up.</value>
+  </data>
+  <data name="UpdateNothingToInstall" xml:space="preserve">
+    <value>Nothing to install: {0} is the newest release, and this installation is not behind it.</value>
+    <comment>The old wording named the installation twice with two different identifiers, because DisplayName falls back to a version directory when no release version was recorded.</comment>
+  </data>
+  <data name="UpdateQueueBusy" xml:space="preserve">
+    <value>The broker has {0} queued job(s). Updating now would stop the tools running them. Run `localai update --wait` to update once they finish.</value>
+    <comment>Noun-first in Russian: genitive plural is correct for every count.</comment>
+  </data>
+  <data name="UpdateQueueStillBusy" xml:space="preserve">
+    <value>Still {0} queued job(s) after {1} minutes. Nothing was changed; try again when the queue is quieter.</value>
+    <comment>The Russian reorders the holes, which indexed string.Format allows: it is the only way to avoid opening on a numeral.</comment>
+  </data>
+  <data name="UpdateQueueWaiting" xml:space="preserve">
+    <value>Waiting for {0} queued job(s) to finish...</value>
+  </data>
+  <data name="UpdateUnknownOption" xml:space="preserve">
+    <value>Unknown option '{0}'.</value>
   </data>
   <data name="UpdateUnknownUnavailable" xml:space="preserve">
     <value>unknown; the last check produced nothing to believe (tried {0} UTC)</value>
   </data>
   <data name="UpdateUpToDate" xml:space="preserve">
     <value>up to date at {0} (checked {1} UTC)</value>
+  </data>
+  <data name="UpdateUsage" xml:space="preserve">
+    <value>Usage: localai update [--wait] [--force]
+
+  Installs the newest signed release over this one. The manifest is verified
+  against the embedded release key before the package is downloaded, the
+  package against the manifest before anything is extracted, and the version
+  pointer is swapped atomically once both check out.
+
+  --wait   Wait up to {0} minutes for queued broker jobs to finish instead of
+           refusing.
+  --force  Install the newest release even when it is not newer than this one.
+
+Prerequisites, models and client integrations are not touched; run the installer
+for those.</value>
+    <comment>Usage: and both option names are byte-identical in both languages. The wait ceiling is a hole fed from MaximumWait so the block cannot name a limit the code does not enforce.</comment>
   </data>
   <data name="UpdateVerifiedRelease" xml:space="preserve">
     <value>{0} (checked {1} UTC)</value>
