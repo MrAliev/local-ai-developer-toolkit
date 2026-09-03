@@ -28,6 +28,49 @@ public sealed class PruneCommandTests : IDisposable
         Assert.Contains(report.Lines, line => line.Contains("abandoned record removed"));
     }
 
+    /// <summary>
+    /// A drive that is not mounted right now looks exactly like a deleted checkout to
+    /// <see cref="Directory.Exists(string)"/>, and the difference is a repository's whole index.
+    ///
+    /// The overlay pass already knows this — `IsGone` was written for it, and its comment names
+    /// the unmounted volume, the disconnected share and the absent subst drive. The abandoned
+    /// check four hundred lines away did not ask, so an external disk left unplugged cost the
+    /// record, its manifest and every generation under it: hours of embedding, reported as
+    /// reclaimed megabytes.
+    /// </summary>
+    [Fact]
+    public void A_repository_whose_drive_is_offline_is_left_alone()
+    {
+        // A volume this session has no such drive letter for. Directory.Exists says false for the
+        // path exactly as it would for a deleted checkout.
+        var offline = OfflineDriveLetter();
+        Assert.False(Directory.Exists(offline + @":\"), "the test needs a drive letter nothing uses");
+        var repository = Repository("offline", offline + @":\checkout\.git");
+
+        var report = PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        Assert.True(
+            Directory.Exists(repository),
+            "a record was deleted because its drive happened to be offline");
+        Assert.DoesNotContain(report.Lines, line => line.Contains("abandoned record removed"));
+    }
+
+    private static char OfflineDriveLetter()
+    {
+        var taken = DriveInfo.GetDrives()
+            .Select(drive => char.ToUpperInvariant(drive.Name[0]))
+            .ToHashSet();
+        for (var letter = 'Z'; letter >= 'D'; letter--)
+        {
+            if (!taken.Contains(letter))
+            {
+                return letter;
+            }
+        }
+
+        throw new InvalidOperationException("every drive letter is in use on this machine");
+    }
+
     [Fact]
     public void A_repository_that_is_still_on_disk_is_left_alone()
     {
