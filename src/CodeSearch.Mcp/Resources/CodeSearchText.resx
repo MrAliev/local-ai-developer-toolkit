@@ -124,7 +124,7 @@
     <value>Run it in the background instead:</value>
   </data>
   <data name="SearchDegraded" xml:space="preserve">
-    <value>LEXICAL ONLY: no embedding model answered, so this search matched literal identifiers and nothing else.
+    <value>LEXICAL ONLY: no embedding model answered, so this search matched the words of the query literally and nothing else.
 Matches by meaning are missing from these results, and a plain-language query finds little or nothing in this state.
 Check the broker, then search again: localai doctor</value>
     <comment>The LEXICAL ONLY token and the command stay as they are in both languages.</comment>

@@ -198,8 +198,9 @@ completely.
 
 What helps regardless of chunking: twelve lines of overlap keep meaning from being lost at
 a seam; a header with the path and line range is added to the chunk text, so a vector "knows"
-where it came from; the lexical branch of search matches exact names; and precise navigation is
-a separate layer that does understand TypeScript and Python.
+where it came from; the lexical branch of search matches the words of the query against the
+symbol, the signature, the chunk body and the file path, in that order of weight; and
+precise navigation is a separate layer that does understand TypeScript and Python.
 
 ### 4.3 Base, overlay and dirty overlay
 

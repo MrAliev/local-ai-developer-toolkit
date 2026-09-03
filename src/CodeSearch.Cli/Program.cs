@@ -128,8 +128,8 @@ async Task<int> SearchAsync(Dictionary<string, string> opts)
     {
         // To stderr, so redirecting the hits to a file still leaves the reason on the screen.
         Console.Error.WriteLine(
-            "LEXICAL ONLY: no embedding model answered, so this search matched literal " +
-            "identifiers and nothing else. Check the broker: localai doctor");
+            "LEXICAL ONLY: no embedding model answered, so this search matched the words " +
+            "of the query literally and nothing else. Check the broker: localai doctor");
     }
 
     if (outcome.Hits.Count == 0)
