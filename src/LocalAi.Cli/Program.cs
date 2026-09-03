@@ -24,7 +24,7 @@ try
 }
 catch (OperationCanceledException)
 {
-    Console.Error.WriteLine("localai: cancelled.");
+    Console.Error.WriteLine("localai: " + CliText.RunCancelled);
     return 130;
 }
 catch (EmbeddingUnavailableException exception)
@@ -122,8 +122,7 @@ static async Task<int> RunAsync(string[] args)
                 // failure this replaces reported a configured repository as unconfigured, so
                 // "there is no repository here" has to be distinguishable from "this one is
                 // not set up yet".
-                Console.Error.WriteLine(
-                    $"'{directory}' is not inside a Git repository.");
+                Console.Error.WriteLine(CliText.RepositoryOutsideGit(directory));
                 return 2;
             }
         }
@@ -133,8 +132,7 @@ static async Task<int> RunAsync(string[] args)
             if (!Directory.Exists(commonDirectory))
             {
                 Console.Error.WriteLine(
-                    $"'{commonDirectory}' is not a directory. Pass a Git common directory, " +
-                    "or use --root with a directory inside the repository.");
+                    CliText.RepositoryPathNotDirectory(commonDirectory));
                 return 2;
             }
         }
@@ -202,9 +200,7 @@ static async Task<int> RunAsync(string[] args)
                 !int.TryParse(args[limitIndex + 1], out var parsedLimit) ||
                 parsedLimit < 0)
             {
-                Console.Error.WriteLine(
-                    "localai: --max-inline-files needs a whole number of files, " +
-                    "for example --max-inline-files 200.");
+                Console.Error.WriteLine(CliText.SyncInlineLimitInvalid);
                 return 64;
             }
 
@@ -244,8 +240,7 @@ static async Task<int> RunAsync(string[] args)
         // the top-level usage, which used to omit this command entirely.
         if (hookArguments is not [var hookName, ..])
         {
-            Console.Error.WriteLine(
-                $"localai hook requires an event. Usage: {LocalAi.Cli.CliUsage.Hook}");
+            Console.Error.WriteLine(CliText.HookEventMissing(LocalAi.Cli.CliUsage.Hook));
             return 2;
         }
 
@@ -255,9 +250,9 @@ static async Task<int> RunAsync(string[] args)
             : Environment.CurrentDirectory;
         if (!HookCommand.IsDispatchedEvent(hookName))
         {
-            Console.Error.WriteLine(
-                $"Unsupported LocalAi hook '{hookName}'. " +
-                $"Supported events: {LocalAi.Cli.CliUsage.HookEvents}.");
+            Console.Error.WriteLine(CliText.HookEventUnknown(
+                hookName,
+                LocalAi.Cli.CliUsage.HookEvents));
             return 2;
         }
 
@@ -318,14 +313,24 @@ static async Task<int> RunAsync(string[] args)
             ["run", "localai"],
             await git.GetConfigurationAsync(root, "core.hooksPath"),
             await git.GetWorkingTreeRootAsync(root));
-        Console.WriteLine(
-            $"Installed {result.Installed.Count} shared Git hooks in " +
-            $"{result.HooksDirectory}.");
+        Console.WriteLine(CliText.HooksInstalled(
+            result.Installed.Count,
+            result.HooksDirectory));
+        if (result.Chained.Count > 0)
+        {
+            // Said at last. Installing moves any hook the reader wrote to `<hook>.pre-localai`
+            // and calls it first, and until now the command did that silently — the result
+            // carried the list and nothing read it. File names rather than the recorded paths:
+            // `Chained` holds the path before the move, so printing it verbatim would name files
+            // that no longer exist, in the directory the line above already named.
+            Console.WriteLine(CliText.HooksChained(
+                LocalAi.Repository.GitHookLayout.ChainedSuffix,
+                string.Join(", ", result.Chained.Select(Path.GetFileName))));
+        }
+
         if (result.InsideWorkingTree)
         {
-            Console.WriteLine(
-                "The repository points core.hooksPath into its working tree, so the " +
-                "dispatchers were also added to .git/info/exclude.");
+            Console.WriteLine(CliText.HooksExcluded);
         }
 
         return 0;
