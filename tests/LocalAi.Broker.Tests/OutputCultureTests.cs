@@ -91,4 +91,42 @@ public sealed class OutputCultureTests
             CultureInfo.DefaultThreadCurrentUICulture = before;
         }
     }
+
+    /// <summary>
+    /// Every language this installation claims to speak has its own answer from
+    /// <see cref="OutputCulture.Pick"/>.
+    ///
+    /// The pair it picks from is the update-check disclosure, which is consent and therefore
+    /// lives as two constants in one file rather than as a catalogue key — a parity test can
+    /// prove a key exists in both languages, never that two paragraphs still make the same
+    /// promises. The cost of that is this: <c>Pick</c> names its languages, and the procedure
+    /// <see cref="OutputCulture.Supported"/> documents — add a resource file, add a name here —
+    /// would otherwise leave a third language reading every line in its own words and the one
+    /// paragraph that asks permission in English, with nothing failing.
+    /// </summary>
+    [Fact]
+    public void Pick_has_an_answer_for_every_language_this_installation_speaks()
+    {
+        var before = CultureInfo.CurrentUICulture;
+        try
+        {
+            foreach (var language in OutputCulture.Supported)
+            {
+                CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(language);
+                var picked = OutputCulture.Pick("english", "russian");
+
+                Assert.True(
+                    language.Equals("en", StringComparison.Ordinal)
+                        ? picked == "english"
+                        : picked != "english",
+                    $"Pick answers '{picked}' to a reader of {language}, which is the English " +
+                    "text. Every supported language needs its own branch here, or the " +
+                    "disclosure it picks belongs in a catalogue after all.");
+            }
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = before;
+        }
+    }
 }

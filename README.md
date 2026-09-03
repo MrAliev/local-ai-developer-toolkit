@@ -1105,7 +1105,11 @@ failed.
 - Every string the software itself prints is chosen by the reader's machine, not written into
   the code: English by default, Russian on a Russian system, English again wherever a language
   has no translation. They live in `.resx` pairs, a language is added by adding a file beside
-  the neutral one, and a test refuses a language that carries only some of the strings.
+  the neutral one, and a test refuses a language that carries only some of the strings. One
+  text sits outside that on purpose: the update-check disclosure is consent, and a parity test
+  can prove a key exists in both languages but never that two paragraphs still make the same
+  promises — so it is a pair of constants chosen by `OutputCulture.Pick`, and its own test
+  refuses a supported language that method has no answer for.
   `localai policy set --language <en|ru|system>` overrides the machine. Commands, option names,
   identifiers and tool descriptions are never translated, and numbers, durations and dates stay
   invariant in every language — the lines are quoted verbatim by agents and parsed by tests. The

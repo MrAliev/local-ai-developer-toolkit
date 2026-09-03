@@ -1,3 +1,5 @@
+using System.Globalization;
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Localization;
 
@@ -9,6 +11,10 @@ namespace LocalAi.Cli;
 /// Relaxing residency is a real trade, not a tuning knob, so the command prints what the
 /// choice costs instead of silently accepting it, and warns that a running broker keeps the
 /// old policy until it is restarted.
+///
+/// What it says follows the reader; what it asks to be typed does not. Field names, option
+/// names, enum values and the tokens `on` and `off` are the same in every language, because
+/// they are what comes back on the next command line.
 /// </summary>
 public static class PolicyCommand
 {
@@ -52,29 +58,9 @@ public static class PolicyCommand
 
     private static int Usage(TextWriter error)
     {
-        error.WriteLine(
-            """
-            Usage: localai policy show
-                   localai policy set --residency <RequireFullVram|AllowPartialOffload|AllowCpu>
-                   localai policy set --idle-model-keep-alive-seconds <non-negative integer>
-                   localai policy set --update-check <on|off>
-                   localai policy set --update-check-interval-hours <1..720>
-                   localai policy set --language <en|ru|system>
-
-              RequireFullVram      Models must sit entirely in video memory. Default.
-              AllowPartialOffload  Part of a model may spill to system memory. Requires an
-                                   adapter that holds at least some of it. Slower.
-              AllowCpu             Models may run entirely on the CPU. Works without a usable
-                                   adapter; substantially slower.
-              Idle keep-alive      Seconds to retain an idle model when no queued job targets
-                                   it. Zero unloads it immediately and is the default.
-              Update check         Whether this installation may look up whether a newer
-                                   release exists. Off by default; nothing is ever downloaded
-                                   or installed without you asking.
-              Language             What the CLI and the MCP tools answer in. Follows this
-                                   computer by default, and falls back to English where there
-                                   is no translation. Commands and option names never change.
-            """);
+        error.WriteLine(CliText.PolicyUsage(
+            UpdateCheckPolicy.MinimumIntervalHours,
+            UpdateCheckPolicy.MaximumIntervalHours));
         return 2;
     }
 
@@ -97,30 +83,29 @@ public static class PolicyCommand
         if (!following &&
             !OutputCulture.Supported.Contains(wanted, StringComparer.OrdinalIgnoreCase))
         {
-            error.WriteLine(
-                $"Unknown language '{value}'. This installation speaks " +
-                string.Join(", ", OutputCulture.Supported) +
-                ", or 'system' to follow the operating system.");
+            error.WriteLine(CliText.PolicyLanguageUnknown(
+                value,
+                string.Join(", ", OutputCulture.Supported)));
             return Usage(error);
         }
 
         languages.Write(following ? null : wanted.ToLowerInvariant());
         output.WriteLine(Describe(languages));
-        output.WriteLine(
-            "note: a broker, an MCP server or a shell that is already running keeps the " +
-            "previous language until it is restarted.");
+        output.WriteLine(CliText.PolicyLanguageRestartNote);
         return 0;
     }
 
     /// <summary>
     /// What the language setting is, in the one form both `show` and `set` print, so the two
     /// cannot describe the same file differently.
+    ///
+    /// A stored choice renders as the code that was stored, which is the code that would be
+    /// typed to store it again; only the sentence explaining `system` is prose.
     /// </summary>
     private static string Describe(OutputLanguageStore languages) =>
         languages.Read() is { } chosen
             ? $"language: {chosen}"
-            : "language: system — the language this computer is set to, English where there is " +
-                "no translation";
+            : CliText.PolicyLanguageSystem;
 
     private static int Show(
         ModelResidencyPolicyStore store,
@@ -131,23 +116,16 @@ public static class PolicyCommand
     {
         var policy = store.Read();
         output.WriteLine($"model residency: {policy.ModelResidency}");
-        output.WriteLine(
-            $"idle model keep-alive: {policy.IdleModelKeepAliveSeconds} seconds");
+        output.WriteLine(CliText.PolicyKeepAlive(policy.IdleModelKeepAliveSeconds));
         if (policy.ModelResidency != ModelResidencyPolicy.RequireFullVram)
         {
-            output.WriteLine(
-                "warning: residency is relaxed; responses may be substantially slower " +
-                "than a fully resident load.");
-            output.WriteLine(
-                "warning: answers from the LocalLm tools are labelled as degraded in the line " +
-                "they print; embedding and search do not route through that line and carry no " +
-                "mark. Restore strict residency with: " +
-                "localai policy set --residency RequireFullVram");
+            output.WriteLine(CliText.PolicyResidencyRelaxed);
+            output.WriteLine(CliText.PolicyResidencyMarks);
         }
 
         var updatePolicy = updates.Read();
         output.WriteLine(updatePolicy.Enabled
-            ? $"update check: on, every {updatePolicy.IntervalHours} hours"
+            ? CliText.PolicyUpdateCheckOn(updatePolicy.IntervalHours)
             : "update check: off");
         output.WriteLine(Describe(states.Read()));
         output.WriteLine(Describe(languages));
@@ -157,17 +135,25 @@ public static class PolicyCommand
     /// <summary>
     /// What the last check learned, in the same words every other surface uses. Read from the
     /// state file, never from the network: `policy show` is a question about this machine.
+    ///
+    /// The three clauses are the doctor report's own, reused rather than paraphrased — the
+    /// promise this method's summary makes, which two near-copies did not keep. The field name
+    /// is composed here rather than inside each clause so it stays one string in one place.
+    ///
+    /// `Verified` gets its own clause because nothing here compares the release against what is
+    /// installed; a `policy show` that answered "up to date" would be answering a question it
+    /// never asked.
     /// </summary>
-    private static string Describe(UpdateCheckState state) => state.Status switch
-    {
-        UpdateCheckStatus.Verified =>
-            $"latest verified release: {state.LatestVersion} " +
-            $"(checked {state.CheckedAtUtc:yyyy-MM-dd HH:mm} UTC)",
-        UpdateCheckStatus.Unavailable =>
-            "latest verified release: unknown — the last check produced nothing to believe " +
-            $"(tried {state.CheckedAtUtc:yyyy-MM-dd HH:mm} UTC)",
-        _ => "latest verified release: unknown — nothing has been checked yet",
-    };
+    private static string Describe(UpdateCheckState state) =>
+        "latest verified release: " + state.Status switch
+        {
+            UpdateCheckStatus.Verified => CliText.UpdateVerifiedRelease(
+                state.LatestVersion,
+                state.CheckedAtUtc?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)),
+            UpdateCheckStatus.Unavailable => CliText.UpdateUnknownUnavailable(
+                state.CheckedAtUtc?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)),
+            _ => CliText.UpdateNeverChecked,
+        };
 
     private static int SetUpdateCheck(
         UpdateCheckPolicyStore updates,
@@ -185,24 +171,22 @@ public static class PolicyCommand
                 enabled = false;
                 break;
             default:
-                error.WriteLine($"Unknown update check setting '{value}'.");
+                error.WriteLine(CliText.PolicyUpdateCheckUnknown(value));
                 return Usage(error);
         }
 
         var policy = updates.Read() with { Enabled = enabled };
         updates.Write(policy);
         output.WriteLine(enabled
-            ? $"update check: on, every {policy.IntervalHours} hours"
+            ? CliText.PolicyUpdateCheckOn(policy.IntervalHours)
             : "update check: off");
         // Printed on the way in, not buried in a document: consent to a network call means
-        // knowing what the call is.
+        // knowing what the call is — and knowing it in the language the rest of this terminal
+        // answers in, which is why the paragraph is picked rather than printed.
         output.WriteLine(enabled
-            ? UpdateCheckPolicy.Disclosure
-            : "No release information will be fetched. Existing results, if any, stay on " +
-                "disk until the next check replaces them.");
-        output.WriteLine(
-            "note: a broker that is already running keeps the previous policy until it is " +
-            "restarted.");
+            ? OutputCulture.Pick(UpdateCheckPolicy.Disclosure, UpdateCheckPolicy.DisclosureRussian)
+            : CliText.PolicyUpdateCheckNothingFetched);
+        output.WriteLine(CliText.PolicyRestartNote);
         return 0;
     }
 
@@ -216,18 +200,18 @@ public static class PolicyCommand
             hours < UpdateCheckPolicy.MinimumIntervalHours ||
             hours > UpdateCheckPolicy.MaximumIntervalHours)
         {
-            error.WriteLine(
-                $"Invalid update check interval '{value}'; expected " +
-                $"{UpdateCheckPolicy.MinimumIntervalHours} to " +
-                $"{UpdateCheckPolicy.MaximumIntervalHours} hours.");
+            error.WriteLine(CliText.PolicyUpdateCheckIntervalInvalid(
+                value,
+                UpdateCheckPolicy.MinimumIntervalHours,
+                UpdateCheckPolicy.MaximumIntervalHours));
             return Usage(error);
         }
 
         var policy = updates.Read() with { IntervalHours = hours };
         updates.Write(policy);
         output.WriteLine(policy.Enabled
-            ? $"update check: on, every {hours} hours"
-            : $"update check: off; interval set to {hours} hours for when it is turned on");
+            ? CliText.PolicyUpdateCheckOn(hours)
+            : CliText.PolicyUpdateCheckOffWithInterval(hours));
         return 0;
     }
 
@@ -239,16 +223,13 @@ public static class PolicyCommand
     {
         if (!int.TryParse(value, out var seconds) || seconds < 0)
         {
-            error.WriteLine(
-                $"Invalid idle model keep-alive '{value}'; expected a non-negative integer.");
+            error.WriteLine(CliText.PolicyKeepAliveInvalid(value));
             return Usage(error);
         }
 
         store.Write(store.Read() with { IdleModelKeepAliveSeconds = seconds });
-        output.WriteLine($"idle model keep-alive: {seconds} seconds");
-        output.WriteLine(
-            "note: a broker that is already running keeps the previous policy until it is " +
-            "restarted.");
+        output.WriteLine(CliText.PolicyKeepAlive(seconds));
+        output.WriteLine(CliText.PolicyRestartNote);
         return 0;
     }
 
@@ -261,7 +242,7 @@ public static class PolicyCommand
         if (!Enum.TryParse<ModelResidencyPolicy>(value, ignoreCase: false, out var residency) ||
             !Enum.IsDefined(residency))
         {
-            error.WriteLine($"Unknown residency policy '{value}'.");
+            error.WriteLine(CliText.PolicyResidencyUnknown(value));
             return Usage(error);
         }
 
@@ -269,19 +250,12 @@ public static class PolicyCommand
         output.WriteLine($"model residency: {residency}");
         if (residency != ModelResidencyPolicy.RequireFullVram)
         {
-            output.WriteLine(
-                residency == ModelResidencyPolicy.AllowCpu
-                    ? "warning: models may now run entirely on the CPU. Expect a large " +
-                        "slowdown; answers from the LocalLm tools are labelled as degraded " +
-                        "in the line they print."
-                    : "warning: models may now be partially offloaded to system memory. " +
-                        "Expect a slowdown; answers from the LocalLm tools are labelled as " +
-                        "degraded in the line they print.");
+            output.WriteLine(residency == ModelResidencyPolicy.AllowCpu
+                ? CliText.PolicyResidencyNowCpu
+                : CliText.PolicyResidencyNowPartial);
         }
 
-        output.WriteLine(
-            "note: a broker that is already running keeps the previous policy until it is " +
-            "restarted.");
+        output.WriteLine(CliText.PolicyRestartNote);
         return 0;
     }
 }
