@@ -25,7 +25,7 @@ public sealed class PruneCommandTests : IDisposable
         var report = PruneCommand.Execute(Runtime, dryRun: false, Now);
 
         Assert.False(Directory.Exists(repository));
-        Assert.Contains(report.Lines, line => line.Contains("abandoned record removed"));
+        Assert.Contains(report.Lines, line => line.Contains("its checkout no longer exists"));
     }
 
     /// <summary>
@@ -52,7 +52,7 @@ public sealed class PruneCommandTests : IDisposable
         Assert.True(
             Directory.Exists(repository),
             "a record was deleted because its drive happened to be offline");
-        Assert.DoesNotContain(report.Lines, line => line.Contains("abandoned record removed"));
+        Assert.DoesNotContain(report.Lines, line => line.Contains("its checkout no longer exists"));
     }
 
     private static char OfflineDriveLetter()
