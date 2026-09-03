@@ -251,6 +251,35 @@ public static class CliText
     public static string PruneWouldReclaim(string megabytes) =>
         Catalogue.Format(nameof(PruneWouldReclaim), megabytes);
 
+    // What the entry point itself says: the guard's outcome, the argument refusals, and what
+    // `hooks install` reports. The localai: prefix stays at the call site in the guard, where
+
+    public static string HookEventMissing(string usage) =>
+        Catalogue.Format(nameof(HookEventMissing), usage);
+
+    public static string HookEventUnknown(string requested, string supportedEvents) =>
+        Catalogue.Format(nameof(HookEventUnknown), requested, supportedEvents);
+
+    public static string HooksChained(string suffix, string hooks) =>
+        Catalogue.Format(nameof(HooksChained), suffix, hooks);
+
+    public static string HooksExcluded => Catalogue.Get(nameof(HooksExcluded));
+
+    public static string HooksInstalled(int hooks, string hooksDirectory) =>
+        Catalogue.Format(nameof(HooksInstalled), hooks, hooksDirectory);
+
+    public static string HooksLauncherRequired => Catalogue.Get(nameof(HooksLauncherRequired));
+
+    public static string RepositoryOutsideGit(string directory) =>
+        Catalogue.Format(nameof(RepositoryOutsideGit), directory);
+
+    public static string RepositoryPathNotDirectory(string path) =>
+        Catalogue.Format(nameof(RepositoryPathNotDirectory), path);
+
+    public static string RunCancelled => Catalogue.Get(nameof(RunCancelled));
+
+    public static string SyncInlineLimitInvalid => Catalogue.Get(nameof(SyncInlineLimitInvalid));
+
     public static string RepositoryNotConnected(string root) =>
         Catalogue.Format(nameof(RepositoryNotConnected), root);
 

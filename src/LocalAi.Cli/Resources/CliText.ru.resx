@@ -77,6 +77,30 @@
     <value>не записано</value>
     <comment>Was "none", which rendered as "generation none" and read as a value rather than as its absence.</comment>
   </data>
+  <data name="HookEventMissing" xml:space="preserve">
+    <value>Команде localai hook нужно событие. Usage: {0}</value>
+    <comment>Usage: and the syntax after it stay English. The syntax is a hole rather than a copy so the message cannot name a form the dispatcher does not accept.</comment>
+  </data>
+  <data name="HookEventUnknown" xml:space="preserve">
+    <value>Команде localai hook неизвестно событие '{0}'. Поддерживаемые события: {1}</value>
+    <comment>The sibling message, the usage syntax and the installed list all say event, so this says event too. No trailing full stop: it would sit glued to a hook name somebody copies. True only since the dispatcher started asking the installed list rather than the enum.</comment>
+  </data>
+  <data name="HooksChained" xml:space="preserve">
+    <value>Хуки, которые здесь уже были, сохранены и вызываются первыми; ненулевой код возврата от такого хука останавливает цепочку. Перенесены с суффиксом {0}: {1}</value>
+    <comment>New: hooks install moved the reader's own files aside and said nothing about it. Both languages come from the paragraph in docs/overview.md that already describes chaining, so the tool and the documentation cannot drift apart. {0} is GitHookLayout.ChainedSuffix rather than a copy of it.</comment>
+  </data>
+  <data name="HooksExcluded" xml:space="preserve">
+    <value>core.hooksPath в этом репозитории указывает внутрь рабочего дерева, поэтому диспетчеры дописаны ещё и в .git/info/exclude — в git status они не появятся.</value>
+    <comment>The last clause is new: without it the line reports an edit to a file in the reader's repository and never says why. core.hooksPath, the path and git status are a config key, a path and a command: Latin in both.</comment>
+  </data>
+  <data name="HooksInstalled" xml:space="preserve">
+    <value>Установлено общих Git-хуков {0}, каталог {1}.</value>
+    <comment>Noun-first: ResourceManager has no plural support, and a leading numeral forces an agreement it cannot make. каталог {1} echoes UpdateInstalled.</comment>
+  </data>
+  <data name="HooksLauncherRequired" xml:space="preserve">
+    <value>Хукам LocalAi нужна переменная LOCALAI_LAUNCHER_PATH — её задаёт стабильный launcher. Запускайте команду через launcher, а не через двоичный файл внутри каталога версии.</value>
+    <comment>Not LauncherMissing: that one is about a file that is not there and is printed by doctor. This is about a variable that was never set, and its fix is how the command was invoked. launcher stays Latin and indeclinable, as in the documentation.</comment>
+  </data>
   <data name="LauncherMissing" xml:space="preserve">
     <value>Стабильной точки входа нет: {0}. Регистрации, указывающие на неё, работать не будут, а регистрации внутрь каталога версии сломаются при следующем обновлении.</value>
   </data>
@@ -252,6 +276,14 @@
     <value>{0} не подключён. Проиндексировать: localai sync --root {0}</value>
     <comment>The old wording named the option without its argument, so the command it offered could not be run as written.</comment>
   </data>
+  <data name="RepositoryOutsideGit" xml:space="preserve">
+    <value>'{0}' не находится внутри Git-репозитория.</value>
+    <comment>Offers no next step on purpose: this branch is reached both when nothing was passed and when --root was passed and pointed outside a repository, so naming --root would tell half the readers to do what they just did.</comment>
+  </data>
+  <data name="RepositoryPathNotDirectory" xml:space="preserve">
+    <value>Каталога '{0}' нет. Укажите Git common directory или используйте --root с каталогом внутри репозитория.</value>
+    <comment>The old wording said the path is not a directory, which is printed when it does not exist at all — and sends a typo hunting for the wrong thing. Unlike RepositoryOutsideGit, --root is a real next step here: this branch is only reached on the positional form.</comment>
+  </data>
   <data name="RepositoryState" xml:space="preserve">
     <value>{0}, поколение {1}</value>
     <comment>0 is a RepositoryIndexState enum name and stays Latin.</comment>
@@ -263,6 +295,10 @@
   <data name="RetentionSweepSkipped" xml:space="preserve">
     <value>Retention: очистка пропущена ({0}). На опубликованный индекс это не влияет.</value>
     <comment>Parenthesised rather than after a colon: an IOException message ends in a full stop, and the old wording rendered two in a row.</comment>
+  </data>
+  <data name="RunCancelled" xml:space="preserve">
+    <value>отменено.</value>
+    <comment>The localai: prefix is added at the call site, where the three handlers beside this one interpolate an exception message. Deliberately not UpdateCancelled: that one promises the installed version is unchanged, and this guard catches any command and can promise nothing.</comment>
   </data>
   <data name="SemanticCheckpointNotRemoved" xml:space="preserve">
     <value>Не удалось удалить семантический checkpoint '{0}': {1}</value>
@@ -287,6 +323,10 @@
   <data name="SyncBusy" xml:space="preserve">
     <value>Этот репозиторий уже собирает другая синхронизация. Запустите синхронизацию снова, когда она завершится. Repository: {0}</value>
     <comment>The hole is last because a 64-character repository id in the middle pushes the actionable clause past the wrap in a hook log. Repository: stays English, matching this command's own SYNCED repository= and REFUSED repository=.</comment>
+  </data>
+  <data name="SyncInlineLimitInvalid" xml:space="preserve">
+    <value>localai: некорректное значение --max-inline-files; ожидалось целое неотрицательное число, например: --max-inline-files 200</value>
+    <comment>The prefix stays in the value: this line is not in the guard and owns its whole line. No hole, because the flag can be the last argument with no value at all. No trailing full stop — the line ends in a command somebody copies. The Russian reuses PolicyKeepAliveInvalid's wording, and the code accepts zero, so it says non-negative.</comment>
   </data>
   <data name="UpdateAvailable" xml:space="preserve">
     <value>доступна {0}, установлена {1}. {2}</value>
