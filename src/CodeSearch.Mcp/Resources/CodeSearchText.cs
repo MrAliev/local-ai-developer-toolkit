@@ -47,8 +47,27 @@ public static class CodeSearchText
     public static string LspDocumentClosed(string path) =>
         Catalogue.Format(nameof(LspDocumentClosed), path);
 
-    public static string SearchIndexHeader(int chunks, int files, string model, string elapsed) =>
-        Catalogue.Format(nameof(SearchIndexHeader), chunks, files, model, elapsed);
+    /// <summary>
+    /// The line above a result list. The third hole is the model, or the token that says
+    /// nothing was embedded — a model named after a search that never used one reports a
+    /// comparison that was never made.
+    /// </summary>
+    public static string SearchIndexHeader(
+        int chunks,
+        int files,
+        string modelOrToken,
+        string elapsed) =>
+        Catalogue.Format(nameof(SearchIndexHeader), chunks, files, modelOrToken, elapsed);
+
+    public static string SearchIndexModel(string model) =>
+        Catalogue.Format(nameof(SearchIndexModel), model);
+
+    /// <summary>
+    /// What a search says when no embedding model answered. The token that opens it and the
+    /// command that closes it are the same in every language; the sentences between them
+    /// are the whole point of the message and are not.
+    /// </summary>
+    public static string SearchDegraded => Catalogue.Get(nameof(SearchDegraded));
 
     public static string SearchIndexHeaderStale(string indexed, string head) =>
         Catalogue.Format(nameof(SearchIndexHeaderStale), indexed, head);

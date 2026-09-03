@@ -85,7 +85,10 @@ public sealed class SearchSnapshotDriftTests : IDisposable
                     "broker unavailable",
                     new TimeoutException())),
             runtimeRoot: _runtimeRoot);
-        return await service.SearchAsync(
+        // These cases are about what a snippet shows once the source has drifted, and reach it
+        // through the lexical path deliberately — the embedder throws. The hits are the whole
+        // subject here; that the search was degraded is somebody else's test.
+        var outcome = await service.SearchAsync(
             "ExactSymbol",
             _root,
             new SearchOptions
@@ -95,6 +98,7 @@ public sealed class SearchSnapshotDriftTests : IDisposable
                 SnippetLines = 1,
             },
             TestContext.Current.CancellationToken);
+        return outcome.Hits;
     }
 
     private void PublishWithHash(byte[] alphaHash)

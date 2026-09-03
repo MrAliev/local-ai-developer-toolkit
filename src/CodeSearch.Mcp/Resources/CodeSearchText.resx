@@ -123,12 +123,22 @@
   <data name="RunInBackground" xml:space="preserve">
     <value>Run it in the background instead:</value>
   </data>
+  <data name="SearchDegraded" xml:space="preserve">
+    <value>LEXICAL ONLY: no embedding model answered, so this search matched literal identifiers and nothing else.
+Matches by meaning are missing from these results, and a plain-language query finds little or nothing in this state.
+Check the broker, then search again: localai doctor</value>
+    <comment>The LEXICAL ONLY token and the command stay as they are in both languages.</comment>
+  </data>
   <data name="SearchIndexHeader" xml:space="preserve">
-    <value>Index: {0} chunks over {1} files, model {2}, {3}</value>
-    <comment>Noun-first in Russian: ResourceManager has no plural support, and genitive plural is correct for every count.</comment>
+    <value>Index: {0} chunks over {1} files, {2}, {3}</value>
+    <comment>2 is either the model or the LEXICAL ONLY token. Noun-first in Russian: ResourceManager has no plural support, and genitive plural is correct for every count.</comment>
   </data>
   <data name="SearchIndexHeaderStale" xml:space="preserve">
     <value> (STALE: built at {0}, HEAD is {1})</value>
+  </data>
+  <data name="SearchIndexModel" xml:space="preserve">
+    <value>model {0}</value>
+    <comment>Only printed when the search actually embedded; otherwise the slot says LEXICAL ONLY.</comment>
   </data>
   <data name="Seconds" xml:space="preserve">
     <value>{0}s</value>

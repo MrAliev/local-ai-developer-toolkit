@@ -26,6 +26,24 @@ public sealed record OverlayStatus(
         Exists && BaseCommit.Length > 0 && currentBaseCommit.Length > 0 && BaseCommit != currentBaseCommit;
 }
 
+/// <summary>
+/// What a search found, and whether the half of it that matches by meaning actually ran.
+///
+/// The hits used to be the whole answer, which meant a search that fell back to literal matching
+/// because no embedding model answered was indistinguishable from one that did the real work.
+/// The two are not the same answer: a plain-language query has almost nothing literal to match,
+/// so the degraded search returns little or nothing and reads as "there is no such code here".
+///
+/// Returned rather than reported through an event or a flag on the service, because a caller
+/// that has the hits has this too, and cannot forget to ask.
+/// </summary>
+/// <param name="EmbeddingsUsed">
+/// False when the query was never embedded, so only literal identifiers were matched.
+/// </param>
+public sealed record SearchOutcome(
+    IReadOnlyList<SearchHit> Hits,
+    bool EmbeddingsUsed);
+
 public sealed record IndexStatus(
     string WorkingRoot,
     string RepositoryRoot,
@@ -146,7 +164,13 @@ public sealed class SearchService : IDisposable
         public required DateTime LastUsedUtc { get; set; }
     }
 
-    public async Task<IReadOnlyList<SearchHit>> SearchAsync(
+    /// <summary>
+    /// Returns a <see cref="SearchOutcome"/> rather than the hits alone, so that a search which
+    /// could not embed cannot be mistaken for one that did. The return type changed for exactly
+    /// that reason: an overload would have left the old shape reachable, and the caller that
+    /// forgot to move is the caller that reports a comparison nobody made.
+    /// </summary>
+    public async Task<SearchOutcome> SearchAsync(
         string query, string? root, SearchOptions options, CancellationToken ct = default)
     {
         var workingRoot = RepoLocator.ResolveWorkingRoot(root).Value;
@@ -174,23 +198,29 @@ public sealed class SearchService : IDisposable
         catch (EmbeddingUnavailableException)
             when (resolvedOptions.AllowLexicalFallbackWhenEmbeddingsUnavailable)
         {
-            return SearchEngine.SearchLexically(
-                searchable,
-                query,
-                resolvedOptions,
-                workingRoot);
+            // Lexical hits beat an exception, so the fallback stays. What travels with them now
+            // is the fact that this is what happened.
+            return new SearchOutcome(
+                SearchEngine.SearchLexically(
+                    searchable,
+                    query,
+                    resolvedOptions,
+                    workingRoot),
+                EmbeddingsUsed: false);
         }
 
         var vector = vectors[0];
 
         // The raw query - not the instruction-wrapped prompt - drives lexical scoring, otherwise
         // words from the instruction itself would match chunk names.
-        return SearchEngine.Search(
-            searchable,
-            vector,
-            query,
-            resolvedOptions,
-            workingRoot);
+        return new SearchOutcome(
+            SearchEngine.Search(
+                searchable,
+                vector,
+                query,
+                resolvedOptions,
+                workingRoot),
+            EmbeddingsUsed: true);
     }
 
     public async Task<SearchChunk> GetChunkAsync(

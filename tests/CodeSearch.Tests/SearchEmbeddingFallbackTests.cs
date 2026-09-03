@@ -50,7 +50,7 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
                 "broker unavailable",
                 new TimeoutException()));
 
-        var hits = await service.SearchAsync(
+        var outcome = await service.SearchAsync(
             "ExactSymbol",
             _root,
             new SearchOptions
@@ -62,7 +62,8 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
             },
             TestContext.Current.CancellationToken);
 
-        var hit = Assert.Single(hits);
+        Assert.False(outcome.EmbeddingsUsed);
+        var hit = Assert.Single(outcome.Hits);
         Assert.Equal("Alpha.cs", hit.RelPath);
         Assert.Equal("Example.ExactSymbol", hit.Symbol);
         Assert.Equal(0, hit.VectorScore);
@@ -79,13 +80,14 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
                 "broker unavailable",
                 new TimeoutException()));
 
-        var hits = await service.SearchAsync(
+        var outcome = await service.SearchAsync(
             "NoSuchIdentifier",
             _root,
             new SearchOptions(),
             TestContext.Current.CancellationToken);
 
-        Assert.Empty(hits);
+        Assert.Empty(outcome.Hits);
+        Assert.False(outcome.EmbeddingsUsed);
     }
 
     [Fact]
@@ -123,6 +125,90 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
         Assert.DoesNotContain("search_code failed:", response, StringComparison.Ordinal);
         Assert.Contains("Example.ExactSymbol", response, StringComparison.Ordinal);
         Assert.Contains("cos=0.000", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The fallback is deliberate and worth keeping — lexical hits beat an exception. What was
+    /// missing is that the answer said nothing about it, so a caller could not tell a search
+    /// that matched by meaning from one that matched the words in the sentence it was given.
+    /// </summary>
+    [Fact]
+    public async Task Mcp_says_that_nothing_was_embedded()
+    {
+        var response = await CodeSearchTools.SearchCode(
+            ServiceThrowing(
+                new EmbeddingUnavailableException(
+                    "broker unavailable",
+                    new TimeoutException())),
+            "ExactSymbol",
+            _root,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("LEXICAL ONLY", response, StringComparison.Ordinal);
+        Assert.Contains(
+            "matches by meaning are missing",
+            response,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The header names the embedding model out of the index snapshot, which is a fact about the
+    /// index rather than about this search. Printed unqualified after nothing was embedded, it
+    /// is the wrong kind of true: it reports a comparison that was never made.
+    /// </summary>
+    [Fact]
+    public async Task Mcp_does_not_present_the_model_as_having_answered()
+    {
+        var response = await CodeSearchTools.SearchCode(
+            ServiceThrowing(
+                new EmbeddingUnavailableException(
+                    "broker unavailable",
+                    new TimeoutException())),
+            "ExactSymbol",
+            _root,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain($"model {CalibratedModel}", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The worst case, and the likeliest one: a plain-language query has almost no literal
+    /// identifiers to match, so the lexical pass finds nothing and the caller is told "No
+    /// matches." — which reads as "there is no such code in this repository" rather than as
+    /// "the half of this tool that answers your kind of question did not run".
+    /// </summary>
+    [Fact]
+    public async Task An_empty_result_still_says_why_it_is_empty()
+    {
+        var response = await CodeSearchTools.SearchCode(
+            ServiceThrowing(
+                new EmbeddingUnavailableException(
+                    "broker unavailable",
+                    new TimeoutException())),
+            "where is payment cancellation handled",
+            _root,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("LEXICAL ONLY", response, StringComparison.Ordinal);
+        Assert.NotEqual("No matches.", response);
+    }
+
+    /// <summary>
+    /// And a healthy search says none of it: a warning on every answer is a warning nobody reads.
+    /// </summary>
+    [Fact]
+    public async Task A_search_that_embedded_normally_carries_no_warning()
+    {
+        var response = await CodeSearchTools.SearchCode(
+            new SearchService(
+                model => new StubEmbeddingClient(model),
+                runtimeRoot: _runtimeRoot),
+            "ExactSymbol",
+            _root,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("LEXICAL ONLY", response, StringComparison.Ordinal);
+        Assert.Contains($"model {CalibratedModel}", response, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -321,6 +407,22 @@ public sealed class SearchEmbeddingFallbackTests : IDisposable
         }
 
         Directory.Delete(path, recursive: true);
+    }
+
+    /// <summary>
+    /// An embedder that answers, so the healthy case can be told from the degraded one. Two
+    /// components, because that is the fixture index's dimension.
+    /// </summary>
+    private sealed class StubEmbeddingClient(string model) : IEmbeddingClient
+    {
+        public string Model { get; } = model;
+
+        public Task<float[][]> EmbedAsync(
+            IReadOnlyList<string> inputs,
+            LocalJobPriority priority,
+            string deduplicationKey,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<float[][]>([[1f, 0f]]);
     }
 
     private sealed class ThrowingEmbeddingClient(
