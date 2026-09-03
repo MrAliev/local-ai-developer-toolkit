@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
+using LocalLm.Core.Resources;
 
 namespace LocalLm.Core;
 
@@ -108,11 +109,15 @@ internal sealed class LogTriagePipeline(
             ?? throw new InvalidOperationException("Log triage produced no model receipt."))
             with { QueueDuration = queued, ExecutionDuration = executed };
         var detail = source.Path is null
-            ? $"разобран текстовый лог ({source.Text!.Length} символов), " +
-              $"фрагментов: {fragmentCount}, контекст: {capacity.ContextTokens}"
-            : $"разобран лог {Path.GetFileName(source.Path)} " +
-              $"({new FileInfo(source.Path).Length / 1024} КБ), " +
-              $"фрагментов: {fragmentCount}, контекст: {capacity.ContextTokens}";
+            ? LocalLmText.LogTextRead(
+                source.Text!.Length,
+                fragmentCount,
+                capacity.ContextTokens)
+            : LocalLmText.LogFileRead(
+                Path.GetFileName(source.Path),
+                new FileInfo(source.Path).Length / 1024,
+                fragmentCount,
+                capacity.ContextTokens);
         return new LocalResult(
             answer,
             TokenEstimator.Saved((int)originalTokens, answer),

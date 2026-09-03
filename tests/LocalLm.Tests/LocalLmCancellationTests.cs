@@ -5,7 +5,7 @@ using LocalLm.Mcp;
 namespace LocalLm.Tests;
 
 /// <summary>
-/// #209/m3: a host cancellation used to come back as "Локальная модель не отработала: The
+/// #209/m3: a host cancellation used to come back as "Local model call failed: The
 /// operation was canceled" — a model failure inviting a retry nobody is waiting for. The
 /// wrapper now lets the caller's own cancellation propagate, while an
 /// OperationCanceledException the caller did not ask for — the shape of an HTTP timeout —
@@ -65,7 +65,7 @@ public sealed class LocalLmCancellationTests
             TestContext.Current.CancellationToken);
 
         Assert.StartsWith(
-            "Локальная модель не отработала",
+            "Local model call failed",
             response,
             StringComparison.Ordinal);
     }

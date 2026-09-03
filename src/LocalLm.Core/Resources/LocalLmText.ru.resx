@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    What the LocalLm tools say, in every language they say it in. English is the neutral resource every other language falls back to. Numbers, durations and identifiers are formatted by the caller and arrive already invariant, so a hole is never a place a decimal separator can change.
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <data name="DurationSeconds" xml:space="preserve">
+    <value>{0} с</value>
+    <comment>The number arrives already formatted invariantly.</comment>
+  </data>
+  <data name="DurationWithQueue" xml:space="preserve">
+    <value>{0} (в очереди {1})</value>
+    <comment>Only when the wait is a real share of the total; the ordinary line stays short.</comment>
+  </data>
+  <data name="FileNotFound" xml:space="preserve">
+    <value>Файл не найден: {0}</value>
+  </data>
+  <data name="FilesProcessed" xml:space="preserve">
+    <value>Обработано файлов: {0} — {1}{2}</value>
+    <comment>2 is the ellipsis when more files were named than are listed.</comment>
+  </data>
+  <data name="FilesSkipped" xml:space="preserve">
+    <value>, файлов пропущено: {0}</value>
+  </data>
+  <data name="ImagesRead" xml:space="preserve">
+    <value>Прочитано изображений: {0} — {1}</value>
+  </data>
+  <data name="InputTruncated" xml:space="preserve">
+    <value>; ввод усечён общим бюджетом {0} символов</value>
+  </data>
+  <data name="InvalidRequest" xml:space="preserve">
+    <value>Некорректный запрос: {0}</value>
+  </data>
+  <data name="LocalModelFailed" xml:space="preserve">
+    <value>Локальная модель не отработала: {0}</value>
+  </data>
+  <data name="LogFileRead" xml:space="preserve">
+    <value>Разобран лог {0} ({1} КБ), фрагментов: {2}, контекст: {3}</value>
+  </data>
+  <data name="LogTextRead" xml:space="preserve">
+    <value>Разобран текстовый лог ({0} символов), фрагментов: {1}, контекст: {2}</value>
+  </data>
+  <data name="Notice" xml:space="preserve">
+    <value>🔧 Локально: {0}{1}. {2}. {3}. {4}</value>
+    <comment>0 model, 1 residency mark or empty, 2 detail, 3 duration, 4 saving sentence.</comment>
+  </data>
+  <data name="PromptOnly" xml:space="preserve">
+    <value>Выполнен запрос без файлов</value>
+  </data>
+  <data name="ResidencyAdvice" xml:space="preserve">
+    <value>⚠️ Неполная загрузка в видеопамять разрешена политикой этой машины. Вернуть строгий режим: localai policy set --residency RequireFullVram — брокер применит его после перезапуска.</value>
+    <comment>Said once per process. The command is never translated.</comment>
+  </data>
+  <data name="ResidencyCpu" xml:space="preserve">
+    <value> (целиком на процессоре — ответы намного медленнее)</value>
+  </data>
+  <data name="ResidencyPartialOffload" xml:space="preserve">
+    <value> (в видеопамяти {0}% модели — ответы медленнее)</value>
+    <comment>Beside the model name, so a reader who stops after the first clause has seen it.</comment>
+  </data>
+  <data name="SavedAbout" xml:space="preserve">
+    <value>Сэкономлено примерно {0} облачных токенов.</value>
+    <comment>0 is already a range such as ~15–18K.</comment>
+  </data>
+  <data name="SavedNegligible" xml:space="preserve">
+    <value>Сэкономлено пренебрежимо мало облачных токенов — менее ~0.5K.</value>
+  </data>
+  <data name="SavedNothing" xml:space="preserve">
+    <value>Облачных токенов это не сэкономило: ответ не короче исходных данных.</value>
+    <comment>Zero is a correct answer, not a broken counter, so the sentence says why.</comment>
+  </data>
+  <data name="SavingUnderHalfK" xml:space="preserve">
+    <value>менее ~0.5K</value>
+    <comment>The band on its own, for a caller composing its own sentence.</comment>
+  </data>
+  <data name="TranslationFailed" xml:space="preserve">
+    <value>Локальный перевод не выполнен: {0}</value>
+  </data>
+  <data name="TranslationNotice" xml:space="preserve">
+    <value>🔧 Локально: {0}{1}. Перевод проверен: {2}. {3}. Локально обработано примерно {4} токенов; на облачной генерации сэкономлено примерно {5}; чистое сокращение облачного контекста — {6}.</value>
+  </data>
+</root>

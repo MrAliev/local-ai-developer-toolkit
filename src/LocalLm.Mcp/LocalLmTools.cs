@@ -4,6 +4,7 @@ using LocalAi.Contracts;
 using LocalAi.Contracts.Security;
 using LocalAi.Broker.Client;
 using LocalLm.Core;
+using LocalLm.Core.Resources;
 using ModelContextProtocol.Server;
 
 namespace LocalLm.Mcp;
@@ -146,7 +147,7 @@ public static class LocalLmTools
         }
         catch (Exception exception)
         {
-            return $"Локальный перевод не выполнен: {exception.Message}";
+            return LocalLmText.TranslationFailed(exception.Message);
         }
     }
 
@@ -255,8 +256,8 @@ public static class LocalLmTools
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // The host cancelled the call: rendering that as "Локальная модель не
-            // отработала" invites a retry nobody is waiting for, so cancellation must
+            // The host cancelled the call: rendering that as "Local model call failed"
+            // invites a retry nobody is waiting for, so cancellation must
             // surface to the MCP host as itself (#209/m3). The filter checks the caller's
             // token because an Ollama HTTP timeout is also an OperationCanceledException,
             // and that one really is a failure worth a readable sentence.
@@ -282,15 +283,15 @@ public static class LocalLmTools
         }
         catch (FileNotFoundException ex)
         {
-            return $"Файл не найден: {ex.FileName}";
+            return LocalLmText.FileNotFound(ex.FileName ?? string.Empty);
         }
         catch (ArgumentException ex)
         {
-            return $"Некорректный запрос: {ex.Message}";
+            return LocalLmText.InvalidRequest(ex.Message);
         }
         catch (Exception ex)
         {
-            return $"Локальная модель не отработала: {ex.Message}";
+            return LocalLmText.LocalModelFailed(ex.Message);
         }
     }
 

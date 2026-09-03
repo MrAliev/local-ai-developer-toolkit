@@ -4,7 +4,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      The product answers in the reader's language, so it has to be able to see what that is.
+      In globalization-invariant mode CultureInfo.CurrentUICulture is empty on a Russian Windows
+      and `new CultureInfo("ru")` throws, which would have made every translation fall silently
+      back to English — the worst shape a localisation bug can take, because nothing reports it.
+      The installer discovered this first and set it false for itself in 629a885; there is no
+      reason for the rest of the product to be the half that cannot read its own machine.
+
+      Formatting deliberately does not follow: numbers and durations in tool output stay
+      invariant, because the notice line is quoted verbatim by agents and read by tests, and a
+      decimal comma appearing there is a change nobody asked for.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <!--
       The gate of #209/m5. The whole tree builds with zero warnings — that is the
       baseline — and this keeps it there: a new warning fails the build, locally and in

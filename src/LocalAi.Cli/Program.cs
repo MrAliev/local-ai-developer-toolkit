@@ -1,7 +1,12 @@
 ﻿using CodeSearch.Core.Embedding;
 using LocalAi.Cli;
 using LocalAi.Contracts;
+using LocalAi.Contracts.Localization;
 using System.Text.Json;
+
+// The language every command answers in, decided before any of them runs. Numbers stay
+// invariant whatever the language is; only the words move.
+OutputCulture.Apply();
 
 // Every command runs under one guard. A broker or Git failure used to leave the runtime's own
 // stack trace on the console and exit with 0xE0434352, which tells an operator nothing and tells

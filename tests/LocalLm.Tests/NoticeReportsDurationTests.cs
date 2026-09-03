@@ -18,7 +18,7 @@ public sealed class NoticeReportsDurationTests
     {
         var notice = Result(queued: TimeSpan.Zero, ran: TimeSpan.FromSeconds(6.2)).Notice;
 
-        Assert.Contains("6.2 с", notice, StringComparison.Ordinal);
+        Assert.Contains("6.2 s", notice, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -32,8 +32,8 @@ public sealed class NoticeReportsDurationTests
             queued: TimeSpan.FromSeconds(4.1),
             ran: TimeSpan.FromSeconds(2)).Notice;
 
-        Assert.Contains("6.1 с", notice, StringComparison.Ordinal);
-        Assert.Contains("в очереди 4.1 с", notice, StringComparison.Ordinal);
+        Assert.Contains("6.1 s", notice, StringComparison.Ordinal);
+        Assert.Contains("4.1 s of that queued", notice, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -49,7 +49,7 @@ public sealed class NoticeReportsDurationTests
             queued: TimeSpan.FromSeconds(queued),
             ran: TimeSpan.FromSeconds(ran)).Notice;
 
-        Assert.DoesNotContain("в очереди", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("of that queued", notice, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -64,8 +64,8 @@ public sealed class NoticeReportsDurationTests
             queued: TimeSpan.FromSeconds(0.3),
             ran: TimeSpan.FromSeconds(5)).Notice;
 
-        Assert.Contains("5.3 с", notice, StringComparison.Ordinal);
-        Assert.DoesNotContain("в очереди", notice, StringComparison.Ordinal);
+        Assert.Contains("5.3 s", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("of that queued", notice, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -84,7 +84,7 @@ public sealed class NoticeReportsDurationTests
     {
         var notice = Result(TimeSpan.FromSeconds(queued), TimeSpan.FromSeconds(ran)).Notice;
 
-        Assert.Equal(named, notice.Contains("в очереди", StringComparison.Ordinal));
+        Assert.Equal(named, notice.Contains("of that queued", StringComparison.Ordinal));
     }
 
     /// <summary>Tenths while that means something, whole seconds once it does not.</summary>
@@ -93,7 +93,7 @@ public sealed class NoticeReportsDurationTests
     {
         var notice = Result(TimeSpan.Zero, TimeSpan.FromSeconds(93.4)).Notice;
 
-        Assert.Contains("93 с", notice, StringComparison.Ordinal);
+        Assert.Contains("93 s", notice, StringComparison.Ordinal);
         Assert.DoesNotContain("93.4", notice, StringComparison.Ordinal);
     }
 
@@ -103,8 +103,8 @@ public sealed class NoticeReportsDurationTests
     {
         var notice = Result(TimeSpan.Zero, TimeSpan.FromSeconds(1), saved: 30_000).Notice;
 
-        Assert.Contains("Сэкономлено", notice, StringComparison.Ordinal);
-        Assert.Contains("1.0 с", notice, StringComparison.Ordinal);
+        Assert.Contains("Saved", notice, StringComparison.Ordinal);
+        Assert.Contains("1.0 s", notice, StringComparison.Ordinal);
         Assert.Contains("qwen3", notice, StringComparison.Ordinal);
     }
 

@@ -58,7 +58,7 @@ public sealed class LocalTaskBudgetTests : IDisposable
 
         Assert.Contains("TRUNCATED", client.LastPrompt, StringComparison.Ordinal);
         Assert.DoesNotContain("BBBB", client.LastPrompt, StringComparison.Ordinal);
-        Assert.Contains("усечён", result.Notice, StringComparison.Ordinal);
+        Assert.Contains("input truncated", result.Notice, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class LocalTaskBudgetTests : IDisposable
             "SECOND-FILE-CONTENT",
             client.LastPrompt,
             StringComparison.Ordinal);
-        Assert.Contains("файлов пропущено: 1", result.Notice, StringComparison.Ordinal);
+        Assert.Contains("files skipped: 1", result.Notice, StringComparison.Ordinal);
     }
 
     [Fact]

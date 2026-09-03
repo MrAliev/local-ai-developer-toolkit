@@ -17,13 +17,13 @@ public sealed class ReportCarriesTheAdviceTests
         var advice = new ResidencyAdvice();
 
         var report = LocalLmTools.Report(
-            "🔧 Локально: m (целиком на процессоре — ответы намного медленнее). …",
+            "🔧 Local: m (entirely on the CPU — answers are much slower). …",
             ResidencyShortfall.Cpu,
             "answer",
             "ask_local",
             advice);
 
-        Assert.Contains("🔧 Локально:", report);
+        Assert.Contains("🔧 Local:", report);
         Assert.Contains("localai policy set --residency RequireFullVram", report);
         Assert.Contains("answer", report);
     }
@@ -32,14 +32,14 @@ public sealed class ReportCarriesTheAdviceTests
     public void A_healthy_answer_reads_exactly_as_it_did()
     {
         var report = LocalLmTools.Report(
-            "🔧 Локально: m. …",
+            "🔧 Local: m. …",
             ResidencyShortfall.None,
             "answer",
             "ask_local",
             new ResidencyAdvice());
 
         Assert.DoesNotContain("policy set", report);
-        Assert.StartsWith("🔧 Локально: m. …", report);
+        Assert.StartsWith("🔧 Local: m. …", report);
     }
 
     /// <summary>The second degraded answer keeps the mark and drops the sentence.</summary>
@@ -47,12 +47,12 @@ public sealed class ReportCarriesTheAdviceTests
     public void The_advice_is_said_once_while_the_notice_stays()
     {
         var advice = new ResidencyAdvice();
-        var notice = "🔧 Локально: m (целиком на процессоре — ответы намного медленнее). …";
+        var notice = "🔧 Local: m (entirely on the CPU — answers are much slower). …";
 
         LocalLmTools.Report(notice, ResidencyShortfall.Cpu, "a", "ask_local", advice);
         var second = LocalLmTools.Report(notice, ResidencyShortfall.Cpu, "b", "ask_local", advice);
 
         Assert.DoesNotContain("policy set", second);
-        Assert.Contains("целиком на процессоре", second);
+        Assert.Contains("entirely on the CPU", second);
     }
 }

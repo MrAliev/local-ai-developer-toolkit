@@ -55,7 +55,7 @@ public sealed class LocalTasksTests
             TestContext.Current.CancellationToken);
 
         Assert.Contains("DIRECT_TEXT_42", Assert.Single(client.Calls).Prompt);
-        Assert.Contains("текстовый лог", result.Detail, StringComparison.Ordinal);
+        Assert.Contains("Log text read", result.Detail, StringComparison.Ordinal);
         await Assert.ThrowsAsync<ArgumentException>(() => tasks.TriageLogAsync(
             path: null,
             text: null,
@@ -117,7 +117,7 @@ public sealed class LocalTasksTests
                 Assert.Equal(2048, call.RequestedContextTokens);
             });
             Assert.Equal(1, client.MaximumConcurrentCalls);
-            Assert.Contains("фрагментов:", result.Detail, StringComparison.Ordinal);
+            Assert.Contains("fragments:", result.Detail, StringComparison.Ordinal);
             Assert.StartsWith("combined finding", result.Answer, StringComparison.Ordinal);
         }
         finally

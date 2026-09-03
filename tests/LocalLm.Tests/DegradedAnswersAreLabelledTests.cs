@@ -22,7 +22,7 @@ public sealed class DegradedAnswersAreLabelledTests
     {
         var notice = Result(ResidencyShortfall.PartialOffload, residentPercent: 42).Notice;
 
-        Assert.Contains("qwen3-coder:30b (в видеопамяти 42% модели — ответы медленнее)", notice);
+        Assert.Contains("qwen3-coder:30b (42% of the model in VRAM — answers are slower)", notice);
     }
 
     /// <summary>Running on the CPU is a different fact and reads differently.</summary>
@@ -32,7 +32,7 @@ public sealed class DegradedAnswersAreLabelledTests
         var notice = Result(ResidencyShortfall.Cpu, residentPercent: 0).Notice;
 
         Assert.Contains(
-            "qwen3-coder:30b (целиком на процессоре — ответы намного медленнее)",
+            "qwen3-coder:30b (entirely on the CPU — answers are much slower)",
             notice);
     }
 
@@ -54,8 +54,8 @@ public sealed class DegradedAnswersAreLabelledTests
     {
         var notice = Result(null, null).Notice;
 
-        Assert.DoesNotContain("видеопамяти", notice);
-        Assert.DoesNotContain("процессоре", notice);
+        Assert.DoesNotContain("VRAM", notice);
+        Assert.DoesNotContain("CPU", notice);
     }
 
     /// <summary>
@@ -76,7 +76,7 @@ public sealed class DegradedAnswersAreLabelledTests
             Receipt: source.Receipt);
 
         Assert.Contains(
-            "qwen3-coder:30b (целиком на процессоре — ответы намного медленнее)",
+            "qwen3-coder:30b (entirely on the CPU — answers are much slower)",
             translation.Notice);
     }
 
@@ -85,7 +85,7 @@ public sealed class DegradedAnswersAreLabelledTests
             "answer",
             30_000,
             "qwen3-coder:30b",
-            "Прочитано 12 файлов",
+            "Files processed: 12",
             new LocalUsageReceipt(
                 JobId: Guid.Empty,
                 Tool: "ask_local",

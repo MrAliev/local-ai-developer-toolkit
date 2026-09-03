@@ -68,6 +68,6 @@ public sealed class ResidencyAdviceOncePerProcessTests
         var advice = new ResidencyAdvice().AdviceFor(ResidencyShortfall.Cpu);
 
         Assert.Contains("localai policy set --residency RequireFullVram", advice);
-        Assert.Contains("перезапуск", advice, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("after a restart", advice, StringComparison.OrdinalIgnoreCase);
     }
 }
