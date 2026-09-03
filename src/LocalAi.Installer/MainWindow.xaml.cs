@@ -16,6 +16,8 @@ public partial class MainWindow : Window
     {
         viewModel = new InstallerWizardViewModel(mode) { EnableDependencyActions = true };
         InitializeComponent();
+        // The caption is the desktop manager's, not the palette's.
+        DarkCaption.Follow(this);
         DataContext = viewModel;
         viewModel.CloseRequested += (_, _) => Close();
     }

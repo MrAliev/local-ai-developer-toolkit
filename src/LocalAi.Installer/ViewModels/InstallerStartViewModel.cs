@@ -77,6 +77,7 @@ public sealed class InstallerStartViewModel : ObservableObject
         installed = readInstalledVersion is null
             ? InstalledVersionReader.Read(Path.Combine(root, "LocalAi"))
             : readInstalledVersion();
+        Theme = preferences.ReadTheme();
         foreach (var option in BuildOptions())
         {
             Actions.Add(option);
@@ -131,6 +132,35 @@ public sealed class InstallerStartViewModel : ObservableObject
         OnPropertyChanged(nameof(IsRussian));
         OnPropertyChanged(nameof(ChooseText));
         OnPropertyChanged(nameof(CloseText));
+    }
+
+    /// <summary>
+    /// Which of the three the person has chosen. "System" is the default and is not a third
+    /// colour scheme: it means the installer keeps following Windows, including a change made
+    /// while it is open.
+    /// </summary>
+    public InstallerTheme Theme { get; private set; }
+
+    public bool IsSystemTheme => Theme == InstallerTheme.System;
+
+    public bool IsLightTheme => Theme == InstallerTheme.Light;
+
+    public bool IsDarkTheme => Theme == InstallerTheme.Dark;
+
+    /// <summary>
+    /// Remembers the choice, repaints the running application, and moves the selection. The
+    /// application is asked rather than told: this view model also runs in tests, where there
+    /// is no application to repaint.
+    /// </summary>
+    public void ChooseTheme(InstallerTheme theme)
+    {
+        Theme = theme;
+        preferences.WriteTheme(theme);
+        App.Themes?.Choose(theme);
+        OnPropertyChanged(nameof(Theme));
+        OnPropertyChanged(nameof(IsSystemTheme));
+        OnPropertyChanged(nameof(IsLightTheme));
+        OnPropertyChanged(nameof(IsDarkTheme));
     }
 
     public bool IsEnglish => InstallerCulture.Current == InstallerLanguage.English;

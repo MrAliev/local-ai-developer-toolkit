@@ -19,6 +19,8 @@ public partial class UninstallWindow : Window
     {
         viewModel = new UninstallWizardViewModel(preset, offersInstallAfterwards);
         InitializeComponent();
+        // The caption is the desktop manager's, not the palette's.
+        DarkCaption.Follow(this);
         DataContext = viewModel;
         viewModel.CloseRequested += (_, _) => Close();
         viewModel.InstallRequested += (_, _) =>
