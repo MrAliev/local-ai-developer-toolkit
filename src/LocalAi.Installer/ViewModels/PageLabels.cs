@@ -150,6 +150,11 @@ public static class PageLabels
 
     public static string Next => InstallerCulture.Pick("Next", "Далее");
 
+    /// <summary>The group of errands, for a screen reader. Never rendered.</summary>
+    public static string ChooseWhatToDo => InstallerCulture.Pick(
+        "Choose what to do",
+        "Выберите, что сделать");
+
     // --- The theme control, on the start screen beside the language ------------------
     public static string ThemeSystem => InstallerCulture.Pick("System", "Системная");
 

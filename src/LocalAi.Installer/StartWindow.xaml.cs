@@ -2,6 +2,8 @@ using System.Windows;
 using System.Windows.Controls;
 using LocalAi.Installer.ViewModels;
 using LocalAi.Installer.Core;
+using System.Linq;
+using System.Windows.Input;
 
 namespace LocalAi.Installer;
 
@@ -44,9 +46,49 @@ public partial class StartWindow : Window
         }
     }
 
-    private void OnChoose(object sender, RoutedEventArgs e)
+    private void OnChooseErrand(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: StartChoice choice })
+        if (sender is RadioButton { Tag: StartChoice choice })
+        {
+            viewModel.Select(choice);
+        }
+    }
+
+    /// <summary>
+    /// Stock WPF moves focus with the arrow keys without moving the selection, so a group of
+    /// radio buttons would leave the person's choice behind their focus. Disabled rows are not
+    /// focusable, so an unavailable errand is skipped without being named here.
+    /// </summary>
+    private void OnErrandKeyDown(object sender, KeyEventArgs e)
+    {
+        var step = e.Key switch
+        {
+            Key.Down or Key.Right => 1,
+            Key.Up or Key.Left => -1,
+            _ => 0,
+        };
+        if (step == 0)
+        {
+            return;
+        }
+
+        var reachable = viewModel.Actions.Where(option => option.IsAvailable).ToArray();
+        if (reachable.Length == 0)
+        {
+            return;
+        }
+
+        var current = Array.FindIndex(reachable, option => option.IsSelected);
+        var next = current < 0
+            ? (step > 0 ? 0 : reachable.Length - 1)
+            : ((current + step) % reachable.Length + reachable.Length) % reachable.Length;
+        viewModel.Select(reachable[next].Choice);
+        e.Handled = true;
+    }
+
+    private void OnNext(object sender, RoutedEventArgs e)
+    {
+        if (viewModel.Selected is not { } choice)
         {
             return;
         }

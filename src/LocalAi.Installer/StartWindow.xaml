@@ -40,6 +40,100 @@
             </Style.Triggers>
         </Style>
 
+        <!-- The errand row. The template's root Border is the whole row, so the click
+             target is the row rather than the 15px circle beside it. -->
+        <Style x:Key="ErrandRow" TargetType="RadioButton">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRingVisual}" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Row" Padding="12,10" CornerRadius="4"
+                                BorderThickness="1" SnapsToDevicePixels="True"
+                                Background="{DynamicResource Surface}"
+                                BorderBrush="{DynamicResource Divider}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <!-- WPF has no elevation, so a lighter top edge is the only
+                                     way a row can say "raised". A recessed row has none. -->
+                                <Border x:Name="Edge" Grid.ColumnSpan="2" Height="1"
+                                        VerticalAlignment="Top" Margin="-12,-10,-12,0"
+                                        Background="{DynamicResource RaisedEdge}" />
+                                <Grid Grid.Column="0" Width="15" Height="15"
+                                      VerticalAlignment="Top" Margin="0,2,10,0"
+                                      SnapsToDevicePixels="True">
+                                    <Ellipse x:Name="Ring"
+                                             Fill="{DynamicResource ControlFill}"
+                                             Stroke="{DynamicResource ControlBorder}"
+                                             StrokeThickness="1" />
+                                    <Ellipse x:Name="Dot" Margin="4" Visibility="Collapsed"
+                                             Fill="{DynamicResource AccentFill}" />
+                                </Grid>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock x:Name="Title" Text="{Binding Title}"
+                                               FontSize="13" FontWeight="SemiBold"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextPrimary}" />
+                                    <TextBlock x:Name="Description" Text="{Binding Description}"
+                                               TextWrapping="Wrap" Margin="0,2,0,0"
+                                               Foreground="{DynamicResource TextSecondary}" />
+                                    <!-- Why an errand is out of reach, said in place and at
+                                         full strength: in a row that is off, this is the one
+                                         thing that has to stay readable. -->
+                                    <TextBlock Text="{Binding UnavailableReason}"
+                                               TextWrapping="Wrap" Margin="0,6,0,0"
+                                               Foreground="{DynamicResource TextSecondary}"
+                                               Visibility="{Binding IsUnavailable, Converter={StaticResource BoolToVisibility}}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Row" Property="Background"
+                                        Value="{DynamicResource ControlFill}" />
+                                <Setter TargetName="Row" Property="BorderBrush"
+                                        Value="{DynamicResource Accent}" />
+                                <Setter TargetName="Ring" Property="Stroke"
+                                        Value="{DynamicResource Accent}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Row" Property="Background"
+                                        Value="{DynamicResource SelectionFill}" />
+                                <Setter TargetName="Row" Property="BorderBrush"
+                                        Value="{DynamicResource AccentFill}" />
+                                <Setter TargetName="Edge" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="Ring" Property="Stroke"
+                                        Value="{DynamicResource AccentFill}" />
+                                <Setter TargetName="Dot" Property="Visibility" Value="Visible" />
+                                <!-- Secondary on this fill computes to 4.7:1, which is over the
+                                     bar by a hair and not worth shipping. -->
+                                <Setter TargetName="Description" Property="Foreground"
+                                        Value="{DynamicResource TextPrimary}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Row" Property="Background"
+                                        Value="{DynamicResource WindowFill}" />
+                                <Setter TargetName="Edge" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="Ring" Property="Stroke"
+                                        Value="{DynamicResource Divider}" />
+                                <Setter TargetName="Ring" Property="Fill"
+                                        Value="{DynamicResource WindowFill}" />
+                                <Setter TargetName="Title" Property="Foreground"
+                                        Value="{DynamicResource TextDisabled}" />
+                                <Setter TargetName="Description" Property="Foreground"
+                                        Value="{DynamicResource TextDisabled}" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="ThemeSegment" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
             <Setter Property="Padding" Value="10,3" />
@@ -117,99 +211,75 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Margin="0,0,0,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-                <TextBlock Text="{Binding Headline}" TextWrapping="Wrap" Style="{StaticResource PageTitle}" />
-                <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Style="{StaticResource Muted}" Margin="0,6,0,0" />
-            </StackPanel>
-            <!-- Autonyms, never translated and never a flag: a flag is a country, and a Russian
-                 speaker outside Russia is not served by one. The active language is plain rather
-                 than greyed — grey reads as unavailable, which is backwards. -->
-            <StackPanel Grid.Column="1" VerticalAlignment="Top" Margin="12,2,0,0">
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <!-- Above the headline rather than beside it: sharing the line squeezed a Russian
+                 headline into 375px while half the window stood empty. -->
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <TextBlock Text="English" FontWeight="SemiBold"
+                <!-- Autonyms, never translated and never a flag: a flag is a country, and a
+                     Russian speaker outside Russia is not served by one. The active language is
+                     plain rather than greyed — grey reads as unavailable, which is backwards. -->
+                <TextBlock Text="English" FontWeight="SemiBold" VerticalAlignment="Center"
                            Visibility="{Binding IsEnglish, Converter={StaticResource BoolToVisibility}}" />
                 <Button Content="English" Style="{StaticResource LanguageLink}"
                         AutomationProperties.Name="Switch the installer to English"
+                        VerticalAlignment="Center"
                         Tag="English" Click="OnChooseLanguage"
                         Visibility="{Binding IsRussian, Converter={StaticResource BoolToVisibility}}" />
-                <TextBlock Text="·" Foreground="{DynamicResource TextMuted}" Margin="8,0,8,0" />
-                <TextBlock Text="Русский" FontWeight="SemiBold"
+                <TextBlock Text="·" Foreground="{DynamicResource TextDisabled}" Margin="8,0,8,0"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="Русский" FontWeight="SemiBold" VerticalAlignment="Center"
                            Visibility="{Binding IsRussian, Converter={StaticResource BoolToVisibility}}" />
                 <Button Content="Русский" Style="{StaticResource LanguageLink}"
                         AutomationProperties.Name="Переключить установщик на русский"
+                        VerticalAlignment="Center"
                         Tag="Russian" Click="OnChooseLanguage"
                         Visibility="{Binding IsEnglish, Converter={StaticResource BoolToVisibility}}" />
+                <!-- Three segments rather than a light/dark pair: "System" is not a third colour
+                     scheme, it is the answer somebody already gave Windows, and dropping it
+                     would make the installer stop listening the moment they touched this. -->
+                <Border Margin="16,0,0,0" CornerRadius="3" VerticalAlignment="Center"
+                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1"
+                        Background="{DynamicResource ControlFill}" SnapsToDevicePixels="True">
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton Style="{StaticResource ThemeSegment}"
+                                     Content="{Binding ThemeSystemText}"
+                                     Tag="System" Checked="OnChooseTheme"
+                                     IsChecked="{Binding IsSystemTheme, Mode=OneWay}" />
+                        <Border Width="1" Background="{DynamicResource ControlBorder}" />
+                        <RadioButton Style="{StaticResource ThemeSegment}"
+                                     Content="{Binding ThemeLightText}"
+                                     Tag="Light" Checked="OnChooseTheme"
+                                     IsChecked="{Binding IsLightTheme, Mode=OneWay}" />
+                        <Border Width="1" Background="{DynamicResource ControlBorder}" />
+                        <RadioButton Style="{StaticResource ThemeSegment}"
+                                     Content="{Binding ThemeDarkText}"
+                                     Tag="Dark" Checked="OnChooseTheme"
+                                     IsChecked="{Binding IsDarkTheme, Mode=OneWay}" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
-            <!-- Three segments rather than a light/dark pair: "System" is not a third colour
-                 scheme, it is the answer somebody already gave Windows, and dropping it would
-                 make the installer stop listening the moment they touched this. -->
-            <Border Margin="0,8,0,0" HorizontalAlignment="Right" CornerRadius="3"
-                    BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1"
-                    Background="{DynamicResource ControlFill}" SnapsToDevicePixels="True">
-                <StackPanel Orientation="Horizontal">
-                    <RadioButton Style="{StaticResource ThemeSegment}"
-                                 Content="{x:Static vm:PageLabels.ThemeSystem}"
-                                 Tag="System" Checked="OnChooseTheme"
-                                 IsChecked="{Binding IsSystemTheme, Mode=OneWay}" />
-                    <Border Width="1" Background="{DynamicResource ControlBorder}" />
-                    <RadioButton Style="{StaticResource ThemeSegment}"
-                                 Content="{x:Static vm:PageLabels.ThemeLight}"
-                                 Tag="Light" Checked="OnChooseTheme"
-                                 IsChecked="{Binding IsLightTheme, Mode=OneWay}" />
-                    <Border Width="1" Background="{DynamicResource ControlBorder}" />
-                    <RadioButton Style="{StaticResource ThemeSegment}"
-                                 Content="{x:Static vm:PageLabels.ThemeDark}"
-                                 Tag="Dark" Checked="OnChooseTheme"
-                                 IsChecked="{Binding IsDarkTheme, Mode=OneWay}" />
-                </StackPanel>
-            </Border>
-            </StackPanel>
-        </Grid>
+            <TextBlock Text="{Binding Headline}" TextWrapping="Wrap" Margin="0,12,0,0"
+                       Style="{StaticResource PageTitle}" />
+            <TextBlock Text="{Binding Detail}" TextWrapping="Wrap"
+                       Style="{StaticResource Muted}" Margin="0,6,0,0" />
+        </StackPanel>
 
+        <!-- The 2px inset keeps the focus ring, drawn at Margin="-2", off the scroll edge. -->
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <ItemsControl ItemsSource="{Binding Actions}">
+            <ItemsControl ItemsSource="{Binding Actions}" Margin="2,2,2,0"
+                          KeyboardNavigation.DirectionalNavigation="Cycle"
+                          AutomationProperties.Name="{Binding ActionsGroupName}"
+                          PreviewKeyDown="OnErrandKeyDown">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border Style="{StaticResource Card}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                                    <!-- WPF has no elevation; a lighter top edge is the only
-                                         way a card can say "raised", and in light there is
-                                         nothing to lighten so the token matches the border. -->
-                                    <Border Height="1" Background="{DynamicResource RaisedEdge}"
-                                            Margin="-12,-10,-12,10" />
-                                    <TextBlock Text="{Binding Title}"
-                                               Style="{StaticResource CardTitle}" />
-                                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap"
-                                               Style="{StaticResource Muted}" Margin="0,3,0,0" />
-                                    <!-- Why an option is out of reach, said in place. A greyed
-                                         button with no explanation is a worse answer than none. -->
-                                    <Border Margin="0,8,0,0" Padding="8,5" CornerRadius="3"
-                                            Background="{DynamicResource WarnFill}"
-                                            BorderBrush="{DynamicResource WarnLine}"
-                                            BorderThickness="1"
-                                            Visibility="{Binding IsUnavailable, Converter={StaticResource BoolToVisibility}}">
-                                        <TextBlock Text="{Binding UnavailableReason}"
-                                                   TextWrapping="Wrap" FontSize="11"
-                                                   Foreground="{DynamicResource WarnText}" />
-                                    </Border>
-                                </StackPanel>
-                                <Button Grid.Column="1" Content="{Binding DataContext.ChooseText, RelativeSource={RelativeSource AncestorType=Window}}" MinWidth="88" Height="28"
-                                        VerticalAlignment="Top"
-                                        IsEnabled="{Binding IsAvailable}"
-                                        Tag="{Binding Choice}"
-                                        Click="OnChoose" />
-                            </Grid>
-                        </Border>
+                        <RadioButton Style="{StaticResource ErrandRow}"
+                                     GroupName="Errand"
+                                     IsEnabled="{Binding IsAvailable}"
+                                     IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                     AutomationProperties.Name="{Binding AccessibleName}"
+                                     AutomationProperties.HelpText="{Binding Description}"
+                                     Tag="{Binding Choice}"
+                                     Checked="OnChooseErrand" />
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -218,8 +288,16 @@
         <Border Grid.Row="2" BorderBrush="{DynamicResource Divider}" BorderThickness="0,1,0,0"
                 Padding="0,10,0,0" Margin="0,10,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="{Binding CloseText}" MinWidth="96" Height="28" IsCancel="True" Click="OnClose" />
+                <!-- One action for four errands. It opens the wizard that asks the rest of the
+                     questions, so it says Next rather than naming the errand: a button labelled
+                     "Remove" here would promise removal and then show a page of questions. -->
+                <Button Content="{Binding NextText}" MinWidth="96" Height="28" Padding="12,0"
+                        Margin="6,0,0,0" IsDefault="True"
+                        IsEnabled="{Binding HasSelection}" Click="OnNext" />
+                <Button Content="{Binding CloseText}" MinWidth="96" Height="28" Padding="12,0"
+                        Margin="6,0,0,0" IsCancel="True" Click="OnClose" />
             </StackPanel>
         </Border>
+
     </Grid>
 </Window>
