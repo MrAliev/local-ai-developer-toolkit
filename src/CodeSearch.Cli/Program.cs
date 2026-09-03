@@ -123,14 +123,22 @@ async Task<int> SearchAsync(Dictionary<string, string> opts)
         MaxPerFile = int.TryParse(opts.GetValueOrDefault("per-file"), out var perFile) ? perFile : 3,
     };
 
-    var hits = await service.SearchAsync(query, opts.GetValueOrDefault("root"), searchOptions);
-    if (hits.Count == 0)
+    var outcome = await service.SearchAsync(query, opts.GetValueOrDefault("root"), searchOptions);
+    if (!outcome.EmbeddingsUsed)
+    {
+        // To stderr, so redirecting the hits to a file still leaves the reason on the screen.
+        Console.Error.WriteLine(
+            "LEXICAL ONLY: no embedding model answered, so this search matched literal " +
+            "identifiers and nothing else. Check the broker: localai doctor");
+    }
+
+    if (outcome.Hits.Count == 0)
     {
         Console.WriteLine("No matches.");
         return 0;
     }
 
-    foreach (var hit in hits)
+    foreach (var hit in outcome.Hits)
     {
         Console.WriteLine($"{hit.RelPath}:{hit.StartLine}-{hit.EndLine}  [{hit.Kind}]  cos={hit.VectorScore:F3}");
         Console.WriteLine($"  {hit.Symbol}");
@@ -196,12 +204,24 @@ async Task<int> EvaluateAsync(Dictionary<string, string> opts)
     foreach (var item in corpus.Cases)
     {
         var timer = Stopwatch.StartNew();
-        var hits = await service.SearchAsync(item.Query, root, searchOptions);
+        var outcome = await service.SearchAsync(item.Query, root, searchOptions);
         timer.Stop();
+        if (!outcome.EmbeddingsUsed)
+        {
+            // Scoring retrieval quality against a search that never embedded measures the
+            // lexical matcher and reports it as the model's. Refusing is the only honest
+            // answer: a number produced this way is worse than no number.
+            Console.Error.WriteLine(
+                "evaluation stopped: no embedding model answered, so these queries would " +
+                "score the literal matcher rather than the index. Check the broker: " +
+                "localai doctor");
+            return 75;
+        }
+
         observations.Add(
             new SearchEvaluationObservation(
                 item.Id,
-                hits.Select(SearchEvaluation.FromSearchHit).ToArray(),
+                outcome.Hits.Select(SearchEvaluation.FromSearchHit).ToArray(),
                 timer.Elapsed,
                 null));
     }

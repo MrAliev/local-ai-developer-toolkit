@@ -244,6 +244,14 @@ stale code, is not possible.
 A loaded index frees its memory automatically after ten minutes without queries; a separate tool
 releases it immediately, leaving the file on disk untouched.
 
+When no embedding model answers at all, the vector branch cannot run and the search falls back
+to literal matching rather than failing — lexical hits beat an exception. The answer says so, in
+those words, and stops naming the embedding model: the model comes out of the index header, so
+printing it after nothing was embedded reports a comparison that was never made. The empty
+result carries the same line, and that is the case that matters most — a plain-language query
+has almost nothing literal to match, so "no matches" in this state means the half of the tool
+that answers such questions did not run, not that the repository has no such code.
+
 ### 4.6 Precise navigation and its honest degradation
 
 Go-to-definition has to be different from a text search, so navigation has three sources and a

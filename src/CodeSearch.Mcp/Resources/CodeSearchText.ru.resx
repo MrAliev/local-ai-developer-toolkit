@@ -123,12 +123,22 @@
   <data name="RunInBackground" xml:space="preserve">
     <value>Запустить в фоне:</value>
   </data>
+  <data name="SearchDegraded" xml:space="preserve">
+    <value>LEXICAL ONLY: ни одна модель эмбеддингов не ответила, поэтому поиск совпал только по буквальным идентификаторам.
+Совпадений по смыслу в этих результатах нет, а запрос обычными словами в таком состоянии почти ничего не находит.
+Проверить брокер и повторить поиск: localai doctor</value>
+    <comment>The LEXICAL ONLY token and the command stay as they are in both languages.</comment>
+  </data>
   <data name="SearchIndexHeader" xml:space="preserve">
-    <value>Index: чанков {0}, файлов {1}, модель {2}, {3}</value>
-    <comment>Noun-first in Russian: ResourceManager has no plural support, and genitive plural is correct for every count.</comment>
+    <value>Index: чанков {0}, файлов {1}, {2}, {3}</value>
+    <comment>2 is either the model or the LEXICAL ONLY token. Noun-first in Russian: ResourceManager has no plural support, and genitive plural is correct for every count.</comment>
   </data>
   <data name="SearchIndexHeaderStale" xml:space="preserve">
     <value> (STALE: собран на {0}, HEAD сейчас {1})</value>
+  </data>
+  <data name="SearchIndexModel" xml:space="preserve">
+    <value>модель {0}</value>
+    <comment>Only printed when the search actually embedded; otherwise the slot says LEXICAL ONLY.</comment>
   </data>
   <data name="Seconds" xml:space="preserve">
     <value>{0} с</value>

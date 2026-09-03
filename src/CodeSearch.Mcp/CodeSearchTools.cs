@@ -343,11 +343,11 @@ public static class CodeSearchTools
             MaxPerFile = Math.Max(0, maxPerFile),
         };
 
-        IReadOnlyList<SearchHit> hits;
+        SearchOutcome outcome;
         var started = Stopwatch.StartNew();
         try
         {
-            hits = await service.SearchAsync(query, root, options, cancellationToken);
+            outcome = await service.SearchAsync(query, root, options, cancellationToken);
         }
         catch (FileNotFoundException)
         {
@@ -371,19 +371,30 @@ public static class CodeSearchTools
             return CodeSearchText.ToolFailed("search_code", Describe(ex));
         }
 
+        var hits = outcome.Hits;
         if (hits.Count == 0)
         {
-            return CodeSearchText.NoMatches;
+            // "No matches." after a search that never embedded reads as "there is no such code
+            // in this repository", which is the opposite of what happened: a plain-language
+            // query has almost nothing literal to match, so an empty result is the expected
+            // shape of the degradation rather than an answer about the repository.
+            return outcome.EmbeddingsUsed
+                ? CodeSearchText.NoMatches
+                : CodeSearchText.NoMatches + "\n\n" + CodeSearchText.SearchDegraded;
         }
 
         var report = new StringBuilder();
         var status2 = service.Status(root);
-        // The elapsed time is in there so the caller can report what this cost rather than
-        // estimate it. The embedding of the query dominates; the rest is memory.
+        // The model comes out of the index header, so it is a fact about the index rather than
+        // about this search: printed unqualified after nothing was embedded, it reports a
+        // comparison that was never made. The elapsed time is in there so the caller can report
+        // what this cost rather than estimate it; the embedding of the query dominates.
         report.Append(CodeSearchText.SearchIndexHeader(
             status2.ChunkCount,
             status2.FileCount,
-            status2.Model,
+            outcome.EmbeddingsUsed
+                ? CodeSearchText.SearchIndexModel(status2.Model)
+                : LexicalOnly,
             Seconds(started.Elapsed)));
         if (status2.CommitDrifted)
         {
@@ -392,7 +403,13 @@ public static class CodeSearchTools
                 Short(status2.CurrentCommit)));
         }
 
-        report.AppendLine().AppendLine();
+        report.AppendLine();
+        if (!outcome.EmbeddingsUsed)
+        {
+            report.AppendLine().Append(CodeSearchText.SearchDegraded).AppendLine();
+        }
+
+        report.AppendLine();
 
         var rank = 0;
         foreach (var hit in hits)
@@ -842,6 +859,21 @@ public static class CodeSearchTools
     /// A duration a person reads rather than parses: tenths under ten seconds, whole seconds
     /// above, because nobody needs a millisecond from a call that took half a minute.
     /// </summary>
+    /// <summary>
+    /// What a search says when the query was never embedded.
+    ///
+    /// Outside the untrusted-content markers, because these are this process's own words rather
+    /// than anything a repository file said, and a caller relaying the answer must be able to
+    /// tell the two apart. Stated once and used by both the empty and the non-empty case, so
+    /// the two cannot drift into saying different things about the same state.
+    /// </summary>
+    /// <summary>
+    /// The token that stands where the model would be. Spelled the same in every language,
+    /// like STALE and HEURISTIC beside it, so it stays a literal rather than a resource key:
+    /// a string identical in both languages makes the parity test say nothing.
+    /// </summary>
+    private const string LexicalOnly = "LEXICAL ONLY";
+
     private static string Seconds(TimeSpan span) =>
         CodeSearchText.Seconds(span < TimeSpan.FromSeconds(10)
             ? span.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture)
