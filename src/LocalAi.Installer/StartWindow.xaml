@@ -12,6 +12,33 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Background" Value="{DynamicResource Surface}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Divider}" />
+            <Style.Triggers>
+                <!-- Recessed rather than greyed: on a dark page a slightly different grey is
+                     not a difference, and the button being disabled is the only other cue. -->
+                <DataTrigger Binding="{Binding IsUnavailable}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource WindowFill}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsUnavailable}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource TextDisabled}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="ThemeSegment" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
             <Setter Property="Padding" Value="10,3" />
@@ -146,22 +173,33 @@
             <ItemsControl ItemsSource="{Binding Actions}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border BorderBrush="{DynamicResource Divider}" BorderThickness="1" CornerRadius="4"
-                                Padding="12,10" Margin="0,0,0,10">
+                        <Border Style="{StaticResource Card}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                    <!-- WPF has no elevation; a lighter top edge is the only
+                                         way a card can say "raised", and in light there is
+                                         nothing to lighten so the token matches the border. -->
+                                    <Border Height="1" Background="{DynamicResource RaisedEdge}"
+                                            Margin="-12,-10,-12,10" />
+                                    <TextBlock Text="{Binding Title}"
+                                               Style="{StaticResource CardTitle}" />
                                     <TextBlock Text="{Binding Description}" TextWrapping="Wrap"
                                                Style="{StaticResource Muted}" Margin="0,3,0,0" />
                                     <!-- Why an option is out of reach, said in place. A greyed
                                          button with no explanation is a worse answer than none. -->
-                                    <TextBlock Text="{Binding UnavailableReason}" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource WarnText}" Margin="0,4,0,0"
-                                               Visibility="{Binding IsUnavailable, Converter={StaticResource BoolToVisibility}}" />
+                                    <Border Margin="0,8,0,0" Padding="8,5" CornerRadius="3"
+                                            Background="{DynamicResource WarnFill}"
+                                            BorderBrush="{DynamicResource WarnLine}"
+                                            BorderThickness="1"
+                                            Visibility="{Binding IsUnavailable, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{Binding UnavailableReason}"
+                                                   TextWrapping="Wrap" FontSize="11"
+                                                   Foreground="{DynamicResource WarnText}" />
+                                    </Border>
                                 </StackPanel>
                                 <Button Grid.Column="1" Content="{Binding DataContext.ChooseText, RelativeSource={RelativeSource AncestorType=Window}}" MinWidth="88" Height="28"
                                         VerticalAlignment="Top"
