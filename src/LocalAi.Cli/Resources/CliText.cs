@@ -59,6 +59,9 @@ public static class CliText
 
     public static string QueueClean(int queued) => Catalogue.Format(nameof(QueueClean), queued);
 
+    public static string QueueStalled(int queued, string minutes) =>
+        Catalogue.Format(nameof(QueueStalled), queued, minutes);
+
     public static string PolicyModels(object residency, int keepAliveSeconds) =>
         Catalogue.Format(nameof(PolicyModels), residency, keepAliveSeconds);
 

@@ -500,7 +500,10 @@ answer from an agent is "the repository is still indexing".
 
 **Diagnostics.** `localai doctor` checks the version and the integrity of the binaries, the
 stable entry point, whether the broker is alive, the queue and the quarantine, the policies in
-force and the state of the index. It only reads and starts nothing; a stopped broker is noted
+force and the state of the index. A live broker and a moving queue are separate questions, and
+it asks both: jobs that have waited past the age at which the scheduler force-includes a
+starved one, with no attempt against any of them, are a queue that is not being served rather
+than a busy one. It only reads and starts nothing; a stopped broker is noted
 rather than reported as an error, because it starts on demand.
 
 **Cleanup.** `localai prune` frees space against the retention limits; a dry-run flag previews
