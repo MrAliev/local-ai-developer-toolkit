@@ -342,6 +342,18 @@
   <data name="QueueQuarantined" xml:space="preserve">
     <value>в очереди {0}, в карантине {1}. Задания из карантина не перезапускаются никогда.</value>
   </data>
+  <data name="ReadImageNoImages" xml:space="preserve">
+    <value>Команде localai read-image нужен хотя бы один файл изображения. Usage: {0}</value>
+    <comment>Shares the code source_missing with triage's own 'nothing to work on'.</comment>
+  </data>
+  <data name="ReadImageProfileNotSupported" xml:space="preserve">
+    <value>Команда localai read-image не выполняет профиль задачи '{0}': это профиль не для изображений. Поддерживаемые профили: {1}</value>
+    <comment>The sibling of AskProfileNotSupported, and a separate key rather than a reason-hole in one: each stays a whole sentence a translator can read. {1} is computed through LocalTasks.IsImageProfile, so it cannot name a profile the call would reject — unlike LocalLmText.ImageProfileUnsupported, which hardcodes the three names in two languages and stays only as the message the task's own guard carries.</comment>
+  </data>
+  <data name="ReadImageQuestionMissing" xml:space="preserve">
+    <value>Команде localai read-image нужен вопрос: что извлечь из изображений. Usage: {0}</value>
+    <comment>The question has no default in the task and does not gain one here: 'transcribe the error text' and 'list every row' produce different answers.</comment>
+  </data>
   <data name="RepoStatusNotConfigured" xml:space="preserve">
     <value>NOT_CONFIGURED: {0} — предложите CodeSearch, LocalLm, общий брокер, поколения основной ветки, overlay веток, хуки, MCP для Claude и MCP для Codex.</value>
     <comment>NOT_CONFIGURED: is a status token left of the first colon and stays English; documents and tests match on it. Six of the eight items after the em dash are prose, not names.</comment>

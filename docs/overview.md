@@ -509,14 +509,21 @@ collects the overlays no live worktree is on — leaving a repository's overlays
 it cannot establish which worktrees those are.
 
 **Delegating to a local model from a terminal.** `localai ask` runs a mechanical task over files
-you name — summarise this, list every method that does X, collect the TODOs — and `localai triage`
-reads a log and says what failed and why. Both reach the same broker, the same routing and the
-same models as the MCP tools, because they call the same code:
+you name — summarise this, list every method that does X, collect the TODOs; `localai triage` reads
+a log and says what failed and why; `localai read-image` reads screenshots, scanned pages and
+diagrams. All of them reach the same broker, the same routing and the same models as the MCP
+tools, because they call the same code:
 
 | MCP tool | Console |
 | --- | --- |
 | `ask_local` | `localai ask "<instruction>" [file ...]` |
 | `triage_log` | `localai triage [log-file\|-]` |
+| `read_image` | `localai read-image "<question>" <image> [image ...]` |
+
+`read-image` takes the question first, like `ask`. A first argument that is a bare image path is
+read as a forgotten question rather than as one — `localai read-image shot.png` says the question
+is missing, which is what is actually wrong — while a question that merely ends in a file name has
+a space in it and stays a question.
 
 The MCP tool is still the first choice while the server is up. These exist for a person at a
 prompt, and for an agent whose MCP server is not running — the fallback this product tells every
@@ -584,7 +591,7 @@ with the refusal inside `data`.
 **Commands that do not answer `--json` refuse it** rather than printing prose, so the promise
 holds without exception: if the flag was passed, standard output is an envelope. The usage block
 marks the commands that take it with `[--json]`, and today those are `localai repo status`,
-`localai ask` and `localai triage`:
+`localai ask`, `localai triage` and `localai read-image`:
 
 ```json
 {"schema":1,"command":"repo status","ok":true,"data":{"repositoryId":"0ecc9019…","commonDirectory":"R:\\LOCALAI\\.GIT","status":"CONFIGURED"}}
@@ -610,7 +617,8 @@ marks the commands that take it with `[--json]`, and today those are `localai re
 | `residency` | `None`, `PartialOffload` or `Cpu` — how much of the model was in video memory. Anything but `None` means the answer was slower and the run said so |
 | `queuedMs`, `ranMs` | waiting and running, separately: four seconds behind another client is a queue to look at, four seconds of inference is a model to look at |
 | `savedTokensEstimate` | an estimate, and named so — it is computed from characters, so printing it as an exact number of tokens would be false precision |
-| `truncated` | `ask` only: whether the answer was formed from part of the input because the shared budget ran out. It changes how the answer must be read |
+| `truncated` | whether the answer was formed from part of the input because the shared budget ran out. Always present; only `ask` can truncate, so `triage` and `read-image` always report `false` |
+| `vramResidentPercent` | how much of the model was in video memory, present only when `residency` is not `None`. The verdict says a run was degraded; this says by how much |
 
 With `--json` nothing is written to standard error, so a caller may treat anything there as an
 anomaly.

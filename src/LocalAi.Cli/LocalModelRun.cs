@@ -28,7 +28,14 @@ public sealed record LocalModelData(
     [property: JsonRequired, JsonPropertyName("savedTokensEstimate"), JsonPropertyOrder(6)]
     int SavedTokensEstimate,
     [property: JsonRequired, JsonPropertyName("truncated"), JsonPropertyOrder(7)]
-    bool Truncated);
+    bool Truncated,
+    /// How much of the model was in video memory, when some of it was not. The verdict
+    /// alone says a run was degraded; the percentage is what makes it information rather
+    /// than a warning, and the prose face has carried it all along. Absent on a healthy
+    /// run, because a field that is empty on almost every call teaches a reader to skip it.
+    [property: JsonPropertyName("vramResidentPercent"), JsonPropertyOrder(8),
+               JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? VramResidentPercent = null);
 
 /// <summary>
 /// The half of a local-model command that is the same for all of them: run the task, put the
@@ -142,7 +149,10 @@ internal static class LocalModelRun
             (long)result.Receipt.QueueDuration.TotalMilliseconds,
             (long)result.Receipt.ExecutionDuration.TotalMilliseconds,
             result.SavedTokens,
-            result.Truncated);
+            result.Truncated,
+            result.Receipt.Routing?.ResidencyShortfall is ResidencyShortfall.None or null
+                ? null
+                : result.Receipt.Routing?.VramResidentPercent);
 
     private static int Fail(
         string command,
