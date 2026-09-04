@@ -21,12 +21,27 @@ public static class MachineEnvelope
     /// <summary>
     /// The version of the envelope, not of the product and not of any command's <c>data</c>.
     /// Adding a field is not a change to it; removing, renaming or retyping one is.
-    ///
-    /// Deliberately <c>schema</c> rather than <c>schemaVersion</c>: <c>localai model</c> and
-    /// <c>codesearch evaluate</c> both printed envelopes of their own before this one existed,
-    /// both numbered 1, and the field name is what tells a plugin which of the three it holds.
     /// </summary>
     public const int Schema = 1;
+
+    /// <summary>
+    /// What that version field is called on the wire.
+    ///
+    /// Deliberately <c>schema</c> rather than <c>schemaVersion</c>: <c>localai model</c> and
+    /// <c>codesearch evaluate</c> both printed shapes of their own before this one existed, both
+    /// numbered 1, and the field name is the whole of what tells a plugin which of the three it
+    /// holds. A constant rather than a spelling written out once in the record below, because
+    /// <c>capabilities</c> reports it — and a listing naming a field the envelope does not write
+    /// would be worse than no listing.
+    /// </summary>
+    public const string VersionField = "schema";
+
+    /// <summary>
+    /// What the two shapes that predate the envelope call the same field. Frozen: nothing new is
+    /// built in that shape, and the pair exists so a plugin can be told which it is about to read
+    /// rather than having to know.
+    /// </summary>
+    public const string LegacyVersionField = "schemaVersion";
 
     /// <summary>
     /// The language to answer in when the answer is for a program: English, always, or nothing to
@@ -98,7 +113,7 @@ public static class MachineEnvelope
         JsonSerializer.Serialize(envelope, LocalAiJson.Strict);
 
     private sealed record Envelope(
-        [property: JsonRequired, JsonPropertyName("schema"), JsonPropertyOrder(0)]
+        [property: JsonRequired, JsonPropertyName(VersionField), JsonPropertyOrder(0)]
         int Schema,
         [property: JsonRequired, JsonPropertyName("command"), JsonPropertyOrder(1)]
         string Command,

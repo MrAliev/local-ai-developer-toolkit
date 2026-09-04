@@ -530,6 +530,9 @@ tools, because they call the same code:
 | `read_image` | `localai read-image "<question>" <image> [image ...]` |
 | `translate_local` | `localai translate [text\|-] --from <language> --to <language>` |
 
+The same mapping travels in machine form as `commands[].tool` in the capability listing of
+§8.1, so this table is its readable face rather than a second list to keep current.
+
 `read-image` takes the question first, like `ask`. A first argument that is a bare image path is
 read as a forgotten question rather than as one — `localai read-image shot.png` says the question
 is missing, which is what is actually wrong — while a question that merely ends in a file name has
@@ -628,7 +631,9 @@ with the refusal inside `data`.
 holds without exception: if the flag was passed, standard output is an envelope. The usage block
 marks the commands that take it with `[--json]`, and today those are `localai repo status`,
 `localai ask`, `localai triage`, `localai read-image`, `localai translate`,
-`codesearch search`, `codesearch get-chunk` and `codesearch status`:
+`codesearch search`, `codesearch get-chunk` and `codesearch status` — plus `capabilities` in both
+binaries, which appears there without the brackets because its flag is required rather than
+optional:
 
 ```json
 {"schema":1,"command":"repo status","ok":true,"data":{"repositoryId":"0ecc9019…","commonDirectory":"R:\\LOCALAI\\.GIT","status":"CONFIGURED"}}
@@ -683,6 +688,37 @@ between them. `get-chunk` carries the same fields plus `body`. `status` carries 
 (`CONFIGURED` or `NOT_CONFIGURED`, the token `localai repo status` prints), `built`, `stale`,
 `navigation` (`Precise` or `Heuristic`), the model and its dimensions, the counts, the commits, and
 a nested `overlay`.
+
+**Finding out what a binary answers, without hard-coding it.** `capabilities` lists the commands
+a program can drive:
+
+```json
+{"schema":1,"command":"capabilities","ok":true,"data":{"binary":"localai","commands":[{"name":"ask","shape":"schema","tool":"ask_local"},{"name":"model status","shape":"schemaVersion","tool":"local_models_status"}]}}
+```
+
+| `data` | |
+| --- | --- |
+| `binary` | `localai` or `codesearch`. Both answer with `command: "capabilities"`, so without this field two listings are indistinguishable |
+| `commands[].name` | the command path exactly as the envelope's own `command` field spells it, so a caller can join the two |
+| `commands[].shape` | the literal name of the version field that command's output carries: `schema` for the shared envelope, `schemaVersion` for the two shapes that predate it. Not a category — it is the property to read first |
+| `commands[].tool` | the MCP tool that does the same job, absent when there is none. `model pull` has none, because `local_models_sync` queues the recommended missing set rather than a named model; `codesearch status` maps to `index_status` and answers more than that tool does, so a caller falling back to the tool gets a narrower answer rather than a wrong one |
+
+**It is two calls, one per binary.** Neither console references the other, and neither can
+honestly describe a surface it cannot see — a cross-binary listing would be a hard-coded copy of
+the sibling's commands, which is the thing this exists to remove.
+
+**Absence means "a program cannot drive this", never "not installed".** A command with no machine
+shape is one a plugin cannot use, because parsing prose is what the flag exists to avoid. What a
+person can run is in the usage block, which carries the syntax this listing deliberately does not.
+
+**There is no version field, on purpose.** The command list is the feature detection, and unlike a
+version comparison it cannot go stale. A version for a bug report comes from `localai doctor`,
+which reports the version the active pointer names and whether that installation is complete.
+
+**Here the flag is required rather than optional**, which is why the usage entry has no brackets
+around it. Without it the command refuses with `json_required` and names the usage block, the list
+for a person — and `json_required` is the one code that never arrives inside an envelope, because
+the condition that produces it is the absence of one.
 
 ---
 

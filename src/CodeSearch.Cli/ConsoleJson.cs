@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using CodeSearch.Core.Search;
+using LocalAi.Contracts;
 
 namespace CodeSearch.Cli;
 
@@ -134,10 +135,50 @@ public static class ConsoleJson
     /// every enveloped command is a <c>data</c> contract forever, and adding one later is
     /// additive.
     /// </summary>
-    private static readonly string[] Commands = ["search", "get-chunk", "status"];
+    /// <summary>
+    /// <c>capabilities</c> is in here like any other enveloped command, which is what makes the
+    /// flag reach it through this same check and what puts it in its own answer with no special
+    /// case anywhere.
+    /// </summary>
+    public static IReadOnlyList<string> Commands { get; } =
+        ["search", "get-chunk", "status", "capabilities"];
+
+    /// <summary>
+    /// The shape that predates the envelope and still prints. Frozen: <c>evaluate</c> is a
+    /// benchmark format, and nothing will join it.
+    ///
+    /// Listed rather than hidden — omitting it would leave a caller to hard-code the knowledge
+    /// that this one spells its version field differently, which is the gap the listing closes.
+    /// </summary>
+    private static readonly string[] Legacy = ["evaluate"];
+
+    /// <summary>
+    /// The MCP tool that does the same job. A first copy rather than a second — this mapping is
+    /// nowhere else in the code — and a test holds every name to <c>McpToolNames</c>, which the
+    /// server's own attributes are held to in turn.
+    ///
+    /// <c>status</c> answers more than <c>index_status</c> does since it learned whether the
+    /// repository is connected at all, so a caller falling back to the tool gets a narrower
+    /// answer rather than a wrong one.
+    /// </summary>
+    private static readonly Dictionary<string, string> Tools = new(StringComparer.Ordinal)
+    {
+        ["search"] = "search_code",
+        ["get-chunk"] = "get_code_chunk",
+        ["status"] = "index_status",
+    };
 
     public static bool Supports(string command) =>
         Commands.Contains(command, StringComparer.Ordinal);
+
+    /// <summary>
+    /// What this binary can be driven to do, derived from the lists above rather than written out
+    /// beside them. `localai` answers the same question about itself, and neither can answer it
+    /// about the other: the consoles do not reference each other, and a hard-coded copy of the
+    /// sibling's surface is precisely what this exists to remove.
+    /// </summary>
+    public static CapabilityData Capabilities() =>
+        CommandCapabilities.Describe("codesearch", Commands, Legacy, Tools);
 
     public static StatusData Describe(IndexStatus status, bool connected)
     {

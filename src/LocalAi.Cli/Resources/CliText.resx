@@ -100,6 +100,10 @@
   <data name="BrokerStateUnreadable" xml:space="preserve">
     <value>host.json cannot be read: {0}</value>
   </data>
+  <data name="CapabilitiesNeedsJson" xml:space="preserve">
+    <value>localai capabilities is for a program: add --json. The usage block is the list for a person.</value>
+    <comment>The command name, --json and 'usage' are all literals a reader types or sees on screen, so they stay as they are in every language.</comment>
+  </data>
   <data name="CommandUnknownArgument" xml:space="preserve">
     <value>localai {0} does not understand '{1}'. Usage: {2}</value>
     <comment>The command-agnostic form of RepoStatusUnknownArgument, which stays as it is because its Russian reads differently with the command name inside the sentence.</comment>

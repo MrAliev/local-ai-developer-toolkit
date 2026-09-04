@@ -400,6 +400,9 @@ public static class CliText
 
     public static string JsonNotSupported => Catalogue.Get(nameof(JsonNotSupported));
 
+    public static string CapabilitiesNeedsJson =>
+        Catalogue.Get(nameof(CapabilitiesNeedsJson));
+
     public static string AskPromptMissing(string usage) =>
         Catalogue.Format(nameof(AskPromptMissing), usage);
 

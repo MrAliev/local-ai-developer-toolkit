@@ -47,9 +47,53 @@ internal static class MachineOutput
     /// The commands that fill an envelope today. A flag whose promise held for some commands and
     /// not others would be worse than no flag: a caller cannot tell prose from an envelope without
     /// parsing, and parsing is the thing this exists to remove.
+    ///
+    /// `capabilities` is in here like any other enveloped command, which is what makes the flag
+    /// reach it through the same pre-dispatch check and what puts it in its own answer without a
+    /// special case.
     /// </summary>
-    private static readonly string[] Commands =
-        ["repo status", "ask", "triage", "read-image", "translate"];
+    public static IReadOnlyList<string> Commands { get; } =
+        ["repo status", "ask", "triage", "read-image", "translate", "capabilities"];
+
+    /// <summary>
+    /// The commands that printed a JSON shape of their own before the envelope existed, and still
+    /// do. Frozen — `model` is parsed by <c>BrokerModelInstaller</c> and nothing will join it.
+    ///
+    /// Listed rather than hidden: leaving them out would leave exactly the gap `capabilities`
+    /// exists to close, with a plugin wanting model state hard-coding the knowledge that this one
+    /// spells its version field differently.
+    /// </summary>
+    private static readonly string[] Legacy =
+        ["model status", "model pull", "model preflight"];
+
+    /// <summary>
+    /// The MCP tool that does the same job, for the commands that have one.
+    ///
+    /// This mapping exists nowhere else in the code, so it is a first copy rather than a second —
+    /// and a test holds every name here against <c>McpToolNames</c>, which the server's own
+    /// attributes are held against in turn.
+    ///
+    /// `model pull` is absent because there is no equivalent: <c>local_models_sync</c> queues the
+    /// recommended missing set rather than a named model, and the server deliberately exposes no
+    /// generic pull. `repo status` is absent for the same reason — nothing on the MCP surface
+    /// answers whether a repository is connected.
+    /// </summary>
+    private static readonly Dictionary<string, string> Tools = new(StringComparer.Ordinal)
+    {
+        ["ask"] = "ask_local",
+        ["triage"] = "triage_log",
+        ["read-image"] = "read_image",
+        ["translate"] = "translate_local",
+        ["model status"] = "local_models_status",
+        ["model preflight"] = "local_model_preflight",
+    };
+
+    /// <summary>
+    /// What this binary can be driven to do, derived from the lists above rather than written out
+    /// beside them. A listing that can disagree with the behaviour is worse than no listing.
+    /// </summary>
+    public static CapabilityData Capabilities() =>
+        CommandCapabilities.Describe("localai", Commands, Legacy, Tools);
 
     public static bool Supports(string commandPath) =>
         Commands.Contains(commandPath, StringComparer.Ordinal);

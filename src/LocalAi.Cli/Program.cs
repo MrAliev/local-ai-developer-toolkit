@@ -166,6 +166,18 @@ static async Task<int> RunAsync(string[] args, bool machineReadable)
         args = MachineOutput.Without(args);
     }
 
+    // First, because it is the command that describes the rest.
+    if (args is ["capabilities", ..])
+    {
+        if (CapabilitiesCommand.Refused(args, machineReadable) is { } refused)
+        {
+            return Refuse("capabilities", refused, machineReadable);
+        }
+
+        Console.WriteLine(MachineOutput.Answer("capabilities", MachineOutput.Capabilities()));
+        return 0;
+    }
+
     if (args is ["model", .. var modelArguments])
     {
         using var processLifetime = new CancellationTokenSource();

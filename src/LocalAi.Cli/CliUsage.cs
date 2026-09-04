@@ -27,6 +27,9 @@ internal static class CliUsage
     public const string ReadImage =
         "localai read-image <question> <image> [image ...] [--profile name] "  +
         "[--model model] [--json]";
+    // No brackets around the flag: here it is required rather than optional. The listing is
+    // for a program, and the block this line sits in is the list for a person.
+    public const string Capabilities = "localai capabilities --json";
 
     // Every command the binary actually answers to belongs here. The hook command was missing
     // from this list while every installed Git hook invoked it, so anyone debugging a hook was
@@ -40,5 +43,6 @@ internal static class CliUsage
         "localai semantic <operation> [options] | localai bootstrap --dry-run | " +
         "localai sync [--root dir] [--base-only] [--require-semantics] [--max-inline-files n] | " + Hook + " | " +
         "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +
-        Telemetry + " | " + Ask + " | " + Triage + " | " + ReadImage + " | " + Translate;
+        Telemetry + " | " + Ask + " | " + Triage + " | " + ReadImage + " | " + Translate +
+        " | " + Capabilities;
 }
