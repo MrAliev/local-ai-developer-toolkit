@@ -59,6 +59,7 @@ try
         "get-chunk" => await GetChunkAsync(options),
         "evaluate" => await EvaluateAsync(options),
         "status" => Status(options),
+        "capabilities" => Capabilities(),
         "scan" => Scan(options),
         "-h" or "--help" or "help" => PrintUsage(),
         _ => Fail($"Unknown command '{command}'.", "command_unknown"),
@@ -74,6 +75,29 @@ catch (Exception ex)
 
     Console.Error.WriteLine($"ERROR: {ex.Message}");
     return 1;
+}
+
+// The listing is for a program, and `--json` is how a program asks. Required rather than
+// optional: a prose face would be a second inventory beside the usage block, and a second
+// inventory is the thing that drifts.
+//
+// `json_required` can never appear inside an envelope, because the condition that produces it is
+// the absence of one. This binary keeps its own convention of 1 for every failure.
+//
+// English, like every other string here: this console has no catalogue to follow a reader with,
+// and a lone Russian sentence in a binary that cannot read one would be worse than none.
+int Capabilities()
+{
+    if (!machineReadable)
+    {
+        Console.Error.WriteLine(
+            "codesearch capabilities is for a program: add --json. " +
+            "The usage block is the list for a person.");
+        return 1;
+    }
+
+    Console.WriteLine(MachineEnvelope.Answer("capabilities", ConsoleJson.Capabilities()));
+    return 0;
 }
 
 async Task<int> IndexAsync(Dictionary<string, string> opts)
@@ -452,31 +476,7 @@ int Fail(string message, string code = "argument_unknown")
 
 static int PrintUsage()
 {
-    Console.WriteLine("""
-        codesearch - semantic + literal code search over a local repository.
-
-          codesearch index   [--root <dir>] [--model <ollama-model>] [--force] [--index <file>]
-          codesearch overlay [--root <dir>] [--index <base>] [--overlay <file>]
-          codesearch search   --query "<text>" [--root <dir>] [--top N] [--kind Type|Method|Text|File]
-                              [--path <substring>] [--per-file N] [--no-instruct] [--json]
-          codesearch get-chunk --id <chunk_id> [--root <dir>] [--json]
-          codesearch evaluate --cases <json> [--root <dir>] [--profile|--no-floor] [--no-instruct]
-          codesearch status  [--root <dir>] [--json]
-          codesearch scan    [--root <dir>]
-
-        One BASE index per repository, and one OVERLAY per worktree holding only what that
-        branch changed plus the files it deleted. Searches see the overlay laid over the base,
-        so a branch pays for its diff rather than for a second full index.
-
-        For a repository connected to LocalAi both are built and published by `localai sync` -
-        the same sync the Git hooks run - and both live under the LocalAi runtime directory.
-        Their real paths, whether either has drifted, and whether this repository is connected
-        at all are what `codesearch status` prints.
-
-        `index` and `overlay` are the builders underneath. On a connected repository neither is
-        the way to refresh anything: run `localai sync`. Use them with explicit `--index` and
-        `--overlay` paths, or on a repository LocalAi does not manage.
-        """);
+    Console.WriteLine(CodeSearchUsage.Text);
 
     return 0;
 }
