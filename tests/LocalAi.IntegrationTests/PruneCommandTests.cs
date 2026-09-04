@@ -525,6 +525,64 @@ public sealed class PruneCommandTests : IDisposable
 
     private string Runtime => Path.Combine(_root, "runtime");
 
+    /// <summary>
+    /// Every repository id is 64 hex characters, so a record whose directory name is shorter than
+    /// twelve was made by hand — and the report slices that name to twelve. The slice threw
+    /// `ArgumentOutOfRangeException`, which no filter in this file catches, so one stray record
+    /// ended every prune on the machine: telemetry, installed versions and launcher backups are
+    /// swept after the repository loop and were never reached.
+    ///
+    /// A manifest is what makes this reachable. Without one the record is not classified at all
+    /// and the loop moves on before the slice — which is why a bare directory does not reproduce
+    /// it.
+    /// </summary>
+    [Fact]
+    public void A_record_with_a_short_name_does_not_end_the_run()
+    {
+        Record("sh", Path.Combine(_root, "never-existed", ".git"));
+        var dead = Repository("dead", Path.Combine(_root, "also-never-existed", ".git"));
+
+        PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        // The record after the short one was still swept.
+        Assert.False(Directory.Exists(dead));
+    }
+
+    /// <summary>And the short record is reported by the name it actually has.</summary>
+    [Fact]
+    public void A_record_with_a_short_name_is_named_by_it()
+    {
+        Record("sh", Path.Combine(_root, "never-existed", ".git"));
+
+        var report = PruneCommand.Execute(Runtime, dryRun: false, Now);
+
+        Assert.Contains(report.Lines, line => line.Contains("sh", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A repository record under the name given, without the padding <see cref="Repository"/>
+    /// applies — which is what makes a name shorter than the report's slice reachable at all.
+    /// </summary>
+    private string Record(string name, string commonDirectory)
+    {
+        var directory = Path.Combine(Runtime, "repositories", name);
+        Directory.CreateDirectory(directory);
+        new RepositoryManifestStore(FsPath.From(directory)).Save(new RepositoryManifest(
+            name,
+            commonDirectory,
+            "refs/heads/main",
+            null,
+            null,
+            "qwen3-embedding:8b-q8_0",
+            4096,
+            1,
+            4,
+            RepositoryIndexState.Initializing,
+            [],
+            Now - TimeSpan.FromDays(40)));
+        return directory;
+    }
+
     private string Repository(
         string name,
         string commonDirectory,
