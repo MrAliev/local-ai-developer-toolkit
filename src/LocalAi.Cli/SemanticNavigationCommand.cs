@@ -71,10 +71,16 @@ internal static class SemanticNavigationCommand
             return Usage();
         }
 
-        // The same numbering the MCP tools take, because this command is what the instruction
-        // block offers when that server is unreachable. A fallback that reads a position
-        // differently from the tool it stands in for is a trap set for the moment somebody is
-        // already dealing with a breakage.
+        // The same path rule and the same numbering the MCP tools take, because this command is
+        // what the instruction block offers when that server is unreachable. A fallback that
+        // reads a position differently from the tool it stands in for is a trap set for the
+        // moment somebody is already dealing with a breakage.
+        if (!SemanticDocumentPath.IsRepositoryRelative(path))
+        {
+            Console.Error.WriteLine(CliText.PathNotRelative(path));
+            return 2;
+        }
+
         if (!SourcePosition.TryFromOneBased(line, column, out var position))
         {
             Console.Error.WriteLine(CliText.PositionNotFromOne(line, column));

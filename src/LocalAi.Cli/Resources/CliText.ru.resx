@@ -184,6 +184,10 @@
   <data name="OverlayDiscarded" xml:space="preserve">
     <value>Worktree {0} изменился, пока собирался его overlay; overlay отброшен, следующая синхронизация соберёт его заново из нового состояния.</value>
   </data>
+  <data name="PathNotRelative" xml:space="preserve">
+    <value>invalid_path: путь должен быть относительно корня репозитория — в том виде, в каком его печатает search_code; получено '{0}'.</value>
+    <comment>Word for word CodeSearchText.PathNotRelative, deliberately duplicated: this CLI is what the instruction block offers when that MCP server is unreachable, and a fallback that refuses a path in different words is a trap. LocalAi.Cli does not reference CodeSearch.Mcp, so the two cannot share one resource; a test compares them.</comment>
+  </data>
   <data name="PolicyDefaults" xml:space="preserve">
     <value>{0} (по умолчанию, файла нет)</value>
   </data>

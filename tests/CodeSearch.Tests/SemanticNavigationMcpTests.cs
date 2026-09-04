@@ -128,6 +128,43 @@ public class SemanticNavigationMcpTests
         Assert.DoesNotContain("<untrusted-content", response, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A path search_code would never have printed is refused by name, the way a zero position
+    /// is. Passed on, it came back as the core's ArgumentException — English, with a framework
+    /// parameter suffix glued on — inside an answer that otherwise follows the reader.
+    /// </summary>
+    [Theory]
+    [InlineData(@"R:\LocalAi\Src\A.cs")]
+    [InlineData("/Src/A.cs")]
+    [InlineData("../Src/A.cs")]
+    [InlineData("Src/./A.cs")]
+    public void A_path_that_is_not_repository_relative_is_refused_by_name(string path)
+    {
+        var response = CodeSearchTools.GoToDefinition(Gateway(), path, line: 3);
+
+        Assert.StartsWith("invalid_path:", response, StringComparison.Ordinal);
+        Assert.Contains(path, response, StringComparison.Ordinal);
+        Assert.DoesNotContain("Parameter", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("<untrusted-content", response, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Every_navigation_tool_refuses_such_a_path_with_the_same_words()
+    {
+        const string path = @"R:\LocalAi\Src\A.cs";
+        var gateway = Gateway();
+        var expected = CodeSearchTools.GoToDefinition(gateway, path, line: 3);
+
+        Assert.All(
+            new[]
+            {
+                CodeSearchTools.FindReferences(gateway, path, line: 5),
+                CodeSearchTools.FindImplementations(gateway, path, line: 3),
+                CodeSearchTools.FindRelationships(gateway, path, line: 4),
+            },
+            answer => Assert.Equal(expected, answer));
+    }
+
     private const string MethodId = "scip-dotnet pkg MyApp 1.0.0 A#Go().";
     private const string ImplementationId = "scip-dotnet pkg MyApp 1.0.0 Impl#Go().";
 

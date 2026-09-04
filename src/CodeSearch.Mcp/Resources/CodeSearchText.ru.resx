@@ -109,6 +109,10 @@
   <data name="NothingLoaded" xml:space="preserve">
     <value>Ничего не загружено — память уже свободна.</value>
   </data>
+  <data name="PathNotRelative" xml:space="preserve">
+    <value>invalid_path: путь должен быть относительно корня репозитория — в том виде, в каком его печатает search_code; получено '{0}'.</value>
+    <comment>invalid_path: is a status token left of the first colon and stays English, like invalid_position: beside it.</comment>
+  </data>
   <data name="PositionNotFromOne" xml:space="preserve">
     <value>invalid_position: строки и колонки считаются с единицы; получено: строка {0}, колонка {1}.</value>
     <comment>invalid_position: is a status token left of the first colon and stays English, like semantic_navigation_not_ready: beside it.</comment>
