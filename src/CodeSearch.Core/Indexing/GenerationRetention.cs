@@ -103,7 +103,25 @@ public static class GenerationRetention
         // the generation a sync had just spent its whole run building, and the sync then died
         // on the missing base. Anything young enough to be that build is kept whatever the
         // count says — the same grace the staging directory already gets.
-        foreach (var candidate in candidates.Where(item => now - item.PublishedAtUtc < Grace))
+        //
+        // Only what might still *become* current, though. A generation the pointer has already
+        // moved past has had its window close, and keeping it for a day cost a machine that
+        // publishes three times in a working day three bases and every overlay hanging off them:
+        // 965 MB measured on one repository, about 510 MB of it history nothing could be asked
+        // about any more (#314). What tells "may yet be current" apart from "was current, and is
+        // not" is whether it was published before the generation the pointer names: the pointer
+        // moved on to something newer, so this one has already had its turn.
+        //
+        // With no current generation at all, everything young keeps its grace: nothing has been
+        // superseded if nothing is current, and the safe answer is the one that keeps an hour of
+        // embedding rather than a gigabyte of disk.
+        var currentPublishedAtUtc = candidates
+            .FirstOrDefault(item => string.Equals(item.Id, current, StringComparison.Ordinal))
+            ?.PublishedAtUtc;
+        foreach (var candidate in candidates.Where(item =>
+                     now - item.PublishedAtUtc < Grace &&
+                     (currentPublishedAtUtc is not { } published ||
+                      item.PublishedAtUtc >= published)))
         {
             keep.Add(candidate.Id);
         }
