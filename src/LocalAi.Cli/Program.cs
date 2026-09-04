@@ -176,6 +176,8 @@ static async Task<int> RunAsync(string[] args)
                 .GetCommonDirectoryAsync(Environment.CurrentDirectory),
             runtimeRoot,
             AppContext.BaseDirectory);
+        Console.WriteLine(CliText.BootstrapDryRun);
+        Console.WriteLine();
         foreach (var change in plan.Changes)
         {
             Console.WriteLine(change);

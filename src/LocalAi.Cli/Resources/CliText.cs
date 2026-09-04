@@ -280,6 +280,48 @@ public static class CliText
 
     public static string SyncInlineLimitInvalid => Catalogue.Get(nameof(SyncInlineLimitInvalid));
 
+    // What `localai telemetry` reports and what `localai bootstrap --dry-run` lists. Neither
+    // changes anything: one answers a question, the other names work done elsewhere.
+
+    public static string BootstrapAlreadyConnected => Catalogue.Get(nameof(BootstrapAlreadyConnected));
+
+    public static string BootstrapDryRun => Catalogue.Get(nameof(BootstrapDryRun));
+
+    public static string BootstrapStepClients => Catalogue.Get(nameof(BootstrapStepClients));
+
+    public static string BootstrapStepHooks => Catalogue.Get(nameof(BootstrapStepHooks));
+
+    public static string BootstrapStepInitializing => Catalogue.Get(nameof(BootstrapStepInitializing));
+
+    public static string BootstrapStepLegacyKept => Catalogue.Get(nameof(BootstrapStepLegacyKept));
+
+    public static string BootstrapStepModels => Catalogue.Get(nameof(BootstrapStepModels));
+
+    public static string BootstrapStepState(string repositoryId) =>
+        Catalogue.Format(nameof(BootstrapStepState), repositoryId);
+
+    public static string TelemetryByModel => Catalogue.Get(nameof(TelemetryByModel));
+
+    public static string TelemetryByProfile => Catalogue.Get(nameof(TelemetryByProfile));
+
+    public static string TelemetryFailureOutlier(string model, string share, int failures, int totalFailures) =>
+        Catalogue.Format(nameof(TelemetryFailureOutlier), model, share, failures, totalFailures);
+
+    public static string TelemetryNone(string runtimeRoot) =>
+        Catalogue.Format(nameof(TelemetryNone), runtimeRoot);
+
+    public static string TelemetryNoneUnreadable(string runtimeRoot) =>
+        Catalogue.Format(nameof(TelemetryNoneUnreadable), runtimeRoot);
+
+    public static string TelemetryRecorded(int jobs, string earliest, string latest) =>
+        Catalogue.Format(nameof(TelemetryRecorded), jobs, earliest, latest);
+
+    public static string TelemetrySaved(string net, string gross, string verifying) =>
+        Catalogue.Format(nameof(TelemetrySaved), net, gross, verifying);
+
+    public static string TelemetryUnreadable(int records) =>
+        Catalogue.Format(nameof(TelemetryUnreadable), records);
+
     public static string RepositoryNotConnected(string root) =>
         Catalogue.Format(nameof(RepositoryNotConnected), root);
 

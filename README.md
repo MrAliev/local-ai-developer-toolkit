@@ -315,7 +315,7 @@ dotnet restore LocalAi.slnx
 dotnet test LocalAi.slnx --configuration Release --no-restore
 ```
 
-Inspect repository synchronization without applying external setup:
+Look at what connecting a repository involves, and at how this one stands. Neither command changes anything:
 
 ```powershell
 dotnet run --project src/LocalAi.Cli -- bootstrap --dry-run
