@@ -125,9 +125,9 @@ public sealed class LastFourCommandsFollowTheReaderTests : IDisposable
         Assert.False(RepoCommand.TryParseStatusArguments(
             ["-r", @"C:\repo"],
             out _,
-            out var error));
+            out var refusal));
 
-        Assert.Contains("--root", error!, StringComparison.Ordinal);
+        Assert.Contains("--root", refusal!.Message, StringComparison.Ordinal);
     }
 
     /// <summary>The three parse refusals are sentences, and sentences follow the reader.</summary>
@@ -139,7 +139,7 @@ public sealed class LastFourCommandsFollowTheReaderTests : IDisposable
         using var reading = TestCulture.Reading("ru");
         RepoCommand.TryParseStatusArguments(["--root"], out _, out var russian);
 
-        Assert.NotEqual(english, russian, StringComparer.Ordinal);
+        Assert.NotEqual(english!.Message, russian!.Message, StringComparer.Ordinal);
     }
 
     /// <summary>

@@ -392,6 +392,9 @@ public static class CliText
 
     public static string SummaryNoProblems => Catalogue.Get(nameof(SummaryNoProblems));
 
+    public static string JsonNotSupported(string command) =>
+        Catalogue.Format(nameof(JsonNotSupported), command);
+
     public static string RepoStatusRootWithoutDirectory => Catalogue.Get(nameof(RepoStatusRootWithoutDirectory));
 
     public static string RepoStatusTwoRepositories => Catalogue.Get(nameof(RepoStatusTwoRepositories));
