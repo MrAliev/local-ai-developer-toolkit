@@ -49,6 +49,39 @@ public sealed class InstructionSkillTests
         Assert.Contains(rule, Flat(ManagedInstructionBlock.SkillBody), StringComparison.Ordinal);
 
     /// <summary>
+    /// What the fallback section has to keep saying. Each phrase stands for a failure the old
+    /// wording allowed, and this is the highest-reach text in the repository — it is written into
+    /// every CLAUDE.md and AGENTS.md on every machine this installs on.
+    /// </summary>
+    [Theory]
+    // The old wording promised only search, so an agent whose MCP server was down went to the
+    // cloud for a screenshot the console could have read.
+    [InlineData("A dead MCP server is not the end of the local tools")]
+    // The console name, so the mapping from the tool name does not have to be guessed.
+    [InlineData("read-image")]
+    // `--to ru` does not fail: it is passed through as written and the attribution comes out in
+    // the wrong language.
+    [InlineData("not `--to ru`")]
+    // Four commands offered as a remedy for the one failure they cannot survive.
+    [InlineData("this section is about a dead MCP server and not about a dead broker")]
+    // A local run reported with no model, no duration and no saving, which the reporting rule
+    // forbids — the notice is on stderr, so capturing only stdout loses it.
+    [InlineData("Capture both")]
+    public void The_fallback_section_offers_every_local_tool(string phrase) =>
+        Assert.Contains(phrase, Flat(ManagedInstructionBlock.SkillBody), StringComparison.Ordinal);
+
+    /// <summary>
+    /// The section exists twice — the skill body and the Codex block — and an edit to one only
+    /// would ship two machines different rules.
+    /// </summary>
+    [Fact]
+    public void The_second_copy_of_the_section_cannot_keep_the_old_text() =>
+        Assert.Contains(
+            "A dead MCP server is not the end of the local tools",
+            Flat(ManagedInstructionBlock.CodexBlock),
+            StringComparison.Ordinal);
+
+    /// <summary>
     /// Codex gets everything inline because it has no import mechanism, so it must not be told
     /// to invoke something that does not exist there.
     /// </summary>

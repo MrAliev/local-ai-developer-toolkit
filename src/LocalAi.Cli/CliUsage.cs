@@ -21,6 +21,9 @@ internal static class CliUsage
         "localai ask <prompt> [file ...] [--profile name] [--model model] [--json]";
     public const string Triage =
         "localai triage [log-file|-] [--question text] [--model model] [--json]";
+    public const string Translate =
+        "localai translate [text|-] --from language --to language [--markdown] " +
+        "[--out file] [--json]";
     public const string ReadImage =
         "localai read-image <question> <image> [image ...] [--profile name] "  +
         "[--model model] [--json]";
@@ -37,5 +40,5 @@ internal static class CliUsage
         "localai semantic <operation> [options] | localai bootstrap --dry-run | " +
         "localai sync [--root dir] [--base-only] [--require-semantics] [--max-inline-files n] | " + Hook + " | " +
         "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +
-        Telemetry + " | " + Ask + " | " + Triage + " | " + ReadImage;
+        Telemetry + " | " + Ask + " | " + Triage + " | " + ReadImage + " | " + Translate;
 }

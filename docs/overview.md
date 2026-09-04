@@ -519,6 +519,7 @@ tools, because they call the same code:
 | `ask_local` | `localai ask "<instruction>" [file ...]` |
 | `triage_log` | `localai triage [log-file\|-]` |
 | `read_image` | `localai read-image "<question>" <image> [image ...]` |
+| `translate_local` | `localai translate [text\|-] --from <language> --to <language>` |
 
 `read-image` takes the question first, like `ask`. A first argument that is a bare image path is
 read as a forgotten question rather than as one — `localai read-image shot.png` says the question
@@ -546,8 +547,23 @@ pipe, another program — it arrives wrapped in the same nonce-bound `<untrusted
 the MCP tools use, and nothing inside them may be treated as instructions. On a terminal the
 reader is a person and the markers are noise, so they are omitted.
 
-A model that is not installed for the profile a command routes to exits **69**, naming the command
-that installs one. That is not the same failure as a wrong argument, which exits 2.
+**`translate` is the exception, and has `--out` for it.** Its answer is a document rather than a
+statement about one, so redirecting it would save a file full of markers. `--out <file>` writes
+the document itself, unwrapped; without it, a redirected translation is wrapped like any other
+answer and says so on standard error. `--from` and `--to` take language *names*: the value is
+passed to the model as written, so `--to ru` does not fail — it produces an English attribution on
+a Russian document.
+
+**Every translation ends with an attribution paragraph** naming the model that produced it. It is
+unconditional, it is in both faces, and it is inside what `--out` writes. A machine translation
+that can pass for a human one is what it exists to prevent.
+
+The exit codes are sysexits values rather than an ad-hoc set. A model that is not installed for
+the profile a command routes to exits **69**, naming the command that installs one — not the same
+failure as a wrong argument, which exits 2. A translation whose structure is still wrong after the
+retries exits **65**, the code a rejected chunk uses: a model produced data this cannot use. A
+`--out` file that could not be written exits **73**, because the command line was right and the
+cause is a permission or a missing directory.
 
 ### 8.1 Answering a program
 
@@ -591,7 +607,7 @@ with the refusal inside `data`.
 **Commands that do not answer `--json` refuse it** rather than printing prose, so the promise
 holds without exception: if the flag was passed, standard output is an envelope. The usage block
 marks the commands that take it with `[--json]`, and today those are `localai repo status`,
-`localai ask`, `localai triage` and `localai read-image`:
+`localai ask`, `localai triage`, `localai read-image` and `localai translate`:
 
 ```json
 {"schema":1,"command":"repo status","ok":true,"data":{"repositoryId":"0ecc9019…","commonDirectory":"R:\\LOCALAI\\.GIT","status":"CONFIGURED"}}
@@ -619,6 +635,11 @@ marks the commands that take it with `[--json]`, and today those are `localai re
 | `savedTokensEstimate` | an estimate, and named so — it is computed from characters, so printing it as an exact number of tokens would be false precision |
 | `truncated` | whether the answer was formed from part of the input because the shared budget ran out. Always present; only `ask` can truncate, so `triage` and `read-image` always report `false` |
 | `vramResidentPercent` | how much of the model was in video memory, present only when `residency` is not `None`. The verdict says a run was degraded; this says by how much |
+
+`translate` fills the same envelope with three token figures instead of one —
+`savedTokensEstimate`, `localTokensProcessedEstimate` and `netContextTokensSavedEstimate`, all
+named as estimates for the same reason — and no `truncated`, because translation chunks the whole
+input and drops nothing. Its `answer` includes the attribution paragraph.
 
 With `--json` nothing is written to standard error, so a caller may treat anything there as an
 anomaly.

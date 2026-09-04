@@ -238,6 +238,38 @@ static async Task<int> RunAsync(string[] args, bool machineReadable)
             token));
     }
 
+    if (args is ["translate", .. var translateArguments])
+    {
+        if (!TranslateCommand.TryParse(
+                translateArguments,
+                Console.IsInputRedirected,
+                out var translate,
+                out var translateRefusal))
+        {
+            return Refuse("translate", translateRefusal!, machineReadable);
+        }
+
+        var source = translate!.Text;
+        if (translate.FromStandardInput)
+        {
+            source = await Console.In.ReadToEndAsync();
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                return Refuse(
+                    "translate",
+                    new CommandRefusal("source_missing", CliText.TranslateEmptyInput),
+                    machineReadable);
+            }
+        }
+
+        return await Interruptible(token => LocalModelRun.TranslateAsync(
+            "translate:" + (translate.FromStandardInput ? "stdin" : "argument"),
+            translate,
+            source!,
+            machineReadable,
+            token));
+    }
+
     if (args is ["read-image", .. var imageArguments])
     {
         if (!ReadImageCommand.TryParse(imageArguments, out var image, out var imageRefusal))
