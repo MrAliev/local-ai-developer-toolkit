@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using LocalAi.Cli;
 using LocalAi.Contracts;
@@ -109,6 +110,75 @@ public sealed class DoctorCommandTests : IDisposable
 
         Assert.Equal(DoctorStatus.Warning, check.Status);
         Assert.Contains("quarantined", check.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A queue that has stopped looks exactly like a busy one to a count of directories, and that
+    /// is what this check was: `4 queued` and `No problems`, printed for two hours while a Git
+    /// hook's embedding job waited behind a job nothing would ever pick (#335). The broker was
+    /// healthy by every measure it reports — a heartbeat one second old, the backend reachable —
+    /// because it was the queue that was not moving.
+    ///
+    /// The evidence was already on disk: each job's state file carries when it was created and
+    /// how many times it has been attempted. Never attempted, and older than the age at which the
+    /// scheduler itself force-includes a starved job, is not a queue anybody should call healthy.
+    /// </summary>
+    [Fact]
+    public void A_queue_that_has_not_moved_is_not_reported_as_healthy()
+    {
+        Install("v1");
+        Queued("stalled-job", DateTimeOffset.UtcNow.AddHours(-2), attempts: 0);
+
+        var check = Check(DoctorCommand.Inspect(_root), "queue");
+
+        Assert.Equal(DoctorStatus.Warning, check.Status);
+    }
+
+    /// <summary>
+    /// A job merely waiting its turn is not a problem. Something is always last in a queue, and a
+    /// check that warned about that would be noise on every busy machine.
+    /// </summary>
+    [Fact]
+    public void A_job_waiting_its_turn_is_not_a_problem()
+    {
+        Install("v1");
+        Queued("fresh-job", DateTimeOffset.UtcNow, attempts: 0);
+
+        var check = Check(DoctorCommand.Inspect(_root), "queue");
+
+        Assert.Equal(DoctorStatus.Ok, check.Status);
+    }
+
+    /// <summary>
+    /// A job that has been attempted is being served, however long it has been there: a long
+    /// inference is work, not a stall.
+    /// </summary>
+    [Fact]
+    public void A_long_job_that_is_being_attempted_is_not_a_stall()
+    {
+        Install("v1");
+        Queued("running-job", DateTimeOffset.UtcNow.AddHours(-2), attempts: 1);
+
+        var check = Check(DoctorCommand.Inspect(_root), "queue");
+
+        Assert.Equal(DoctorStatus.Ok, check.Status);
+    }
+
+    /// <summary>One job directory, shaped the way the durable queue writes them.</summary>
+    private void Queued(string name, DateTimeOffset createdAtUtc, int attempts)
+    {
+        var directory = Path.Combine(_root, "jobs", name);
+        Directory.CreateDirectory(directory);
+        var moment = createdAtUtc.ToString("O", CultureInfo.InvariantCulture);
+        File.WriteAllText(
+            Path.Combine(directory, "state.json"),
+            $$"""
+            {"SchemaVersion":1,"JobId":"{{Guid.NewGuid()}}","Sequence":1,
+             "Priority":"Foreground","State":"Queued",
+             "CreatedAtUtc":"{{moment}}","UpdatedAtUtc":"{{moment}}",
+             "WorkerId":null,"LeaseId":null,"LeaseExpiresAtUtc":null,"HeartbeatAtUtc":null,
+             "AttemptCount":{{attempts}},"RecoveryCount":0,"FailureCode":null}
+            """);
     }
 
     /// <summary>

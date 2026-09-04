@@ -346,6 +346,10 @@
   <data name="QueueQuarantined" xml:space="preserve">
     <value>в очереди {0}, в карантине {1}. Задания из карантина не перезапускаются никогда.</value>
   </data>
+  <data name="QueueStalled" xml:space="preserve">
+    <value>В очереди заданий {0}, ни одно не бралось в работу; самое старое ждёт {1} минут. Очередь не обслуживается.</value>
+    <comment>Printed when the oldest queued job has never been attempted and has waited past the age at which the scheduler force-includes a starved job. Counts stay invariant; {1} is minutes. The remedy is deliberately not named: what unblocks a stalled queue is not something the reader can do from the console today (#335).</comment>
+  </data>
   <data name="ReadImageNoImages" xml:space="preserve">
     <value>Команде localai read-image нужен хотя бы один файл изображения. Usage: {0}</value>
     <comment>Shares the code source_missing with triage's own 'nothing to work on'.</comment>

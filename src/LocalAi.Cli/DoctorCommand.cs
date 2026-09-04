@@ -200,10 +200,32 @@ public static class DoctorCommand
                     silence.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture)));
     }
 
+    /// <summary>
+    /// The age past which a queued job that has never been attempted is a stall rather than a
+    /// wait. Not invented here: it is the age at which the scheduler itself force-includes a
+    /// starved job, so anything older has already been passed over by the one component whose job
+    /// is not to pass it over.
+    /// </summary>
+    private static readonly TimeSpan StallAge = TimeSpan.FromMinutes(15);
+
     private static DoctorCheck CheckQueue(string root)
     {
         var queued = Count(Path.Combine(root, "jobs"));
         var quarantined = Count(Path.Combine(root, "quarantine"));
+        var stalled = OldestUnattempted(Path.Combine(root, "jobs"));
+
+        // A stopped queue looked exactly like a busy one here: this check counted directories and
+        // said "4 queued, none quarantined" every minute for two hours while nothing moved (#335).
+        // The broker was healthy by its own measures throughout — the queue was not.
+        if (stalled is { } age && age >= StallAge)
+        {
+            return new DoctorCheck(
+                "queue",
+                DoctorStatus.Warning,
+                CliText.QueueStalled(
+                    queued,
+                    ((int)age.TotalMinutes).ToString(CultureInfo.InvariantCulture)));
+        }
 
         // Quarantine is the interesting number. A job lands there when it could not be parsed or
         // recovered, and nothing raises it: the queue keeps working and the entry sits for months.
@@ -218,6 +240,48 @@ public static class DoctorCommand
             Directory.Exists(path)
                 ? Directory.EnumerateFileSystemEntries(path).Count()
                 : 0;
+
+        // How long the oldest job that has never been attempted has been waiting, or null when
+        // every job has had its turn. Unreadable state files are skipped rather than reported:
+        // that is what the quarantine is for, and a diagnostic that throws while diagnosing is
+        // worse than one that says a little less.
+        static TimeSpan? OldestUnattempted(string path)
+        {
+            if (!Directory.Exists(path))
+            {
+                return null;
+            }
+
+            TimeSpan? oldest = null;
+            foreach (var directory in Directory.EnumerateDirectories(path))
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(
+                        File.ReadAllText(Path.Combine(directory, "state.json")));
+                    var state = document.RootElement;
+                    if (state.GetProperty("State").GetString() != "Queued" ||
+                        state.GetProperty("AttemptCount").GetInt32() != 0)
+                    {
+                        continue;
+                    }
+
+                    var waited = DateTimeOffset.UtcNow -
+                        state.GetProperty("CreatedAtUtc").GetDateTimeOffset();
+                    if (oldest is null || waited > oldest)
+                    {
+                        oldest = waited;
+                    }
+                }
+                catch (Exception exception) when (
+                    exception is IOException or UnauthorizedAccessException or JsonException
+                        or KeyNotFoundException or InvalidOperationException or FormatException)
+                {
+                }
+            }
+
+            return oldest;
+        }
     }
 
     /// <summary>

@@ -346,6 +346,10 @@
   <data name="QueueQuarantined" xml:space="preserve">
     <value>{0} queued, {1} quarantined. Quarantined jobs are never retried.</value>
   </data>
+  <data name="QueueStalled" xml:space="preserve">
+    <value>{0} job(s) queued and none attempted; the oldest has waited {1} minutes. The queue is not being served.</value>
+    <comment>Printed when the oldest queued job has never been attempted and has waited past the age at which the scheduler force-includes a starved job. Counts stay invariant; {1} is minutes. The remedy is deliberately not named: what unblocks a stalled queue is not something the reader can do from the console today (#335).</comment>
+  </data>
   <data name="ReadImageNoImages" xml:space="preserve">
     <value>localai read-image needs at least one image file. Usage: {0}</value>
     <comment>Shares the code source_missing with triage's own 'nothing to work on'.</comment>
