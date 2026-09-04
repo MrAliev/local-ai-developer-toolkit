@@ -16,15 +16,11 @@ internal static class LocalModelOutput
     /// <summary>
     /// The answer, wrapped when it is going somewhere it can be re-read.
     ///
-    /// A terminal has a person in front of it, and markers there are noise to scroll past. Piped
-    /// or redirected, the text lands in a file, a log or another program, where a model may meet
-    /// it and must not act on instructions inside it.
-    ///
-    /// The guess is asymmetric: an unwanted wrapper costs a person one glance, and a missing one
-    /// costs a safety boundary — so redirection wraps. The case this cannot cover is an agent on
-    /// a pseudo-terminal, which reads as interactive; it still gets the notice naming the command
-    /// and the model, so provenance is dimmed rather than lost.
+    /// The rule itself is <see cref="RedirectedSource"/>, in Contracts, because the other console
+    /// binary needs the same one and neither should reference the other. The case it cannot cover
+    /// is an agent on a pseudo-terminal, which reads as interactive: it still gets the notice
+    /// naming the command and the model, so provenance is dimmed rather than lost.
     /// </summary>
     public static string Answer(string origin, string answer, bool redirected) =>
-        redirected ? UntrustedContent.Wrap(answer, origin) : answer;
+        RedirectedSource.Wrap(origin, answer, redirected);
 }
