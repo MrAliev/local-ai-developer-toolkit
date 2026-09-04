@@ -108,6 +108,16 @@ public sealed class GitClient
             start.ArgumentList.Add(argument);
         }
 
+        // Before starting anything, because `Process.Start` answers a missing working directory
+        // with `Win32Exception` — a type none of this class's callers catch, so a mistyped
+        // `--root` travelled all the way to the entry point's last resort and was reported as an
+        // unexpected failure at exit 70, in whatever language the operating system writes its
+        // own errors in. It is an ordinary wrong path and gets the answer every wrong path gets.
+        if (!Directory.Exists(start.WorkingDirectory))
+        {
+            throw new DirectoryNotFoundException(start.WorkingDirectory);
+        }
+
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("Could not start git.");
         var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);

@@ -13,7 +13,7 @@ internal static class CliUsage
         "localai hook <" + HookEvents + "> [--root dir]";
     public const string HookEvents = "post-commit|post-checkout|post-merge|post-rewrite";
     public const string RepoStatus =
-        "localai repo status [--root dir | git-common-dir]";
+        "localai repo status [--root dir | git-common-dir] [--json]";
     public const string Prune = "localai prune [--dry-run]";
     public const string Doctor = "localai doctor [--root dir]";
     public const string Telemetry = "localai telemetry";

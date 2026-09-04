@@ -135,6 +135,10 @@
     <value>Хукам LocalAi нужна переменная LOCALAI_LAUNCHER_PATH — её задаёт стабильный launcher. Запускайте команду через launcher, а не через двоичный файл внутри каталога версии.</value>
     <comment>Not LauncherMissing: that one is about a file that is not there and is printed by doctor. This is about a variable that was never set, and its fix is how the command was invoked. launcher stays Latin and indeclinable, as in the documentation.</comment>
   </data>
+  <data name="JsonNotSupported" xml:space="preserve">
+    <value>--json недоступен для 'localai {0}'. Команды, которые его принимают, отмечены в Usage как [--json].</value>
+    <comment>Says nothing about whether the command exists, because at the point this is printed the binary cannot tell a real command with no envelope from a typo — the dispatcher is a chain of patterns, and a second list of command names beside it would be a copy that drifts. Both readers need the same next step, and the usage marks answer both. Unreachable in Russian while --json pins the language to English; it is a key rather than a literal so the parity test needs no exception and lifting the pin later costs no new string.</comment>
+  </data>
   <data name="LauncherMissing" xml:space="preserve">
     <value>Стабильной точки входа нет: {0}. Регистрации, указывающие на неё, работать не будут, а регистрации внутрь каталога версии сломаются при следующем обновлении.</value>
   </data>

@@ -3,6 +3,7 @@ using LocalAi.Cli;
 using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Localization;
+using System.Globalization;
 using System.Text.Json;
 
 // Before the guard below, because the guard's own failure path prints: an exit code and a
@@ -12,7 +13,21 @@ ConsoleOutputText.UseUtf8();
 // The language every command answers in, decided before any of them runs — and after the
 // encoding, because the first thing this can produce is a sentence the console has to be able
 // to write. Numbers stay invariant whatever the language is; only the words move.
-OutputCulture.Apply();
+//
+// Except when the reader is a program. `--json` promises the same bytes on every machine, and
+// one decision here keeps that promise for the catalogue and for the framework's own
+// exception messages alike. Not for `Win32Exception`, whose words come from the operating
+// system: those paths earn a code and a sentence of our own instead.
+var machineReadable = MachineOutput.Requested(args);
+if (machineReadable)
+{
+    OutputCulture.Apply(MachineOutput.Language(args), CultureInfo.CurrentUICulture);
+    OutputCulture.PinInvariantFormatting();
+}
+else
+{
+    OutputCulture.Apply();
+}
 
 // Every command runs under one guard. A broker or Git failure used to leave the runtime's own
 // stack trace on the console and exit with 0xE0434352, which tells an operator nothing and tells
@@ -20,29 +35,25 @@ OutputCulture.Apply();
 // distinguishes "try again later" from "this input will never work".
 try
 {
-    return await RunAsync(args);
+    return await RunAsync(args, machineReadable);
 }
 catch (OperationCanceledException)
 {
-    Console.Error.WriteLine("localai: " + CliText.RunCancelled);
-    return 130;
+    return Failed("run_cancelled", CliText.RunCancelled, 130);
 }
 catch (EmbeddingUnavailableException exception)
 {
-    Console.Error.WriteLine($"localai: {exception.Message}");
-    return 75;
+    return Failed("broker_unavailable", exception.Message, 75);
 }
 catch (RepositorySyncBusyException exception)
 {
     // The same "try again later" family as an unreachable embedder: the other run is doing
     // this run's work, and a hook or script must be able to tell that from a real fault.
-    Console.Error.WriteLine($"localai: {exception.Message}");
-    return 75;
+    return Failed("sync_busy", exception.Message, 75);
 }
 catch (EmbeddingChunkException exception)
 {
-    Console.Error.WriteLine($"localai: {exception.Message}");
-    return 65;
+    return Failed("chunk_rejected", exception.Message, 65);
 }
 catch (Exception exception)
 {
@@ -51,12 +62,67 @@ catch (Exception exception)
     // that one anonymous line cost five reproduction attempts without finding the cause
     // (#139). An unexpected failure is precisely the one whose message cannot be trusted
     // to identify itself.
-    Console.Error.WriteLine($"localai: {UnexpectedFailure.Describe(exception)}");
-    return 70;
+    return Failed("unexpected_failure", UnexpectedFailure.Describe(exception), 70);
 }
 
-static async Task<int> RunAsync(string[] args)
+// One refusal, two faces. The prose keeps the `localai:` prefix it has always had; the envelope
+// goes to stdout, because a caller that asked for JSON should never have to read stderr to find
+// out what happened.
+static int Refuse(string command, CommandRefusal refused, bool machine)
 {
+    if (machine)
+    {
+        Console.WriteLine(
+            MachineOutput.Refusal(command, refused.Code, refused.Message));
+    }
+    else
+    {
+        Console.Error.WriteLine(refused.Message);
+    }
+
+    return 2;
+}
+
+int Failed(string code, string message, int exitCode)
+{
+    if (machineReadable)
+    {
+        Console.WriteLine(MachineOutput.Refusal(MachineOutput.CommandPath(args), code, message));
+    }
+    else
+    {
+        Console.Error.WriteLine($"localai: {message}");
+    }
+
+    return exitCode;
+}
+
+static async Task<int> RunAsync(string[] args, bool machineReadable)
+{
+    if (MachineOutput.Requested(args))
+    {
+        var asked = MachineOutput.CommandPath(args);
+        if (asked.Length == 0)
+        {
+            Console.WriteLine(MachineOutput.Refusal(
+                asked,
+                "command_unknown",
+                CliUsage.Text));
+            return 2;
+        }
+
+        if (!MachineOutput.Supports(asked))
+        {
+            Console.WriteLine(MachineOutput.Refusal(
+                asked,
+                "json_not_supported",
+                CliText.JsonNotSupported(asked)));
+            return 2;
+        }
+
+        args = MachineOutput.Without(args);
+    }
+
     if (args is ["model", .. var modelArguments])
     {
         using var processLifetime = new CancellationTokenSource();
@@ -110,10 +176,9 @@ static async Task<int> RunAsync(string[] args)
         if (!RepoCommand.TryParseStatusArguments(
                 args.AsSpan(2).ToArray(),
                 out var target,
-                out var parseError))
+                out var refusal))
         {
-            Console.Error.WriteLine(parseError);
-            return 2;
+            return Refuse("repo status", refusal!, machineReadable);
         }
 
         string commonDirectory;
@@ -132,8 +197,16 @@ static async Task<int> RunAsync(string[] args)
                 // failure this replaces reported a configured repository as unconfigured, so
                 // "there is no repository here" has to be distinguishable from "this one is
                 // not set up yet".
-                Console.Error.WriteLine(CliText.RepositoryOutsideGit(directory));
-                return 2;
+                // Not `not_a_git_repository`: this catch also takes any non-zero git exit
+                // and a git that would not start, so the code says what was established rather
+                // than the usual cause of it. It is also not NOT_CONFIGURED, which is the
+                // opposite situation — a repository resolved, and LocalAi not knowing it (#94).
+                return Refuse(
+                    "repo status",
+                    new CommandRefusal(
+                        "repository_not_resolved",
+                        CliText.RepositoryOutsideGit(directory)),
+                    machineReadable);
             }
         }
         else
@@ -141,16 +214,21 @@ static async Task<int> RunAsync(string[] args)
             commonDirectory = target.Path!;
             if (!Directory.Exists(commonDirectory))
             {
-                Console.Error.WriteLine(
-                    CliText.RepositoryPathNotDirectory(commonDirectory));
-                return 2;
+                return Refuse(
+                    "repo status",
+                    new CommandRefusal(
+                        "directory_missing",
+                        CliText.RepositoryPathNotDirectory(commonDirectory)),
+                    machineReadable);
             }
         }
 
-        Console.WriteLine(
-            RepoCommand.Status(
-                commonDirectory,
-                ModelResidencyPolicyStore.DefaultRuntimeRoot).Message);
+        var status = RepoCommand.Status(
+            commonDirectory,
+            ModelResidencyPolicyStore.DefaultRuntimeRoot);
+        Console.WriteLine(machineReadable
+            ? MachineOutput.Answer("repo status", RepoCommand.MachineStatus(status))
+            : status.Message);
         return 0;
     }
 

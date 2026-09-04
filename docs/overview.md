@@ -508,6 +508,62 @@ it. It never touches the active version pointer or the current index generation,
 collects the overlays no live worktree is on — leaving a repository's overlays alone whenever
 it cannot establish which worktrees those are.
 
+### 8.1 Answering a program
+
+Everything above is written for a person, and since the console learned to follow the reader's
+language it cannot also be a contract: a parser would break the first time it ran on a Russian
+machine. `--json` is the other face. It is for an editor plugin, a script or a scheduled task —
+anything that reads the answer rather than looks at it.
+
+One envelope, whatever the command:
+
+| Field | |
+| --- | --- |
+| `schema` | the envelope's version, an integer. Adding a field does not change it; removing, renaming or retyping one does |
+| `command` | the command as typed, without its options — `repo status`. Empty only when none was given |
+| `ok` | whether the run succeeded, mirroring the exit code |
+| `data` | the command's own answer. Absent when `ok` is false |
+| `error` | `code` and `message`. Absent when `ok` is true |
+
+**`--json` also fixes the language to English.** Output that is versioned cannot follow the
+machine it came from, so the flag decides both. A reader who set `LOCALAI_LANGUAGE=ru` and then
+asked for JSON gets Russian prose everywhere else and an English envelope here, and that is the
+intended behaviour rather than a defect. One exception is worth knowing: a Windows error carried
+by `Win32Exception` takes its words from the operating system, so those failures are given a code
+and a sentence of LocalAi's own before they can reach the envelope.
+
+**`code` is for branching, `message` is for showing to a person.** Never parse `message`; it is
+reworded whenever it turns out to be unclear, and that is not a change to the schema. The codes
+are `subject_state` — `root_value_missing`, `repository_ambiguous`, `argument_unknown` — and they
+never name the command, because the envelope already carries it and the same refusal recurs across
+commands.
+
+**Exit codes are unchanged**, and `ok` follows the exit code rather than the outcome. The
+difference is not academic: `localai sync` prints `REFUSED …` and exits 0 on purpose, because a
+run that correctly declined to do something did exactly what it was asked. That run is `ok: true`
+with the refusal inside `data`.
+
+**Commands that do not answer `--json` refuse it** rather than printing prose, so the promise
+holds without exception: if the flag was passed, standard output is an envelope. The usage block
+marks the commands that take it with `[--json]`, and today that is `localai repo status`:
+
+```json
+{"schema":1,"command":"repo status","ok":true,"data":{"repositoryId":"0ecc9019…","commonDirectory":"R:\\LOCALAI\\.GIT","status":"CONFIGURED"}}
+```
+
+| `data` | |
+| --- | --- |
+| `repositoryId` | the identity every runtime directory is named by, and what `SYNCED repository=` prints |
+| `commonDirectory` | which repository this answer is about — the identity spelling: absolute, native separators, upper-cased on Windows. A plugin comparing it against its own workspace path must do so case-insensitively |
+| `status` | `CONFIGURED` or `NOT_CONFIGURED`, the same token the prose prints |
+
+The prose sentence does not travel in `data`. It is an instruction to an agent, it is reworded
+whenever it is wrong, and a versioned contract is the wrong place for it.
+
+One thing that predates this flag: `localai model` has always printed a JSON envelope of its own,
+with no flag and no prose face, and its version field is `schemaVersion` rather than `schema`.
+The two are unrelated shapes; the field name is what tells them apart.
+
 ---
 
 ## 9. Installing and updating

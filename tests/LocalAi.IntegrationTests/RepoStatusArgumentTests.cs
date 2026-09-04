@@ -13,9 +13,9 @@ public sealed class RepoStatusArgumentTests
     [Fact]
     public void No_arguments_means_the_current_directory_resolved_through_git()
     {
-        Assert.True(RepoCommand.TryParseStatusArguments([], out var target, out var error));
+        Assert.True(RepoCommand.TryParseStatusArguments([], out var target, out var refusal));
 
-        Assert.Null(error);
+        Assert.Null(refusal);
         Assert.Null(target.Path);
         Assert.True(target.ResolveThroughGit);
     }
@@ -26,9 +26,9 @@ public sealed class RepoStatusArgumentTests
         Assert.True(RepoCommand.TryParseStatusArguments(
             ["--root", @"R:\Repo"],
             out var target,
-            out var error));
+            out var refusal));
 
-        Assert.Null(error);
+        Assert.Null(refusal);
         Assert.Equal(@"R:\Repo", target.Path);
         Assert.True(target.ResolveThroughGit);
     }
@@ -39,9 +39,9 @@ public sealed class RepoStatusArgumentTests
         Assert.True(RepoCommand.TryParseStatusArguments(
             [@"R:\Repo\.git"],
             out var target,
-            out var error));
+            out var refusal));
 
-        Assert.Null(error);
+        Assert.Null(refusal);
         Assert.Equal(@"R:\Repo\.git", target.Path);
         Assert.False(target.ResolveThroughGit);
     }
@@ -55,17 +55,17 @@ public sealed class RepoStatusArgumentTests
         Assert.False(RepoCommand.TryParseStatusArguments(
             [argument],
             out _,
-            out var error));
+            out var refusal));
 
-        Assert.Contains(argument, error);
+        Assert.Contains(argument, refusal!.Message);
     }
 
     [Fact]
     public void A_root_without_a_directory_is_refused()
     {
-        Assert.False(RepoCommand.TryParseStatusArguments(["--root"], out _, out var error));
+        Assert.False(RepoCommand.TryParseStatusArguments(["--root"], out _, out var refusal));
 
-        Assert.Contains("requires a directory", error);
+        Assert.Contains("requires a directory", refusal!.Message);
     }
 
     [Fact]
@@ -82,8 +82,8 @@ public sealed class RepoStatusArgumentTests
 
     private static void AssertRefusesTwo(string[] arguments)
     {
-        Assert.False(RepoCommand.TryParseStatusArguments(arguments, out _, out var error));
+        Assert.False(RepoCommand.TryParseStatusArguments(arguments, out _, out var refusal));
 
-        Assert.Contains("one repository", error);
+        Assert.Contains("one repository", refusal!.Message);
     }
 }
