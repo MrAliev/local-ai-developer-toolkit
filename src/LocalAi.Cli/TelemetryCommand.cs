@@ -1,4 +1,5 @@
 using LocalAi.Broker;
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalLm.Core;
 using System.Globalization;
@@ -106,16 +107,16 @@ public static class TelemetryCommand
         {
             // Not a failure and not an error: a runtime that has never been asked to run anything
             // locally has nothing to report, and so does one whose records have all aged out.
-            text.AppendLine(
-                $"No job telemetry under {runtimeRoot}. Nothing has been delegated here, or " +
-                "everything recorded has passed its retention.");
-            AppendUnreadable(text, summary);
+            text.AppendLine(summary.Unreadable > 0
+                ? CliText.TelemetryNoneUnreadable(runtimeRoot)
+                : CliText.TelemetryNone(runtimeRoot));
             return text.ToString();
         }
 
-        text.AppendLine(
-            $"{summary.Jobs} job(s) recorded between " +
-            $"{Moment(summary.Earliest)} and {Moment(summary.Latest)}.");
+        text.AppendLine(CliText.TelemetryRecorded(
+            summary.Jobs,
+            Moment(summary.Earliest),
+            Moment(summary.Latest)));
         AppendUnreadable(text, summary);
         text.AppendLine();
         text.AppendLine(
@@ -137,12 +138,13 @@ public static class TelemetryCommand
         text.AppendLine($"queue       {Latencies(summary.Queue)}");
         text.AppendLine($"execution   {Latencies(summary.Execution)}");
         text.AppendLine(
-            $"saved       {TokenEstimator.DescribeRange(summary.NetTokensSaved)} cloud tokens " +
-            $"net, of {TokenEstimator.DescribeRange(summary.GrossTokensSaved)} gross " +
-            $"({TokenEstimator.DescribeRange(summary.VerificationTokens)} spent verifying)");
+            "saved       " + CliText.TelemetrySaved(
+                TokenEstimator.DescribeRange(summary.NetTokensSaved),
+                TokenEstimator.DescribeRange(summary.GrossTokensSaved),
+                TokenEstimator.DescribeRange(summary.VerificationTokens)));
 
-        AppendBreakdown(text, "by model", summary.ByModel);
-        AppendBreakdown(text, "by task profile", summary.ByProfile);
+        AppendBreakdown(text, CliText.TelemetryByModel, summary.ByModel);
+        AppendBreakdown(text, CliText.TelemetryByProfile, summary.ByProfile);
         return text.ToString();
     }
 
@@ -173,10 +175,11 @@ public static class TelemetryCommand
                 entry.Failures * 2 >= totalFailures)
             .OrderByDescending(entry => entry.Failures)
             .Select(entry =>
-                $"attention   {entry.Row.Name} fails " +
-                $"{Percent(entry.Failures, entry.Row.Jobs)} of its jobs — " +
-                $"{entry.Failures} of the {totalFailures} failure(s) recorded; " +
-                "see the by-model table")
+                "attention   " + CliText.TelemetryFailureOutlier(
+                    entry.Row.Name,
+                    Percent(entry.Failures, entry.Row.Jobs),
+                    entry.Failures,
+                    totalFailures))
             .ToArray();
     }
 
@@ -185,8 +188,7 @@ public static class TelemetryCommand
         if (summary.Unreadable > 0)
         {
             text.AppendLine(
-                $"{summary.Unreadable} record(s) could not be read and are not counted in " +
-                "anything below.");
+                CliText.TelemetryUnreadable(summary.Unreadable));
         }
     }
 

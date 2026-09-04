@@ -42,13 +42,6 @@ public sealed class BootstrapTests : IDisposable
     }
 
     [Fact]
-    public void Bootstrap_requires_explicit_acceptance()
-    {
-        Assert.Throws<InvalidOperationException>(
-            () => BootstrapCommand.RequireAcceptance(accept: false));
-    }
-
-    [Fact]
     public void Bootstrap_plans_model_sync_only_through_mcp()
     {
         var plan = BootstrapCommand.Plan(
@@ -89,7 +82,7 @@ public sealed class BootstrapTests : IDisposable
 
         Assert.True(plan.Repository.Configured);
         Assert.Single(plan.Changes);
-        Assert.Contains("already configured", plan.Changes[0]);
+        Assert.Contains("already connected", plan.Changes[0]);
     }
 
     public void Dispose()

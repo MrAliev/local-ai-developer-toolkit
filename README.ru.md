@@ -302,7 +302,7 @@ dotnet restore LocalAi.slnx
 dotnet test LocalAi.slnx --configuration Release --no-restore
 ```
 
-Проверьте синхронизацию репозитория без применения внешней настройки:
+Посмотрите, что входит в подключение репозитория и в каком состоянии этот. Ни одна из команд ничего не меняет:
 
 ```powershell
 dotnet run --project src/LocalAi.Cli -- bootstrap --dry-run

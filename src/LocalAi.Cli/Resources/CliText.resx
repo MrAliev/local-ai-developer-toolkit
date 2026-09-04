@@ -47,6 +47,36 @@
   <data name="AdaptersFailed" xml:space="preserve">
     <value>Semantic generation was not published because required adapters failed: {0}</value>
   </data>
+  <data name="BootstrapAlreadyConnected" xml:space="preserve">
+    <value>This repository is already connected; nothing here needs setting up.</value>
+    <comment>connected rather than configured: RepositoryNotConnected already settled that word, and lowercase configured is neither the CONFIGURED status token nor house prose.</comment>
+  </data>
+  <data name="BootstrapDryRun" xml:space="preserve">
+    <value>--dry-run: nothing was changed. This command only lists what connecting a repository involves; each step is done by the installer or by a command of its own.</value>
+    <comment>Deliberately not PruneDryRun: that one promises what a run without the flag would reclaim, and this command has no spelling without the flag at all.</comment>
+  </data>
+  <data name="BootstrapStepClients" xml:space="preserve">
+    <value>Register CodeSearch and LocalLm through the stable launcher in Claude and Codex.</value>
+  </data>
+  <data name="BootstrapStepHooks" xml:space="preserve">
+    <value>Install the shared LocalAi Git hooks. Hooks already here are kept and called first.</value>
+    <comment>The old wording named a chained dispatcher and compatibility checks, neither of which this file explains. HooksInstalled and HooksChained already say it in both languages.</comment>
+  </data>
+  <data name="BootstrapStepInitializing" xml:space="preserve">
+    <value>Set the state to INITIALIZING until a verified mainline generation exists.</value>
+    <comment>INITIALIZING is a state token and stays Latin.</comment>
+  </data>
+  <data name="BootstrapStepLegacyKept" xml:space="preserve">
+    <value>Models and profiles already installed are left alone.</value>
+    <comment>Five lines address the machine; this one addressed the reader as an order. In a list somebody consents to, a promise about what will not happen has to read as one.</comment>
+  </data>
+  <data name="BootstrapStepModels" xml:space="preserve">
+    <value>Synchronize recommended models through the local_models_sync MCP tool.</value>
+  </data>
+  <data name="BootstrapStepState" xml:space="preserve">
+    <value>Create LocalAi state for repository {0} under the runtime root.</value>
+    <comment>The bare identifier used to stand alone with nothing saying what it was.</comment>
+  </data>
   <data name="BrokerAlive" xml:space="preserve">
     <value>process {0}, heartbeat {1}s ago</value>
   </data>
@@ -327,6 +357,36 @@
   <data name="SyncInlineLimitInvalid" xml:space="preserve">
     <value>localai: invalid --max-inline-files; expected a non-negative integer, for example: --max-inline-files 200</value>
     <comment>The prefix stays in the value: this line is not in the guard and owns its whole line. No hole, because the flag can be the last argument with no value at all. No trailing full stop — the line ends in a command somebody copies. The Russian reuses PolicyKeepAliveInvalid's wording, and the code accepts zero, so it says non-negative.</comment>
+  </data>
+  <data name="TelemetryByModel" xml:space="preserve">
+    <value>by model</value>
+  </data>
+  <data name="TelemetryByProfile" xml:space="preserve">
+    <value>by task profile</value>
+  </data>
+  <data name="TelemetryFailureOutlier" xml:space="preserve">
+    <value>{0} fails {1} of its jobs — {2} of the {3} failure(s) recorded.</value>
+    <comment>The old tail pointed at a table four lines below that states the complementary fact: the line says 30% fail, the table says 70% ok. 0 is a model name and stays Latin.</comment>
+  </data>
+  <data name="TelemetryNone" xml:space="preserve">
+    <value>No job telemetry under {0}. Nothing has been delegated here, or everything recorded has passed its retention.</value>
+    <comment>Split from TelemetryNoneUnreadable: the empty report used to print this and then say that some records could not be read, which is proof that something was delegated.</comment>
+  </data>
+  <data name="TelemetryNoneUnreadable" xml:space="preserve">
+    <value>No job telemetry could be read under {0}. Every record found there is unreadable, so what was delegated here cannot be said.</value>
+    <comment>The other half of the split. Only the cause tells the reader whether the empty verdict is right.</comment>
+  </data>
+  <data name="TelemetryRecorded" xml:space="preserve">
+    <value>{0} job(s) recorded between {1} and {2} UTC.</value>
+    <comment>Noun-first in Russian. UTC is named because the timestamps are UtcDateTime and a reader three hours ahead read the range as local and concluded the report was stale.</comment>
+  </data>
+  <data name="TelemetrySaved" xml:space="preserve">
+    <value>{0} cloud tokens net, of {1} gross ({2} spent verifying)</value>
+    <comment>The three holes are token bands whose K and M suffix is a number's unit and stays invariant. Vocabulary from docs/overview.ru.md.</comment>
+  </data>
+  <data name="TelemetryUnreadable" xml:space="preserve">
+    <value>{0} record(s) could not be read and are not counted in anything below.</value>
+    <comment>Only ever printed with a table under it, which is what makes 'below' true. Noun-first.</comment>
   </data>
   <data name="UpdateAvailable" xml:space="preserve">
     <value>{0} is available; this installation is {1}. {2}</value>
