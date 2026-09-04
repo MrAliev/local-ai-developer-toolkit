@@ -426,6 +426,22 @@ public static class CliText
     public static string ReadImageProfileNotSupported(string profile, string accepted) =>
         Catalogue.Format(nameof(ReadImageProfileNotSupported), profile, accepted);
 
+    public static string TranslateLanguageMissing(string usage) =>
+        Catalogue.Format(nameof(TranslateLanguageMissing), usage);
+
+    public static string TranslateNoSource(string usage) =>
+        Catalogue.Format(nameof(TranslateNoSource), usage);
+
+    public static string TranslateEmptyInput => Catalogue.Get(nameof(TranslateEmptyInput));
+
+    public static string TranslateOneText(string usage) =>
+        Catalogue.Format(nameof(TranslateOneText), usage);
+
+    public static string TranslateWriteDocument => Catalogue.Get(nameof(TranslateWriteDocument));
+
+    public static string OutputNotWritten(string path, string reason) =>
+        Catalogue.Format(nameof(OutputNotWritten), path, reason);
+
     public static string RepoStatusRootWithoutDirectory => Catalogue.Get(nameof(RepoStatusRootWithoutDirectory));
 
     public static string RepoStatusTwoRepositories => Catalogue.Get(nameof(RepoStatusTwoRepositories));

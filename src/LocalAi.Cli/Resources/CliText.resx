@@ -170,6 +170,10 @@
     <value>localai {0} needs a value after {1}. Usage: {2}</value>
     <comment>{1} is an option name and stays Latin. RepoStatusRootWithoutDirectory keeps its own wording rather than folding in here: 'needs a directory' says what to type, and 'needs a value' does not.</comment>
   </data>
+  <data name="OutputNotWritten" xml:space="preserve">
+    <value>The translation could not be written to '{0}': {1}</value>
+    <comment>{1} is the framework's own message for the failure, English under the --json pin and the machine's language otherwise.</comment>
+  </data>
   <data name="OverlayDegraded" xml:space="preserve">
     <value>Semantic overlay for '{0}' is degraded: {1}. Files this worktree changed are cut by line window until the adapter works again; the base generation is unaffected.</value>
   </data>
@@ -465,6 +469,25 @@
   <data name="TelemetryUnreadable" xml:space="preserve">
     <value>{0} record(s) could not be read and are not counted in anything below.</value>
     <comment>Only ever printed with a table under it, which is what makes 'below' true. Noun-first.</comment>
+  </data>
+  <data name="TranslateEmptyInput" xml:space="preserve">
+    <value>Nothing arrived on stdin, so there is nothing to translate.</value>
+    <comment>Mirrors TriageEmptyInput in shape deliberately: the same mistake in two commands should read as a pair. Shares the code source_missing with TranslateNoSource.</comment>
+  </data>
+  <data name="TranslateLanguageMissing" xml:space="preserve">
+    <value>localai translate needs both --from and --to, as language names: --from English --to Russian. Usage: {0}</value>
+    <comment>The example is the only warning a reader gets that a code does not work: the value is interpolated into the prompt verbatim, and the attribution paragraph picks its language by looking for Russian in the target, so --to ru produces an English attribution on a Russian document rather than failing.</comment>
+  </data>
+  <data name="TranslateNoSource" xml:space="preserve">
+    <value>localai translate needs text: give it as an argument, or pipe it in. Usage: {0}</value>
+  </data>
+  <data name="TranslateOneText" xml:space="preserve">
+    <value>localai translate takes one text, not two. Usage: {0}</value>
+    <comment>The sibling of TriageOneLog, and the same code: source_ambiguous fires for three as well, and what the reader can act on is that the command could not tell which was meant.</comment>
+  </data>
+  <data name="TranslateWriteDocument" xml:space="preserve">
+    <value>The answer was redirected, so it carries provenance markers. Write the document itself with --out &lt;file&gt;.</value>
+    <comment>Printed to stderr beside the notice, only when the answer was redirected and --out was not given. Discoverability is what --out costs, and this line is what pays it.</comment>
   </data>
   <data name="TriageEmptyInput" xml:space="preserve">
     <value>Nothing arrived on stdin, so there is no log to triage.</value>

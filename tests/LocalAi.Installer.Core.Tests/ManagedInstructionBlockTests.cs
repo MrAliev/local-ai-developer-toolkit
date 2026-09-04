@@ -298,7 +298,15 @@ public sealed class ManagedInstructionBlockTests
     {
         // Larger on purpose, and chosen rather than drifted into: the split saved characters for
         // Claude and spent them here.
-        const int budget = 13_000;
+        //
+        // Raised from 13_000 once, on purpose. The MCP-down section stopped covering one tool
+        // and started covering five, and a command line for read_image or triage_log is what
+        // stands between a dead MCP server and a screenshot sent to the cloud at ~1.5K tokens
+        // instead of ~0.2K. The block was eight characters under the old limit, so this was not
+        // drift: it was one change that argued for its length, after the section had already
+        // been cut to the shortest form that keeps every rule in it. The next one argues the
+        // same way, or prunes.
+        const int budget = 13_600;
 
         var measured = ManagedInstructionBlock.CodexBlock.Length
             - ManagedInstructionBlock.CodexBlock.Count(character => character == (char)13);

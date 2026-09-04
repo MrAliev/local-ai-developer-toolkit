@@ -81,7 +81,7 @@ internal static class MachineOutput
     /// without parsing, and parsing is the thing this exists to remove.
     /// </summary>
     private static readonly string[] Commands =
-        ["repo status", "ask", "triage", "read-image"];
+        ["repo status", "ask", "triage", "read-image", "translate"];
 
     public static bool Supports(string commandPath) =>
         Commands.Contains(commandPath, StringComparer.Ordinal);
