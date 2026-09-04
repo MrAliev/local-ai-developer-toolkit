@@ -13,6 +13,19 @@ namespace LocalAi.Broker.Tests;
 
 public sealed class BrokerRecoveryTests
 {
+    /// <summary>
+    /// A guard against a hang, not a measurement.
+    ///
+    /// These tests are about ordering and recovery, and most of them drive a manual clock, so
+    /// nothing here should take a second of real time. The number exists only so a deadlock
+    /// fails the run instead of hanging it — and it is large because a deadline a correct run
+    /// can miss reports itself as a fault in the code under test, which is how #322 spent a
+    /// re-run and an investigation on a test that was not wrong about the broker.
+    ///
+    /// The lease duration below is not this: that one is the subject of its test.
+    /// </summary>
+    private static readonly TimeSpan Guard = TimeSpan.FromMinutes(2);
+
     [Fact]
     public async Task Heartbeat_extends_lease_and_expired_lease_is_recovered()
     {
@@ -117,7 +130,7 @@ public sealed class BrokerRecoveryTests
         var clock = new ManualTimeProvider(
             new DateTimeOffset(2026, 7, 29, 8, 0, 0, TimeSpan.Zero));
         var queue = new DurableQueue(root.Path, clock);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var unloadCalls = 0;
         var host = new BrokerHost(
             queue,
@@ -149,7 +162,7 @@ public sealed class BrokerRecoveryTests
     {
         using var root = new TemporaryRuntimeRoot();
         var queue = new DurableQueue(root.Path);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var unloadCalls = 0;
         var host = new BrokerHost(
             queue,
@@ -178,7 +191,7 @@ public sealed class BrokerRecoveryTests
         var startedAt = new DateTimeOffset(2026, 7, 29, 8, 0, 0, TimeSpan.Zero);
         var clock = new ManualTimeProvider(startedAt);
         var queue = new DurableQueue(root.Path, clock);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var unloadCalls = 0;
         DateTimeOffset? unloadedAt = null;
         var host = new BrokerHost(
@@ -248,7 +261,7 @@ public sealed class BrokerRecoveryTests
         var queuedCandidate = Assert.Single(
             await queue.ListQueuedAsync(TestContext.Current.CancellationToken));
         var residentModel = resolver.Resolve(queuedCandidate).Model;
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var idleCycles = 0;
         var unloadCalls = 0;
         var host = new BrokerHost(
@@ -298,7 +311,7 @@ public sealed class BrokerRecoveryTests
         var resolver = new ScheduleMetadataResolver(
             ModelRoutingCatalog.LoadEmbedded(),
             new DurationEstimator());
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var unloadCalls = 0;
         var host = new BrokerHost(
             queue,
@@ -360,7 +373,7 @@ public sealed class BrokerRecoveryTests
     [Fact]
     public async Task BrokerHost_synchronous_cooperative_host_cancellation_cancels_not_fails()
     {
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var queue = new ScriptedBrokerQueue(TestLease("sync-cancel", "worker"))
         {
             OnLease = stop.Cancel
@@ -386,7 +399,7 @@ public sealed class BrokerRecoveryTests
     [Fact]
     public async Task BrokerHost_abandons_lost_lease_cancels_attempt_and_continues()
     {
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var first = TestLease("lost", "worker");
         var second = TestLease("recovered", "worker");
         var queue = new ScriptedBrokerQueue(first, second)
@@ -432,7 +445,7 @@ public sealed class BrokerRecoveryTests
     [Fact]
     public async Task BrokerHost_unexpected_heartbeat_fault_cancels_attempt_reports_and_fails_fast()
     {
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var lease = TestLease("heartbeat-io", "worker");
         var queue = new ScriptedBrokerQueue(lease)
         {
@@ -482,7 +495,7 @@ public sealed class BrokerRecoveryTests
     [Fact]
     public async Task BrokerHost_watchdog_fails_only_after_confirmed_unhealthy_probes()
     {
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var lease = TestLease("watchdog-unhealthy", "worker");
         var queue = new ScriptedBrokerQueue(lease);
         var executionCancelled = new TaskCompletionSource(
@@ -537,7 +550,7 @@ public sealed class BrokerRecoveryTests
     [Fact]
     public async Task BrokerHost_watchdog_never_times_out_a_healthy_long_running_job()
     {
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var lease = TestLease("watchdog-healthy", "worker");
         var queue = new ScriptedBrokerQueue(lease);
         var probes = 0;
@@ -585,7 +598,7 @@ public sealed class BrokerRecoveryTests
     [InlineData(false)]
     public async Task BrokerHost_executor_failure_calls_fail_once_and_continues(bool synchronous)
     {
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var queue = new ScriptedBrokerQueue(
             TestLease("failure", "worker"),
             TestLease("next", "worker"));
@@ -622,7 +635,7 @@ public sealed class BrokerRecoveryTests
     public async Task BrokerHost_terminal_write_failure_reports_bounded_diagnostic_and_continues(
         string operation)
     {
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var stop = new CancellationTokenSource(Guard);
         var queue = new ScriptedBrokerQueue(
             TestLease("first-write", "worker"),
             TestLease("second-write", "worker"))
