@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using CodeSearch.Core.Resources;
 
 namespace CodeSearch.Core.Search;
 
@@ -105,7 +106,7 @@ public sealed record SearchChunkId(
         {
             throw new SearchChunkIdException(
                 "chunk_id_tampered",
-                "The chunk id digest does not match its payload.");
+                IndexText.ChunkIdTampered);
         }
 
         try
@@ -201,7 +202,7 @@ public sealed record SearchChunkId(
     }
 
     private static SearchChunkIdException Malformed() =>
-        new("chunk_id_malformed", "The chunk id is malformed.");
+        new("chunk_id_malformed", IndexText.ChunkIdMalformed);
 }
 
 public sealed class SearchChunkIdException(string code, string message)
@@ -225,9 +226,7 @@ public static class SearchChunkResolver
                 actual.RepositoryId,
                 StringComparison.Ordinal))
         {
-            throw Mismatch(
-                "wrong_repository",
-                "The chunk id belongs to another repository.");
+            throw Mismatch("wrong_repository", IndexText.ChunkWrongRepository);
         }
 
         if (!string.Equals(
@@ -235,23 +234,17 @@ public static class SearchChunkResolver
                 actual.GenerationId,
                 StringComparison.Ordinal))
         {
-            throw Mismatch(
-                "stale_generation",
-                "The chunk id belongs to a generation that is no longer active.");
+            throw Mismatch("stale_generation", IndexText.ChunkStaleGeneration);
         }
 
         if (!string.Equals(expected.GitTree, actual.GitTree, StringComparison.Ordinal))
         {
-            throw Mismatch(
-                "stale_worktree",
-                "The worktree tree changed after this chunk id was issued.");
+            throw Mismatch("stale_worktree", IndexText.ChunkStaleWorktree);
         }
 
         if (!string.Equals(expected.DirtyHash, actual.DirtyHash, StringComparison.Ordinal))
         {
-            throw Mismatch(
-                "stale_overlay",
-                "The worktree overlay changed after this chunk id was issued.");
+            throw Mismatch("stale_overlay", IndexText.ChunkStaleOverlay);
         }
     }
 
@@ -259,13 +252,19 @@ public static class SearchChunkResolver
     {
         if (id.Ordinal < 0 || id.Ordinal >= chunkCount)
         {
-            throw Mismatch(
-                "chunk_out_of_range",
-                "The chunk ordinal is outside the exact index snapshot.");
+            throw Mismatch("chunk_out_of_range", IndexText.ChunkOutOfRange);
         }
     }
 
-    private static SearchChunkResolutionException Mismatch(
+    /// <summary>
+    /// The one place a chunk refusal is composed: the code, then the sentence.
+    ///
+    /// The code stays Latin and is what a caller branches on; the sentence follows the reader.
+    /// Composing here rather than in each message keeps the code out of the catalogue, where it
+    /// would have become a token inside a translated string and a second spelling of a fact the
+    /// exception already carries.
+    /// </summary>
+    public static SearchChunkResolutionException Mismatch(
         string code,
         string message) =>
         new(code, $"{code}: {message}");

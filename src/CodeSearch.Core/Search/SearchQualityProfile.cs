@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using CodeSearch.Core.Resources;
 
 namespace CodeSearch.Core.Search;
 
@@ -37,8 +38,7 @@ public sealed record SearchQualityProfile(
             return profile;
         }
 
-        throw new SearchNotReadyException(
-            $"Semantic relevance threshold not calibrated for embedding model '{model}'.");
+        throw new SearchNotReadyException(IndexText.ModelNotCalibrated(model));
     }
 
     public static SearchOptions Resolve(string model, SearchOptions options)

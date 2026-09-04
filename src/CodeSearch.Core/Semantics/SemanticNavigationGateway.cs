@@ -1,4 +1,5 @@
 using CodeSearch.Core.Indexing;
+using CodeSearch.Core.Resources;
 using LocalAi.Repository;
 
 namespace CodeSearch.Core.Semantics;
@@ -7,8 +8,26 @@ public sealed record SemanticNavigationContext(
     SemanticNavigationService Service,
     SemanticSnapshotIdentity Snapshot);
 
-public sealed class SemanticNavigationNotReadyException(string message)
-    : InvalidOperationException(message);
+/// <summary>
+/// Why navigation could not answer precisely, in words meant for the reader.
+///
+/// The inner exception is the one this replaced in the sentence. None of the twenty ways a
+/// semantic index can be unreadable changes what the reader does — the answer is a re-sync in all
+/// of them — and "Semantic index ended inside a document hash." is not a sentence to put in front
+/// of anybody. It is kept here because a debugger still wants it.
+/// </summary>
+public sealed class SemanticNavigationNotReadyException : InvalidOperationException
+{
+    public SemanticNavigationNotReadyException(string message)
+        : base(message)
+    {
+    }
+
+    public SemanticNavigationNotReadyException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
 
 /// <summary>
 /// A navigation answer together with the reason it is not the precise one, when it is not.
@@ -295,9 +314,7 @@ public sealed class SemanticNavigationGateway
     /// and simply has nothing at that position. Worth distinguishing from a missing index, because
     /// only one of the two is fixed by re-syncing.
     /// </summary>
-    private const string EmptyPreciseResult =
-        "The semantic index has no symbol at this position, so these are bounded text matches " +
-        "rather than resolved references.";
+    private static string EmptyPreciseResult => IndexText.NoSymbolAtPosition;
 
     private static string ResolveLiveRoot(string? root) =>
         root is null
@@ -311,12 +328,12 @@ public sealed class SemanticNavigationGateway
         var store = new GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent()
             ?? throw new SemanticNavigationNotReadyException(
-                "No current repository generation is published. Run localai sync first.");
+                IndexText.GenerationNotPublished(workingRoot));
         var manifest = store.ReadManifest(current.GenerationId);
         if (manifest.SemanticIndexFile is null)
         {
             throw new SemanticNavigationNotReadyException(
-                $"Generation '{current.GenerationId}' has no semantic.sidx. Rebuild it with semantic indexing enabled.");
+                IndexText.GenerationWithoutSemanticIndex(current.GenerationId, workingRoot));
         }
 
         var usesBaseSnapshot =
@@ -336,8 +353,8 @@ public sealed class SemanticNavigationGateway
             exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             throw new SemanticNavigationNotReadyException(
-                $"Semantic index for the current worktree snapshot is unavailable: {exception.Message}. " +
-                "Run localai sync to build it.");
+                IndexText.SemanticIndexUnreadable(current.GenerationId, workingRoot),
+                exception);
         }
 
         return new SemanticNavigationContext(

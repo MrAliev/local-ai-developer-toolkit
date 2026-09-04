@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
+using LocalAi.Contracts.Localization;
 using LocalAi.Contracts.Security;
 using CodeSearch.Core.Search;
 using LocalAi.Broker.Client;
@@ -14,6 +16,20 @@ using LocalAi.Repository;
 // Redirected stdout on Windows otherwise falls back to the legacy console codepage and mangles
 // every Cyrillic character - which matters, this codebase's comments are mostly Russian.
 ConsoleOutputText.UseUtf8();
+
+// English, for both faces, whatever machine this runs on.
+//
+// `CodeSearch.Core` now has a catalogue, so its refusals follow the reader — and this binary's own
+// prose is still English literals from end to end: `No matches.`, `Connected:`, `LEXICAL ONLY`.
+// Without a pin here, a Russian machine would get one Russian sentence inside an English answer,
+// which is worse than none, and `--json` would stop promising the same bytes everywhere. The MCP
+// server has no such problem: its own strings are catalogued, and it calls `Apply()` with no
+// argument, so its tools follow the reader.
+//
+// When this binary gets a catalogue of its own, the prose face follows the reader and this pin
+// narrows to `--json`, exactly as `localai` does it.
+OutputCulture.Apply("en", CultureInfo.CurrentUICulture);
+OutputCulture.PinInvariantFormatting();
 
 // Quality-first default, and it fits a single 16GB card - the bare `:8b` tag is Q4_K_M, and fp16
 // only runs by splitting across two GPUs, which this machine will not have for much longer.
@@ -30,9 +46,6 @@ var command = args[0].ToLowerInvariant();
 // Scanned as an option of its own, stepping over the value of any option before it: `codesearch
 // search --query "--json"` is an ordinary query. `localai` may scan its whole list, because
 // nothing there could plausibly take that literal as a value.
-//
-// No language is pinned here, unlike `localai`: this binary prints English literals and has no
-// catalogue to follow a reader. When it gains one, the pin belongs here.
 var machineReadable = MachineEnvelope.RequestedAsOption(args);
 if (machineReadable && !ConsoleJson.Supports(command))
 {

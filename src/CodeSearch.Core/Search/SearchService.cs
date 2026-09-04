@@ -3,6 +3,7 @@ using System.Runtime;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
+using CodeSearch.Core.Resources;
 using CodeSearch.Core.Semantics;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
@@ -176,7 +177,7 @@ public sealed class SearchService : IDisposable
         var workingRoot = RepoLocator.ResolveWorkingRoot(root).Value;
         var indexPath = RepoLocator.IndexPathFor(RepoLocator.ResolveRoot(root).Value, _runtimeRoot);
         var baseIndex = Load(indexPath);
-        RequireSnapshotIdentity(baseIndex);
+        RequireSnapshotIdentity(baseIndex, workingRoot);
 
         var searchable = Compose(baseIndex, workingRoot);
         var resolvedOptions = SearchQualityProfile.Resolve(baseIndex.Model, options);
@@ -278,9 +279,9 @@ public sealed class SearchService : IDisposable
         if (!CanonicalIndexText.Hash(sourceText).AsSpan().SequenceEqual(
                 searchable.FileHashAt(requested.Ordinal)))
         {
-            throw new SearchChunkResolutionException(
+            throw SearchChunkResolver.Mismatch(
                 "stale_source_content",
-                "stale_source_content: The source file no longer matches the indexed content.");
+                IndexText.ChunkSourceStaleContent);
         }
 
         var currentIdentity = RuntimeIndexLayout.Inspect(workingRoot, _runtimeRoot);
@@ -298,9 +299,9 @@ public sealed class SearchService : IDisposable
             meta.EndLine < meta.StartLine ||
             meta.EndLine > lines.Length)
         {
-            throw new SearchChunkResolutionException(
+            throw SearchChunkResolver.Mismatch(
                 "stale_source_range",
-                "stale_source_range: The indexed line range no longer exists in the source file.");
+                IndexText.ChunkSourceStaleRange);
         }
 
         var body = string.Join(
@@ -318,15 +319,14 @@ public sealed class SearchService : IDisposable
             body);
     }
 
-    private static void RequireSnapshotIdentity(CodeIndex index)
+    private static void RequireSnapshotIdentity(CodeIndex index, string workingRoot)
     {
         if (string.IsNullOrWhiteSpace(index.RepositoryId) ||
             string.IsNullOrWhiteSpace(index.GenerationId) ||
             string.IsNullOrWhiteSpace(index.GitTree))
         {
             throw new SearchNotReadyException(
-                "The CodeSearch index predates snapshot-bound chunk retrieval. " +
-                "Rebuild or migrate the index before searching.");
+                IndexText.IndexPredatesSnapshotIds(workingRoot));
         }
     }
 
@@ -334,19 +334,18 @@ public sealed class SearchService : IDisposable
         SourcePathFailure failure) =>
         failure switch
         {
-            SourcePathFailure.OutsideRoot => new(
+            SourcePathFailure.OutsideRoot => SearchChunkResolver.Mismatch(
                 "unsafe_chunk_path",
-                "unsafe_chunk_path: The indexed source path escapes the repository root."),
-            SourcePathFailure.ReparsePoint => new(
+                IndexText.ChunkPathOutsideRoot),
+            SourcePathFailure.ReparsePoint => SearchChunkResolver.Mismatch(
                 "unsafe_chunk_reparse_point",
-                "unsafe_chunk_reparse_point: The indexed source path contains a " +
-                "symbolic link or reparse point."),
-            SourcePathFailure.Missing => new(
+                IndexText.ChunkPathReparsePoint),
+            SourcePathFailure.Missing => SearchChunkResolver.Mismatch(
                 "chunk_source_missing",
-                "chunk_source_missing: The indexed source file no longer exists."),
-            _ => new(
+                IndexText.ChunkSourceMissing),
+            _ => SearchChunkResolver.Mismatch(
                 "chunk_source_unavailable",
-                "chunk_source_unavailable: The indexed source file is unavailable.")
+                IndexText.ChunkSourceUnavailable)
         };
 
     private static string QueryDeduplicationKey(CodeIndex index, string prompt)
@@ -373,7 +372,7 @@ public sealed class SearchService : IDisposable
                     StringComparison.Ordinal))
             {
                 throw new SearchNotReadyException(
-                    "The current index belongs to another repository.");
+                    IndexText.IndexBelongsToAnotherRepository(workingRoot));
             }
 
             if (string.Equals(baseIndex.GitTree, identity.HeadTree, StringComparison.Ordinal) &&
@@ -414,11 +413,12 @@ public sealed class SearchService : IDisposable
         return new CompositeIndex(baseIndex, Load(overlayPath));
     }
 
+    // It used to end "Diagnose/restart MCP, use the LocalAi CLI through the same broker, or
+    // continue with rg", which named nothing the reader could type — and contradicted
+    // ConsoleJson's own comment that this state is answered by syncing this worktree and that
+    // the message says so. Now it does.
     private static SearchNotReadyException MissingOverlay(string workingRoot) =>
-        new(
-            $"No exact current overlay exists for worktree '{workingRoot}'. " +
-            "Stale or mixed results are blocked. Diagnose/restart MCP, use the LocalAi " +
-            "CLI through the same broker, or continue with rg.");
+        new(IndexText.OverlayMissing(workingRoot));
 
     public IndexStatus Status(string? root)
     {
@@ -587,8 +587,10 @@ public sealed class SearchService : IDisposable
     {
         if (!File.Exists(indexPath))
         {
-            throw new FileNotFoundException(
-                $"No index at '{indexPath}'. Build it with: codesearch index --root <repo>", indexPath);
+            // `localai sync`, not `codesearch index`: the latter writes a file in place and
+            // publishes no generation, and both the MCP tool and this binary's own usage answer
+            // this identical state with the sync.
+            throw new FileNotFoundException(IndexText.IndexNotBuilt(indexPath), indexPath);
         }
 
         EvictIdle();

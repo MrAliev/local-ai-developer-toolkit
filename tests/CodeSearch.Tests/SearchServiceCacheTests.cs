@@ -63,6 +63,15 @@ public class SearchServiceCacheTests : IDisposable
         Assert.NotSame(first, service.Load(_indexPath));
     }
 
+    /// <summary>
+    /// The action it names is `localai sync`, and it used to be `codesearch index`.
+    ///
+    /// That was the less actionable of the two on a connected repository: `codesearch index`
+    /// writes an index file in place and publishes no generation, so it does not produce the
+    /// thing whose absence is being reported. Both the `index_status` tool and this binary's own
+    /// "Build it with `localai sync`" already said the other one, which left one binary naming
+    /// two different build commands for one state.
+    /// </summary>
     [Fact]
     public void MissingIndexFailsWithAnActionableMessage()
     {
@@ -70,7 +79,7 @@ public class SearchServiceCacheTests : IDisposable
         var missing = Path.Combine(Path.GetTempPath(), $"nope-{Guid.NewGuid():N}.cidx");
 
         var ex = Assert.Throws<FileNotFoundException>(() => service.Load(missing));
-        Assert.Contains("codesearch index", ex.Message);
+        Assert.Contains("localai sync", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
