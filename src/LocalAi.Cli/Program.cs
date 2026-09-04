@@ -238,6 +238,27 @@ static async Task<int> RunAsync(string[] args, bool machineReadable)
             token));
     }
 
+    if (args is ["read-image", .. var imageArguments])
+    {
+        if (!ReadImageCommand.TryParse(imageArguments, out var image, out var imageRefusal))
+        {
+            return Refuse("read-image", imageRefusal!, machineReadable);
+        }
+
+        return await Interruptible(token => LocalModelRun.ExecuteAsync(
+            "read-image",
+            "read-image:" + PrimarySource(image!.Images, "images"),
+            image.Profile,
+            (tasks, inner) => tasks.ReadImageAsync(
+                image.Images,
+                image.Question,
+                image.Profile,
+                image.Model,
+                inner),
+            machineReadable,
+            token));
+    }
+
     if (args is ["triage", .. var triageArguments])
     {
         if (!TriageCommand.TryParse(

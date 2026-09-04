@@ -342,6 +342,18 @@
   <data name="QueueQuarantined" xml:space="preserve">
     <value>{0} queued, {1} quarantined. Quarantined jobs are never retried.</value>
   </data>
+  <data name="ReadImageNoImages" xml:space="preserve">
+    <value>localai read-image needs at least one image file. Usage: {0}</value>
+    <comment>Shares the code source_missing with triage's own 'nothing to work on'.</comment>
+  </data>
+  <data name="ReadImageProfileNotSupported" xml:space="preserve">
+    <value>localai read-image does not run the task profile '{0}': it is a profile for something other than images. Supported profiles: {1}</value>
+    <comment>The sibling of AskProfileNotSupported, and a separate key rather than a reason-hole in one: each stays a whole sentence a translator can read. {1} is computed through LocalTasks.IsImageProfile, so it cannot name a profile the call would reject — unlike LocalLmText.ImageProfileUnsupported, which hardcodes the three names in two languages and stays only as the message the task's own guard carries.</comment>
+  </data>
+  <data name="ReadImageQuestionMissing" xml:space="preserve">
+    <value>localai read-image needs a question: what to extract from the images. Usage: {0}</value>
+    <comment>The question has no default in the task and does not gain one here: 'transcribe the error text' and 'list every row' produce different answers.</comment>
+  </data>
   <data name="RepoStatusNotConfigured" xml:space="preserve">
     <value>NOT_CONFIGURED: {0} — offer CodeSearch, LocalLm, shared broker, mainline generations, branch overlays, hooks, Claude MCP and Codex MCP.</value>
     <comment>NOT_CONFIGURED: is a status token left of the first colon and stays English; documents and tests match on it. Six of the eight items after the em dash are prose, not names.</comment>

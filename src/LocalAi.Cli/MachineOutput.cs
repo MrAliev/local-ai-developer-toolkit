@@ -80,7 +80,8 @@ internal static class MachineOutput
     /// not others would be worse than no flag: a caller cannot tell prose from an envelope
     /// without parsing, and parsing is the thing this exists to remove.
     /// </summary>
-    private static readonly string[] Commands = ["repo status", "ask", "triage"];
+    private static readonly string[] Commands =
+        ["repo status", "ask", "triage", "read-image"];
 
     public static bool Supports(string commandPath) =>
         Commands.Contains(commandPath, StringComparer.Ordinal);

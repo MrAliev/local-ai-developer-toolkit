@@ -417,6 +417,15 @@ public static class CliText
     public static string TriageOneLog(string usage) =>
         Catalogue.Format(nameof(TriageOneLog), usage);
 
+    public static string ReadImageQuestionMissing(string usage) =>
+        Catalogue.Format(nameof(ReadImageQuestionMissing), usage);
+
+    public static string ReadImageNoImages(string usage) =>
+        Catalogue.Format(nameof(ReadImageNoImages), usage);
+
+    public static string ReadImageProfileNotSupported(string profile, string accepted) =>
+        Catalogue.Format(nameof(ReadImageProfileNotSupported), profile, accepted);
+
     public static string RepoStatusRootWithoutDirectory => Catalogue.Get(nameof(RepoStatusRootWithoutDirectory));
 
     public static string RepoStatusTwoRepositories => Catalogue.Get(nameof(RepoStatusTwoRepositories));

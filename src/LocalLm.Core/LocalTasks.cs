@@ -151,10 +151,7 @@ public sealed class LocalTasks
         string? model,
         CancellationToken ct)
     {
-        if (profile is not (
-                LocalTaskProfile.VisualAnalysis or
-                LocalTaskProfile.Ocr or
-                LocalTaskProfile.ImageTranslation))
+        if (!IsImageProfile(profile))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(profile),
@@ -184,7 +181,7 @@ public sealed class LocalTasks
         foreach (var path in paths)
         {
             var full = Resolve(path);
-            if (!ImageExtensions.Contains(Path.GetExtension(full)))
+            if (!IsImageFile(full))
             {
                 throw new ArgumentException(LocalLmText.NotAnImage(full), nameof(paths));
             }
@@ -329,6 +326,31 @@ public sealed class LocalTasks
     /// `HookEventUnknown` and `NativeOperationUnknown` were both written to avoid. One predicate,
     /// so the refusal and the check cannot disagree.
     /// </summary>
+    /// <summary>
+    /// Whether a profile routes to a model that can look at an image.
+    ///
+    /// Public for the reason <see cref="IsTextChatProfile"/> is: a caller has to be able to name
+    /// the set it accepts before sending one, and a refusal that named a set this check would
+    /// reject is the defect the listing refusals were all built to avoid. The catalogue's
+    /// <c>ImageProfileUnsupported</c> hardcodes the same three names in two languages; this is
+    /// the one that cannot fall out of step with the code.
+    /// </summary>
+    public static bool IsImageProfile(LocalTaskProfile profile) =>
+        profile is
+            LocalTaskProfile.VisualAnalysis or
+            LocalTaskProfile.Ocr or
+            LocalTaskProfile.ImageTranslation;
+
+    /// <summary>
+    /// Whether a path names a file this can read as an image, by its extension.
+    ///
+    /// Public so a caller can refuse a PDF before the call rather than after: inside, the answer
+    /// is an argument failure among many, and a console reporting all of those the same way tells
+    /// a program nothing it can act on. The same set, so the two cannot disagree.
+    /// </summary>
+    public static bool IsImageFile(string path) =>
+        ImageExtensions.Contains(Path.GetExtension(path));
+
     public static bool IsTextChatProfile(LocalTaskProfile profile) =>
         profile is not (
             LocalTaskProfile.PlainTranslation or

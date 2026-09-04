@@ -156,6 +156,30 @@ public sealed class LocalModelCommandTests
     }
 
     /// <summary>
+    /// A residency of `PartialOffload` says the model did not fit; the percentage says how much
+    /// of it arrived, which is what makes it information rather than a warning. The prose face
+    /// has carried that figure all along and the wire carried only the verdict.
+    ///
+    /// Absent rather than null on a healthy run: a field that is present and empty on almost
+    /// every call teaches a reader to skip it.
+    /// </summary>
+    [Fact]
+    public void The_wire_says_how_much_of_the_model_arrived_when_some_of_it_did_not()
+    {
+        var degraded = MachineOutput.Answer(
+            "ask",
+            new LocalModelData(
+                "answer", "ask:x", "qwen3.5:9b", "PartialOffload", 12, 340, 9, false, 62));
+        var healthy = MachineOutput.Answer(
+            "ask",
+            new LocalModelData(
+                "answer", "ask:x", "qwen3.5:9b", "None", 12, 340, 9, false, null));
+
+        Assert.Contains("\"vramResidentPercent\":62", degraded, StringComparison.Ordinal);
+        Assert.DoesNotContain("vramResidentPercent", healthy, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The answer was written by a local model out of files it read, so wherever it can be read
     /// again later it has to carry that provenance. Piped or redirected, it is going somewhere a
     /// model may meet it, and it is wrapped; on a terminal the reader is a person and the markers
