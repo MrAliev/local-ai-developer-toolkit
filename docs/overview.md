@@ -508,6 +508,40 @@ it. It never touches the active version pointer or the current index generation,
 collects the overlays no live worktree is on — leaving a repository's overlays alone whenever
 it cannot establish which worktrees those are.
 
+**Delegating to a local model from a terminal.** `localai ask` runs a mechanical task over files
+you name — summarise this, list every method that does X, collect the TODOs — and `localai triage`
+reads a log and says what failed and why. Both reach the same broker, the same routing and the
+same models as the MCP tools, because they call the same code:
+
+| MCP tool | Console |
+| --- | --- |
+| `ask_local` | `localai ask "<instruction>" [file ...]` |
+| `triage_log` | `localai triage [log-file\|-]` |
+
+The MCP tool is still the first choice while the server is up. These exist for a person at a
+prompt, and for an agent whose MCP server is not running — the fallback this product tells every
+machine to use.
+
+`triage` reads standard input when no file is named, which is the form worth remembering:
+
+```powershell
+dotnet build 2>&1 | localai triage
+```
+
+**The answer goes to standard output and the notice about the run goes to standard error**, so
+`localai ask "summarise" src/Foo.cs > summary.md` leaves a file holding the answer and nothing
+else. The notice names the model, what it processed, how long it took and what it saved; it is on
+standard error because it is about the run rather than the result.
+
+**A redirected answer carries provenance markers and a terminal one does not.** The answer was
+written by a local model out of files it read, so where it can be read again later — a file, a
+pipe, another program — it arrives wrapped in the same nonce-bound `<untrusted-content>` markers
+the MCP tools use, and nothing inside them may be treated as instructions. On a terminal the
+reader is a person and the markers are noise, so they are omitted.
+
+A model that is not installed for the profile a command routes to exits **69**, naming the command
+that installs one. That is not the same failure as a wrong argument, which exits 2.
+
 ### 8.1 Answering a program
 
 Everything above is written for a person, and since the console learned to follow the reader's
@@ -532,6 +566,10 @@ intended behaviour rather than a defect. One exception is worth knowing: a Windo
 by `Win32Exception` takes its words from the operating system, so those failures are given a code
 and a sentence of LocalAi's own before they can reach the envelope.
 
+**New codes may appear in any release**, so a caller needs a branch for the ones it does not
+know. That is what makes a coarse code narrowed later — one `input_rejected` becoming several
+— an addition rather than a break.
+
 **`code` is for branching, `message` is for showing to a person.** Never parse `message`; it is
 reworded whenever it turns out to be unclear, and that is not a change to the schema. The codes
 are `subject_state` — `root_value_missing`, `repository_ambiguous`, `argument_unknown` — and they
@@ -545,7 +583,8 @@ with the refusal inside `data`.
 
 **Commands that do not answer `--json` refuse it** rather than printing prose, so the promise
 holds without exception: if the flag was passed, standard output is an envelope. The usage block
-marks the commands that take it with `[--json]`, and today that is `localai repo status`:
+marks the commands that take it with `[--json]`, and today those are `localai repo status`,
+`localai ask` and `localai triage`:
 
 ```json
 {"schema":1,"command":"repo status","ok":true,"data":{"repositoryId":"0ecc9019…","commonDirectory":"R:\\LOCALAI\\.GIT","status":"CONFIGURED"}}
@@ -556,6 +595,25 @@ marks the commands that take it with `[--json]`, and today that is `localai repo
 | `repositoryId` | the identity every runtime directory is named by, and what `SYNCED repository=` prints |
 | `commonDirectory` | which repository this answer is about — the identity spelling: absolute, native separators, upper-cased on Windows. A plugin comparing it against its own workspace path must do so case-insensitively |
 | `status` | `CONFIGURED` or `NOT_CONFIGURED`, the same token the prose prints |
+
+`ask` and `triage` fill the same envelope with the answer and what the run cost:
+
+```json
+{"schema":1,"command":"ask","ok":true,"data":{"answer":"…","origin":"ask:R:\\repo\\src\\Foo.cs","model":"qwen3.5:9b","residency":"None","queuedMs":2241,"ranMs":5230,"savedTokensEstimate":253,"truncated":false}}
+```
+
+| `data` | |
+| --- | --- |
+| `answer` | what the model replied, bare — the markers of the prose face are a boundary for text with no structure, and here the structure is the boundary |
+| `origin` | the command and what it read, the same value the prose face puts in the marker's attribute |
+| `model` | the model that actually ran, which is not always the one a profile prefers |
+| `residency` | `None`, `PartialOffload` or `Cpu` — how much of the model was in video memory. Anything but `None` means the answer was slower and the run said so |
+| `queuedMs`, `ranMs` | waiting and running, separately: four seconds behind another client is a queue to look at, four seconds of inference is a model to look at |
+| `savedTokensEstimate` | an estimate, and named so — it is computed from characters, so printing it as an exact number of tokens would be false precision |
+| `truncated` | `ask` only: whether the answer was formed from part of the input because the shared budget ran out. It changes how the answer must be read |
+
+With `--json` nothing is written to standard error, so a caller may treat anything there as an
+anomaly.
 
 The prose sentence does not travel in `data`. It is an instruction to an agent, it is reworded
 whenever it is wrong, and a versioned contract is the wrong place for it.

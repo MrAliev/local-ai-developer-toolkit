@@ -11,7 +11,16 @@ public sealed record LocalResult(
     int SavedTokens,
     string Model,
     string Detail,
-    LocalUsageReceipt Receipt)
+    LocalUsageReceipt Receipt,
+    /// <summary>
+    /// Whether the answer was formed from part of the input rather than all of it.
+    ///
+    /// The fact was always in <see cref="Detail"/>, folded into a sentence. A caller reading the
+    /// machine face has to be able to see it without parsing prose, because it changes how the
+    /// answer must be read. Only asking over files can truncate: triage reduces hierarchically
+    /// and image reading refuses instead.
+    /// </summary>
+    bool Truncated = false)
 {
     /// <summary>
     /// The line the caller is expected to surface, so what a local call cost and saved is
@@ -312,6 +321,24 @@ public sealed class LocalTasks
         new LogTriagePipeline(client, logTriagePolicies.Read())
             .RunAsync(path, text, question, model, ct);
 
+    /// <summary>
+    /// Whether a profile routes to a model this task can hold a text conversation with.
+    ///
+    /// Public because a caller has to be able to say which profiles it will accept *before*
+    /// sending one — a console refusal that named a set the check would reject is the defect
+    /// `HookEventUnknown` and `NativeOperationUnknown` were both written to avoid. One predicate,
+    /// so the refusal and the check cannot disagree.
+    /// </summary>
+    public static bool IsTextChatProfile(LocalTaskProfile profile) =>
+        profile is not (
+            LocalTaskProfile.PlainTranslation or
+            LocalTaskProfile.TechnicalTranslation or
+            LocalTaskProfile.ExactSearch or
+            LocalTaskProfile.VectorEmbedding or
+            LocalTaskProfile.Ocr or
+            LocalTaskProfile.VisualAnalysis or
+            LocalTaskProfile.ImageTranslation);
+
     public async Task<LocalResult> AskAsync(
         string prompt, IReadOnlyList<string> files, string? model, CancellationToken ct)
         => await AskAsync(
@@ -328,14 +355,7 @@ public sealed class LocalTasks
         string? model,
         CancellationToken ct)
     {
-        if (profile is (
-                LocalTaskProfile.PlainTranslation or
-                LocalTaskProfile.TechnicalTranslation or
-                LocalTaskProfile.ExactSearch or
-                LocalTaskProfile.VectorEmbedding or
-                LocalTaskProfile.Ocr or
-                LocalTaskProfile.VisualAnalysis or
-                LocalTaskProfile.ImageTranslation))
+        if (!IsTextChatProfile(profile))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(profile),
@@ -426,7 +446,8 @@ public sealed class LocalTasks
             TokenEstimator.Saved(wouldHaveCost, result.Value),
             chosen,
             detail,
-            result.Receipt);
+            result.Receipt,
+            Truncated: boundedNote.Length > 0);
     }
 
     public async Task<LocalTranslationResult> TranslateAsync(
