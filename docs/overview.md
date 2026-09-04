@@ -547,6 +547,10 @@ pipe, another program — it arrives wrapped in the same nonce-bound `<untrusted
 the MCP tools use, and nothing inside them may be treated as instructions. On a terminal the
 reader is a person and the markers are noise, so they are omitted.
 
+The same rule now covers `codesearch get-chunk`, which prints the bytes of a source file and
+is the most directly injection-bearing thing either console produces. It printed them bare in
+every direction until this rule reached it.
+
 **`translate` is the exception, and has `--out` for it.** Its answer is a document rather than a
 statement about one, so redirecting it would save a file full of markers. `--out <file>` writes
 the document itself, unwrapped; without it, a redirected translation is wrapped like any other
@@ -589,6 +593,13 @@ intended behaviour rather than a defect. One exception is worth knowing: a Windo
 by `Win32Exception` takes its words from the operating system, so those failures are given a code
 and a sentence of LocalAi's own before they can reach the envelope.
 
+**The flag is in both binaries and the envelope is one shape.** `localai` and `codesearch`
+answer with the same `schema`, `command`, `ok`, `data` and `error`, so a plugin writes one parser
+for both. Two things are per-binary rather than shared: `localai` pins its language to English
+under `--json` (`codesearch` prints English regardless, having no catalogue yet), and the exit
+codes are different vocabularies — `localai` uses sysexits values, `codesearch` returns 1 for every
+failure. `ok` still mirrors the exit code in both; it is the numbers that do not transfer.
+
 **New codes may appear in any release**, so a caller needs a branch for the ones it does not
 know. That is what makes a coarse code narrowed later — one `input_rejected` becoming several
 — an addition rather than a break.
@@ -607,7 +618,8 @@ with the refusal inside `data`.
 **Commands that do not answer `--json` refuse it** rather than printing prose, so the promise
 holds without exception: if the flag was passed, standard output is an envelope. The usage block
 marks the commands that take it with `[--json]`, and today those are `localai repo status`,
-`localai ask`, `localai triage`, `localai read-image` and `localai translate`:
+`localai ask`, `localai triage`, `localai read-image`, `localai translate`,
+`codesearch search`, `codesearch get-chunk` and `codesearch status`:
 
 ```json
 {"schema":1,"command":"repo status","ok":true,"data":{"repositoryId":"0ecc9019…","commonDirectory":"R:\\LOCALAI\\.GIT","status":"CONFIGURED"}}
@@ -647,9 +659,21 @@ anomaly.
 The prose sentence does not travel in `data`. It is an instruction to an agent, it is reworded
 whenever it is wrong, and a versioned contract is the wrong place for it.
 
-One thing that predates this flag: `localai model` has always printed a JSON envelope of its own,
-with no flag and no prose face, and its version field is `schemaVersion` rather than `schema`.
-The two are unrelated shapes; the field name is what tells them apart.
+Two things predate this flag and are not it. `localai model` has always printed a JSON envelope
+of its own, with no flag and no prose face, and `codesearch evaluate` prints another. Both spell
+their version `schemaVersion` where this one spells it `schema`, and that field name is what tells
+the three apart. They are unrelated shapes with their own parsers — `BrokerModelInstaller` reads
+the first — and neither takes `--json`.
+
+`codesearch search`, `get-chunk` and `status` fill the shared envelope. `search`'s `data` carries
+`query`, `embeddingsUsed` and `hits[]` — and `embeddingsUsed` is required rather than convenient:
+the prose face puts a `LEXICAL ONLY` warning on standard error when no embedding model answered,
+and with `--json` standard error is empty, so without that field a caller would show literal
+matches as if they were ranked ones. A hit's `score` is comparable within one response and not
+between them. `get-chunk` carries the same fields plus `body`. `status` carries `connected`
+(`CONFIGURED` or `NOT_CONFIGURED`, the token `localai repo status` prints), `built`, `stale`,
+`navigation` (`Precise` or `Heuristic`), the model and its dimensions, the counts, the commits, and
+a nested `overlay`.
 
 ---
 

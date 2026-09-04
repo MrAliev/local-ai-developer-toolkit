@@ -4,9 +4,12 @@ using System.Text.Json;
 using CodeSearch.Core.Chunking;
 using CodeSearch.Core.Embedding;
 using CodeSearch.Core.Indexing;
+using LocalAi.Contracts.Security;
 using CodeSearch.Core.Search;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
+using CodeSearch.Cli;
+using LocalAi.Repository;
 
 // Redirected stdout on Windows otherwise falls back to the legacy console codepage and mangles
 // every Cyrillic character - which matters, this codebase's comments are mostly Russian.
@@ -23,7 +26,28 @@ if (args.Length == 0)
 }
 
 var command = args[0].ToLowerInvariant();
-var options = ParseOptions(args.Skip(1).ToArray());
+
+// Scanned as an option of its own, stepping over the value of any option before it: `codesearch
+// search --query "--json"` is an ordinary query. `localai` may scan its whole list, because
+// nothing there could plausibly take that literal as a value.
+//
+// No language is pinned here, unlike `localai`: this binary prints English literals and has no
+// catalogue to follow a reader. When it gains one, the pin belongs here.
+var machineReadable = MachineEnvelope.RequestedAsOption(args);
+if (machineReadable && !ConsoleJson.Supports(command))
+{
+    // The promise is unconditional or it is nothing: if the flag was passed, stdout is an
+    // envelope. `index` and `overlay` stream progress to stdout as they build, so they could not
+    // keep it even if they wanted to — and a plugin that wants an index built calls `localai sync`.
+    Console.WriteLine(MachineEnvelope.Refusal(
+        command,
+        "json_not_supported",
+        "--json is not available here. The usage marks the commands that take it with [--json]."));
+    return 1;
+}
+
+var options = ParseOptions(
+    (machineReadable ? MachineEnvelope.WithoutFlag(args) : args).Skip(1).ToArray());
 
 try
 {
@@ -37,11 +61,17 @@ try
         "status" => Status(options),
         "scan" => Scan(options),
         "-h" or "--help" or "help" => PrintUsage(),
-        _ => Fail($"Unknown command '{command}'."),
+        _ => Fail($"Unknown command '{command}'.", "command_unknown"),
     };
 }
 catch (Exception ex)
 {
+    if (machineReadable)
+    {
+        Console.WriteLine(MachineEnvelope.Refusal(command, ConsoleJson.Classify(ex), ex.Message));
+        return 1;
+    }
+
     Console.Error.WriteLine($"ERROR: {ex.Message}");
     return 1;
 }
@@ -80,7 +110,9 @@ async Task<int> OverlayAsync(Dictionary<string, string> opts)
 
     if (!File.Exists(basePath))
     {
-        return Fail($"No base index at '{basePath}'. Build it first with `codesearch index`.");
+        return Fail(
+            $"No base index at '{basePath}'. Build it with `localai sync`.",
+            "index_not_built");
     }
 
     // The model is dictated by the base: an overlay embedded with anything else produces vectors
@@ -107,7 +139,7 @@ async Task<int> SearchAsync(Dictionary<string, string> opts)
 {
     if (!opts.TryGetValue("query", out var query) || string.IsNullOrWhiteSpace(query))
     {
-        return Fail("search needs --query \"...\"");
+        return Fail("search needs --query \"...\"", "query_missing");
     }
 
     var service = new SearchService()
@@ -130,6 +162,12 @@ async Task<int> SearchAsync(Dictionary<string, string> opts)
         Console.Error.WriteLine(
             "LEXICAL ONLY: no embedding model answered, so this search matched the words " +
             "of the query literally and nothing else. Check the broker: localai doctor");
+    }
+
+    if (machineReadable)
+    {
+        Console.WriteLine(MachineEnvelope.Answer("search", ConsoleJson.Describe(query, outcome)));
+        return 0;
     }
 
     if (outcome.Hits.Count == 0)
@@ -155,12 +193,28 @@ async Task<int> GetChunkAsync(Dictionary<string, string> opts)
     if (!opts.TryGetValue("id", out var chunkId) ||
         string.IsNullOrWhiteSpace(chunkId))
     {
-        return Fail("get-chunk needs --id <chunk_id>");
+        return Fail("get-chunk needs --id <chunk_id>", "id_missing");
     }
 
     var chunk = await new SearchService().GetChunkAsync(
         chunkId,
         opts.GetValueOrDefault("root"));
+    if (machineReadable)
+    {
+        Console.WriteLine(MachineEnvelope.Answer(
+            "get-chunk",
+            new ChunkData(
+                chunk.ChunkId,
+                chunk.RelPath,
+                chunk.StartLine,
+                chunk.EndLine,
+                chunk.Kind.ToString(),
+                chunk.Symbol,
+                chunk.Signature,
+                chunk.Body)));
+        return 0;
+    }
+
     Console.WriteLine(
         $"{chunk.RelPath}:{chunk.StartLine}-{chunk.EndLine}  [{chunk.Kind}]");
     Console.WriteLine(chunk.Symbol);
@@ -172,7 +226,14 @@ async Task<int> GetChunkAsync(Dictionary<string, string> opts)
 
     Console.WriteLine($"chunk_id: {chunk.ChunkId}");
     Console.WriteLine();
-    Console.WriteLine(chunk.Body);
+
+    // The bytes of a source file, which is the most directly injection-bearing thing either
+    // console prints. The MCP tool that returns the same chunk has always wrapped it; this
+    // printed it bare in every direction until now.
+    Console.WriteLine(RedirectedSource.Wrap(
+        $"get-chunk:{chunk.RelPath}",
+        chunk.Body,
+        Console.IsOutputRedirected));
     return 0;
 }
 
@@ -181,7 +242,7 @@ async Task<int> EvaluateAsync(Dictionary<string, string> opts)
     if (!opts.TryGetValue("cases", out var casesPath) ||
         string.IsNullOrWhiteSpace(casesPath))
     {
-        return Fail("evaluate needs --cases <json>");
+        return Fail("evaluate needs --cases <json>", "cases_missing");
     }
 
     if (opts.ContainsKey("no-floor") && opts.ContainsKey("profile"))
@@ -260,6 +321,17 @@ async Task<int> EvaluateAsync(Dictionary<string, string> opts)
 int Status(Dictionary<string, string> opts)
 {
     var status = new SearchService().Status(opts.GetValueOrDefault("root"));
+    var connected = Connected(status.WorkingRoot);
+    if (machineReadable)
+    {
+        Console.WriteLine(MachineEnvelope.Answer("status", ConsoleJson.Describe(status, connected)));
+        return 0;
+    }
+
+    // "Can I search here yet" is one question, and it used to take two commands: this one for the
+    // index and `localai repo status` for whether the repository is connected at all. The verdict
+    // uses that command's own two tokens, so one fact has one name in both binaries.
+    Console.WriteLine($"Connected:    {(connected ? "CONFIGURED" : "NOT_CONFIGURED")}");
     Console.WriteLine($"Working root: {status.WorkingRoot}");
     Console.WriteLine($"Repository:   {status.RepositoryRoot}");
     Console.WriteLine($"Base index:   {status.IndexPath}");
@@ -275,7 +347,7 @@ int Status(Dictionary<string, string> opts)
     Console.WriteLine($"Base:         {status.FileCount} files, {status.ChunkCount} chunks, " +
                       $"{status.SizeBytes / 1024.0 / 1024.0:F1} MB, commit {Short(status.IndexedCommit)}");
     Console.WriteLine(status.CommitDrifted
-        ? "Base status:  STALE - rerun `codesearch index` against the base checkout"
+        ? "Base status:  STALE - the indexed commit is not HEAD; refresh with `localai sync`"
         : "Base status:  current");
 
     if (!status.RequiresOverlay)
@@ -288,7 +360,8 @@ int Status(Dictionary<string, string> opts)
     {
         Console.WriteLine($"Overlay:      NOT BUILT ({status.Overlay.Path})");
         Console.WriteLine("              searches here answer from the base only, so this branch's");
-        Console.WriteLine("              own changes are invisible. Build it with `codesearch overlay`.");
+        Console.WriteLine("              own changes are invisible. Build it with " +
+                          "`localai sync --root <this worktree>`.");
         return 0;
     }
 
@@ -297,7 +370,7 @@ int Status(Dictionary<string, string> opts)
     Console.WriteLine($"Overlay built: {status.Overlay.IndexedAtUtc:u} at commit {Short(status.Overlay.WorkingCommit)} " +
                       $"against base {Short(status.Overlay.BaseCommit)}");
     Console.WriteLine(status.Overlay.BaseDrifted(status.IndexedCommit)
-        ? "Overlay status: STALE - the base moved since; rerun `codesearch overlay`"
+        ? "Overlay status: STALE - the base moved since; refresh with `localai sync`"
         : "Overlay status: current");
     return 0;
 }
@@ -337,8 +410,41 @@ static Dictionary<string, string> ParseOptions(string[] args)
     return result;
 }
 
-static int Fail(string message)
+/// <summary>
+/// Whether LocalAi knows this repository, read the way `localai repo status` reads it. False for
+/// anything that throws: an unconnected repository is exactly the case where the runtime layout
+/// cannot be resolved, and a diagnostic command must not fail because its subject is absent.
+/// </summary>
+static bool Connected(string workingRoot)
 {
+    try
+    {
+        var identity = RuntimeIndexLayout.Inspect(workingRoot);
+        return new RepositoryManifestStore(identity.RepositoryRuntimeRoot).Read() is not null;
+    }
+    catch (Exception exception) when (
+        exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+    {
+        return false;
+    }
+}
+
+/// <summary>
+/// A refusal in both faces. The prose keeps its `ERROR:` prefix and its usage block; the envelope
+/// goes to standard output, because a caller that asked for JSON should never have to read
+/// standard error to find out what happened.
+///
+/// Exit stays 1 whatever the failure: this binary has never had a code vocabulary of its own, and
+/// giving it one is a separate subject from giving it an envelope.
+/// </summary>
+int Fail(string message, string code = "argument_unknown")
+{
+    if (machineReadable)
+    {
+        Console.WriteLine(MachineEnvelope.Refusal(command, code, message));
+        return 1;
+    }
+
     Console.Error.WriteLine($"ERROR: {message}");
     PrintUsage();
     return 1;
@@ -352,20 +458,24 @@ static int PrintUsage()
           codesearch index   [--root <dir>] [--model <ollama-model>] [--force] [--index <file>]
           codesearch overlay [--root <dir>] [--index <base>] [--overlay <file>]
           codesearch search   --query "<text>" [--root <dir>] [--top N] [--kind Type|Method|Text|File]
-                              [--path <substring>] [--per-file N] [--no-instruct]
-          codesearch get-chunk --id <chunk_id> [--root <dir>]
+                              [--path <substring>] [--per-file N] [--no-instruct] [--json]
+          codesearch get-chunk --id <chunk_id> [--root <dir>] [--json]
           codesearch evaluate --cases <json> [--root <dir>] [--profile|--no-floor] [--no-instruct]
-          codesearch status  [--root <dir>]
+          codesearch status  [--root <dir>] [--json]
           codesearch scan    [--root <dir>]
 
-        One BASE index per repository, built from the mainline checkout, lives in
-        ~/.claude/tools/index. Every other worktree keeps an OVERLAY in its own
-        .claude/codesearch/overlay.cidx holding only what its branch changed, plus the files it
-        deleted. Searches see the overlay laid over the base, so a branch pays for its diff
-        rather than for a second full index.
+        One BASE index per repository, and one OVERLAY per worktree holding only what that
+        branch changed plus the files it deleted. Searches see the overlay laid over the base,
+        so a branch pays for its diff rather than for a second full index.
 
-        Build the base against the mainline checkout:
-          codesearch index --root <mainline-worktree> --index <canonical path from `status`>
+        For a repository connected to LocalAi both are built and published by `localai sync` -
+        the same sync the Git hooks run - and both live under the LocalAi runtime directory.
+        Their real paths, whether either has drifted, and whether this repository is connected
+        at all are what `codesearch status` prints.
+
+        `index` and `overlay` are the builders underneath. On a connected repository neither is
+        the way to refresh anything: run `localai sync`. Use them with explicit `--index` and
+        `--overlay` paths, or on a repository LocalAi does not manage.
         """);
 
     return 0;
