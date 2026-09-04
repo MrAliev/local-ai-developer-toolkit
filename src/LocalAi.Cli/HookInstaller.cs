@@ -1,4 +1,5 @@
 using System.Text;
+using LocalAi.Cli.Resources;
 using LocalAi.Repository;
 
 namespace LocalAi.Cli;
@@ -46,6 +47,19 @@ public static class HookInstaller
             commonDirectory,
             configuredHooksPath,
             workingTreeRoot);
+        foreach (var hookEvent in GitHookLayout.Events)
+        {
+            var candidate = Path.Combine(hooksRoot, hookEvent);
+            var saved = candidate + GitHookLayout.ChainedSuffix;
+            if (File.Exists(candidate) &&
+                !GitHookLayout.IsManagedDispatcher(candidate) &&
+                File.Exists(saved))
+            {
+                throw new InvalidOperationException(
+                    CliText.HooksChainBlocked(candidate, saved));
+            }
+        }
+
         Directory.CreateDirectory(hooksRoot);
         var executable = Path.GetFullPath(launcherPath).Replace('\\', '/');
         var commandPrefix = QuoteExecutable(executable);
@@ -65,12 +79,6 @@ public static class HookInstaller
             var previousPath = hookPath + GitHookLayout.ChainedSuffix;
             if (File.Exists(hookPath) && !GitHookLayout.IsManagedDispatcher(hookPath))
             {
-                if (File.Exists(previousPath))
-                {
-                    throw new InvalidOperationException(
-                        $"Cannot safely chain hook because backup exists: {previousPath}");
-                }
-
                 File.Move(hookPath, previousPath);
                 chained.Add(hookPath);
             }

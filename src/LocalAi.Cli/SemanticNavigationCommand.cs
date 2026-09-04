@@ -2,6 +2,7 @@ using CodeSearch.Core.Semantics;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using LocalAi.Cli.Resources;
 
 namespace LocalAi.Cli;
 
@@ -50,9 +51,16 @@ internal static class SemanticNavigationCommand
             }
             catch (Exception exception)
             {
-                Console.Error.WriteLine($"semantic status failed: {exception.Message}");
+                Console.Error.WriteLine(
+                    CliText.SemanticCommandFailed("status", exception.Message));
                 return 1;
             }
+        }
+
+        if (!NavigationOperations.Contains(operation, StringComparer.Ordinal))
+        {
+            Console.Error.WriteLine(CliText.SemanticOperationUnknown(operation));
+            return Usage();
         }
 
         var path = Option(args, "--path");
@@ -69,9 +77,7 @@ internal static class SemanticNavigationCommand
         // already dealing with a breakage.
         if (!SourcePosition.TryFromOneBased(line, column, out var position))
         {
-            Console.Error.WriteLine(
-                $"invalid_position: lines and columns are counted from 1; " +
-                $"got line {line}, column {column}.");
+            Console.Error.WriteLine(CliText.PositionNotFromOne(line, column));
             return 2;
         }
 
@@ -123,7 +129,8 @@ internal static class SemanticNavigationCommand
                     position.Line,
                     position.Utf16Column,
                     root),
-                _ => throw new ArgumentException($"Unknown semantic operation '{operation}'."),
+                _ => throw new UnreachableException(
+                    "The operation was tested before this switch was entered."),
             };
             foreach (var location in locations)
             {
@@ -140,7 +147,8 @@ internal static class SemanticNavigationCommand
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"semantic {operation} failed: {exception.Message}");
+            Console.Error.WriteLine(
+                CliText.SemanticCommandFailed(operation, exception.Message));
             return 1;
         }
     }
@@ -161,7 +169,7 @@ internal static class SemanticNavigationCommand
             runtimeRoot);
         var store = new CodeSearch.Core.Indexing.GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent()
-            ?? throw new SemanticNavigationNotReadyException("No current generation is published.");
+            ?? throw new SemanticNavigationNotReadyException(CliText.NoCurrentGeneration);
         var manifest = store.ReadManifest(current.GenerationId);
         var baseIndex = SemanticIndex.Load(store.SemanticIndexPath(current.GenerationId));
         var usesBaseSnapshot =
@@ -306,7 +314,8 @@ internal static class SemanticNavigationCommand
             };
             var suite = JsonSerializer.Deserialize<SemanticBenchmarkSuite>(
                 File.ReadAllBytes(Path.GetFullPath(casesPath)), options)
-                ?? throw new InvalidDataException("Semantic benchmark suite is empty.");
+                ?? throw new InvalidDataException(
+                    CliText.SemanticEvaluateNoSuite(casesPath));
             if (int.TryParse(Option(args, "--iterations"), out var iterations))
             {
                 suite = suite with { Iterations = iterations };
@@ -355,7 +364,8 @@ internal static class SemanticNavigationCommand
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"semantic evaluate failed: {exception.Message}");
+            Console.Error.WriteLine(
+                CliText.SemanticCommandFailed("evaluate", exception.Message));
             return 1;
         }
     }
@@ -365,7 +375,7 @@ internal static class SemanticNavigationCommand
         var identity = CodeSearch.Core.Indexing.RuntimeIndexLayout.Inspect(root, runtimeRoot);
         var store = new CodeSearch.Core.Indexing.GenerationStore(identity.RepositoryRuntimeRoot);
         var current = store.ReadCurrent()
-            ?? throw new SemanticNavigationNotReadyException("No current generation is published.");
+            ?? throw new SemanticNavigationNotReadyException(CliText.NoCurrentGeneration);
         var paths = new[]
         {
             store.SemanticIndexPath(current.GenerationId),
@@ -374,6 +384,9 @@ internal static class SemanticNavigationCommand
         };
         return paths.Where(File.Exists).Sum(path => new FileInfo(path).Length);
     }
+
+    private static readonly string[] NavigationOperations =
+        ["definition", "references", "implementations", "relationships"];
 
     private static int Usage()
     {
