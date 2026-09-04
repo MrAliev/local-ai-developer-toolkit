@@ -104,6 +104,11 @@ internal static class BrokerProgram
                 ollamaUri,
                 new OllamaLaunchRecordStore(runtimeRoot),
                 message => Console.Error.WriteLine("LocalAi broker: " + message));
+            // Standard error is where these went, and the broker runs detached, so nothing
+            // read them: when a queue stalled for two hours the line naming the exception was
+            // written to a stream with no reader (#335). It still goes there — a person running
+            // the broker in a terminal should see it — and now it is also kept.
+            var diagnosticLog = new BrokerDiagnosticLog(runtimeRoot);
             var durationEstimator = new DurationEstimator();
             var scheduleMetadata = new ScheduleMetadataResolver(
                 catalog,
@@ -147,6 +152,10 @@ internal static class BrokerProgram
                         $"LocalAi broker diagnostic: job={diagnostic.JobId:N} " +
                         $"operation={diagnostic.Operation} " +
                         $"exception={diagnostic.ExceptionType}.");
+                    diagnosticLog.Write(
+                        diagnostic.Operation,
+                        diagnostic.ExceptionType,
+                        diagnostic.JobId);
                     backendHintPrinted = ReportUnreachableBackend(
                         diagnostic,
                         ollamaUri,
