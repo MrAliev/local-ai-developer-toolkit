@@ -316,6 +316,10 @@ public static class RemovalMatrix
         "broker.lock",
         "sequence.json",
         "shutdown.request",
+        // What the broker last failed at. Bounded, rebuilt by the next failure, and worth nothing
+        // without the installation that produced it.
+        "diagnostics.jsonl",
+        "diagnostics.1.jsonl",
         // What the last update check learned. Rebuilt by the next one, and meaningless without
         // the installation it describes.
         "update-state.json",
