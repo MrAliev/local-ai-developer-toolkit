@@ -133,6 +133,56 @@ public sealed class GenerationRetentionTests : IDisposable
     /// interrupted run's generation, which the next sync would otherwise reuse rather than
     /// rebuild.
     /// </summary>
+    /// <summary>
+    /// Grace exists for a generation that might still *become* current: it is published minutes
+    /// before the pointer moves, and a sweep in that window once deleted what a sync had spent
+    /// its whole run building.
+    ///
+    /// A generation the pointer has already moved *past* needs none of that protection — its
+    /// window closed when the pointer left it. Keeping it for a day meant a machine that
+    /// publishes three times in a working day carried three bases and every overlay hanging off
+    /// them: 965 MB measured on one repository, of which about 510 MB was history nothing could
+    /// be asked about any more (#314).
+    ///
+    /// The pointer records when it was last moved, which is what tells the two apart.
+    /// </summary>
+    [Fact]
+    public void A_generation_the_pointer_has_moved_past_is_not_protected_by_grace()
+    {
+        var store = new GenerationStore(FsPath.From(Repository));
+        var superseded = Publish(store, "a", Now - TimeSpan.FromHours(3));
+        var current = Publish(store, "b", Now - TimeSpan.FromHours(2));
+        store.SetCurrent(store.ReadManifest(current));
+
+        var result = GenerationRetention.Prune(
+            Repository,
+            RuntimeRetentionPolicy.Default with { GenerationsPerRepository = 1 },
+            Now);
+
+        Assert.Contains(superseded, result.GenerationsRemoved);
+        Assert.DoesNotContain(current, result.GenerationsRemoved);
+    }
+
+    /// <summary>
+    /// And a generation published after the pointer last moved is exactly the case grace was
+    /// written for: another run may be building it right now, between publishing and switching.
+    /// </summary>
+    [Fact]
+    public void A_generation_published_after_the_pointer_moved_keeps_its_grace()
+    {
+        var store = new GenerationStore(FsPath.From(Repository));
+        var current = Publish(store, "a", Now - TimeSpan.FromHours(3));
+        store.SetCurrent(store.ReadManifest(current));
+        var building = Publish(store, "b", Now - TimeSpan.FromMinutes(1));
+
+        var result = GenerationRetention.Prune(
+            Repository,
+            RuntimeRetentionPolicy.Default with { GenerationsPerRepository = 1 },
+            Now);
+
+        Assert.DoesNotContain(building, result.GenerationsRemoved);
+    }
+
     [Fact]
     public void A_generation_published_moments_ago_is_not_swept()
     {

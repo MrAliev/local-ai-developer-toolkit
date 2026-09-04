@@ -397,6 +397,12 @@ One subtlety about retention: the minimum lifetime of a response body protects c
 rather than disk — a response younger than that is deleted by nothing, and a manually configured
 zero is clamped rather than obeyed.
 
+A freshly published index generation is kept for a day whatever the count says, because it is
+published minutes before the pointer moves to it and a sweep in that window would delete what a
+sync had just spent its run building. That protection ends the moment the pointer moves past it:
+a generation published earlier than the current one has already had its turn, and is swept by
+the count like any other.
+
 ---
 
 ## 7. Cloud tokens saved
