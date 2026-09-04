@@ -80,25 +80,41 @@ internal static class MachineOutput
     /// not others would be worse than no flag: a caller cannot tell prose from an envelope
     /// without parsing, and parsing is the thing this exists to remove.
     /// </summary>
-    private static readonly string[] Enveloped = ["repo status"];
+    private static readonly string[] Commands = ["repo status", "ask", "triage"];
 
     public static bool Supports(string commandPath) =>
-        Enveloped.Contains(commandPath, StringComparer.Ordinal);
+        Commands.Contains(commandPath, StringComparer.Ordinal);
 
     /// <summary>
-    /// The command as typed, without its options: <c>repo status</c>, <c>hooks install</c>,
-    /// <c>prune</c>. The leaf alone would collide — three groups have a <c>status</c>.
+    /// Which of the commands that fill an envelope this run is, or null for anything else.
     ///
-    /// Two words at most, and not an arbitrary limit: every command path this binary answers to
-    /// is one or two, <c>bootstrap --dry-run</c> included, whose path is one because the rest is
-    /// an option. It bounds an echo of what somebody typed without a character count.
+    /// Matched against what exists rather than guessed from the leading words. Guessing was
+    /// tried first — "the first two non-option tokens", on the grounds that every command path
+    /// here is one or two words — and `ask` broke it immediately: its first positional argument
+    /// is the reader's own instruction, so `localai ask "In one sentence: what is this?" --json`
+    /// asked for a command whose name was that sentence, and was told the flag was unavailable.
     /// </summary>
-    public static string CommandPath(IReadOnlyList<string> arguments)
+    public static string? Enveloped(IReadOnlyList<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        return string.Join(
-            ' ',
-            arguments.TakeWhile(argument => !argument.StartsWith('-')).Take(2));
+        return Commands.FirstOrDefault(command =>
+        {
+            var words = command.Split(' ');
+            return arguments.Count >= words.Length &&
+                words.SequenceEqual(arguments.Take(words.Length), StringComparer.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// What to call a command that fills no envelope, for the refusal that says so: its first
+    /// word, and only that. Everything after it may be anything at all — a prompt, a path, a
+    /// query — and echoing it would put unvalidated input where a plugin looks for a name.
+    /// </summary>
+    public static string Named(IReadOnlyList<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var first = arguments.FirstOrDefault(argument => !argument.StartsWith('-'));
+        return first ?? string.Empty;
     }
 
     /// <summary>

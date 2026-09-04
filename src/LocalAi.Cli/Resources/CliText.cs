@@ -392,8 +392,30 @@ public static class CliText
 
     public static string SummaryNoProblems => Catalogue.Get(nameof(SummaryNoProblems));
 
-    public static string JsonNotSupported(string command) =>
-        Catalogue.Format(nameof(JsonNotSupported), command);
+    public static string JsonNotSupported => Catalogue.Get(nameof(JsonNotSupported));
+
+    public static string AskPromptMissing(string usage) =>
+        Catalogue.Format(nameof(AskPromptMissing), usage);
+
+    public static string ProfileUnknown(string command, string profile, string accepted) =>
+        Catalogue.Format(nameof(ProfileUnknown), command, profile, accepted);
+
+    public static string AskProfileNotSupported(string profile, string accepted) =>
+        Catalogue.Format(nameof(AskProfileNotSupported), profile, accepted);
+
+    public static string OptionValueMissing(string command, string option, string usage) =>
+        Catalogue.Format(nameof(OptionValueMissing), command, option, usage);
+
+    public static string CommandUnknownArgument(string command, string argument, string usage) =>
+        Catalogue.Format(nameof(CommandUnknownArgument), command, argument, usage);
+
+    public static string TriageNoSource(string usage) =>
+        Catalogue.Format(nameof(TriageNoSource), usage);
+
+    public static string TriageEmptyInput => Catalogue.Get(nameof(TriageEmptyInput));
+
+    public static string TriageOneLog(string usage) =>
+        Catalogue.Format(nameof(TriageOneLog), usage);
 
     public static string RepoStatusRootWithoutDirectory => Catalogue.Get(nameof(RepoStatusRootWithoutDirectory));
 

@@ -68,6 +68,46 @@ catch (Exception exception)
 // One refusal, two faces. The prose keeps the `localai:` prefix it has always had; the envelope
 // goes to stdout, because a caller that asked for JSON should never have to read stderr to find
 // out what happened.
+/// <summary>
+/// The interrupt handling `model` already installs, for the two commands that can wait minutes
+/// on a queue and a model.
+/// </summary>
+static async Task<int> Interruptible(Func<CancellationToken, Task<int>> work)
+{
+    using var processLifetime = new CancellationTokenSource();
+    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+        processLifetime.Token);
+    ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        processLifetime.Cancel();
+    };
+    EventHandler exitHandler = (_, _) => processLifetime.Cancel();
+    Console.CancelKeyPress += cancelHandler;
+    AppDomain.CurrentDomain.ProcessExit += exitHandler;
+    try
+    {
+        return await work(cancellation.Token);
+    }
+    finally
+    {
+        Console.CancelKeyPress -= cancelHandler;
+        AppDomain.CurrentDomain.ProcessExit -= exitHandler;
+    }
+}
+
+/// <summary>
+/// What the answer came from, in the shape the MCP tools already use for the same attribute, so
+/// provenance reads the same in both faces.
+/// </summary>
+static string PrimarySource(IReadOnlyList<string> sources, string whenEmpty) =>
+    sources.Count switch
+    {
+        0 => whenEmpty,
+        1 => Path.GetFullPath(sources[0]),
+        _ => $"{Path.GetFullPath(sources[0])} (+{sources.Count - 1} more)",
+    };
+
 static int Refuse(string command, CommandRefusal refused, bool machine)
 {
     if (machine)
@@ -87,7 +127,10 @@ int Failed(string code, string message, int exitCode)
 {
     if (machineReadable)
     {
-        Console.WriteLine(MachineOutput.Refusal(MachineOutput.CommandPath(args), code, message));
+        Console.WriteLine(MachineOutput.Refusal(
+            MachineOutput.Enveloped(args) ?? MachineOutput.Named(args),
+            code,
+            message));
     }
     else
     {
@@ -101,22 +144,22 @@ static async Task<int> RunAsync(string[] args, bool machineReadable)
 {
     if (MachineOutput.Requested(args))
     {
-        var asked = MachineOutput.CommandPath(args);
-        if (asked.Length == 0)
+        if (MachineOutput.Enveloped(args) is null)
         {
-            Console.WriteLine(MachineOutput.Refusal(
-                asked,
-                "command_unknown",
-                CliUsage.Text));
-            return 2;
-        }
+            var named = MachineOutput.Named(args);
+            if (named.Length == 0)
+            {
+                Console.WriteLine(MachineOutput.Refusal(
+                    named,
+                    "command_unknown",
+                    CliUsage.Text));
+                return 2;
+            }
 
-        if (!MachineOutput.Supports(asked))
-        {
             Console.WriteLine(MachineOutput.Refusal(
-                asked,
+                named,
                 "json_not_supported",
-                CliText.JsonNotSupported(asked)));
+                CliText.JsonNotSupported));
             return 2;
         }
 
@@ -169,6 +212,70 @@ static async Task<int> RunAsync(string[] args, bool machineReadable)
 
         Console.WriteLine(response.GetRawText());
         return 0;
+    }
+
+    // The first commands in this binary that can run for minutes, so they are also the first
+    // that have to answer Ctrl+C — an interrupted triage would otherwise exit with no envelope
+    // and no line saying why.
+    if (args is ["ask", .. var askArguments])
+    {
+        if (!AskCommand.TryParse(askArguments, out var ask, out var askRefusal))
+        {
+            return Refuse("ask", askRefusal!, machineReadable);
+        }
+
+        return await Interruptible(token => LocalModelRun.ExecuteAsync(
+            "ask",
+            "ask:" + PrimarySource(ask!.Files, "prompt"),
+            ask.Profile,
+            (tasks, inner) => tasks.AskAsync(
+                ask.Profile,
+                ask.Prompt,
+                ask.Files,
+                ask.Model,
+                inner),
+            machineReadable,
+            token));
+    }
+
+    if (args is ["triage", .. var triageArguments])
+    {
+        if (!TriageCommand.TryParse(
+                triageArguments,
+                Console.IsInputRedirected,
+                out var triage,
+                out var triageRefusal))
+        {
+            return Refuse("triage", triageRefusal!, machineReadable);
+        }
+
+        string? piped = null;
+        if (triage!.FromStandardInput)
+        {
+            piped = await Console.In.ReadToEndAsync();
+            if (string.IsNullOrWhiteSpace(piped))
+            {
+                // A pipe that carried nothing is a different mistake from no pipe at all, and
+                // only the sentence tells the reader which one they made.
+                return Refuse(
+                    "triage",
+                    new CommandRefusal("source_missing", CliText.TriageEmptyInput),
+                    machineReadable);
+            }
+        }
+
+        return await Interruptible(token => LocalModelRun.ExecuteAsync(
+            "triage",
+            "triage:" + (triage.Path ?? "stdin"),
+            LocalTaskProfile.LogTriage,
+            (tasks, inner) => tasks.TriageLogAsync(
+                triage.Path,
+                piped,
+                triage.Question,
+                triage.Model,
+                inner),
+            machineReadable,
+            token));
     }
 
     if (args is ["repo", "status", ..])

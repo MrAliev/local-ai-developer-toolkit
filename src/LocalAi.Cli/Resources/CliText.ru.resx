@@ -47,6 +47,14 @@
   <data name="AdaptersFailed" xml:space="preserve">
     <value>Семантическое поколение не опубликовано, потому что обязательные адаптеры не отработали: {0}</value>
   </data>
+  <data name="AskProfileNotSupported" xml:space="preserve">
+    <value>Команда localai ask не выполняет профиль задачи '{0}': он не относится к текстовому чату. Поддерживаемые профили: {1}</value>
+    <comment>The cause is the one the code checks. An earlier draft said the model could not hold a conversation, which is false for four of the seven excluded profiles: translation and image profiles route through the same chat call, and it is the task that does not fit. The clause after the colon is LocalLmText.NotATextChatProfile word for word.</comment>
+  </data>
+  <data name="AskPromptMissing" xml:space="preserve">
+    <value>Команде localai ask нужна инструкция для модели. Usage: {0}</value>
+    <comment>Usage: stays Latin, as it does in every other refusal that carries a form.</comment>
+  </data>
   <data name="BootstrapAlreadyConnected" xml:space="preserve">
     <value>Этот репозиторий уже подключён; настраивать здесь нечего.</value>
     <comment>connected rather than configured: RepositoryNotConnected already settled that word, and lowercase configured is neither the CONFIGURED status token nor house prose.</comment>
@@ -92,6 +100,10 @@
   <data name="BrokerStateUnreadable" xml:space="preserve">
     <value>host.json не читается: {0}</value>
   </data>
+  <data name="CommandUnknownArgument" xml:space="preserve">
+    <value>Команда localai {0} не понимает '{1}'. Usage: {2}</value>
+    <comment>The command-agnostic form of RepoStatusUnknownArgument, which stays as it is because its Russian reads differently with the command name inside the sentence.</comment>
+  </data>
   <data name="CoverageNoCsharp" xml:space="preserve">
     <value>Семантическая индексация не покрыла ни одного документа C#, хотя в репозитории есть исходники C#. go_to_definition, find_references, find_implementations и find_relationships будут отвечать ограниченным поиском по тексту, пока это не исправлено. Причину, по которой не загрузилось рабочее пространство, называет строка 'Roslyn:' выше, если она есть.</value>
     <comment>Tool names and the 'Roslyn:' prefix stay Latin; the prefix is written literally elsewhere in this same file.</comment>
@@ -136,8 +148,8 @@
     <comment>Not LauncherMissing: that one is about a file that is not there and is printed by doctor. This is about a variable that was never set, and its fix is how the command was invoked. launcher stays Latin and indeclinable, as in the documentation.</comment>
   </data>
   <data name="JsonNotSupported" xml:space="preserve">
-    <value>--json недоступен для 'localai {0}'. Команды, которые его принимают, отмечены в Usage как [--json].</value>
-    <comment>Says nothing about whether the command exists, because at the point this is printed the binary cannot tell a real command with no envelope from a typo — the dispatcher is a chain of patterns, and a second list of command names beside it would be a copy that drifts. Both readers need the same next step, and the usage marks answer both. Unreachable in Russian while --json pins the language to English; it is a key rather than a literal so the parity test needs no exception and lifting the pin later costs no new string.</comment>
+    <value>Здесь --json недоступен. Команды, которые его принимают, отмечены в Usage как [--json].</value>
+    <comment>No echo of what was typed. Naming the command meant naming a prefix of it — `hooks` for `hooks install`, because the path is matched against the commands that fill an envelope and an unmatched one is known only by its first word. A prefix names a command the reader did not run. The envelope's own `command` field keeps that first word for correlation; this sentence does not repeat it.</comment>
   </data>
   <data name="LauncherMissing" xml:space="preserve">
     <value>Стабильной точки входа нет: {0}. Регистрации, указывающие на неё, работать не будут, а регистрации внутрь каталога версии сломаются при следующем обновлении.</value>
@@ -153,6 +165,10 @@
   <data name="NoCurrentGeneration" xml:space="preserve">
     <value>Для этого репозитория не опубликовано ни одного поколения. Собрать: localai sync</value>
     <comment>Not RepositoryNotConnected: a connected repository still building its first generation reaches this branch too.</comment>
+  </data>
+  <data name="OptionValueMissing" xml:space="preserve">
+    <value>Команде localai {0} нужно значение после {1}. Usage: {2}</value>
+    <comment>{1} is an option name and stays Latin. RepoStatusRootWithoutDirectory keeps its own wording rather than folding in here: 'needs a directory' says what to type, and 'needs a value' does not.</comment>
   </data>
   <data name="OverlayDegraded" xml:space="preserve">
     <value>Семантический overlay для '{0}' ухудшен: {1}. Файлы, изменённые в этом worktree, режутся скользящим окном по строкам, пока адаптер не заработает снова; на базовое поколение это не влияет.</value>
@@ -258,6 +274,10 @@
   <data name="PositionNotFromOne" xml:space="preserve">
     <value>invalid_position: строки и колонки считаются с единицы; получено: строка {0}, колонка {1}.</value>
     <comment>Word for word CodeSearchText.PositionNotFromOne, deliberately duplicated: this CLI is what the instruction block offers when that MCP server is unreachable, and the block quotes the sentence as a literal. LocalAi.Cli does not reference CodeSearch.Mcp, so the two cannot share one resource; a test compares them.</comment>
+  </data>
+  <data name="ProfileUnknown" xml:space="preserve">
+    <value>Команде localai {0} неизвестен профиль задачи '{1}'. Поддерживаемые профили: {2}</value>
+    <comment>Command-agnostic because read-image and translate need the same refusal with a different set, and two parallel keys would drift. No full stop: the line ends in a list somebody copies, the reason HookEventUnknown gives.</comment>
   </data>
   <data name="PruneArchive" xml:space="preserve">
     <value>archive: заданий {0}, тел ответов {1}, {2} МБ</value>
@@ -433,6 +453,17 @@
   <data name="TelemetryUnreadable" xml:space="preserve">
     <value>Не прочитано записей {0}; в подсчётах ниже они не участвуют.</value>
     <comment>Only ever printed with a table under it, which is what makes 'below' true. Noun-first.</comment>
+  </data>
+  <data name="TriageEmptyInput" xml:space="preserve">
+    <value>На stdin ничего не пришло — триажить нечего.</value>
+    <comment>Shares the code source_missing with TriageNoSource: the remedy is the same family, and only the message says which of the two mistakes was made — the TelemetryNone split.</comment>
+  </data>
+  <data name="TriageNoSource" xml:space="preserve">
+    <value>Команде localai triage нужен лог: укажите файл или передайте его на stdin. Usage: {0}</value>
+    <comment>stdin stays Latin: it is the name of a stream, not a word.</comment>
+  </data>
+  <data name="TriageOneLog" xml:space="preserve">
+    <value>Команда localai triage читает один лог, а не два. Usage: {0}</value>
   </data>
   <data name="UpdateAvailable" xml:space="preserve">
     <value>доступна {0}, установлена {1}. {2}</value>

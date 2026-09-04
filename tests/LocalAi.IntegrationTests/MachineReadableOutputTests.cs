@@ -125,10 +125,42 @@ public sealed class MachineReadableOutputTests
     [Fact]
     public void A_command_with_no_envelope_refuses_the_flag_rather_than_ignoring_it()
     {
-        var message = CliText.JsonNotSupported("prune");
+        var message = CliText.JsonNotSupported;
 
         Assert.Contains("--json", message, StringComparison.Ordinal);
-        Assert.Contains("prune", message, StringComparison.Ordinal);
+
+        // Deliberately no echo of what was typed. Naming the command meant naming a prefix of
+        // it — `hooks` for `hooks install` — which is a command the reader did not run.
+        Assert.Contains("[--json]", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A command path cannot be guessed from the leading words: `ask` takes the reader's own
+    /// instruction as its first positional argument, so "the first two non-option tokens" made
+    /// `localai ask "In one sentence: what is this?" --json` ask for a command called
+    /// `ask In one sentence: what is this?` and be told the flag was unavailable.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { "repo", "status", "--json" }, "repo status")]
+    [InlineData(new[] { "ask", "summarise this file", "a.cs", "--json" }, "ask")]
+    [InlineData(new[] { "triage", "build.log", "--json" }, "triage")]
+    public void The_command_is_matched_against_what_exists_not_guessed(
+        string[] arguments,
+        string expected)
+    {
+        Assert.Equal(expected, MachineOutput.Enveloped(arguments), StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A command with no envelope matches nothing, and what it is called comes from its first
+    /// word only — the words after it may be anything the reader typed.
+    /// </summary>
+    [Fact]
+    public void A_command_with_no_envelope_matches_nothing_and_is_named_by_its_first_word()
+    {
+        Assert.Null(MachineOutput.Enveloped(["prune", "--dry-run", "--json"]));
+        Assert.Equal("prune", MachineOutput.Named(["prune", "--dry-run", "--json"]));
+        Assert.Equal(string.Empty, MachineOutput.Named(["--json"]));
     }
 
     /// <summary>

@@ -17,6 +17,10 @@ internal static class CliUsage
     public const string Prune = "localai prune [--dry-run]";
     public const string Doctor = "localai doctor [--root dir]";
     public const string Telemetry = "localai telemetry";
+    public const string Ask =
+        "localai ask <prompt> [file ...] [--profile name] [--model model] [--json]";
+    public const string Triage =
+        "localai triage [log-file|-] [--question text] [--model model] [--json]";
 
     // Every command the binary actually answers to belongs here. The hook command was missing
     // from this list while every installed Git hook invoked it, so anyone debugging a hook was
@@ -30,5 +34,5 @@ internal static class CliUsage
         "localai semantic <operation> [options] | localai bootstrap --dry-run | " +
         "localai sync [--root dir] [--base-only] [--require-semantics] [--max-inline-files n] | " + Hook + " | " +
         "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +
-        Telemetry;
+        Telemetry + " | " + Ask + " | " + Triage;
 }
