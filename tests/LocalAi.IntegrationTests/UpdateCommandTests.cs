@@ -1,3 +1,4 @@
+using LocalAi.Cli.Resources;
 using System.Text;
 using LocalAi.Cli;
 using LocalAi.Contracts;
@@ -140,6 +141,66 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains("2 queued job(s)", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("localai update --wait", error.ToString(), StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Ctrl+C while `--wait` sits on the queue used to escape past the only code that deletes the
+    /// working directory: `QueueIsQuietAsync` is called outside the try that owns it. So every
+    /// abandoned wait left a `%TEMP%\localai-update-<guid>` behind, and nothing ever collected
+    /// them — a person who waits, gives up and retries accumulates one per attempt.
+    /// </summary>
+    [Fact]
+    public async Task Cancelling_the_wait_leaves_no_working_directory_behind()
+    {
+        Queue(1);
+        var before = TemporaryUpdateDirectories();
+        using var cancellation = new CancellationTokenSource();
+
+        var run = UpdateCommand.ExecuteAsync(
+            ["--wait"],
+            root,
+            output,
+            error,
+            new StubFeed("v0.1.51", "0.1.51", Directory51),
+            processRunner: null,
+            cancellation.Token);
+        await cancellation.CancelAsync();
+        await Record.ExceptionAsync(() => run);
+
+        Assert.Equal(before, TemporaryUpdateDirectories());
+    }
+
+    /// <summary>
+    /// And it says the one thing the reader needs: the installed version is untouched. The
+    /// cancellation escaped to the entry point's guard, which prints `localai: cancelled.` — true
+    /// of any command and a promise about none of them. The string that promises the version was
+    /// not changed exists and was not the one that appeared.
+    /// </summary>
+    [Fact]
+    public async Task Cancelling_the_wait_says_the_installed_version_is_untouched()
+    {
+        Queue(1);
+        using var cancellation = new CancellationTokenSource();
+
+        var run = UpdateCommand.ExecuteAsync(
+            ["--wait"],
+            root,
+            output,
+            error,
+            new StubFeed("v0.1.51", "0.1.51", Directory51),
+            processRunner: null,
+            cancellation.Token);
+        await cancellation.CancelAsync();
+        await Record.ExceptionAsync(() => run);
+
+        Assert.Contains(
+            CliText.UpdateCancelled,
+            error.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>Every working directory this command could have left in the temp root.</summary>
+    private static string[] TemporaryUpdateDirectories() =>
+        Directory.GetDirectories(Path.GetTempPath(), "localai-update-*");
 
     [Fact]
     public async Task An_unknown_option_changes_nothing()

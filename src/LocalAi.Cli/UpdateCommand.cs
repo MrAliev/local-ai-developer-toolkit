@@ -122,15 +122,19 @@ public static class UpdateCommand
         // release page URL, which this command does not have: the feed resolves a package URI.
         output.WriteLine(
             CliText.UpdateAvailable(available, installed.DisplayName, null).TrimEnd());
-        if (!await QueueIsQuietAsync(runtimeRoot, wait, output, error, cancellationToken)
-            .ConfigureAwait(false))
-        {
-            Delete(working);
-            return 2;
-        }
-
         try
         {
+            // Inside the block that owns the working directory, not before it. Waiting on the
+            // queue is the one part of this command that can take minutes, so it is the part
+            // somebody interrupts - and cancelling used to throw past the only code that deletes
+            // the directory, leaving a working directory in the temp root on every abandoned
+            // wait with nothing to collect them (#319).
+            if (!await QueueIsQuietAsync(runtimeRoot, wait, output, error, cancellationToken)
+                .ConfigureAwait(false))
+            {
+                return 2;
+            }
+
             var service = new ReleaseInstallService(
                 releases,
                 processRunner ?? new SystemProcessRunner(),
