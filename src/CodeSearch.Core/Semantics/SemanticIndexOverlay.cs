@@ -1,4 +1,5 @@
 using System.Text;
+using CodeSearch.Core.Resources;
 
 namespace CodeSearch.Core.Semantics;
 
@@ -116,8 +117,7 @@ public sealed record SemanticIndexOverlay
             !string.Equals(baseIndex.GenerationId, GenerationId, StringComparison.Ordinal) ||
             !string.Equals(baseIndex.GitTree, BaseGitTree, StringComparison.Ordinal))
         {
-            throw new SemanticSnapshotMismatchException(
-                "Semantic overlay does not match the supplied base generation.");
+            throw new SemanticSnapshotMismatchException(IndexText.OverlayBaseMismatch);
         }
 
         var touched = DeletedDocuments.Concat(Changed.Documents.Select(document => document.RelPath))

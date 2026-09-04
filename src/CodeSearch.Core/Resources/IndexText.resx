@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    What CodeSearch.Core refuses with, in the language the reader's machine is set to. The rule is CodeSearchText's, unchanged: anything left of the first colon is a field name or a code and stays English, and so does any status token, identifier, path or command to the right of one. Sentences and clauses are translated. Do not write a second rule.
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <data name="ChunkIdMalformed" xml:space="preserve">
+    <value>The chunk id is malformed.</value>
+  </data>
+  <data name="ChunkIdTampered" xml:space="preserve">
+    <value>The chunk id digest does not match its payload.</value>
+  </data>
+  <data name="ChunkOutOfRange" xml:space="preserve">
+    <value>The chunk ordinal is outside the exact index snapshot. Run search_code again for a current id.</value>
+  </data>
+  <data name="ChunkPathOutsideRoot" xml:space="preserve">
+    <value>The indexed source path escapes the repository root.</value>
+  </data>
+  <data name="ChunkPathReparsePoint" xml:space="preserve">
+    <value>The indexed source path contains a symbolic link or reparse point.</value>
+  </data>
+  <data name="ChunkSourceMissing" xml:space="preserve">
+    <value>The indexed source file no longer exists.</value>
+  </data>
+  <data name="ChunkSourceStaleContent" xml:space="preserve">
+    <value>The source file no longer matches the indexed content. Run search_code again for a current id.</value>
+  </data>
+  <data name="ChunkSourceStaleRange" xml:space="preserve">
+    <value>The indexed line range no longer exists in the source file. Run search_code again for a current id.</value>
+  </data>
+  <data name="ChunkSourceUnavailable" xml:space="preserve">
+    <value>The indexed source file is unavailable.</value>
+  </data>
+  <data name="ChunkStaleGeneration" xml:space="preserve">
+    <value>The chunk id belongs to a generation that is no longer active. Run search_code again for a current id.</value>
+    <comment>The closing clause is new: the six stale cases named no action at all, and the action is always the same one.</comment>
+  </data>
+  <data name="ChunkStaleOverlay" xml:space="preserve">
+    <value>The worktree overlay changed after this chunk id was issued. Run search_code again for a current id.</value>
+  </data>
+  <data name="ChunkStaleWorktree" xml:space="preserve">
+    <value>The worktree tree changed after this chunk id was issued. Run search_code again for a current id.</value>
+  </data>
+  <data name="ChunkWrongRepository" xml:space="preserve">
+    <value>The chunk id belongs to another repository.</value>
+  </data>
+  <data name="GenerationNotPublished" xml:space="preserve">
+    <value>No index generation is published for this repository. Build one: localai sync --root {0}</value>
+    <comment>localai sync and --root are typed, so they stay as they are; {0} is a path and never moves.</comment>
+  </data>
+  <data name="GenerationWithoutSemanticIndex" xml:space="preserve">
+    <value>Generation '{0}' has no semantic.sidx, so definitions and references are answered by bounded text matching. Sync again to build it: localai sync --root {1}</value>
+    <comment>The second clause is the wording CodeSearchText.NavigationHeuristicMissing already uses for the same fact on the Navigation: line; two spellings of one fact is how they drift. It replaces 'Rebuild it with semantic indexing enabled', which named a route no option offers: localai sync takes no such flag, and the real cause is a generation published before semantic indexing existed.</comment>
+  </data>
+  <data name="IndexBelongsToAnotherRepository" xml:space="preserve">
+    <value>The published index belongs to another repository, so nothing here was searched. Sync this one: localai sync --root {0}</value>
+  </data>
+  <data name="IndexNotBuilt" xml:space="preserve">
+    <value>No index at '{0}'. Build it: localai sync --root &lt;repo&gt;</value>
+    <comment>It used to recommend codesearch index, which writes a file in place and publishes no generation; the MCP tool answers this identical state with localai sync, and so does this binary three hundred lines away. Two build commands in one binary is the drift.</comment>
+  </data>
+  <data name="IndexPredatesSnapshotIds" xml:space="preserve">
+    <value>This index was built before chunk ids were bound to a snapshot. Rebuild it: localai sync --root {0}</value>
+  </data>
+  <data name="ModelNotCalibrated" xml:space="preserve">
+    <value>Semantic relevance threshold not calibrated for embedding model '{0}'.</value>
+    <comment>The English is unchanged to the character: README.md quotes 'threshold not calibrated' as a literal, and two tests assert on it.</comment>
+  </data>
+  <data name="NoSymbolAtPosition" xml:space="preserve">
+    <value>The semantic index has no symbol at this position, so these are bounded text matches rather than resolved references.</value>
+    <comment>Not a refusal but a degradation note, and it lands in the same slot as the three above — left English it would reproduce this defect one line lower.</comment>
+  </data>
+  <data name="OverlayBaseMismatch" xml:space="preserve">
+    <value>The semantic overlay was built against a different base generation than the one published now. Run localai sync in this worktree.</value>
+    <comment>overlay stays Latin and indeclinable in Russian, as docs/overview.ru.md already writes it.</comment>
+  </data>
+  <data name="OverlayMissing" xml:space="preserve">
+    <value>No overlay matches this worktree as it is now, so no stale or mixed result was returned. Build one: localai sync --root {0}</value>
+    <comment>It used to end 'Diagnose/restart MCP, use the LocalAi CLI through the same broker, or continue with rg', which named nothing the reader could type and contradicted ConsoleJson's own comment that this state is answered by syncing this worktree and that the message says so. Now it does.</comment>
+  </data>
+  <data name="SemanticIndexUnreadable" xml:space="preserve">
+    <value>The semantic index for generation '{0}' could not be read. Rebuild it: localai sync --root {1}</value>
+    <comment>The cause it used to interpolate is now the InnerException: none of the twenty ways to be unreadable changes what the reader does, and 'Semantic index ended inside a document hash' is not a sentence to put in front of anybody.</comment>
+  </data>
+  <data name="SnapshotMismatch" xml:space="preserve">
+    <value>The semantic index snapshot does not match the requested repository generation and worktree. Run localai sync in this worktree.</value>
+    <comment>No path hole: neither call site has a working root to name, and threading one through for a --root the reader may omit is not worth the parameter.</comment>
+  </data>
+</root>

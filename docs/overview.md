@@ -608,9 +608,16 @@ and a sentence of LocalAi's own before they can reach the envelope.
 **The flag is in both binaries and the envelope is one shape.** `localai` and `codesearch`
 answer with the same `schema`, `command`, `ok`, `data` and `error`, so a plugin writes one parser
 for both. Two things are per-binary rather than shared: `localai` pins its language to English
-under `--json` (`codesearch` prints English regardless, having no catalogue yet), and the exit
-codes are different vocabularies — `localai` uses sysexits values, `codesearch` returns 1 for every
-failure. `ok` still mirrors the exit code in both; it is the numbers that do not transfer.
+under `--json`, while `codesearch` pins English for everything it prints, because the prose around
+what its index core says is still English literals and one Russian sentence inside an English
+answer is worse than none; and the exit codes are different vocabularies — `localai` uses sysexits
+values, `codesearch` returns 1 for every failure. `ok` still mirrors the exit code in both; it is
+the numbers that do not transfer.
+
+The MCP tools are the other half of that and behave the opposite way: they are catalogued
+throughout and follow the reader, so the same refusal from the same index core arrives in Russian
+through `search_code` and in English through `codesearch search`. That is deliberate. One is read
+by a person in their own language; the other is parsed.
 
 **New codes may appear in any release**, so a caller needs a branch for the ones it does not
 know. That is what makes a coarse code narrowed later — one `input_rejected` becoming several

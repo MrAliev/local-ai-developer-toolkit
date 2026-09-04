@@ -1,3 +1,5 @@
+using CodeSearch.Core.Resources;
+
 namespace CodeSearch.Core.Semantics;
 
 public sealed record SemanticSnapshotIdentity(
@@ -311,8 +313,7 @@ public sealed class SemanticNavigationService
             !string.Equals(_identity.GitTree, snapshot.GitTree, StringComparison.Ordinal) ||
             !string.Equals(_identity.DirtyHash, snapshot.DirtyHash, StringComparison.Ordinal))
         {
-            throw new SemanticSnapshotMismatchException(
-                "Semantic index snapshot does not match the requested repository generation and worktree.");
+            throw new SemanticSnapshotMismatchException(IndexText.SnapshotMismatch);
         }
     }
 

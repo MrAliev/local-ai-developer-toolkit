@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    What CodeSearch.Core refuses with, in the language the reader's machine is set to. The rule is CodeSearchText's, unchanged: anything left of the first colon is a field name or a code and stays English, and so does any status token, identifier, path or command to the right of one. Sentences and clauses are translated. Do not write a second rule.
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a2c561934e089</value>
+  </resheader>
+  <data name="ChunkIdMalformed" xml:space="preserve">
+    <value>Идентификатор чанка имеет неверный формат.</value>
+  </data>
+  <data name="ChunkIdTampered" xml:space="preserve">
+    <value>Контрольная сумма идентификатора чанка не сходится с его содержимым.</value>
+  </data>
+  <data name="ChunkOutOfRange" xml:space="preserve">
+    <value>Порядковый номер чанка выходит за пределы точного снимка индекса. Запросить новый идентификатор через search_code.</value>
+  </data>
+  <data name="ChunkPathOutsideRoot" xml:space="preserve">
+    <value>Проиндексированный путь к исходнику выходит за корень репозитория.</value>
+  </data>
+  <data name="ChunkPathReparsePoint" xml:space="preserve">
+    <value>В проиндексированном пути к исходнику есть символическая ссылка или точка повторного разбора.</value>
+  </data>
+  <data name="ChunkSourceMissing" xml:space="preserve">
+    <value>Проиндексированного файла исходника больше нет.</value>
+  </data>
+  <data name="ChunkSourceStaleContent" xml:space="preserve">
+    <value>Файл исходника больше не совпадает с проиндексированным содержимым. Запросить новый идентификатор через search_code.</value>
+  </data>
+  <data name="ChunkSourceStaleRange" xml:space="preserve">
+    <value>Проиндексированного диапазона строк в файле исходника больше нет. Запросить новый идентификатор через search_code.</value>
+  </data>
+  <data name="ChunkSourceUnavailable" xml:space="preserve">
+    <value>Проиндексированный файл исходника недоступен.</value>
+  </data>
+  <data name="ChunkStaleGeneration" xml:space="preserve">
+    <value>Идентификатор чанка принадлежит поколению, которое больше не активно. Запросить новый идентификатор через search_code.</value>
+    <comment>The closing clause is new: the six stale cases named no action at all, and the action is always the same one.</comment>
+  </data>
+  <data name="ChunkStaleOverlay" xml:space="preserve">
+    <value>Overlay рабочего дерева изменился после выдачи этого идентификатора чанка. Запросить новый идентификатор через search_code.</value>
+  </data>
+  <data name="ChunkStaleWorktree" xml:space="preserve">
+    <value>Дерево рабочей копии изменилось после выдачи этого идентификатора чанка. Запросить новый идентификатор через search_code.</value>
+  </data>
+  <data name="ChunkWrongRepository" xml:space="preserve">
+    <value>Идентификатор чанка принадлежит другому репозиторию.</value>
+  </data>
+  <data name="GenerationNotPublished" xml:space="preserve">
+    <value>Для этого репозитория нет опубликованного поколения индекса. Собрать: localai sync --root {0}</value>
+    <comment>localai sync and --root are typed, so they stay as they are; {0} is a path and never moves.</comment>
+  </data>
+  <data name="GenerationWithoutSemanticIndex" xml:space="preserve">
+    <value>В поколении '{0}' нет semantic.sidx, поэтому определения и ссылки отвечают ограниченным поиском по тексту. Синхронизировать заново, чтобы он появился: localai sync --root {1}</value>
+    <comment>The second clause is the wording CodeSearchText.NavigationHeuristicMissing already uses for the same fact on the Navigation: line; two spellings of one fact is how they drift. It replaces 'Rebuild it with semantic indexing enabled', which named a route no option offers: localai sync takes no such flag, and the real cause is a generation published before semantic indexing existed.</comment>
+  </data>
+  <data name="IndexBelongsToAnotherRepository" xml:space="preserve">
+    <value>Опубликованный индекс принадлежит другому репозиторию, поэтому здесь ничего не искалось. Синхронизировать этот: localai sync --root {0}</value>
+  </data>
+  <data name="IndexNotBuilt" xml:space="preserve">
+    <value>Индекса по пути '{0}' нет. Собрать: localai sync --root &lt;repo&gt;</value>
+    <comment>It used to recommend codesearch index, which writes a file in place and publishes no generation; the MCP tool answers this identical state with localai sync, and so does this binary three hundred lines away. Two build commands in one binary is the drift.</comment>
+  </data>
+  <data name="IndexPredatesSnapshotIds" xml:space="preserve">
+    <value>Этот индекс собран раньше, чем идентификаторы чанков стали привязываться к снимку. Пересобрать: localai sync --root {0}</value>
+  </data>
+  <data name="ModelNotCalibrated" xml:space="preserve">
+    <value>Порог семантической релевантности не откалиброван для модели эмбеддингов '{0}'.</value>
+    <comment>The English is unchanged to the character: README.md quotes 'threshold not calibrated' as a literal, and two tests assert on it.</comment>
+  </data>
+  <data name="NoSymbolAtPosition" xml:space="preserve">
+    <value>В семантическом индексе на этой позиции нет символа, поэтому это ограниченные совпадения по тексту, а не разрешённые ссылки.</value>
+    <comment>Not a refusal but a degradation note, and it lands in the same slot as the three above — left English it would reproduce this defect one line lower.</comment>
+  </data>
+  <data name="OverlayBaseMismatch" xml:space="preserve">
+    <value>Семантический overlay собран на другом базовом поколении, не на том, что опубликовано сейчас. Запустить localai sync в этом рабочем дереве.</value>
+    <comment>overlay stays Latin and indeclinable in Russian, as docs/overview.ru.md already writes it.</comment>
+  </data>
+  <data name="OverlayMissing" xml:space="preserve">
+    <value>Ни один overlay не соответствует текущему состоянию этого рабочего дерева, поэтому устаревший или смешанный результат не выдан. Собрать: localai sync --root {0}</value>
+    <comment>It used to end 'Diagnose/restart MCP, use the LocalAi CLI through the same broker, or continue with rg', which named nothing the reader could type and contradicted ConsoleJson's own comment that this state is answered by syncing this worktree and that the message says so. Now it does.</comment>
+  </data>
+  <data name="SemanticIndexUnreadable" xml:space="preserve">
+    <value>Семантический индекс поколения '{0}' не читается. Пересобрать: localai sync --root {1}</value>
+    <comment>The cause it used to interpolate is now the InnerException: none of the twenty ways to be unreadable changes what the reader does, and 'Semantic index ended inside a document hash' is not a sentence to put in front of anybody.</comment>
+  </data>
+  <data name="SnapshotMismatch" xml:space="preserve">
+    <value>Снимок семантического индекса не совпадает с запрошенным поколением репозитория и рабочим деревом. Запустить localai sync в этом рабочем дереве.</value>
+    <comment>No path hole: neither call site has a working root to name, and threading one through for a --root the reader may omit is not worth the parameter.</comment>
+  </data>
+</root>

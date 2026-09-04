@@ -1,3 +1,4 @@
+using CodeSearch.Core.Resources;
 using CodeSearch.Core.Semantics;
 
 namespace CodeSearch.Tests;
@@ -146,9 +147,10 @@ public sealed class HeuristicSemanticNavigationTests : IDisposable
         // reach the text fallback, so the caller saw README and docs matches and no reason.
         var heuristic = new FakeHeuristic([HeuristicLocation]);
         var gateway = new SemanticNavigationGateway(
+            // The production sentence rather than a copy of it: a fixture that quotes a
+            // message the product no longer prints reads like a promise about the product.
             _ => throw new SemanticNavigationNotReadyException(
-                "Generation 'ff114b066164' has no semantic.sidx. " +
-                "Rebuild it with semantic indexing enabled."),
+                IndexText.GenerationWithoutSemanticIndex("ff114b066164", @"R:epo")),
             heuristicNavigation: heuristic);
 
         var outcome = await gateway.ResolveReferencesAsync("Use.cs", 0, 1, true, _root, Ct);
