@@ -260,6 +260,9 @@ public static class CliText
     public static string HookEventUnknown(string requested, string supportedEvents) =>
         Catalogue.Format(nameof(HookEventUnknown), requested, supportedEvents);
 
+    public static string HooksChainBlocked(string hookPath, string previousPath) =>
+        Catalogue.Format(nameof(HooksChainBlocked), hookPath, previousPath);
+
     public static string HooksChained(string suffix, string hooks) =>
         Catalogue.Format(nameof(HooksChained), suffix, hooks);
 
@@ -388,4 +391,31 @@ public static class CliText
         Catalogue.Format(nameof(SummaryNoProblemsWithNotes), warned);
 
     public static string SummaryNoProblems => Catalogue.Get(nameof(SummaryNoProblems));
+
+    public static string RepoStatusRootWithoutDirectory => Catalogue.Get(nameof(RepoStatusRootWithoutDirectory));
+
+    public static string RepoStatusTwoRepositories => Catalogue.Get(nameof(RepoStatusTwoRepositories));
+
+    public static string RepoStatusUnknownArgument(string argument, string usage) =>
+        Catalogue.Format(nameof(RepoStatusUnknownArgument), argument, usage);
+
+    public static string RepoStatusNotConfigured(string commonDirectory) =>
+        Catalogue.Format(nameof(RepoStatusNotConfigured), commonDirectory);
+
+    public static string SemanticCommandFailed(string operation, string reason) =>
+        Catalogue.Format(nameof(SemanticCommandFailed), operation, reason);
+
+    public static string PositionNotFromOne(int line, int column) =>
+        Catalogue.Format(nameof(PositionNotFromOne), line, column);
+
+    public static string SemanticOperationUnknown(string operation) =>
+        Catalogue.Format(nameof(SemanticOperationUnknown), operation);
+
+    public static string NoCurrentGeneration => Catalogue.Get(nameof(NoCurrentGeneration));
+
+    public static string SemanticEvaluateNoSuite(string path) =>
+        Catalogue.Format(nameof(SemanticEvaluateNoSuite), path);
+
+    public static string NativeOperationUnknown(string operation, string operations) =>
+        Catalogue.Format(nameof(NativeOperationUnknown), operation, operations);
 }

@@ -228,6 +228,9 @@ repository sets `core.hooksPath` — and husky, lefthook and simple-git-hooks al
 from `npm install` — they go there instead. For husky that means the `.husky` directory rather
 than `.husky/_`, which husky recreates on every run. An existing hook of the same name is not
 overwritten: it is kept alongside and called first, and a non-zero exit from it stops the chain.
+One case installs nothing at all: a hook LocalAi did not write, with a copy from an
+earlier install already saved beside it. Keeping the first would overwrite the second, so
+the command stops, names both files, and leaves the choice where it belongs.
 Files that land in the working tree are added to `.git/info/exclude` so they never show up in
 `git status`.
 

@@ -1,3 +1,4 @@
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 using LocalAi.Repository;
 
@@ -46,13 +47,13 @@ public static class RepoCommand
             {
                 if (index + 1 >= arguments.Count)
                 {
-                    error = "localai repo status --root requires a directory.";
+                    error = CliText.RepoStatusRootWithoutDirectory;
                     return false;
                 }
 
                 if (path is not null)
                 {
-                    error = "localai repo status accepts one repository, not two.";
+                    error = CliText.RepoStatusTwoRepositories;
                     return false;
                 }
 
@@ -63,13 +64,13 @@ public static class RepoCommand
 
             if (argument.StartsWith('-'))
             {
-                error = $"localai repo status does not understand '{argument}'.";
+                error = CliText.RepoStatusUnknownArgument(argument, CliUsage.RepoStatus);
                 return false;
             }
 
             if (path is not null)
             {
-                error = "localai repo status accepts one repository, not two.";
+                error = CliText.RepoStatusTwoRepositories;
                 return false;
             }
 
@@ -98,9 +99,7 @@ public static class RepoCommand
         // token stays first so anything matching on it keeps working.
         var message = configured
             ? $"CONFIGURED: {identity.CommonDirectory}"
-            : $"NOT_CONFIGURED: {identity.CommonDirectory} — offer CodeSearch, LocalLm, " +
-              "shared broker, mainline generations, branch overlays, hooks, Claude MCP " +
-              "and Codex MCP.";
+            : CliText.RepoStatusNotConfigured(identity.CommonDirectory);
         return new RepositoryStatus(identity, configured, message);
     }
 }

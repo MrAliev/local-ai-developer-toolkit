@@ -12,6 +12,8 @@ internal static class CliUsage
     public const string Hook =
         "localai hook <" + HookEvents + "> [--root dir]";
     public const string HookEvents = "post-commit|post-checkout|post-merge|post-rewrite";
+    public const string RepoStatus =
+        "localai repo status [--root dir | git-common-dir]";
     public const string Prune = "localai prune [--dry-run]";
     public const string Doctor = "localai doctor [--root dir]";
     public const string Telemetry = "localai telemetry";
@@ -22,10 +24,10 @@ internal static class CliUsage
     public const string Text =
         "Usage: localai native <operation> [--request file] | " +
         ModelStatus + " | " + ModelPull + " | " + ModelPreflight + " | " +
-        "localai repo status [--root dir | git-common-dir] | " +
+        RepoStatus + " | " +
         "localai policy <show|set> [options] | " +
         "localai update [--wait] [--force] | " +
-        "localai semantic <operation> [--request file] | localai bootstrap --dry-run | " +
+        "localai semantic <operation> [options] | localai bootstrap --dry-run | " +
         "localai sync [--root dir] [--base-only] [--require-semantics] [--max-inline-files n] | " + Hook + " | " +
         "localai hooks install [--root dir] | " + Prune + " | " + Doctor + " | " +
         Telemetry;

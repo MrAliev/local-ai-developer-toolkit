@@ -90,7 +90,17 @@ static async Task<int> RunAsync(string[] args)
         var requestPath = requestIndex >= 0 && requestIndex + 1 < args.Length
             ? args[requestIndex + 1]
             : null;
-        var response = await NativeCommand.ExecuteAsync(operation, requestPath);
+        JsonElement response;
+        try
+        {
+            response = await NativeCommand.ExecuteAsync(operation, requestPath);
+        }
+        catch (ArgumentException refusal)
+        {
+            Console.Error.WriteLine(refusal.Message);
+            return 2;
+        }
+
         Console.WriteLine(response.GetRawText());
         return 0;
     }
@@ -297,9 +307,7 @@ static async Task<int> RunAsync(string[] args)
             "LOCALAI_LAUNCHER_PATH");
         if (string.IsNullOrWhiteSpace(launcherPath))
         {
-            Console.Error.WriteLine(
-                "LocalAi hooks require LOCALAI_LAUNCHER_PATH. " +
-                "Run this command through the stable LocalAi launcher.");
+            Console.Error.WriteLine(CliText.HooksLauncherRequired);
             return 2;
         }
 
@@ -309,12 +317,24 @@ static async Task<int> RunAsync(string[] args)
             : Environment.CurrentDirectory;
         var git = new LocalAi.Repository.GitClient();
         var commonDirectory = await git.GetCommonDirectoryAsync(root);
-        var result = HookInstaller.Install(
-            commonDirectory,
-            launcherPath,
-            ["run", "localai"],
-            await git.GetConfigurationAsync(root, "core.hooksPath"),
-            await git.GetWorkingTreeRootAsync(root));
+        HookInstallResult result;
+        try
+        {
+            result = HookInstaller.Install(
+                commonDirectory,
+                launcherPath,
+                ["run", "localai"],
+                await git.GetConfigurationAsync(root, "core.hooksPath"),
+                await git.GetWorkingTreeRootAsync(root));
+        }
+        catch (InvalidOperationException blocked)
+        {
+            // A collision between the reader's own hook and a backup of an earlier one is
+            // theirs to resolve, and the message says how. Exit 70 framed it as a fault.
+            Console.Error.WriteLine(blocked.Message);
+            return 2;
+        }
+
         Console.WriteLine(CliText.HooksInstalled(
             result.Installed.Count,
             result.HooksDirectory));

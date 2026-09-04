@@ -115,6 +115,10 @@
     <value>localai hook does not know the event '{0}'. Supported events: {1}</value>
     <comment>The sibling message, the usage syntax and the installed list all say event, so this says event too. No trailing full stop: it would sit glued to a hook name somebody copies. True only since the dispatcher started asking the installed list rather than the enum.</comment>
   </data>
+  <data name="HooksChainBlocked" xml:space="preserve">
+    <value>Nothing was installed: '{0}' is a hook LocalAi did not write, and '{1}' beside it already holds one saved earlier. The first cannot be saved without overwriting the second. Keep whichever of the two should run, remove the other, and run this again: localai hooks install</value>
+    <comment>{0} is the hook itself, which the old message never named; {1} is the backup beside it. Naming both is what makes the instruction actionable: only the reader knows which of the two should run.</comment>
+  </data>
   <data name="HooksChained" xml:space="preserve">
     <value>Hooks that were already here were kept, are called first, and a non-zero exit from one of them stops the chain. Moved aside with the suffix {0}: {1}</value>
     <comment>New: hooks install moved the reader's own files aside and said nothing about it. Both languages come from the paragraph in docs/overview.md that already describes chaining, so the tool and the documentation cannot drift apart. {0} is GitHookLayout.ChainedSuffix rather than a copy of it.</comment>
@@ -137,6 +141,14 @@
   <data name="MainlineMissing" xml:space="preserve">
     <value>A local mainline branch is required before indexing. None of these branches exists here: {0}</value>
     <comment>0 is the refs actually tried, which starts with the manifest's DevRef — the old wording named dev and main even for a repository configured for neither.</comment>
+  </data>
+  <data name="NativeOperationUnknown" xml:space="preserve">
+    <value>localai native does not know the operation '{0}'. Supported operations: {1}</value>
+    <comment>{1} is fed from Enum.GetNames over NativeOllamaOperation, so the message cannot name a set the parser does not accept.</comment>
+  </data>
+  <data name="NoCurrentGeneration" xml:space="preserve">
+    <value>No generation is published for this repository. Build one: localai sync</value>
+    <comment>Not RepositoryNotConnected: a connected repository still building its first generation reaches this branch too.</comment>
   </data>
   <data name="OverlayDegraded" xml:space="preserve">
     <value>Semantic overlay for '{0}' is degraded: {1}. Files this worktree changed are cut by line window until the adapter works again; the base generation is unaffected.</value>
@@ -239,6 +251,10 @@
                        never translated.</value>
     <comment>Usage: and every syntax line are byte-identical in both languages. The description column is 23; a Russian caption longer than 19 characters moves it for all six rows.</comment>
   </data>
+  <data name="PositionNotFromOne" xml:space="preserve">
+    <value>invalid_position: lines and columns are counted from 1; got line {0}, column {1}.</value>
+    <comment>Word for word CodeSearchText.PositionNotFromOne, deliberately duplicated: this CLI is what the instruction block offers when that MCP server is unreachable, and the block quotes the sentence as a literal. LocalAi.Cli does not reference CodeSearch.Mcp, so the two cannot share one resource; a test compares them.</comment>
+  </data>
   <data name="PruneArchive" xml:space="preserve">
     <value>archive: {0} job(s), {1} response bod(ies), {2} MB</value>
     <comment>Two different events on one row: a job record deleted, and a response body deleted from a record that stays. The Russian keeps both nouns for that reason, noun-first.</comment>
@@ -302,6 +318,21 @@
   <data name="QueueQuarantined" xml:space="preserve">
     <value>{0} queued, {1} quarantined. Quarantined jobs are never retried.</value>
   </data>
+  <data name="RepoStatusNotConfigured" xml:space="preserve">
+    <value>NOT_CONFIGURED: {0} — offer CodeSearch, LocalLm, shared broker, mainline generations, branch overlays, hooks, Claude MCP and Codex MCP.</value>
+    <comment>NOT_CONFIGURED: is a status token left of the first colon and stays English; documents and tests match on it. Six of the eight items after the em dash are prose, not names.</comment>
+  </data>
+  <data name="RepoStatusRootWithoutDirectory" xml:space="preserve">
+    <value>localai repo status --root requires a directory.</value>
+  </data>
+  <data name="RepoStatusTwoRepositories" xml:space="preserve">
+    <value>localai repo status accepts one repository, not two.</value>
+    <comment>One key, two call sites: --root given twice, and a bare path after --root.</comment>
+  </data>
+  <data name="RepoStatusUnknownArgument" xml:space="preserve">
+    <value>localai repo status does not understand '{0}'. Usage: {1}</value>
+    <comment>Usage: stays English, as it does everywhere else. {1} is CliUsage.RepoStatus, so the refusal names --root rather than leaving the reader to guess which flag was meant.</comment>
+  </data>
   <data name="RepositoryNotConnected" xml:space="preserve">
     <value>{0} is not connected. Index it: localai sync --root {0}</value>
     <comment>The old wording named the option without its argument, so the command it offered could not be run as written.</comment>
@@ -336,6 +367,17 @@
   <data name="SemanticCheckpointUnusable" xml:space="preserve">
     <value>Semantic checkpoint '{0}' was not reusable and will be rebuilt: {1}</value>
     <comment>checkpoint stays Latin: the embedding one is literally named &lt;id&gt;.embedding-checkpoint.</comment>
+  </data>
+  <data name="SemanticCommandFailed" xml:space="preserve">
+    <value>semantic {0} failed: {1}</value>
+    <comment>{0} is the operation name and stays Latin. {1} is exception.Message — English from our own core, and whatever language the runtime chose for a framework exception.</comment>
+  </data>
+  <data name="SemanticEvaluateNoSuite" xml:space="preserve">
+    <value>No benchmark suite in '{0}'.</value>
+  </data>
+  <data name="SemanticOperationUnknown" xml:space="preserve">
+    <value>localai semantic does not know the operation '{0}'.</value>
+    <comment>No list of operations: the syntax block prints immediately after this line.</comment>
   </data>
   <data name="SemanticPhaseResumed" xml:space="preserve">
     <value>Semantic phase resumed from '{0}'.</value>

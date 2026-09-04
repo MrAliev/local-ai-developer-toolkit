@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using LocalAi.Broker.Client;
+using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
 
 namespace LocalAi.Cli;
@@ -18,9 +19,9 @@ public static class NativeCommand
                 ignoreCase: true,
                 out var parsedOperation))
         {
-            throw new ArgumentException(
-                $"Unsupported native Ollama operation '{operation}'.",
-                nameof(operation));
+            throw new ArgumentException(CliText.NativeOperationUnknown(
+                operation,
+                string.Join("|", Enum.GetNames<NativeOllamaOperation>())));
         }
 
         JsonElement? body = null;
