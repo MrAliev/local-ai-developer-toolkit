@@ -309,6 +309,10 @@
     <value>repository {0}: whole record, its checkout no longer exists, {1} MB</value>
     <comment>Kept apart from PruneRecordNeverIndexed on purpose: only the cause tells a reader whether the deletion was right. checkout stays Latin and indeclinable.</comment>
   </data>
+  <data name="PruneRecordLeftAlone" xml:space="preserve">
+    <value>{0}  left alone: {1}</value>
+    <comment>Shaped after PruneOverlaysLeftAlone, which says the same thing about one generation's overlays. The two-space column is the report's own layout. {1} is the framework's message for the failure, which is as much as this can say about somebody else's lock or permissions.</comment>
+  </data>
   <data name="PruneRecordNeverIndexed" xml:space="preserve">
     <value>repository {0}: whole record, indexing never finished, {1} MB</value>
     <comment>The other shape the abandoned check matches: a record stuck in Initializing past the archive retention.</comment>

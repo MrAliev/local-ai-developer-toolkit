@@ -72,19 +72,38 @@ public static class PruneCommand
                 {
                     reclaimed += size;
                     lines.Add(abandonment == Abandonment.CheckoutGone
-                        ? CliText.PruneRecordCheckoutGone(name[..12], Megabytes(size))
-                        : CliText.PruneRecordNeverIndexed(name[..12], Megabytes(size)));
+                        ? CliText.PruneRecordCheckoutGone(Short(name), Megabytes(size))
+                        : CliText.PruneRecordNeverIndexed(Short(name), Megabytes(size)));
                 }
 
                 continue;
             }
 
-            var result = GenerationRetention.Prune(
-                repository,
-                policy,
-                now,
-                dryRun,
-                ReachableOverlays(repository, runtimeRoot));
+            GenerationRetentionResult result;
+            try
+            {
+                result = GenerationRetention.Prune(
+                    repository,
+                    policy,
+                    now,
+                    dryRun,
+                    ReachableOverlays(repository, runtimeRoot));
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                // Enumerating a directory can fail for reasons that have nothing to do with this
+                // record: another process holding it, a permissions change, a failing disk. With
+                // no filter here, one of those ended the whole run — and the parts that come
+                // after this loop, telemetry and installed versions and launcher backups, are
+                // where most of the reclaimable space usually is.
+                //
+                // The same reasoning is already written down beside the InvalidDataException
+                // filter in ReachableOverlays, which was added after exactly that happened.
+                lines.Add(CliText.PruneRecordLeftAlone(Short(name), exception.Message));
+                continue;
+            }
+
             if (result.ActionCount == 0)
             {
                 continue;
@@ -92,7 +111,7 @@ public static class PruneCommand
 
             reclaimed += result.BytesReclaimed;
             lines.Add(CliText.PruneRepositorySwept(
-                name[..12],
+                Short(name),
                 result.GenerationsRemoved.Count,
                 result.OverlaysRemoved.Count,
                 result.StagingRemoved.Count,
@@ -177,7 +196,7 @@ public static class PruneCommand
             // skip this repository: it escaped Execute and ended the whole run, so telemetry,
             // installed versions and launcher backups were never swept.
             Console.Error.WriteLine(CliText.PruneOverlaysLeftAlone(
-                Path.GetFileName(repositoryRuntimeRoot)[..12],
+                Short(Path.GetFileName(repositoryRuntimeRoot)),
                 exception.Message));
             return null;
         }
@@ -208,6 +227,18 @@ public static class PruneCommand
 
         return true;
     }
+
+    /// <summary>
+    /// A repository id shortened for a report line, and a name that is already short left alone.
+    ///
+    /// Every real id is 64 hex characters, so this only matters for a record somebody made by
+    /// hand — and slicing one of those threw `ArgumentOutOfRangeException`, which nothing in this
+    /// file catches. One stray directory ended every prune on the machine, and the parts that run
+    /// after the repository loop — telemetry, installed versions, launcher backups — were never
+    /// reached (#325).
+    /// </summary>
+    private static string Short(string name) =>
+        name.Length <= 12 ? name : name[..12];
 
     private static IEnumerable<string> Repositories(string runtimeRoot)
     {

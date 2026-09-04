@@ -222,6 +222,9 @@ public static class CliText
     public static string PruneOverlaysLeftAlone(string repositoryId, string reason) =>
         Catalogue.Format(nameof(PruneOverlaysLeftAlone), repositoryId, reason);
 
+    public static string PruneRecordLeftAlone(string repositoryId, string reason) =>
+        Catalogue.Format(nameof(PruneRecordLeftAlone), repositoryId, reason);
+
     public static string PruneQuarantine(int entries) =>
         Catalogue.Format(nameof(PruneQuarantine), entries);
 
