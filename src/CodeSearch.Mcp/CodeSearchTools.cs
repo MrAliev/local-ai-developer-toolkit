@@ -59,6 +59,11 @@ public static class CodeSearchTools
         [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
+        if (!SemanticDocumentPath.IsRepositoryRelative(path))
+        {
+            return CodeSearchText.PathNotRelative(path);
+        }
+
         if (!SourcePosition.TryFromOneBased(line, column, out var position))
         {
             return CodeSearchText.PositionNotFromOne(line, column);
@@ -115,6 +120,11 @@ public static class CodeSearchTools
         [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
+        if (!SemanticDocumentPath.IsRepositoryRelative(path))
+        {
+            return CodeSearchText.PathNotRelative(path);
+        }
+
         if (!SourcePosition.TryFromOneBased(line, column, out var position))
         {
             return CodeSearchText.PositionNotFromOne(line, column);
@@ -169,6 +179,11 @@ public static class CodeSearchTools
         [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
+        if (!SemanticDocumentPath.IsRepositoryRelative(path))
+        {
+            return CodeSearchText.PathNotRelative(path);
+        }
+
         if (!SourcePosition.TryFromOneBased(line, column, out var position))
         {
             return CodeSearchText.PositionNotFromOne(line, column);
@@ -225,6 +240,11 @@ public static class CodeSearchTools
         [Description("Repository root. Defaults to the repository containing the working directory.")]
         string? root = null)
     {
+        if (!SemanticDocumentPath.IsRepositoryRelative(path))
+        {
+            return CodeSearchText.PathNotRelative(path);
+        }
+
         if (!SourcePosition.TryFromOneBased(line, column, out var position))
         {
             return CodeSearchText.PositionNotFromOne(line, column);

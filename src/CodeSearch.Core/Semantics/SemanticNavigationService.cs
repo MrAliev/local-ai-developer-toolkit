@@ -357,13 +357,11 @@ public sealed class SemanticNavigationService
     private static string NormalizePath(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var normalized = path.Replace('\\', '/');
-        if (Path.IsPathRooted(normalized) ||
-            normalized.Split('/').Any(segment => segment is "" or "." or ".."))
+        if (!SemanticDocumentPath.IsRepositoryRelative(path))
         {
             throw new ArgumentException("Semantic document path must be repository-relative.", nameof(path));
         }
 
-        return normalized;
+        return path.Replace('\\', '/');
     }
 }

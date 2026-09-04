@@ -96,6 +96,14 @@ public static class CodeSearchText
     public static string NavigationPrecise => Catalogue.Get(nameof(NavigationPrecise));
 
     /// <summary>
+    /// A path search_code would never have printed, refused by name. Passed on, it came back as
+    /// the core's ArgumentException — English, with a framework parameter suffix — inside an
+    /// answer that otherwise follows the reader.
+    /// </summary>
+    public static string PathNotRelative(string path) =>
+        Catalogue.Format(nameof(PathNotRelative), path);
+
+    /// <summary>
     /// A position nobody could have meant, refused by name. Passing it on would answer
     /// about the line above and look like an answer.
     /// </summary>

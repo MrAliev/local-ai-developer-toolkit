@@ -109,6 +109,10 @@
   <data name="NothingLoaded" xml:space="preserve">
     <value>Nothing is loaded — the memory is already free.</value>
   </data>
+  <data name="PathNotRelative" xml:space="preserve">
+    <value>invalid_path: the path must be repository-relative, as search_code prints it; got '{0}'.</value>
+    <comment>invalid_path: is a status token left of the first colon and stays English, like invalid_position: beside it.</comment>
+  </data>
   <data name="PositionNotFromOne" xml:space="preserve">
     <value>invalid_position: lines and columns are counted from 1; got line {0}, column {1}.</value>
     <comment>invalid_position: is a status token left of the first colon and stays English, like semantic_navigation_not_ready: beside it.</comment>

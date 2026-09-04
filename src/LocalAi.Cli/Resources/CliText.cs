@@ -464,6 +464,9 @@ public static class CliText
     public static string SemanticCommandFailed(string operation, string reason) =>
         Catalogue.Format(nameof(SemanticCommandFailed), operation, reason);
 
+    public static string PathNotRelative(string path) =>
+        Catalogue.Format(nameof(PathNotRelative), path);
+
     public static string PositionNotFromOne(int line, int column) =>
         Catalogue.Format(nameof(PositionNotFromOne), line, column);
 

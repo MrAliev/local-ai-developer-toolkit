@@ -164,22 +164,50 @@ public sealed class LastFourCommandsFollowTheReaderTests : IDisposable
     /// the duplicate is deliberate — and a duplicate with nothing watching it drifts.
     /// </summary>
     [Theory]
-    [InlineData("CliText.resx", "CodeSearchText.resx")]
-    [InlineData("CliText.ru.resx", "CodeSearchText.ru.resx")]
-    public void The_position_refusal_is_word_for_word_the_one_the_mcp_tool_prints(
+    [InlineData("CliText.resx", "CodeSearchText.resx", "PositionNotFromOne")]
+    [InlineData("CliText.ru.resx", "CodeSearchText.ru.resx", "PositionNotFromOne")]
+    [InlineData("CliText.resx", "CodeSearchText.resx", "PathNotRelative")]
+    [InlineData("CliText.ru.resx", "CodeSearchText.ru.resx", "PathNotRelative")]
+    public void An_edge_refusal_is_word_for_word_the_one_the_mcp_tool_prints(
         string cli,
-        string mcp)
+        string mcp,
+        string key)
     {
         var root = RepositoryRoot();
 
         Assert.Equal(
-            Value(
-                Path.Combine(root, "src", "CodeSearch.Mcp", "Resources", mcp),
-                "PositionNotFromOne"),
-            Value(
-                Path.Combine(root, "src", "LocalAi.Cli", "Resources", cli),
-                "PositionNotFromOne"),
+            Value(Path.Combine(root, "src", "CodeSearch.Mcp", "Resources", mcp), key),
+            Value(Path.Combine(root, "src", "LocalAi.Cli", "Resources", cli), key),
             StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// The same rule as the position one, for the same reason: a path the tool refuses by name
+    /// is refused here by the same name, before anything is loaded — which is why a runtime root
+    /// that does not exist is not reached and the exit is the usage code, not a failure.
+    /// </summary>
+    [Fact]
+    public void A_path_that_is_not_repository_relative_is_refused_before_anything_is_loaded()
+    {
+        using var reading = TestCulture.Reading("en");
+        var original = Console.Error;
+        var error = new StringWriter();
+        Console.SetError(error);
+        int exit;
+        try
+        {
+            exit = SemanticNavigationCommand.Execute(
+                ["definition", "--path", @"R:\LocalAi\a.cs", "--line", "1", "--column", "1"],
+                _root);
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+
+        Assert.Equal(2, exit);
+        Assert.StartsWith("invalid_path:", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Parameter", error.ToString(), StringComparison.Ordinal);
     }
 
     private static string Value(string resx, string key) =>
