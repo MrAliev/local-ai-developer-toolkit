@@ -29,16 +29,24 @@ public sealed class BrokerDrainTests
         await queue.EnqueueAsync(Request("second"));
         var drain = false;
         var executed = new List<Guid>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // A guard against a hang, not a measurement: nothing here should take a second, and a
+        // correct run on a loaded CI runner must not be able to reach this. The module it lives
+        // in has taken 2m19s there, and this test was reported as failing after 42 seconds (#322)
+        // — a deadline that a slow machine can miss reports itself as a defect in the broker.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 
         async Task<BrokerExecutionResult> Execute(
             LocalJobRequest request,
             CancellationToken cancellationToken)
         {
             // The drain arrives while this job is running: the job that started before it is
-            // the one that must not be lost.
+            // the one that must not be lost. Setting it here is what makes that true — this runs
+            // inside the attempt, so the loop cannot see it until the attempt is over.
+            //
+            // There was a 30ms sleep here, and it bought nothing: the flag is already set by the
+            // time the loop could look. What it did buy was a test whose behaviour depended on
+            // how busy the machine was, which is the failure mode CONTRIBUTING names.
             drain = true;
-            await Task.Delay(30, cancellationToken);
             executed.Add(request.JobId);
             return new BrokerExecutionResult(
                 JsonSerializer.SerializeToElement(new { request.JobId }));
@@ -66,7 +74,11 @@ public sealed class BrokerDrainTests
         using var root = new TemporaryRuntimeRoot();
         var queue = new DurableQueue(root.Path);
         await queue.EnqueueAsync(Request("untouched"));
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // A guard against a hang, not a measurement: nothing here should take a second, and a
+        // correct run on a loaded CI runner must not be able to reach this. The module it lives
+        // in has taken 2m19s there, and this test was reported as failing after 42 seconds (#322)
+        // — a deadline that a slow machine can miss reports itself as a defect in the broker.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 
         var host = new BrokerHost(
             queue,
