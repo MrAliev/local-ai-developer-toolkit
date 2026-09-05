@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     What the broker client says when a job does not come back. Reached by every LocalLm tool's failure path, so it is read by the same person as the notice line and follows the same language.
@@ -47,5 +47,9 @@
   <data name="BrokerJobFailed" xml:space="preserve">
     <value>Broker job '{0}' failed with '{1}'.</value>
     <comment>1 is a failure code the caller may match on and is never translated.</comment>
+  </data>
+  <data name="BrokerJobFailedWithReason" xml:space="preserve">
+    <value>Broker job '{0}' failed with '{1}'. Reported: {2}</value>
+    <comment>1 is a failure code the caller may match on and is never translated. 2 is the text recorded with the failure, written by whatever refused the job and English whatever the reader's language, so it is quoted rather than translated and the marker before it is what tells our words from its. Already collapsed to one line and cut by the caller. No closing period: the reason brings its own, or ends in an ellipsis where a period would be wrong twice.</comment>
   </data>
 </root>

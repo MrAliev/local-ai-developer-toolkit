@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using LocalAi.Broker;
 
 namespace LocalAi.Broker.Tests;
@@ -35,6 +35,48 @@ public sealed class BrokerDiagnosticLogTests : IDisposable
             "ArgumentOutOfRangeException",
             entry.RootElement.GetProperty("failure").GetString());
         Assert.True(entry.RootElement.TryGetProperty("atUtc", out _));
+    }
+
+    /// <summary>
+    /// The type says what kind of failure it was; this says what it said. Without it the log
+    /// recorded forty embedding refusals over four days and could explain none of them (#349).
+    /// </summary>
+    [Fact]
+    public void The_reason_a_job_failed_is_written_beside_its_type()
+    {
+        var log = new BrokerDiagnosticLog(_root);
+        var jobId = Guid.NewGuid();
+
+        log.Write(
+            "execute",
+            "HttpRequestException",
+            jobId,
+            "Ollama request failed with HTTP 400. Response: {\"error\":\"input\"}");
+
+        var line = File.ReadAllLines(Path.Combine(_root, "diagnostics.jsonl")).Single();
+        using var entry = JsonDocument.Parse(line);
+        Assert.Equal("execute", entry.RootElement.GetProperty("operation").GetString());
+        Assert.Equal(jobId.ToString("N"), entry.RootElement.GetProperty("jobId").GetString());
+        Assert.Contains(
+            "HTTP 400",
+            entry.RootElement.GetProperty("reason").GetString() ?? string.Empty,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A failure with nothing to add writes no empty field: the four keys a reader scans stay
+    /// where they were, and a script that never saw this one keeps parsing.
+    /// </summary>
+    [Fact]
+    public void A_failure_with_nothing_to_add_writes_no_reason_at_all()
+    {
+        var log = new BrokerDiagnosticLog(_root);
+
+        log.Write("heartbeat", "IOException", Guid.NewGuid());
+
+        var line = File.ReadAllLines(Path.Combine(_root, "diagnostics.jsonl")).Single();
+        using var entry = JsonDocument.Parse(line);
+        Assert.False(entry.RootElement.TryGetProperty("reason", out _));
     }
 
     /// <summary>

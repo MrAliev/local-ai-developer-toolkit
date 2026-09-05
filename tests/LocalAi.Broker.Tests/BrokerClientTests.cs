@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using LocalAi.Broker.Client;
 using LocalAi.Contracts;
 
@@ -138,7 +138,8 @@ public sealed class BrokerClientTests
                 lease.Request.JobId,
                 lease.WorkerId,
                 lease.LeaseId,
-                failureCode);
+                failureCode,
+                failureReason: null);
         }
 
         public void Dispose()

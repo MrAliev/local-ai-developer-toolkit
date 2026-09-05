@@ -1,4 +1,4 @@
-using LocalAi.Contracts.Localization;
+﻿using LocalAi.Contracts.Localization;
 
 namespace LocalAi.Broker.Client.Resources;
 
@@ -18,4 +18,11 @@ public static class BrokerClientText
 
     public static string BrokerJobFailed(Guid jobId, string failureCode) =>
         Catalogue.Format(nameof(BrokerJobFailed), jobId, failureCode);
+
+    /// <summary>
+    /// The same failure, with what was reported alongside it. A separate key rather than an
+    /// empty hole: a job that recorded nothing would otherwise end in a dangling marker.
+    /// </summary>
+    public static string BrokerJobFailedWithReason(Guid jobId, string failureCode, string reason) =>
+        Catalogue.Format(nameof(BrokerJobFailedWithReason), jobId, failureCode, reason);
 }

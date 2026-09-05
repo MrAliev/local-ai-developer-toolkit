@@ -1,4 +1,4 @@
-using LocalAi.Contracts;
+﻿using LocalAi.Contracts;
 
 namespace LocalAi.Broker;
 
@@ -46,9 +46,10 @@ public sealed record ModelSelection(
 /// None of the models this task routes to is installed.
 ///
 /// A distinct type because the type name is the failure code the broker records, and the code is
-/// all that crosses back to the client -- messages do not, deliberately, since a raw exception
-/// text is not something this boundary should hand out. "InvalidOperationException" told a caller
-/// of read_image nothing at all; this one tells the tool layer enough to name what to install.
+/// what a caller matches on: the message crosses back too, but as an explanation to read rather
+/// than a contract to switch on, and it is Ollama's wording as often as ours.
+/// "InvalidOperationException" told a caller of read_image nothing at all; this one tells the
+/// tool layer enough to name what to install.
 /// </summary>
 public sealed class NoModelInstalledException(LocalTaskProfile profile)
     : InvalidOperationException(

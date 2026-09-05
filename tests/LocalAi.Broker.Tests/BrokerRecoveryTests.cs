@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -72,7 +72,7 @@ public sealed class BrokerRecoveryTests
         await Assert.ThrowsAsync<LeaseLostException>(
             () => queue.CompleteAsync(enqueue.JobId, "same-worker", oldLease.LeaseId, JsonSerializer.SerializeToElement(true)));
         await Assert.ThrowsAsync<LeaseLostException>(
-            () => queue.FailAsync(enqueue.JobId, "same-worker", oldLease.LeaseId, "stale"));
+            () => queue.FailAsync(enqueue.JobId, "same-worker", oldLease.LeaseId, "stale", null));
         await Assert.ThrowsAsync<LeaseLostException>(
             () => queue.CancelAsync(enqueue.JobId, "same-worker", oldLease.LeaseId));
 
@@ -671,10 +671,14 @@ public sealed class BrokerRecoveryTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.RunAsync(stop.Token));
 
         Assert.Equal(2, executions);
-        Assert.Single(diagnostics);
-        Assert.Equal(operation, diagnostics[0].Operation);
-        Assert.Equal(nameof(IOException), diagnostics[0].ExceptionType);
-        var diagnosticJson = JsonSerializer.Serialize(diagnostics[0]);
+        // The "fail" case fails the executor first, and that failure is now reported in its own
+        // right; the write failure this test is about is the last one either way.
+        var written = diagnostics[^1];
+        Assert.Equal(operation == "fail" ? 2 : 1, diagnostics.Count);
+        Assert.Equal(operation, written.Operation);
+        Assert.Equal(nameof(IOException), written.ExceptionType);
+        Assert.Null(written.Reason);
+        var diagnosticJson = JsonSerializer.Serialize(written);
         Assert.DoesNotContain("secret", diagnosticJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Inputs", diagnosticJson, StringComparison.Ordinal);
     }
@@ -1031,6 +1035,8 @@ internal sealed class ScriptedBrokerQueue(params LeasedJob[] leases) : IBrokerQu
 
     public int FailCalls { get; private set; }
 
+    public List<string?> FailureReasons { get; } = [];
+
     public int CancelCalls { get; private set; }
 
     public Action? OnLease { get; set; }
@@ -1090,9 +1096,11 @@ internal sealed class ScriptedBrokerQueue(params LeasedJob[] leases) : IBrokerQu
         string workerId,
         Guid leaseId,
         string failureCode,
+        string? failureReason,
         CancellationToken cancellationToken = default)
     {
         FailCalls++;
+        FailureReasons.Add(failureReason);
         if (FailException is { } exception)
         {
             FailException = null;

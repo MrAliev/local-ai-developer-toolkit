@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LocalAi.Broker;
@@ -77,7 +77,7 @@ public sealed class DurableQueueTests
             var lease = await queue.LeaseNextAsync("worker");
             Assert.NotNull(lease);
             order.Add(lease.Request.JobId);
-            await queue.FailAsync(lease.Request.JobId, "worker", lease.LeaseId, "expected-test-failure");
+            await queue.FailAsync(lease.Request.JobId, "worker", lease.LeaseId, "expected-test-failure", null);
         }
 
         Assert.Equal(
@@ -162,7 +162,7 @@ public sealed class DurableQueueTests
         Assert.True(runningJoin.JoinedExisting);
         Assert.Equal(first.JobId, runningJoin.JobId);
 
-        await queue.FailAsync(lease.Request.JobId, "worker", lease.LeaseId, "terminal");
+        await queue.FailAsync(lease.Request.JobId, "worker", lease.LeaseId, "terminal", null);
         var resubmission = await queue.EnqueueAsync(Request("stable-key"));
         Assert.False(resubmission.JoinedExisting);
         Assert.NotEqual(first.JobId, resubmission.JobId);
@@ -185,7 +185,7 @@ public sealed class DurableQueueTests
         await Assert.ThrowsAsync<LeaseLostException>(
             () => queue.CompleteAsync(lease.Request.JobId, "worker-2", lease.LeaseId, JsonSerializer.SerializeToElement(new { ok = true })));
         await Assert.ThrowsAsync<LeaseLostException>(
-            () => queue.FailAsync(lease.Request.JobId, "worker-2", lease.LeaseId, "failure"));
+            () => queue.FailAsync(lease.Request.JobId, "worker-2", lease.LeaseId, "failure", null));
         await Assert.ThrowsAsync<LeaseLostException>(
             () => queue.CancelAsync(lease.Request.JobId, "worker-2", lease.LeaseId));
     }
@@ -204,11 +204,11 @@ public sealed class DurableQueueTests
         Assert.Equal(42, response.Body.GetProperty("answer").GetInt32());
         Assert.Equal(LocalJobState.Succeeded, (await queue.GetDiagnosticAsync(completed.JobId))!.State);
         await Assert.ThrowsAsync<LeaseLostException>(
-            () => queue.FailAsync(completed.JobId, "worker", completedLease.LeaseId, "late"));
+            () => queue.FailAsync(completed.JobId, "worker", completedLease.LeaseId, "late", null));
 
         var failed = await queue.EnqueueAsync(Request("failed"));
         var failedLease = Assert.IsType<LeasedJob>(await queue.LeaseNextAsync("worker"));
-        await queue.FailAsync(failed.JobId, "worker", failedLease.LeaseId, "failure-code");
+        await queue.FailAsync(failed.JobId, "worker", failedLease.LeaseId, "failure-code", null);
         Assert.Null(await queue.ReadResponseAsync(failed.JobId));
         Assert.Equal(LocalJobState.Failed, (await queue.GetDiagnosticAsync(failed.JobId))!.State);
 
