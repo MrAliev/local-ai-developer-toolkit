@@ -666,11 +666,14 @@ dotnet build 2>&1 | localai triage
 | `name` | `version`, `launcher`, `broker`, `queue`, `policy.models`, `policy.retention`, `policy.languageServers`, `update`, `repository` — последняя только если был передан `--root` |
 | `status` | `Ok`, `Warning` или `Failed` |
 | `detail` | строка, которую для этой проверки печатает проза, по-английски. Её показывают человеку и никогда не разбирают — то же обещание, что у `error.message` |
-| остальное | то, что установила проверка: `versionDirectory`, `releaseVersion` и `missingFiles` у `version`; `path` у `launcher`; `processId` и `heartbeatAgeSeconds` у `broker`; `queued`, `quarantined` и `oldestUnattemptedMinutes` у `queue`; значения самой политики и `fileFound` у трёх политик; `enabled`, `availability`, `latestVersion`, `releaseUrl` и `checkedAtUtc` у `update`; `repositoryId`, `repositoryRoot`, `state` и `generationId` у `repository`. Поле отсутствует, когда проверка не смогла его установить; `null` не пишется никогда |
+| остальное | то, что установила проверка: `versionDirectory`, `releaseVersion` и `missingFiles` у `version`; `path` у `launcher`; `processId` и `heartbeatAgeSeconds` у `broker`; `queued`, `quarantined` и `oldestUnattemptedMinutes` у `queue`; значения самой политики, `fileFound` и `fileUsed` у трёх политик; `enabled`, `availability`, `latestVersion`, `releaseUrl` и `checkedAtUtc` у `update`; `repositoryId`, `repositoryRoot`, `state` и `generationId` у `repository`. Поле отсутствует, когда проверка не смогла его установить; `null` не пишется никогда |
 
-**`fileFound` говорит, что файл был, а не что его прочитали.** Любое хранилище политик отвечает на
-испорченный документ своими значениями по умолчанию, а не ошибкой, поэтому переставший разбираться
-файл считается найденным, и рядом стоят значения по умолчанию.
+**`fileFound` говорит, что файл есть; `fileUsed` — что ответил именно он.** Любое хранилище
+политик встречает документ, который не может использовать — испорченный, с неизвестной схемой, со
+значением вне диапазона, — своими значениями по умолчанию, а не ошибкой: на времени работы это
+правильно, но на диске остаётся файл, который выглядит настроенным и ничего не делает. Это случай
+`fileFound: true, fileUsed: false`, проверка становится предупреждением, а строка называет файл,
+чтобы его было что исправить.
 
 **Код возврата здесь — вердикт.** 0, когда ничего не провалилось, 1, когда провалилось; `ok: true`
 в обоих случаях. `ok: false` от этой команды значит, что отчёта не получилось вовсе.

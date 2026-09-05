@@ -191,6 +191,10 @@
   <data name="PolicyDefaults" xml:space="preserve">
     <value>{0} (defaults, no file)</value>
   </data>
+  <data name="PolicyFileNotUsed" xml:space="preserve">
+    <value>{0} (defaults — {1} is not valid for this version and is ignored)</value>
+    <comment>1 is a path and is invariant. Deliberately not "did not parse": a wrong SchemaVersion or an out-of-range value parses perfectly well and is still refused, so naming the parse would be a lie in the commonest case — a hand-edited value. Names no repair command: policy set covers policy.json only, and this line is shared by all three policy checks.</comment>
+  </data>
   <data name="PolicyKeepAlive" xml:space="preserve">
     <value>idle model keep-alive: {0} seconds</value>
     <comment>The field name is the option's own name and is byte-identical in both languages.</comment>

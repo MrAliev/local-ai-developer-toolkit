@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace LocalAi.Contracts;
@@ -160,26 +160,43 @@ public sealed class RuntimeRetentionPolicyStore
     public static RuntimeRetentionPolicy ReadDefault() =>
         new RuntimeRetentionPolicyStore(DefaultRuntimeRoot).Read();
 
-    public RuntimeRetentionPolicy Read()
+    public RuntimeRetentionPolicy Read() => ReadWithSource().Policy;
+
+    /// <summary>The policy, and whether the file on disk is what produced it.</summary>
+    public PolicyRead<RuntimeRetentionPolicy> ReadWithSource()
     {
+        var path = ReadPath;
+        var found = File.Exists(path);
         try
         {
-            if (!File.Exists(ReadPath))
+            if (!found)
             {
-                return RuntimeRetentionPolicy.Default;
+                return new PolicyRead<RuntimeRetentionPolicy>(
+                    RuntimeRetentionPolicy.Default,
+                    path,
+                    false,
+                    false);
             }
 
             var policy = JsonSerializer.Deserialize<RuntimeRetentionPolicy>(
-                File.ReadAllBytes(ReadPath),
+                File.ReadAllBytes(path),
                 SerializerOptions);
             return policy is null || policy.SchemaVersion != 1
-                ? RuntimeRetentionPolicy.Default
-                : policy.Normalized();
+                ? new PolicyRead<RuntimeRetentionPolicy>(
+                    RuntimeRetentionPolicy.Default,
+                    path,
+                    true,
+                    false)
+                : new PolicyRead<RuntimeRetentionPolicy>(policy.Normalized(), path, true, true);
         }
         catch (Exception exception) when (
             exception is JsonException or IOException or UnauthorizedAccessException)
         {
-            return RuntimeRetentionPolicy.Default;
+            return new PolicyRead<RuntimeRetentionPolicy>(
+                RuntimeRetentionPolicy.Default,
+                path,
+                found,
+                false);
         }
     }
 

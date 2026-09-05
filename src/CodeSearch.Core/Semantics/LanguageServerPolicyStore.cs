@@ -1,4 +1,4 @@
-using LocalAi.Contracts;
+﻿using LocalAi.Contracts;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -104,26 +104,39 @@ public sealed class LanguageServerPolicyStore
     /// <summary>Where the file is now, which may still be the legacy path.</summary>
     public string Path => ReadPath;
 
-    public LanguageServerPolicy Read()
+    public LanguageServerPolicy Read() => ReadWithSource().Policy;
+
+    /// <summary>The policy, and whether the file on disk is what produced it.</summary>
+    public PolicyRead<LanguageServerPolicy> ReadWithSource()
     {
+        var path = ReadPath;
+        var found = File.Exists(path);
         try
         {
-            if (!File.Exists(ReadPath))
+            if (!found)
             {
-                return LanguageServerPolicy.Default;
+                return new PolicyRead<LanguageServerPolicy>(
+                    LanguageServerPolicy.Default,
+                    path,
+                    false,
+                    false);
             }
 
             var policy = JsonSerializer.Deserialize<LanguageServerPolicy>(
-                File.ReadAllBytes(ReadPath),
+                File.ReadAllBytes(path),
                 SerializerOptions);
             return policy is not null && IsValid(policy)
-                ? policy
-                : LanguageServerPolicy.Default;
+                ? new PolicyRead<LanguageServerPolicy>(policy, path, true, true)
+                : new PolicyRead<LanguageServerPolicy>(LanguageServerPolicy.Default, path, true, false);
         }
         catch (Exception exception) when (
             exception is JsonException or IOException or UnauthorizedAccessException)
         {
-            return LanguageServerPolicy.Default;
+            return new PolicyRead<LanguageServerPolicy>(
+                LanguageServerPolicy.Default,
+                path,
+                found,
+                false);
         }
     }
 

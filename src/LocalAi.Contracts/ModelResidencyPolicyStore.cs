@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace LocalAi.Contracts;
@@ -60,14 +60,18 @@ public sealed class ModelResidencyPolicyStore
     public static BrokerPolicy ReadDefault() =>
         new ModelResidencyPolicyStore(DefaultRuntimeRoot).Read();
 
-    public BrokerPolicy Read()
+    public BrokerPolicy Read() => ReadWithSource().Policy;
+
+    /// <summary>The policy, and whether the file on disk is what produced it.</summary>
+    public PolicyRead<BrokerPolicy> ReadWithSource()
     {
+        var path = ReadPath;
+        var found = File.Exists(path);
         try
         {
-            var path = ReadPath;
-            if (!File.Exists(path))
+            if (!found)
             {
-                return BrokerPolicy.Default;
+                return new PolicyRead<BrokerPolicy>(BrokerPolicy.Default, path, false, false);
             }
 
             var policy = JsonSerializer.Deserialize<BrokerPolicy>(
@@ -78,15 +82,15 @@ public sealed class ModelResidencyPolicyStore
                 !Enum.IsDefined(policy.ModelResidency) ||
                 policy.IdleModelKeepAliveSeconds < 0)
             {
-                return BrokerPolicy.Default;
+                return new PolicyRead<BrokerPolicy>(BrokerPolicy.Default, path, true, false);
             }
 
-            return policy;
+            return new PolicyRead<BrokerPolicy>(policy, path, true, true);
         }
         catch (Exception exception) when (
             exception is JsonException or IOException or UnauthorizedAccessException)
         {
-            return BrokerPolicy.Default;
+            return new PolicyRead<BrokerPolicy>(BrokerPolicy.Default, path, found, false);
         }
     }
 
