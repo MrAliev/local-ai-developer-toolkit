@@ -494,16 +494,49 @@
     <value>На stdin ничего не пришло — переводить нечего.</value>
     <comment>Mirrors TriageEmptyInput in shape deliberately: the same mistake in two commands should read as a pair. Shares the code source_missing with TranslateNoSource.</comment>
   </data>
+  <data name="TranslateFileEmpty" xml:space="preserve">
+    <value>Файл '{0}' пуст — переводить нечего.</value>
+    <comment>Mirrors TranslateEmptyInput, its stdin twin, and shares source_missing with it: whitespace only is empty here too, because that is what the task's own ThrowIfNullOrWhiteSpace would reject a moment later with a vaguer sentence.</comment>
+  </data>
+  <data name="TranslateFileMissing" xml:space="preserve">
+    <value>По пути '{0}' файла нет.</value>
+    <comment>{0} is the resolved absolute path, never the path as typed: a relative path run from the wrong directory is the commonest cause, and only the resolved form shows it. Shares file_missing with TranslateNotAFile.</comment>
+  </data>
+  <data name="TranslateFileNotRead" xml:space="preserve">
+    <value>Файл '{0}' не удалось прочитать: {1}</value>
+    <comment>{1} is the framework's own message, English under the --json pin and the machine's language otherwise, the same note OutputNotWritten carries. Exit 66 is EX_NOINPUT, the mirror of the 73 --out gives when it cannot write.</comment>
+  </data>
+  <data name="TranslateFileNotText" xml:space="preserve">
+    <value>'{0}' — не текст: в нём есть нулевой байт, которого в текстовом файле не бывает.</value>
+    <comment>The sentence names the check the code performs: a zero byte in the first 8000 bytes, skipped when a UTF-16 or UTF-32 BOM says the file decodes. Any looser wording would be a claim about content this does not inspect.</comment>
+  </data>
   <data name="TranslateLanguageMissing" xml:space="preserve">
     <value>Команде localai translate нужны и --from, и --to — названиями языков: --from English --to Russian. Usage: {0}</value>
     <comment>The example is the only warning a reader gets that a code does not work: the value is interpolated into the prompt verbatim, and the attribution paragraph picks its language by looking for Russian in the target, so --to ru produces an English attribution on a Russian document rather than failing.</comment>
   </data>
+  <data name="TranslateMarkdownAssumed" xml:space="preserve">
+    <value>'{0}' — Markdown, поэтому --markdown включён: код в ограждённых блоках проходит без перевода. Чтобы перевести файл как обычный текст, отправьте его на stdin.</value>
+    <comment>Printed to stderr before the run rather than beside the notice after it: a translation takes minutes, and an assumption is worth stating while it can still be stopped. Not a refusal.</comment>
+  </data>
   <data name="TranslateNoSource" xml:space="preserve">
-    <value>Команде localai translate нужен текст: передайте его аргументом или на stdin. Usage: {0}</value>
+    <value>Команде localai translate нужен текст: передайте его аргументом, назовите файл через --in или отправьте на stdin. Usage: {0}</value>
+    <comment>Names all three routes: a refusal that omits one sends the reader down a worse one. The code stays source_missing, shared with TranslateEmptyInput and TranslateFileEmpty.</comment>
+  </data>
+  <data name="TranslateNotAFile" xml:space="preserve">
+    <value>'{0}' — это каталог, а не файл для перевода.</value>
+    <comment>Shares file_missing with TranslateFileMissing because the remedy is the same, and keeps its own sentence because the reader who typed one made a different mistake - the pair TriageEmptyInput and TriageNoSource already work this way.</comment>
+  </data>
+  <data name="TranslateOneSource" xml:space="preserve">
+    <value>Команда localai translate принимает один источник: текст, --in &lt;file&gt; или stdin. Usage: {0}</value>
+    <comment>&lt;file&gt; stays Latin in both languages, as it does in TranslateWriteDocument. Shares source_ambiguous with TranslateOneText, which keeps its own sentence: two quoted strings is a quoting mistake, and a text beside --in is a different one.</comment>
   </data>
   <data name="TranslateOneText" xml:space="preserve">
     <value>Команда localai translate принимает один текст, а не два. Usage: {0}</value>
     <comment>The sibling of TriageOneLog, and the same code: source_ambiguous fires for three as well, and what the reader can act on is that the command could not tell which was meant.</comment>
+  </data>
+  <data name="TranslateOutputIsSource" xml:space="preserve">
+    <value>--in и --out указывают на один файл '{0}'. Дайте переводу собственное имя.</value>
+    <comment>Translating in place destroys the original and there is no undo. The paths are compared resolved, so {0} is the resolved form of both.</comment>
   </data>
   <data name="TranslateWriteDocument" xml:space="preserve">
     <value>Ответ перенаправлен, поэтому он несёт метки происхождения. Сам документ пишется через --out &lt;file&gt;.</value>

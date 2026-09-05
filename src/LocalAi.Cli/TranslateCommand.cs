@@ -9,7 +9,8 @@ public sealed record TranslateRequest(
     string From,
     string To,
     bool Markdown,
-    string? OutputPath);
+    string? OutputPath,
+    string? InputPath);
 
 /// <summary>
 /// The one command here whose answer is the artifact rather than a statement about one.
@@ -20,6 +21,12 @@ public sealed record TranslateRequest(
 /// wraps unconditionally; and a <c>--raw</c> flag would be a flag that turns a safety boundary
 /// off, which is the kind that gets copied into scripts. <c>--out</c> says "this is a document,
 /// write it here" and leaves the rule uniform across all four commands.
+///
+/// <c>--in &lt;file&gt;</c> is its pair, and the only correct way to hand this command a document:
+/// standard input is decoded with the console's input code page, which this binary never sets, so
+/// a UTF-8 file piped in arrives at the model already mangled. Opening it is
+/// <see cref="TranslateSource"/>'s job rather than this parser's — nothing here touches the disk,
+/// which is what lets every refusal below be tested with a literal path.
 ///
 /// No <c>--model</c>: <c>LocalTasks.TranslateAsync</c> has no override parameter, and a usage
 /// line offering one would be a lie.
@@ -38,10 +45,13 @@ public static class TranslateCommand
 
         string? text = null;
         var fromStandardInput = false;
+        var dashGiven = false;
         string? from = null;
         string? to = null;
         var markdown = false;
         string? output = null;
+        string? input = null;
+        var inGiven = 0;
 
         for (var index = 0; index < arguments.Count; index++)
         {
@@ -49,6 +59,7 @@ public static class TranslateCommand
             if (argument == "-")
             {
                 fromStandardInput = true;
+                dashGiven = true;
                 continue;
             }
 
@@ -61,6 +72,7 @@ public static class TranslateCommand
                 case "--from":
                 case "--to":
                 case "--out":
+                case "--in":
                     if (index + 1 >= arguments.Count)
                     {
                         refusal = new CommandRefusal(
@@ -81,8 +93,23 @@ public static class TranslateCommand
                         case "--to":
                             to = value;
                             break;
-                        default:
+                        case "--out":
                             output = value;
+                            break;
+                        default:
+                            // `--in -` is standard input, so a wrapper holding either can pass it
+                            // without branching. It names the same source a bare `-` does, which
+                            // is why it sets no path and the two together are not a conflict.
+                            inGiven++;
+                            if (value == "-")
+                            {
+                                fromStandardInput = true;
+                            }
+                            else
+                            {
+                                input = value;
+                            }
+
                             break;
                     }
 
@@ -113,6 +140,36 @@ public static class TranslateCommand
             }
         }
 
+        // One source, whichever two were named. `--in` is new, so it is strict from its first
+        // release at no compatibility cost; the older pair of a text and a bare `-` keeps the
+        // settled behaviour where the text wins and standard input is never read, because a
+        // script may already sit on it.
+        if (inGiven > 1 || (input is not null && (text is not null || dashGiven)))
+        {
+            refusal = new CommandRefusal(
+                "source_ambiguous",
+                CliText.TranslateOneSource(CliUsage.Translate));
+            return false;
+        }
+
+        // Translating in place destroys the original and there is no undo. Compared resolved, so
+        // two spellings of one file are still one file — and resolving touches no disk, which is
+        // what keeps this check in the parser.
+        if (input is not null && output is not null)
+        {
+            var resolvedInput = Path.GetFullPath(input);
+            if (string.Equals(
+                    resolvedInput,
+                    Path.GetFullPath(output),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                refusal = new CommandRefusal(
+                    "output_is_source",
+                    CliText.TranslateOutputIsSource(resolvedInput));
+                return false;
+            }
+        }
+
         // Refused here rather than left to ThrowIfNullOrWhiteSpace inside the task, which would
         // arrive as a bare argument failure with a vaguer sentence and the wrong code.
         if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to))
@@ -125,7 +182,13 @@ public static class TranslateCommand
 
         if (text is not null)
         {
-            request = new TranslateRequest(text, false, from, to, markdown, output);
+            request = new TranslateRequest(text, false, from, to, markdown, output, null);
+            return true;
+        }
+
+        if (input is not null)
+        {
+            request = new TranslateRequest(null, false, from, to, markdown, output, input);
             return true;
         }
 
@@ -137,7 +200,7 @@ public static class TranslateCommand
             return false;
         }
 
-        request = new TranslateRequest(null, true, from, to, markdown, output);
+        request = new TranslateRequest(null, true, from, to, markdown, output, null);
         return true;
     }
 }
