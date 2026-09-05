@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using LocalAi.Contracts;
 
 namespace LocalAi.Broker.Tests;
@@ -207,6 +207,51 @@ public sealed class BrokerExecutionRouterTests : IDisposable
             TestContext.Current.CancellationToken);
 
         Assert.Equal(["qwen3-embedding:8b-q8_0"], fixture.Transport.UnloadedModels);
+        Assert.Null(fixture.Router.ResidentModel);
+    }
+
+    /// <summary>
+    /// The scheduler asks which model is loaded to decide whether the next job is a cold switch,
+    /// and a model outside the catalog was never warm by that measure — so every job targeting
+    /// one paid the two-second gather window, back to back, for a whole indexing run.
+    /// </summary>
+    [Fact]
+    public async Task A_model_the_catalog_does_not_name_is_still_what_is_loaded()
+    {
+        var fixture = CreateFixture();
+        var request = LocalJobRequestFactory.CreateEmbed(
+            "embedding",
+            LocalJobPriority.Foreground,
+            "some-other-embedding:4b",
+            ["semantic navigation"]);
+
+        await fixture.Router.ExecuteAsync(
+            request,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("some-other-embedding:4b", fixture.Router.ResidentModel);
+    }
+
+    /// <summary>
+    /// And remembering it changes nothing about what this broker is willing to unload: a model
+    /// the catalog does not name was loaded by somebody else, and taking it out from under them
+    /// is the thing the filter in UnloadResidentAsync exists to prevent.
+    /// </summary>
+    [Fact]
+    public async Task A_model_the_catalog_does_not_name_is_never_unloaded()
+    {
+        var fixture = CreateFixture();
+        await fixture.Router.ExecuteAsync(
+            LocalJobRequestFactory.CreateEmbed(
+                "embedding",
+                LocalJobPriority.Foreground,
+                "some-other-embedding:4b",
+                ["semantic navigation"]),
+            TestContext.Current.CancellationToken);
+
+        await fixture.Router.UnloadResidentAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(fixture.Transport.UnloadedModels);
         Assert.Null(fixture.Router.ResidentModel);
     }
 
