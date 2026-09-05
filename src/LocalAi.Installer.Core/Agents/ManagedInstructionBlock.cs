@@ -370,7 +370,7 @@ public static class ManagedInstructionBlock
         localai-launcher.exe run localai ask "<instruction>" [file ...]
         localai-launcher.exe run localai triage [log-file|-]
         localai-launcher.exe run localai read-image "<what to extract>" <image> [image ...]
-        localai-launcher.exe run localai translate [text|-] --from <language> --to <language>
+        localai-launcher.exe run localai translate [text|-|--in <file>] --from <language> --to <language>
         ```
 
         They stand for `ask_local`, `triage_log`, `read_image` and `translate_local`.
@@ -632,7 +632,7 @@ public static class ManagedInstructionBlock
         localai-launcher.exe run localai ask "<instruction>" [file ...]
         localai-launcher.exe run localai triage [log-file|-]
         localai-launcher.exe run localai read-image "<what to extract>" <image> [image ...]
-        localai-launcher.exe run localai translate [text|-] --from <language> --to <language>
+        localai-launcher.exe run localai translate [text|-|--in <file>] --from <language> --to <language>
         ```
 
         They stand for `ask_local`, `triage_log`, `read_image` and `translate_local`.

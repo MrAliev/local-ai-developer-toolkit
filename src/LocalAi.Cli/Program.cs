@@ -108,7 +108,10 @@ static string PrimarySource(IReadOnlyList<string> sources, string whenEmpty) =>
         _ => $"{Path.GetFullPath(sources[0])} (+{sources.Count - 1} more)",
     };
 
-static int Refuse(string command, CommandRefusal refused, bool machine)
+// `exit` defaults to 2, which is what a wrong command line has always been. It is passed only
+// where the command line was right and the machine refused — a file named with `--in` that could
+// not be opened, which exits 66 the way `--out` exits 73 when it cannot write.
+static int Refuse(string command, CommandRefusal refused, bool machine, int exit = 2)
 {
     if (machine)
     {
@@ -120,7 +123,7 @@ static int Refuse(string command, CommandRefusal refused, bool machine)
         Console.Error.WriteLine(refused.Message);
     }
 
-    return 2;
+    return exit;
 }
 
 int Failed(string code, string message, int exitCode)
@@ -262,7 +265,32 @@ static async Task<int> RunAsync(string[] args, bool machineReadable)
         }
 
         var source = translate!.Text;
-        if (translate.FromStandardInput)
+        var origin = "translate:" + (translate.FromStandardInput ? "stdin" : "argument");
+        var markdown = translate.Markdown;
+
+        if (translate.InputPath is { } document)
+        {
+            var read = TranslateSource.Read(document);
+            if (read.Refusal is { } unreadable)
+            {
+                return Refuse("translate", unreadable, machineReadable, read.Exit);
+            }
+
+            source = read.Text;
+            origin = "translate:" + Path.GetFullPath(document);
+
+            // Forgetting `--markdown` on a Markdown file sends its fenced code to the model as
+            // prose, and nobody notices until later. Said before the run rather than beside the
+            // notice after it: a translation takes minutes, and an assumption is worth stating
+            // while it can still be stopped.
+            if (!markdown && TranslateSource.IsMarkdown(document))
+            {
+                markdown = true;
+                Console.Error.WriteLine(
+                    CliText.TranslateMarkdownAssumed(Path.GetFullPath(document)));
+            }
+        }
+        else if (translate.FromStandardInput)
         {
             source = await Console.In.ReadToEndAsync();
             if (string.IsNullOrWhiteSpace(source))
@@ -275,8 +303,8 @@ static async Task<int> RunAsync(string[] args, bool machineReadable)
         }
 
         return await Interruptible(token => LocalModelRun.TranslateAsync(
-            "translate:" + (translate.FromStandardInput ? "stdin" : "argument"),
-            translate,
+            origin,
+            translate with { Markdown = markdown },
             source!,
             machineReadable,
             token));

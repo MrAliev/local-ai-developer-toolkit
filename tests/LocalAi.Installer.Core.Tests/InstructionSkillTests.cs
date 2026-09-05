@@ -62,6 +62,9 @@ public sealed class InstructionSkillTests
     // `--to ru` does not fail: it is passed through as written and the attribution comes out in
     // the wrong language.
     [InlineData("not `--to ru`")]
+    // The only correct way to hand this command a document: a pipe decodes with the console's
+    // input code page, which this binary does not set, so a UTF-8 file arrives mangled.
+    [InlineData("--in <file>")]
     // Four commands offered as a remedy for the one failure they cannot survive.
     [InlineData("this section is about a dead MCP server and not about a dead broker")]
     // A local run reported with no model, no duration and no saving, which the reporting rule

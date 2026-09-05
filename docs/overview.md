@@ -528,7 +528,7 @@ tools, because they call the same code:
 | `ask_local` | `localai ask "<instruction>" [file ...]` |
 | `triage_log` | `localai triage [log-file\|-]` |
 | `read_image` | `localai read-image "<question>" <image> [image ...]` |
-| `translate_local` | `localai translate [text\|-] --from <language> --to <language>` |
+| `translate_local` | `localai translate [text\|-\|--in <file>] --from <language> --to <language>` |
 
 The same mapping travels in machine form as `commands[].tool` in the capability listing of
 §8.1, so this table is its readable face rather than a second list to keep current.
@@ -570,6 +570,14 @@ answer and says so on standard error. `--from` and `--to` take language *names*:
 passed to the model as written, so `--to ru` does not fail — it produces an English attribution on
 a Russian document.
 
+A document is named with `--in <file>` rather than passed as an argument: the file is read as
+UTF-8 with BOM detection, while standard input is decoded with the console's input code page,
+which this binary does not set. `--in -` is standard input, for a wrapper that passes either. A
+file named `.md` or `.markdown` is translated with `--markdown` whether or not the flag was
+given, and the command says so on standard error before the run starts. `--in` and `--out`
+naming the same file is refused: translating in place destroys the original, and there is no
+undo.
+
 **Every translation ends with an attribution paragraph** naming the model that produced it. It is
 unconditional, it is in both faces, and it is inside what `--out` writes. A machine translation
 that can pass for a human one is what it exists to prevent.
@@ -579,7 +587,8 @@ the profile a command routes to exits **69**, naming the command that installs o
 failure as a wrong argument, which exits 2. A translation whose structure is still wrong after the
 retries exits **65**, the code a rejected chunk uses: a model produced data this cannot use. A
 `--out` file that could not be written exits **73**, because the command line was right and the
-cause is a permission or a missing directory.
+cause is a permission or a missing directory. A file named with `--in` that could not be read
+exits **66**, for the same reason and from the other side.
 
 ### 8.1 Answering a program
 

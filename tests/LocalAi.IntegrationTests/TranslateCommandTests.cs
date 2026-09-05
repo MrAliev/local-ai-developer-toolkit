@@ -110,11 +110,109 @@ public sealed class TranslateCommandTests
         Assert.Equal(@"C:\readme.ru.md", request!.OutputPath, StringComparer.Ordinal);
     }
 
+    /// <summary>
+    /// The pair of `--out`. This is the one command whose input is a document as often as its
+    /// output is one, and a pipe is not a way to hand one over: standard input decodes with the
+    /// console's input code page, which this binary never sets, so a UTF-8 document arrives at
+    /// the model already mangled. A named file is read as UTF-8 with BOM detection.
+    /// </summary>
+    [Fact]
+    public void A_document_can_be_named_rather_than_piped()
+    {
+        Assert.True(TranslateCommand.TryParse(
+            ["--in", @"C:\readme.md", "--from", "English", "--to", "Russian"],
+            piped: false,
+            out var request,
+            out _));
+
+        Assert.Equal(@"C:\readme.md", request!.InputPath, StringComparer.Ordinal);
+        Assert.Null(request.Text);
+        Assert.False(request.FromStandardInput);
+    }
+
+    /// <summary>
+    /// `--in -` is standard input, so a wrapper that has either can pass it without branching —
+    /// the plugins planned on top of this console are exactly that wrapper.
+    /// </summary>
+    [Fact]
+    public void A_dash_after_the_option_is_standard_input()
+    {
+        Assert.True(TranslateCommand.TryParse(
+            ["--in", "-", "--from", "English", "--to", "Russian"],
+            piped: true,
+            out var request,
+            out _));
+
+        Assert.True(request!.FromStandardInput);
+        Assert.Null(request.InputPath);
+    }
+
+    /// <summary>
+    /// One source, whichever two were named. `--in` is new, so it is strict from its first
+    /// release at no compatibility cost; the older `"text" -` pair keeps its settled behaviour,
+    /// where a script may already rely on the text winning.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { "hello", "--in", @"C:\readme.md" }, "a text and a file")]
+    [InlineData(new[] { "-", "--in", @"C:\readme.md" }, "standard input and a file")]
+    [InlineData(new[] { "--in", @"C:\a.md", "--in", @"C:\b.md" }, "two files")]
+    public void One_source_or_the_other_never_both(string[] source, string pair)
+    {
+        Assert.False(
+            TranslateCommand.TryParse(
+                [.. source, "--from", "English", "--to", "Russian"],
+                piped: true,
+                out _,
+                out var refusal),
+            pair + " names two sources, and only one may be filled");
+
+        Assert.Equal("source_ambiguous", refusal!.Code, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Translating in place destroys the original and there is no undo. Compared resolved, so
+    /// two spellings of one file are still one file — and resolving touches no disk, which is
+    /// what keeps this check in the parser.
+    /// </summary>
+    [Fact]
+    public void The_translation_may_not_overwrite_its_own_source()
+    {
+        Assert.False(TranslateCommand.TryParse(
+            [
+                "--in", @"C:\docs\readme.md",
+                "--from", "English",
+                "--to", "Russian",
+                "--out", @"C:\docs\..\docs\readme.md",
+            ],
+            piped: false,
+            out _,
+            out var refusal));
+
+        Assert.Equal("output_is_source", refusal!.Code, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A refusal that omits a route sends the reader down a worse one, so the sentence that
+    /// fires when nothing was given has to name all three.
+    /// </summary>
+    [Fact]
+    public void The_refusal_for_nothing_at_all_names_every_way_in()
+    {
+        TranslateCommand.TryParse(
+            ["--from", "English", "--to", "Russian"],
+            piped: false,
+            out _,
+            out var refusal);
+
+        Assert.Contains("--in", refusal!.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>Every option that takes a value refuses the same way when it is left off.</summary>
     [Theory]
     [InlineData("--from", "from_value_missing")]
     [InlineData("--to", "to_value_missing")]
     [InlineData("--out", "out_value_missing")]
+    [InlineData("--in", "in_value_missing")]
     public void An_option_without_its_value_names_itself(string option, string code)
     {
         Assert.False(TranslateCommand.TryParse(
@@ -156,6 +254,10 @@ public sealed class TranslateCommandTests
     {
         Assert.Contains("[--json]", CliUsage.Translate, StringComparison.Ordinal);
         Assert.Contains("--out", CliUsage.Translate, StringComparison.Ordinal);
+
+        // The three ways in are one slot and only one may be filled, which is the fact worth
+        // showing. `repo status` already spells an alternation this way in this same file.
+        Assert.Contains("[text|-|--in file]", CliUsage.Translate, StringComparison.Ordinal);
         Assert.Contains(CliUsage.Translate, CliUsage.Text, StringComparison.Ordinal);
         Assert.True(MachineOutput.Supports("translate"));
 

@@ -21,8 +21,11 @@ internal static class CliUsage
         "localai ask <prompt> [file ...] [--profile name] [--model model] [--json]";
     public const string Triage =
         "localai triage [log-file|-] [--question text] [--model model] [--json]";
+    // The three ways in are one slot and only one may be filled, which is the fact worth showing;
+    // `repo status` above already spells an alternation this way. `--in -` is not advertised
+    // here — the bare `-` in the same bracket already stands for standard input.
     public const string Translate =
-        "localai translate [text|-] --from language --to language [--markdown] " +
+        "localai translate [text|-|--in file] --from language --to language [--markdown] " +
         "[--out file] [--json]";
     public const string ReadImage =
         "localai read-image <question> <image> [image ...] [--profile name] "  +
