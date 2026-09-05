@@ -567,6 +567,24 @@ seconds of a run that has said nothing, then whenever thirty seconds pass with n
 Every line is written whole; nothing rewrites itself with a carriage return, so a redirected
 log holds the same bytes a terminal showed.
 
+**`localai model pull` says how far a download has got**, in two figures rather than a
+percent: `Downloading gpt-oss:20b: 4.7 of 12.8 GB.` The total is the sum of the layer sizes
+the backend has named so far, so it grows as layers appear — and a percent against a growing
+denominator would go backwards, which no wording repairs. Both figures only ever increase.
+Three identical lines thirty seconds apart mean the download has stalled, and that is
+information a percent would have hidden behind rounding. The phases before and after the
+bytes get a line each, because hashing a twelve-gigabyte file is minutes during which the
+download line has already reached its own total.
+
+`--progress-json` gives the same run to a program instead: one object per line on standard
+error, no prose, and never both at once. The installer passes it, because a sentence is not a
+channel — the installer and the console can be set to different languages, and a reviewer's
+wording change must not be a parser break.
+
+A pull is also given the twelve hours the installer allows it, rather than the thirty minutes
+that belong to a call to a model. Below that, the console gave up while the broker went on
+downloading, and reported a cancellation nobody had asked for.
+
 **A redirected answer carries provenance markers and a terminal one does not.** The answer was
 written by a local model out of files it read, so where it can be read again later — a file, a
 pipe, another program — it arrives wrapped in the same nonce-bound `<untrusted-content>` markers

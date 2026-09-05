@@ -7,7 +7,8 @@ public sealed class BrokerHost
 {
     private readonly IBrokerQueue _queue;
     private readonly string _workerId;
-    private readonly Func<LocalJobRequest, CancellationToken, Task<BrokerExecutionResult>> _executor;
+    private readonly Func<LocalJobRequest, IJobProgress, CancellationToken,
+        Task<BrokerExecutionResult>> _executor;
     private readonly Func<TimeSpan, CancellationToken, Task> _idleDelay;
     private readonly TimeSpan _idleInterval;
     private readonly TimeSpan _heartbeatInterval;
@@ -30,7 +31,8 @@ public sealed class BrokerHost
     public BrokerHost(
         IBrokerQueue queue,
         string workerId,
-        Func<LocalJobRequest, CancellationToken, Task<BrokerExecutionResult>> executor,
+        Func<LocalJobRequest, IJobProgress, CancellationToken, Task<BrokerExecutionResult>>
+            executor,
         TimeProvider? timeProvider = null,
         Func<TimeSpan, CancellationToken, Task>? idleDelay = null,
         TimeSpan? idleInterval = null,
@@ -230,7 +232,10 @@ public sealed class BrokerHost
         Task<BrokerExecutionResult> execution;
         try
         {
-            execution = _executor(lease.Request, attemptCancellation.Token);
+            execution = _executor(
+                lease.Request,
+                new LeasedJobProgress(_queue, lease),
+                attemptCancellation.Token);
         }
         catch (OperationCanceledException) when (hostCancellation.IsCancellationRequested)
         {
@@ -523,6 +528,24 @@ public sealed class BrokerHost
             // A diagnostic sink is observational and cannot own broker liveness.
         }
     }
+}
+
+/// <summary>
+/// The sink the host hands to the executor: the one job it holds a lease for, and no
+/// other. Reporting is best-effort by construction — a position is an encouragement, and
+/// a queue that refused one must never turn a running download into a failed job.
+/// </summary>
+internal sealed class LeasedJobProgress(IBrokerQueue queue, LeasedJob lease) : IJobProgress
+{
+    public Task ReportAsync(
+        JobProgress progress,
+        CancellationToken cancellationToken = default) =>
+        queue.ReportProgressAsync(
+            lease.Request.JobId,
+            lease.WorkerId,
+            lease.LeaseId,
+            progress,
+            cancellationToken);
 }
 
 public sealed record BrokerExecutionResult(

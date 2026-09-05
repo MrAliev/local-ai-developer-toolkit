@@ -137,8 +137,13 @@ public sealed class OllamaTransportTests
         Assert.Equal("active_model_loading", probe.Code);
     }
 
+    /// <summary>
+    /// Streamed, and this asserts the request that asks for it. Unstreamed — which is what this
+    /// test used to pin — the backend answers once, when the download is over, so the only place
+    /// a size is ever known stayed inside a call that said nothing until it ended.
+    /// </summary>
     [Fact]
-    public async Task Runtime_pull_posts_non_streaming_request()
+    public async Task Runtime_pull_asks_for_a_streamed_response()
     {
         var fake = new FakeOllamaServer();
         fake.EnqueueJson(HttpStatusCode.OK, """{"status":"success"}""");
@@ -147,14 +152,72 @@ public sealed class OllamaTransportTests
 
         await transport.PullAsync(
             "translategemma:12b",
+            null,
             TestContext.Current.CancellationToken);
 
         var request = Assert.Single(fake.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal(new Uri(BaseUri, "api/pull"), request.Uri);
         Assert.Equal(
-            """{"model":"translategemma:12b","stream":false}""",
+            """{"model":"translategemma:12b","stream":true}""",
             request.Body);
+    }
+
+    /// <summary>
+    /// Every line of the stream is one object, and what the caller is handed is every one of
+    /// them. A line that cannot be read is skipped rather than fatal: the answer is the last
+    /// line, and one malformed status must not fail a download that succeeded.
+    /// </summary>
+    [Fact]
+    public async Task Every_line_of_the_pull_stream_reaches_the_caller()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(
+            HttpStatusCode.OK,
+            """
+            {"status":"pulling manifest"}
+            {"status":"pulling","digest":"sha256:aaa","total":400,"completed":100}
+            not json at all
+            {"status":"pulling","digest":"sha256:aaa","total":400,"completed":400}
+            {"status":"success"}
+            """);
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+        var seen = new List<ModelPullProgress>();
+
+        await transport.PullAsync(
+            "translategemma:12b",
+            (line, _) =>
+            {
+                seen.Add(line);
+                return Task.CompletedTask;
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            ["pulling manifest", "pulling", "pulling", "success"],
+            seen.Select(line => line.Status));
+        Assert.Equal(400, seen[2].Completed);
+    }
+
+    /// <summary>
+    /// A stream that stops before saying so is a failed pull, not a quiet success. Without the
+    /// final line there is nothing that says the model arrived whole.
+    /// </summary>
+    [Fact]
+    public async Task A_stream_that_never_confirms_success_is_a_failure()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(
+            HttpStatusCode.OK,
+            """{"status":"pulling","digest":"sha256:aaa","total":400,"completed":100}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => transport.PullAsync(
+            "translategemma:12b",
+            null,
+            TestContext.Current.CancellationToken));
     }
 
     [Fact]

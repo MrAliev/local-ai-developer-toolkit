@@ -133,8 +133,22 @@ public sealed class BrokerClient : IBrokerClient
                     // The one place that knows which of the two waits this is. Reported
                     // on every poll; whether any of them becomes a line is the console's
                     // decision, and it is the only caller that passes an observer.
+                    // A job that is reporting a position says more than the heartbeat
+                    // would, and "the model is working" would be false of a download:
+                    // no model is working, a file is arriving.
                     _observer?.Report(
-                        new BrokerJobPending(diagnostic.State == LocalJobState.Running));
+                        diagnostic is
+                        {
+                            State: LocalJobState.Running,
+                            Progress: { } position,
+                        }
+                            ? new ModelDownloadProgress(
+                                position.Phase,
+                                position.Detail,
+                                position.Completed,
+                                position.Total)
+                            : new BrokerJobPending(
+                                diagnostic.State == LocalJobState.Running));
                     await _delay(_pollInterval, cancellationToken);
                     break;
 

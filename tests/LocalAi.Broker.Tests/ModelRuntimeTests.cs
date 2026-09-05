@@ -239,6 +239,7 @@ public sealed class ModelRuntimeTests
         await Assert.ThrowsAsync<ArgumentException>(
             () => runtime.PullAsync(
                 "untrusted/model:latest",
+                progress: null,
                 TestContext.Current.CancellationToken));
 
         Assert.Empty(transport.Pulled);
@@ -273,7 +274,10 @@ public sealed class ModelRuntimeTests
                     ? ProcessSnapshots.Dequeue()
                     : Processes);
 
-        public Task PullAsync(string model, CancellationToken ct)
+        public Task PullAsync(
+            string model,
+            Func<ModelPullProgress, CancellationToken, Task>? onProgress,
+            CancellationToken ct)
         {
             Pulled.Add(model);
             return Task.CompletedTask;

@@ -540,7 +540,10 @@ public sealed class ModelExecutionCoordinatorTests : IDisposable
 
         public bool IsDisabled(string model, int contextTokens) => false;
 
-        public Task PullAsync(string model, CancellationToken cancellationToken = default) =>
+        public Task PullAsync(
+            string model,
+            IJobProgress? progress,
+            CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
         public Task<ModelResidencyProof> EnsureReadyAsync(

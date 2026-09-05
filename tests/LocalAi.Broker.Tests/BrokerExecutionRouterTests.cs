@@ -23,6 +23,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => fixture.Router.ExecuteAsync(
                 stale,
+                progress: null,
                 TestContext.Current.CancellationToken));
         Assert.Empty(fixture.Transport.PulledModels);
 
@@ -34,6 +35,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
             fixture.Catalog.CatalogVersion);
         var result = await fixture.Router.ExecuteAsync(
             current,
+            progress: null,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(["translategemma:12b"], fixture.Transport.PulledModels);
@@ -67,6 +69,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
 
         var result = await fixture.Router.ExecuteAsync(
             request,
+            progress: null,
             TestContext.Current.CancellationToken);
 
         var executed = Assert.IsType<ChatJobPayload>(
@@ -88,6 +91,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
 
         var result = await fixture.Router.ExecuteAsync(
             request,
+            progress: null,
             TestContext.Current.CancellationToken);
 
         var status = result.Body.Deserialize<LocalModelsStatusOutput>(
@@ -110,6 +114,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
 
         var result = await fixture.Router.ExecuteAsync(
             request,
+            progress: null,
             TestContext.Current.CancellationToken);
 
         var output = result.Body.Deserialize<LocalModelPreflightOutput>(
@@ -136,7 +141,10 @@ public sealed class BrokerExecutionRouterTests : IDisposable
             "stale");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Router.ExecuteAsync(request, TestContext.Current.CancellationToken));
+            fixture.Router.ExecuteAsync(
+                request,
+                progress: null,
+                TestContext.Current.CancellationToken));
 
         Assert.Empty(fixture.Transport.Processes);
         Assert.Null(fixture.Router.ResidentModel);
@@ -165,6 +173,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
             requestedContextTokens: 2048);
         await fixture.Router.ExecuteAsync(
             request,
+            progress: null,
             TestContext.Current.CancellationToken);
         fixture.Transport.Processes =
         [
@@ -199,6 +208,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
 
         await fixture.Router.ExecuteAsync(
             request,
+            progress: null,
             TestContext.Current.CancellationToken);
 
         Assert.Equal("qwen3-embedding:8b-q8_0", fixture.Router.ResidentModel);
@@ -227,6 +237,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
 
         await fixture.Router.ExecuteAsync(
             request,
+            progress: null,
             TestContext.Current.CancellationToken);
 
         Assert.Equal("some-other-embedding:4b", fixture.Router.ResidentModel);
@@ -247,6 +258,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
                 LocalJobPriority.Foreground,
                 "some-other-embedding:4b",
                 ["semantic navigation"]),
+            progress: null,
             TestContext.Current.CancellationToken);
 
         await fixture.Router.UnloadResidentAsync(TestContext.Current.CancellationToken);
@@ -269,6 +281,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
 
         await fixture.Router.ExecuteAsync(
             request,
+            progress: null,
             TestContext.Current.CancellationToken);
 
         Assert.Equal("gpt-oss:20b", fixture.Router.ResidentModel);
@@ -327,6 +340,7 @@ public sealed class BrokerExecutionRouterTests : IDisposable
 
         var result = await fixture.Router.ExecuteAsync(
             request,
+            progress: null,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(
@@ -469,7 +483,10 @@ public sealed class BrokerExecutionRouterTests : IDisposable
         public Task<IReadOnlyList<OllamaProcessInfo>> ListProcessesAsync(CancellationToken ct) =>
             Task.FromResult(Processes);
 
-        public Task PullAsync(string model, CancellationToken ct)
+        public Task PullAsync(
+            string model,
+            Func<ModelPullProgress, CancellationToken, Task>? onProgress,
+            CancellationToken ct)
         {
             PulledModels.Add(model);
             return Task.CompletedTask;

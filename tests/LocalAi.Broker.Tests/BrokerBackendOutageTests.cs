@@ -64,6 +64,7 @@ public sealed class BrokerBackendOutageTests
 
         Task<BrokerExecutionResult> Execute(
             LocalJobRequest job,
+            IJobProgress progress,
             CancellationToken cancellationToken)
         {
             executed.Add(job.JobId);
@@ -138,7 +139,7 @@ public sealed class BrokerBackendOutageTests
         var host = new BrokerHost(
             queue,
             "outage-worker",
-            (_, _) => throw new UnreachableException(),
+            (_, _, _) => throw new UnreachableException(),
             clock,
             idleDelay: (delay, _) =>
             {

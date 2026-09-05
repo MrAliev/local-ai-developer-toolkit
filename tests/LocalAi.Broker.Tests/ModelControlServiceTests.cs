@@ -398,7 +398,10 @@ public sealed class ModelControlServiceTests : IDisposable
             Task.FromResult(Installed);
         public Task<IReadOnlyList<OllamaProcessInfo>> ListProcessesAsync(CancellationToken ct) =>
             Task.FromResult(Processes);
-        public Task PullAsync(string model, CancellationToken ct) => Task.CompletedTask;
+        public Task PullAsync(
+            string model,
+            Func<ModelPullProgress, CancellationToken, Task>? onProgress,
+            CancellationToken ct) => Task.CompletedTask;
         public Task PreflightAsync(string model, int contextTokens, CancellationToken ct) =>
             Task.CompletedTask;
         public Task PreflightEmbeddingAsync(

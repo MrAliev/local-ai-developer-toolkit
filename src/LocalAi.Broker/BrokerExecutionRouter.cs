@@ -105,8 +105,14 @@ public sealed class BrokerExecutionRouter
         Volatile.Write(ref _residentModel, null);
     }
 
+    /// <summary>
+    /// The sink is the host's, bound to the lease this job runs under. Only the pull uses
+    /// it: everything else here is a single call whose duration the receipt already
+    /// reports, and a position nobody can act on is noise in a durable file.
+    /// </summary>
     public Task<BrokerExecutionResult> ExecuteAsync(
         LocalJobRequest request,
+        IJobProgress? progress,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -115,7 +121,7 @@ public sealed class BrokerExecutionRouter
             ChatJobPayload { TaskProfile: not null } =>
                 ExecuteRoutedChatAsync(request, cancellationToken),
             ModelMaintenanceJobPayload maintenance =>
-                ExecuteMaintenanceAsync(maintenance, cancellationToken),
+                ExecuteMaintenanceAsync(maintenance, progress, cancellationToken),
             ModelControlJobPayload control =>
                 ExecuteControlAsync(control, cancellationToken),
             _ => ExecuteDirectAsync(request, cancellationToken)
@@ -207,6 +213,7 @@ public sealed class BrokerExecutionRouter
 
     private async Task<BrokerExecutionResult> ExecuteMaintenanceAsync(
         ModelMaintenanceJobPayload payload,
+        IJobProgress? progress,
         CancellationToken cancellationToken)
     {
         if (!string.Equals(
@@ -222,7 +229,7 @@ public sealed class BrokerExecutionRouter
         switch (payload.Operation)
         {
             case ModelMaintenanceOperation.Pull:
-                await _runtime.PullAsync(payload.Model, cancellationToken);
+                await _runtime.PullAsync(payload.Model, progress, cancellationToken);
                 return Result(new ModelMaintenanceJobOutput("success"));
             default:
                 throw new ArgumentOutOfRangeException(

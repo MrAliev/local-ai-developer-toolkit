@@ -299,6 +299,26 @@
     <value> Осталось примерно {0} мин.</value>
     <comment>Leading space: a clause appended to the line above. Empty on the first fragment, where nothing has been measured yet, and never a bare number without about - it is a mean over completed fragments, and the fallback pass can double it. F1 and invariant, the format IndexBuilder already prints an ETA in.</comment>
   </data>
+  <data name="ProgressPullDownloading" xml:space="preserve">
+    <value>Скачивается {0}: {1} из {2} ГБ.</value>
+    <comment>Two figures and no percent on purpose: the total is summed over the layer digests as they appear, so it can grow, and a percent against a growing denominator moves backwards. Both figures only ever increase. Printed on the silence clock rather than per byte - a byte threshold would encode the connection's speed into the cadence. Three identical lines mean the download has stalled, and that is information.</comment>
+  </data>
+  <data name="ProgressPullPreparing" xml:space="preserve">
+    <value>Подготовка к скачиванию {0}: {1} с.</value>
+    <comment>The manifest fetch, before any layer size is known. It exists so the run explains why no size is on offer yet.</comment>
+  </data>
+  <data name="ProgressPullStatus" xml:space="preserve">
+    <value>Ollama сообщает: {0}. {1} с.</value>
+    <comment>Ollama's own status, quoted rather than mapped to one of our phases. Silence here would recreate this defect for every status Ollama adds later. The token is never translated, and it is collapsed to one line and cut to 60 characters before it reaches this sentence.</comment>
+  </data>
+  <data name="ProgressPullStoring" xml:space="preserve">
+    <value>Модель добавляется в Ollama: {0} с.</value>
+    <comment>After the bytes and the hash: writing the manifest, and removing layers no model needs any more. Minutes on a large model, and silence here reads as a run that finished and then hung.</comment>
+  </data>
+  <data name="ProgressPullVerifying" xml:space="preserve">
+    <value>Проверяется скачанное: {0} с.</value>
+    <comment>Hashing the whole file, after the download line has already reached its own total. Without a line of its own this phase reads as finished-then-hung.</comment>
+  </data>
   <data name="ProgressQueued" xml:space="preserve">
     <value>Ожидание в очереди брокера: {0} с.</value>
     <comment>Printed only into silence: first at 10 s of a run that has said nothing, then at every 30 s since the last line of any kind. The state is LocalJobState.Queued as the broker client's poll loop reads it, never a guess - a line saying the model is working while the job has not started is the false reassurance this pair exists to refuse.</comment>

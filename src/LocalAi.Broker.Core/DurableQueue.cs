@@ -223,6 +223,101 @@ public sealed class DurableQueue : ISelectableBrokerQueue
     }
 
     /// <summary>
+    /// Where a running job has got to, for a reader in another process.
+    ///
+    /// A sibling file rather than a field on the state document, for the reason the
+    /// failure reason is one: the state document is read with
+    /// <c>UnmappedMemberHandling.Disallow</c>, so a new field there would make every job
+    /// this release writes unreadable to the release before it — and an upgrade leaves an
+    /// old broker running against a new console until something restarts it. A file the
+    /// old code never opens costs it nothing.
+    ///
+    /// Overwritten, not appended: this is a position, not a history, and the directory it
+    /// sits in is copied to the archive when the job ends.
+    /// </summary>
+    public Task ReportProgressAsync(
+        Guid jobId,
+        string workerId,
+        Guid leaseId,
+        JobProgress progress,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(progress);
+        cancellationToken.ThrowIfCancellationRequested();
+        using var mutex = EnterMutex(cancellationToken);
+        var entry = RequireLease(jobId, workerId, leaseId);
+        var now = _timeProvider.GetUtcNow();
+        EnsureLeaseIsCurrent(entry.State, now);
+        AtomicWriteJson(
+            Path.Combine(entry.Directory, ProgressFileName),
+            new JobProgressDocument(
+                1,
+                jobId,
+                now,
+                BoundPhase(progress.Phase),
+                BoundDetail(progress.Detail),
+                progress.Completed,
+                progress.Total));
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The status is a token from the model backend, so it is bounded here for the reason
+    /// a failure reason is: it is external text landing in a durable file.
+    /// </summary>
+    public const int MaximumProgressStatusCharacters = 64;
+
+    private const string ProgressFileName = "progress.json";
+
+    private static string BoundPhase(string? phase) =>
+        BoundText(phase) ?? string.Empty;
+
+    private static string? BoundDetail(string? detail) => BoundText(detail);
+
+    private static string? BoundText(string? text) =>
+        string.IsNullOrWhiteSpace(text)
+            ? null
+            : text.Length <= MaximumProgressStatusCharacters
+                ? text
+                : text[..MaximumProgressStatusCharacters];
+
+    private static JobProgress? ReadProgress(JobEntry entry)
+    {
+        // Only while it runs. A finished job's last position is not what anybody asked,
+        // and reading it back would make a completed download look like a stalled one.
+        if (entry.State.State != LocalJobState.Running)
+        {
+            return null;
+        }
+
+        var path = Path.Combine(entry.Directory, ProgressFileName);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var document = JsonSerializer.Deserialize<JobProgressDocument>(
+                File.ReadAllText(path),
+                JsonOptions);
+            return document?.SchemaVersion == 1 && document.JobId == entry.State.JobId
+                ? new JobProgress(
+                    document.Phase,
+                    document.Detail,
+                    document.Completed,
+                    document.Total)
+                : null;
+        }
+        catch (Exception exception) when (exception is JsonException or IOException)
+        {
+            // A position is an encouragement, not a fact the caller acts on. A file being
+            // rewritten as it is read must not turn a running job into an unreadable one.
+            return null;
+        }
+    }
+
+    /// <summary>
     /// What a failure may say, in characters. Longer than the transport's own 400-character
     /// excerpt so that an excerpt at exactly that bound is not cut a second time by the words
     /// wrapped around it.
@@ -406,7 +501,8 @@ public sealed class DurableQueue : ISelectableBrokerQueue
             state.AttemptCount,
             state.RecoveryCount,
             state.FailureCode,
-            ReadFailureReason(entry)));
+            ReadFailureReason(entry),
+            ReadProgress(entry)));
     }
 
     private static void ValidateWorkerId(string workerId) =>
@@ -1150,6 +1246,37 @@ public sealed record JobResponse(
     [property: JsonRequired] DateTimeOffset CompletedAtUtc,
     [property: JsonRequired] JsonElement Body);
 
+/// <summary>How far a running job has got, when it is the kind that can say.</summary>
+/// <summary>
+/// <paramref name="Phase"/> is one of ours - preparing, downloading, verifying, storing,
+/// other - never the backend's own word, so the sentence a console prints cannot be
+/// decided by a vocabulary somebody else may extend. <paramref name="Detail"/> carries
+/// that backend word, and only when the phase is other.
+/// </summary>
+public sealed record JobProgress(string Phase, string? Detail, long Completed, long Total);
+
+/// <summary>
+/// Where a job says how far it has got, bound to the lease it is running under.
+///
+/// Handed to the executor rather than reached for, because the lease is the host's and
+/// not the router's: an executor that could name any job could report a position onto
+/// somebody else's.
+/// </summary>
+public interface IJobProgress
+{
+    Task ReportAsync(JobProgress progress, CancellationToken cancellationToken = default);
+}
+
+/// <summary>How far a running job had got, as it was written down.</summary>
+public sealed record JobProgressDocument(
+    [property: JsonRequired] int SchemaVersion,
+    [property: JsonRequired] Guid JobId,
+    [property: JsonRequired] DateTimeOffset AtUtc,
+    [property: JsonRequired] string Phase,
+    [property: JsonRequired] string? Detail,
+    [property: JsonRequired] long Completed,
+    [property: JsonRequired] long Total);
+
 /// <summary>The sentence recorded with a failed job, if anything was.</summary>
 public sealed record JobFailure(
     [property: JsonRequired] int SchemaVersion,
@@ -1169,7 +1296,8 @@ public sealed record JobDiagnostic(
     int AttemptCount,
     int RecoveryCount,
     string? FailureCode,
-    string? FailureReason);
+    string? FailureReason,
+    JobProgress? Progress);
 
 public sealed class LeaseLostException(string message) : InvalidOperationException(message);
 
@@ -1200,6 +1328,13 @@ public interface IBrokerQueue
         Guid leaseId,
         string failureCode,
         string? failureReason,
+        CancellationToken cancellationToken = default);
+
+    Task ReportProgressAsync(
+        Guid jobId,
+        string workerId,
+        Guid leaseId,
+        JobProgress progress,
         CancellationToken cancellationToken = default);
 
     Task CancelAsync(

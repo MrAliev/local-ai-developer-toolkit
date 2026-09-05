@@ -32,16 +32,29 @@ public sealed class LocalRunProgress : ILocalRunObserver
     private readonly Func<DateTimeOffset> clock;
     private readonly DateTimeOffset startedAt;
 
+    /// <summary>
+    /// What the run is about, when a line needs to name it. Only a download does: every
+    /// other line here is about the run the reader started a moment ago and can see.
+    /// </summary>
+    private readonly string subject;
+
+    private string? downloadPhase;
+    private string? downloadDetail;
+
     private DateTimeOffset? lastLineAt;
     private bool? running;
     private DateTimeOffset stateSince;
     private DateTimeOffset? firstFragmentAt;
 
-    public LocalRunProgress(TextWriter writer, Func<DateTimeOffset> clock)
+    public LocalRunProgress(
+        TextWriter writer,
+        Func<DateTimeOffset> clock,
+        string? subject = null)
     {
         ArgumentNullException.ThrowIfNull(clock);
         this.writer = writer;
         this.clock = clock;
+        this.subject = subject ?? string.Empty;
         startedAt = clock();
         stateSince = startedAt;
     }
@@ -53,6 +66,10 @@ public sealed class LocalRunProgress : ILocalRunObserver
         {
             case BrokerJobPending pending:
                 ReportPending(pending, now);
+                break;
+
+            case ModelDownloadProgress download:
+                ReportDownload(download, now);
                 break;
 
             case TranslatingFragment fragment:
@@ -111,6 +128,48 @@ public sealed class LocalRunProgress : ILocalRunObserver
             pending.Running ? CliText.ProgressRunning(inState) : CliText.ProgressQueued(inState),
             now);
     }
+
+    /// <summary>
+    /// The running heartbeat for the job it belongs to, which is why nothing else prints
+    /// one beside it: "the model is working" would be false of a download.
+    ///
+    /// A change of phase does not wait for the clock — it answers a different question
+    /// from a byte count. The first phase still does, because below ten seconds a reader
+    /// is waiting rather than wondering, and a line the answer follows says nothing.
+    /// </summary>
+    private void ReportDownload(ModelDownloadProgress download, DateTimeOffset now)
+    {
+        var moved = !string.Equals(downloadPhase, download.Phase, StringComparison.Ordinal) ||
+                    !string.Equals(downloadDetail, download.Detail, StringComparison.Ordinal);
+        downloadPhase = download.Phase;
+        downloadDetail = download.Detail;
+        if (!(moved && lastLineAt is not null) && !SilenceEarnsALine(now))
+        {
+            return;
+        }
+
+        var elapsed = WholeSeconds(now - startedAt);
+        Write(
+            download.Phase switch
+            {
+                "downloading" => CliText.ProgressPullDownloading(
+                    subject,
+                    Gigabytes(download.Completed),
+                    Gigabytes(download.Total)),
+                "preparing" => CliText.ProgressPullPreparing(subject, elapsed),
+                "verifying" => CliText.ProgressPullVerifying(elapsed),
+                "storing" => CliText.ProgressPullStoring(elapsed),
+                _ => CliText.ProgressPullStatus(download.Detail ?? string.Empty, elapsed),
+            },
+            now);
+    }
+
+    /// <summary>
+    /// Gibibytes to one decimal, invariant. The same unit the operating system shows for a
+    /// file, so the figure matches what the reader will find on disk.
+    /// </summary>
+    private static string Gigabytes(long bytes) =>
+        (bytes / (1024d * 1024 * 1024)).ToString("F1", CultureInfo.InvariantCulture);
 
     private void ReportFragment(TranslatingFragment fragment, DateTimeOffset now)
     {

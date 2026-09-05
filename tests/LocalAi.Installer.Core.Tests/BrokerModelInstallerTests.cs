@@ -139,9 +139,9 @@ public sealed class BrokerModelInstallerTests : IDisposable
         Assert.Equal(
             [
                 "run localai model status",
-                "run localai model pull --model model-a --catalog-version signed-7",
+                "run localai model pull --model model-a --catalog-version signed-7 --progress-json",
                 "run localai model preflight --model model-a --context 2048 --catalog-version signed-7",
-                "run localai model pull --model model-b --catalog-version signed-7",
+                "run localai model pull --model model-b --catalog-version signed-7 --progress-json",
                 "run localai model preflight --model model-b --context 4096 --catalog-version signed-7",
             ],
             runner.Calls.Select(call => string.Join(' ', call.Arguments)));
@@ -1025,6 +1025,92 @@ public sealed class BrokerModelInstallerTests : IDisposable
 
     private static string Json<T>(T value) =>
         JsonSerializer.Serialize(value, LocalAiJson.Strict) + Environment.NewLine;
+
+    /// <summary>
+    /// A pull now reports where it has got to, and it reports on standard error, which this
+    /// installer refuses from a child process. The refusal is what catches a binary that has
+    /// started printing warnings, so it is narrowed rather than lifted: progress objects are
+    /// expected on a run that asked for them, and nothing else ever is.
+    /// </summary>
+    [Fact]
+    public async Task A_pull_that_reports_its_progress_is_not_a_protocol_failure()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status([], [], "signed-7")),
+            new ProcessResult(
+                0,
+                Pull("model-a", "signed-7"),
+                """
+                {"schemaVersion":1,"operation":"pull","model":"model-a","phase":"preparing"}
+                {"schemaVersion":1,"operation":"pull","model":"model-a","phase":"downloading","completedBytes":1,"totalBytes":2}
+                """,
+                false,
+                false),
+            Success(Preflight("model-a", 2048, 80, 80, true)));
+        var installer = Installer(runner, Launcher());
+
+        var result = await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7")],
+            TestContext.Current.CancellationToken);
+
+        Assert.True(Assert.Single(result.Models).PullCompleted);
+    }
+
+    /// <summary>
+    /// A twelve-hour download reports thousands of lines and the runner keeps a bounded prefix,
+    /// so a truncated capture is the ordinary case rather than a fault. The answer is on standard
+    /// output, and a truncated answer still fails as it always did.
+    /// </summary>
+    [Fact]
+    public async Task Progress_that_did_not_all_fit_is_still_not_a_failure()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status([], [], "signed-7")),
+            new ProcessResult(
+                0,
+                Pull("model-a", "signed-7"),
+                """
+                {"schemaVersion":1,"operation":"pull","model":"model-a","phase":"downloading","completedBytes":1,"totalBytes":2}
+                {"schemaVersion":1,"operation":"pull","mod
+                """,
+                false,
+                false,
+                StandardErrorTruncated: true),
+            Success(Preflight("model-a", 2048, 80, 80, true)));
+        var installer = Installer(runner, Launcher());
+
+        var result = await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7")],
+            TestContext.Current.CancellationToken);
+
+        Assert.True(Assert.Single(result.Models).PullCompleted);
+    }
+
+    /// <summary>
+    /// The half that must not be lost: anything on standard error that is not what was asked for
+    /// still fails the install, because that is the only thing standing between a child process
+    /// that has started printing warnings and an installation that ignores them.
+    /// </summary>
+    [Fact]
+    public async Task A_pull_that_writes_something_else_still_fails()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status([], [], "signed-7")),
+            new ProcessResult(
+                0,
+                Pull("model-a", "signed-7"),
+                "warning: the launcher is unsigned",
+                false,
+                false),
+            Success(Preflight("model-a", 2048, 80, 80, true)));
+        var installer = Installer(runner, Launcher());
+
+        var result = await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7")],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(BrokerModelBatchStopReason.ProtocolFailure, result.StopReason);
+    }
 
     private static ProcessResult Success(string stdout) =>
         new(0, stdout, string.Empty, false, false);
