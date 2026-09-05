@@ -94,17 +94,29 @@ public sealed class LocalTasks
     private readonly ILocalModelClient client;
     private readonly LogTriagePolicyStore logTriagePolicies;
 
-    public LocalTasks(ILocalModelClient client)
-        : this(client, new LogTriagePolicyStore(LogTriagePolicyStore.DefaultRuntimeRoot))
+    /// <summary>
+    /// Optional because only the console has a reader for it. An MCP server passes none and
+    /// stays silent: progress on a stdio server's standard error lands in the host's log, where
+    /// nobody is waiting for it.
+    /// </summary>
+    private readonly ILocalRunObserver? observer;
+
+    public LocalTasks(ILocalModelClient client, ILocalRunObserver? observer = null)
+        : this(
+            client,
+            new LogTriagePolicyStore(LogTriagePolicyStore.DefaultRuntimeRoot),
+            observer)
     {
     }
 
     internal LocalTasks(
         ILocalModelClient client,
-        LogTriagePolicyStore logTriagePolicies)
+        LogTriagePolicyStore logTriagePolicies,
+        ILocalRunObserver? observer = null)
     {
         this.client = client;
         this.logTriagePolicies = logTriagePolicies;
+        this.observer = observer;
     }
 
     private const long MaxImageBytes = 30 * 1024 * 1024;
@@ -315,7 +327,7 @@ public sealed class LocalTasks
         string? question,
         string? model,
         CancellationToken ct) =>
-        new LogTriagePipeline(client, logTriagePolicies.Read())
+        new LogTriagePipeline(client, logTriagePolicies.Read(), observer)
             .RunAsync(path, text, question, model, ct);
 
     /// <summary>
@@ -522,6 +534,9 @@ public sealed class LocalTasks
                     markdown
                         ? SplitBoundaryLineBreaks(item.Text)
                         : (string.Empty, item.Text, string.Empty);
+                // Before the call rather than after it: the total is known before the
+                // first one, and it is the fact that decides whether the reader waits.
+                observer?.Report(new TranslatingFragment(modelStep + 1, modelStepCount));
                 var prompt =
                     $"Translate the following fragment from {sourceLanguage} to {targetLanguage}. " +
                     "Return only the translated fragment. Preserve Markdown structure, code, URLs, " +
@@ -597,6 +612,10 @@ public sealed class LocalTasks
             {
                 try
                 {
+                    // The counter is about to restart at 1, which without this line
+                    // reads as a defect rather than as a second pass over the document.
+                    observer?.Report(
+                        new TranslationRetrying(validation.Detail, fallbackModels[index]));
                     attempt = await RunAttemptAsync(fallbackModels[index]);
                     attempts.Add(attempt);
                     break;

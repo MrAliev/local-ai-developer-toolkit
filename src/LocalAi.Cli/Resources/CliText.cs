@@ -487,6 +487,36 @@ public static class CliText
     public static string TranslateMarkdownAssumed(string path) =>
         Catalogue.Format(nameof(TranslateMarkdownAssumed), path);
 
+    // Every number below is formatted invariantly by the caller before it arrives here: these
+    // lines are quoted verbatim by agents and read out of redirected logs, and a decimal comma
+    // would make the estimate a different number to whoever parses it.
+    public static string ProgressQueued(int seconds) =>
+        Catalogue.Format(nameof(ProgressQueued), seconds);
+
+    public static string ProgressRunning(int seconds) =>
+        Catalogue.Format(nameof(ProgressRunning), seconds);
+
+    public static string ProgressTranslatingFragment(int index, int total, string left) =>
+        Catalogue.Format(nameof(ProgressTranslatingFragment), index, total, left);
+
+    public static string ProgressMinutesLeft(string minutes) =>
+        Catalogue.Format(nameof(ProgressMinutesLeft), minutes);
+
+    public static string ProgressTranslationRetry(string detail, string model) =>
+        Catalogue.Format(nameof(ProgressTranslationRetry), detail, model);
+
+    public static string ProgressTriageChoosingModel =>
+        Catalogue.Get(nameof(ProgressTriageChoosingModel));
+
+    public static string ProgressTriageFragment(int index, int seconds) =>
+        Catalogue.Format(nameof(ProgressTriageFragment), index, seconds);
+
+    public static string ProgressTriageLogRead(int fragments) =>
+        Catalogue.Format(nameof(ProgressTriageLogRead), fragments);
+
+    public static string ProgressTriageMerging(int findings, int level) =>
+        Catalogue.Format(nameof(ProgressTriageMerging), findings, level);
+
     public static string TranslateWriteDocument => Catalogue.Get(nameof(TranslateWriteDocument));
 
     public static string OutputNotWritten(string path, string reason) =>

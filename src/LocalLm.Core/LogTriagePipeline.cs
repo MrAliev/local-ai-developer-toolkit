@@ -13,7 +13,8 @@ namespace LocalLm.Core;
 /// </summary>
 internal sealed class LogTriagePipeline(
     ILocalModelClient client,
-    LogTriagePolicy policy)
+    LogTriagePolicy policy,
+    ILocalRunObserver? observer = null)
 {
     private const string DefaultQuestion =
         "What failed, and why? Give the exact file and line if the log names one.";
@@ -33,6 +34,10 @@ internal sealed class LogTriagePipeline(
     {
         var source = ValidateSource(path, text);
         var focus = string.IsNullOrWhiteSpace(question) ? DefaultQuestion : question.Trim();
+        // Before the probe, which loads a model to find out whether it fits: it unloads
+        // others, preflights at a context size and steps down on failure. Minutes of
+        // silence otherwise, before anything else about this run can be said.
+        observer?.Report(new TriageChoosingModel());
         var capacity = await SelectCapacityAsync(model, cancellationToken);
         var promptBudget = InputCharacterBudget(capacity.ContextTokens);
         var availableCharacters =
@@ -80,6 +85,7 @@ internal sealed class LogTriagePipeline(
                            cancellationToken))
         {
             fragmentCount++;
+            observer?.Report(new TriagingFragment((int)fragmentCount));
             originalTokens = Math.Min(
                 int.MaxValue,
                 originalTokens + TokenEstimator.ForText(fragment.UniqueText));
@@ -96,6 +102,8 @@ internal sealed class LogTriagePipeline(
             await reducer.AddAsync(result.Value, cancellationToken);
         }
 
+        // The total, at the first moment it is true.
+        observer?.Report(new TriageLogRead((int)fragmentCount));
         var reduced = await reducer.CompleteAsync(cancellationToken);
         if (reduced.Receipt is not null)
         {
@@ -289,6 +297,9 @@ internal sealed class LogTriagePipeline(
         Capacity capacity,
         CancellationToken cancellationToken)
     {
+        // Merges also happen mid-stream when a level overflows its budget, so the line
+        // this becomes must not read as "the log has been read".
+        observer?.Report(new TriageMerging(summaries.Count, level));
         var body = new StringBuilder();
         for (var index = 0; index < summaries.Count; index++)
         {

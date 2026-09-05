@@ -295,6 +295,42 @@
     <value>Команде localai {0} неизвестен профиль задачи '{1}'. Поддерживаемые профили: {2}</value>
     <comment>Command-agnostic because read-image and translate need the same refusal with a different set, and two parallel keys would drift. No full stop: the line ends in a list somebody copies, the reason HookEventUnknown gives.</comment>
   </data>
+  <data name="ProgressMinutesLeft" xml:space="preserve">
+    <value> Осталось примерно {0} мин.</value>
+    <comment>Leading space: a clause appended to the line above. Empty on the first fragment, where nothing has been measured yet, and never a bare number without about - it is a mean over completed fragments, and the fallback pass can double it. F1 and invariant, the format IndexBuilder already prints an ETA in.</comment>
+  </data>
+  <data name="ProgressQueued" xml:space="preserve">
+    <value>Ожидание в очереди брокера: {0} с.</value>
+    <comment>Printed only into silence: first at 10 s of a run that has said nothing, then at every 30 s since the last line of any kind. The state is LocalJobState.Queued as the broker client's poll loop reads it, never a guess - a line saying the model is working while the job has not started is the false reassurance this pair exists to refuse.</comment>
+  </data>
+  <data name="ProgressRunning" xml:space="preserve">
+    <value>Модель работает: {0} с.</value>
+    <comment>Its pair, for LocalJobState.Running. The number is time in the current state rather than since the command started, so the two lines together read as a timeline.</comment>
+  </data>
+  <data name="ProgressTranslatingFragment" xml:space="preserve">
+    <value>Переводится фрагмент {0} из {1}.{2}</value>
+    <comment>Printed before the call, not after: the total is known before the first one, and it is the fact that decides whether the reader waits. {2} is ProgressMinutesLeft or empty.</comment>
+  </data>
+  <data name="ProgressTranslationRetry" xml:space="preserve">
+    <value>Проверка структуры не пройдена ({0}), поэтому весь документ переводится заново с фрагмента 1, моделью {1}.</value>
+    <comment>The fallback pass re-translates the whole document, so the counter restarts at 1; without this line that reads as a defect. {0} is the validator's own detail, {1} the model tag, which is never translated.</comment>
+  </data>
+  <data name="ProgressTriageChoosingModel" xml:space="preserve">
+    <value>Выбор модели для этого лога и её загрузка.</value>
+    <comment>Before the capacity probe, which loads a model to find out whether it fits: it unloads others, preflights at a context size and checks residency, stepping down on failure. Minutes of silence otherwise, before anything else about the run can be said.</comment>
+  </data>
+  <data name="ProgressTriageFragment" xml:space="preserve">
+    <value>Разбор фрагмента {0}; с начала прошло {1} с.</value>
+    <comment>No of N on purpose: fragments are streamed off the log and the total is not known until it ends. The elapsed is since the command started, unlike the heartbeat's, and the wording says so.</comment>
+  </data>
+  <data name="ProgressTriageLogRead" xml:space="preserve">
+    <value>Лог прочитан полностью: фрагментов {0}.</value>
+    <comment>The total, at the first moment it is true. Noun-first in Russian: ResourceManager has no plural support.</comment>
+  </data>
+  <data name="ProgressTriageMerging" xml:space="preserve">
+    <value>Слияние частичных выводов: {0} (уровень {1}).</value>
+    <comment>Merges also happen mid-stream when a level overflows its budget, so this must not be read as the log having been read. level is the reduction level the prompt itself names.</comment>
+  </data>
   <data name="PruneArchive" xml:space="preserve">
     <value>archive: заданий {0}, тел ответов {1}, {2} МБ</value>
     <comment>Two different events on one row: a job record deleted, and a response body deleted from a record that stays. The Russian keeps both nouns for that reason, noun-first.</comment>

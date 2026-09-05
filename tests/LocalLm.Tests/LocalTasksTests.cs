@@ -671,6 +671,95 @@ public sealed class LocalTasksTests
                 null);
     }
 
+    /// <summary>
+    /// A translation is one model call per fragment, and until the first line lands the console
+    /// cannot say whether this run is one call or twenty. The total is known before the first
+    /// call, so it is reported before the first call.
+    /// </summary>
+    [Fact]
+    public async Task A_translation_says_which_fragment_it_is_on_before_it_starts_it()
+    {
+        var client = new FakeLocalModelClient { Answer = "Перевод." };
+        var seen = new RecordingRunObserver();
+        var tasks = new LocalTasks(client, seen);
+
+        await tasks.TranslateAsync(
+            "Text one.\r\n\r\n```csharp\r\nvar x = 1;\r\n```\r\n\r\nText two.",
+            "English",
+            "Russian",
+            markdown: true,
+            TestContext.Current.CancellationToken);
+
+        // The fenced block is not translatable, so it is not a model call and not a fragment.
+        Assert.Equal(
+            [new TranslatingFragment(1, 2), new TranslatingFragment(2, 2)],
+            seen.Steps.OfType<TranslatingFragment>().Take(2));
+    }
+
+    /// <summary>
+    /// The fallback pass re-translates the whole document, so a run that has just doubled shows
+    /// its counter restarting at 1. Without a line saying why, that reads as a defect — and until
+    /// now a translation that took twice as long said so nowhere at all.
+    /// </summary>
+    [Fact]
+    public async Task A_fallback_pass_says_the_document_is_being_translated_again()
+    {
+        var client = new FakeLocalModelClient();
+        client.Answers.Enqueue("# Перевод\r\n\r\nТекст без защищённого токена.");
+        client.Answers.Enqueue("# Перевод\r\n\r\nТекст с `Code()`.");
+        var seen = new RecordingRunObserver();
+        var tasks = new LocalTasks(client, seen);
+
+        await tasks.TranslateAsync(
+            "# Source\r\n\r\nText with `Code()`.",
+            "English",
+            "Russian",
+            markdown: true,
+            TestContext.Current.CancellationToken);
+
+        var retry = Assert.Single(seen.Steps.OfType<TranslationRetrying>());
+        Assert.Equal("qwen2.5-coder:14b", retry.Model, StringComparer.Ordinal);
+        Assert.NotEmpty(retry.Detail);
+    }
+
+    /// <summary>
+    /// Triage cannot say "of N" while it runs: fragments are streamed off the log and the count
+    /// is not known until the log ends. So it counts what it has, and prints the total at the
+    /// first moment that total is true — an invented denominator would be the one number in this
+    /// output that was a guess.
+    /// </summary>
+    [Fact]
+    public async Task A_triage_counts_its_fragments_and_names_the_total_only_at_the_end()
+    {
+        var client = new FakeLocalModelClient();
+        var seen = new RecordingRunObserver();
+        var tasks = new LocalTasks(client, seen);
+
+        await tasks.TriageLogAsync(
+            path: null,
+            text: "fatal DIRECT_TEXT_42",
+            question: null,
+            model: null,
+            TestContext.Current.CancellationToken);
+
+        // Choosing the model comes first because it loads one: minutes of silence otherwise,
+        // before anything else about the run can be said.
+        Assert.IsType<TriageChoosingModel>(seen.Steps[0]);
+        Assert.Equal(new TriagingFragment(1), seen.Steps.OfType<TriagingFragment>().Single());
+        Assert.Equal(1, seen.Steps.OfType<TriageLogRead>().Single().Fragments);
+        Assert.True(
+            seen.Steps.IndexOf(seen.Steps.OfType<TriageLogRead>().Single()) >
+            seen.Steps.IndexOf(seen.Steps.OfType<TriagingFragment>().Single()),
+            "the total can only be told after the fragment it counts");
+    }
+
+    private sealed class RecordingRunObserver : ILocalRunObserver
+    {
+        public List<LocalRunStep> Steps { get; } = [];
+
+        public void Report(LocalRunStep step) => Steps.Add(step);
+    }
+
     private sealed record RoutedCall(
         LocalTaskProfile Profile,
         string Prompt,

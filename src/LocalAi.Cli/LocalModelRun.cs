@@ -96,7 +96,7 @@ internal static class LocalModelRun
         ArgumentNullException.ThrowIfNull(job);
         try
         {
-            var result = await job(Tasks(), cancellationToken);
+            var result = await job(Tasks(Watching()), cancellationToken);
             if (machineReadable)
             {
                 Console.WriteLine(MachineOutput.Answer(command, Describe(origin, result)));
@@ -135,7 +135,7 @@ internal static class LocalModelRun
         ArgumentNullException.ThrowIfNull(request);
         try
         {
-            var result = await Tasks().TranslateAsync(
+            var result = await Tasks(Watching()).TranslateAsync(
                 text,
                 request.From,
                 request.To,
@@ -209,8 +209,24 @@ internal static class LocalModelRun
         }
     }
 
-    private static LocalTasks Tasks() =>
-        new(new BrokerLocalModelClient(BrokerClientFactory.CreateDefault()));
+    /// <summary>
+    /// One observer for the whole run, given to both layers: the broker client knows
+    /// whether the job is queued or running, and the task knows which fragment it is on.
+    /// Neither knows what the other is doing, and the console needs both to say anything
+    /// true about a long run.
+    /// </summary>
+    private static LocalTasks Tasks(ILocalRunObserver observer) =>
+        new(
+            new BrokerLocalModelClient(
+                BrokerClientFactory.CreateDefault(observer: observer)),
+            observer);
+
+    /// <summary>
+    /// Built at the moment the run starts, because its first decision is measured from
+    /// then: ten seconds of a run that has said nothing earns the first line.
+    /// </summary>
+    private static LocalRunProgress Watching() =>
+        new(Console.Error, static () => DateTimeOffset.UtcNow);
 
     /// <summary>
     /// One ladder for every local task in this binary. The MCP face has its own, which turns each

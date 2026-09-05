@@ -20,13 +20,21 @@ public sealed class BrokerClient : IBrokerClient
     private readonly TimeSpan _timeout;
     private readonly TimeSpan _pollInterval;
 
+    /// <summary>
+    /// Told on every poll whether the job is still queued or already running. Only the
+    /// console has a reader for that; everything else passes none.
+    /// </summary>
+    private readonly ILocalRunObserver? _observer;
+
     public BrokerClient(
         DurableQueue queue,
         IBrokerProcess process,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         TimeSpan? timeout = null,
-        TimeSpan? pollInterval = null)
+        TimeSpan? pollInterval = null,
+        ILocalRunObserver? observer = null)
     {
+        _observer = observer;
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
         _process = process ?? throw new ArgumentNullException(nameof(process));
         _delay = delay ?? Task.Delay;
@@ -122,6 +130,11 @@ public sealed class BrokerClient : IBrokerClient
 
                 case LocalJobState.Queued:
                 case LocalJobState.Running:
+                    // The one place that knows which of the two waits this is. Reported
+                    // on every poll; whether any of them becomes a line is the console's
+                    // decision, and it is the only caller that passes an observer.
+                    _observer?.Report(
+                        new BrokerJobPending(diagnostic.State == LocalJobState.Running));
                     await _delay(_pollInterval, cancellationToken);
                     break;
 
