@@ -74,6 +74,18 @@ The parameters below come from the code, not from the documentation.
 | Contexts | Discrete steps from 2K to 256K tokens; a step is used only when preflight proved the runner fits entirely |
 | Experiments | A new candidate runs on the first ten completed tasks of a profile, then pauses until the owner decides: promote, continue, keep as fallback only, or disable |
 
+One job the scheduler cannot work out what to do with costs that job and nothing else. It used
+to cost everything: the metadata for the whole queue is resolved in one pass, so a job naming a
+model the catalogue does not hold threw out of that pass, the broker read the result as
+"nothing to schedule", and nothing was leased at any priority for as long as that job stayed
+queued — while the broker reported itself healthy throughout. The job is now skipped for
+scheduling, leased anyway, attempted once, and failed with a reason that names the model.
+
+A request the backend refuses because it could not reach its own runner is retried rather than
+reported as a bad request. It arrives as an HTTP 400 and is not one: the same request works
+moments later, and the layer above used to answer by halving the batch to isolate a chunk that
+did not exist.
+
 Partial offload to system memory is not an error — it makes the answer several times slower
 without failing. The slowdown announces itself only because the report line is made to say so,
 beside the model it names. That is precisely why it is forbidden by default, and why relaxing it

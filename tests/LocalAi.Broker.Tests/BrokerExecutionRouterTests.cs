@@ -418,6 +418,92 @@ public sealed class BrokerExecutionRouterTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// One candidate the resolution cannot read must cost that job and no other.
+    ///
+    /// This runs over the whole queue at once, so an exception here reached the host, which read
+    /// it as "nothing to schedule" and leased nothing — at any priority, for as long as the job
+    /// stayed queued. #335 recorded the result: five jobs waiting with AttemptCount 0, a git
+    /// commit hanging ten minutes behind a job nothing had even attempted, and a broker calling
+    /// itself healthy throughout.
+    ///
+    /// The exception is a KeyNotFoundException: the catalog throws it for a tag it does not hold,
+    /// and a model override names one whenever somebody types `--model no-such-model:1b`. The
+    /// guard here caught InvalidOperationException only, so that one walked out.
+    /// </summary>
+    [Fact]
+    public async Task A_candidate_naming_a_model_the_catalog_never_heard_of_takes_no_others_with_it()
+    {
+        var fixture = CreateFixture();
+        // The good candidate has to be routable, or it would be missing for a reason that
+        // has nothing to do with the one being tested.
+        fixture.Transport.Installed = fixture.Catalog.Models
+            .Select(model => model.Tag)
+            .ToArray();
+        var workload = new LocalWorkloadMetadata(2, 2, 0, 0, 0, LocalDurationClass.Short);
+        var unreadable = LocalJobRequestFactory.Create(
+            "unreadable",
+            LocalJobPriority.Interactive,
+            new ChatJobPayload(
+                "no-such-model:1b",
+                "hi",
+                null,
+                null,
+                LocalTaskProfile.ShortSummary,
+                workload));
+        var wanted = LocalJobRequestFactory.CreateRoutedChat(
+            "wanted",
+            LocalJobPriority.Interactive,
+            LocalTaskProfile.ShortSummary,
+            "hi",
+            null,
+            null,
+            workload);
+
+        var prepared = await fixture.Router.PrepareAsync(
+            [
+                new QueuedJobCandidate(unreadable, 1, DateTimeOffset.UtcNow),
+                new QueuedJobCandidate(wanted, 2, DateTimeOffset.UtcNow),
+            ],
+            TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(unreadable.JobId, prepared.Keys);
+        Assert.Contains(wanted.JobId, prepared.Keys);
+    }
+
+    /// <summary>
+    /// Skipped by the scheduler is not the same as answered. A job the catalog cannot route still
+    /// has to end, and it ends where every other unservable job ends: leased, attempted once, and
+    /// failed for itself — with a reason that names what could not be found, which the queue now
+    /// keeps beside the job (#354).
+    /// </summary>
+    [Fact]
+    public async Task A_job_naming_a_model_that_does_not_exist_fails_rather_than_waits()
+    {
+        var fixture = CreateFixture();
+        fixture.Transport.Installed = fixture.Catalog.Models
+            .Select(model => model.Tag)
+            .ToArray();
+        var request = LocalJobRequestFactory.Create(
+            "unreadable",
+            LocalJobPriority.Interactive,
+            new ChatJobPayload(
+                "no-such-model:1b",
+                "hi",
+                null,
+                null,
+                LocalTaskProfile.ShortSummary,
+                new LocalWorkloadMetadata(2, 2, 0, 0, 0, LocalDurationClass.Short)));
+
+        var failure = await Assert.ThrowsAnyAsync<Exception>(() =>
+            fixture.Router.ExecuteAsync(
+                request,
+                progress: null,
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("no-such-model:1b", failure.Message, StringComparison.Ordinal);
+    }
+
     private Fixture CreateFixture()
     {
         var catalog = ModelRoutingCatalog.LoadEmbedded();

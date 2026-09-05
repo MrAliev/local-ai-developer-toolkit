@@ -69,11 +69,16 @@ public sealed class BrokerExecutionRouter
                 _prepared[candidate.Request.JobId] =
                     new PreparedModelExecution(selection, availability);
             }
-            catch (InvalidOperationException)
+            catch (Exception exception) when (
+                exception is not OperationCanceledException)
             {
                 // A permanently invalid candidate must not prevent valid queued
                 // work from being scheduled. Its execution will repeat selection
                 // and persist the terminal failure for that job alone.
+                //
+                // Every exception, not only InvalidOperationException: selection throws
+                // ArgumentException for a payload it will not accept, and that one
+                // escaped to the caller, where it stopped the whole queue (#335).
             }
         }
 

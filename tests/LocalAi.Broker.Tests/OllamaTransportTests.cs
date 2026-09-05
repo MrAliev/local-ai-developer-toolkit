@@ -138,6 +138,65 @@ public sealed class OllamaTransportTests
     }
 
     /// <summary>
+    /// A 400 whose body says the server could not reach its own runner is not a bad request. It
+    /// is the backend being briefly unavailable, and it is retryable.
+    ///
+    /// Counted before this was written (#349): 40 embed jobs failed this way in four days, every
+    /// one an HTTP 400 with no accompanying line in Ollama's own log, and every one succeeded on
+    /// the retry. The layer above answered by halving the batch to isolate an offending chunk —
+    /// and there was none, so it halved a batch whose backend had gone away and failed twice
+    /// instead of once.
+    /// </summary>
+    [Fact]
+    public async Task A_backend_that_cannot_reach_its_own_runner_is_retried_rather_than_refused()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(
+            HttpStatusCode.BadRequest,
+            """
+            {"error":"Post \"http://127.0.0.1:59268/tokenize\": dial tcp 127.0.0.1:59268: connectex: No connection could be made because the target machine actively refused it."}
+            """);
+        fake.EnqueueJson(HttpStatusCode.OK, """{"embeddings":[[1.0,2.0]]}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await transport.ExecuteAsync(
+            LocalJobRequestFactory.CreateEmbed(
+                "retryable",
+                LocalJobPriority.Background,
+                "embed-model",
+                ["one"]),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, fake.Requests.Count);
+    }
+
+    /// <summary>
+    /// The half that must not be lost: a 400 that is about the request stays a refusal, and is
+    /// not retried three times before saying so.
+    /// </summary>
+    [Fact]
+    public async Task A_400_about_the_request_itself_is_still_refused_at_once()
+    {
+        var fake = new FakeOllamaServer();
+        fake.EnqueueJson(
+            HttpStatusCode.BadRequest,
+            """{"error":"input length exceeds maximum context length"}""");
+        using var client = new HttpClient(fake);
+        using var transport = new OllamaTransport(client, BaseUri, NoDelay);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => transport.ExecuteAsync(
+            LocalJobRequestFactory.CreateEmbed(
+                "refused",
+                LocalJobPriority.Background,
+                "embed-model",
+                ["one"]),
+            TestContext.Current.CancellationToken));
+
+        Assert.Single(fake.Requests);
+    }
+
+    /// <summary>
     /// Streamed, and this asserts the request that asks for it. Unstreamed — which is what this
     /// test used to pin — the backend answers once, when the download is over, so the only place
     /// a size is ever known stayed inside a call that said nothing until it ended.

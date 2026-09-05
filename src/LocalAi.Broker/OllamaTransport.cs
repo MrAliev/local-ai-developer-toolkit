@@ -750,7 +750,8 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
                 var errorBody = await ReadBoundedErrorBodyAsync(
                     response.Content,
                     cancellationToken);
-                if (!IsTransient(response.StatusCode) || attempt == MaxAttempts)
+                if (!IsRetryable(response.StatusCode, errorBody.Text) ||
+                    attempt == MaxAttempts)
                 {
                     throw CreateStatusException(
                         response,
@@ -835,6 +836,32 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
     private static bool IsTransient(HttpStatusCode statusCode) =>
         statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
         (int)statusCode >= 500;
+
+    /// <summary>
+    /// A 400 whose body says the server could not reach its own runner is not a bad
+    /// request. It is the backend being briefly unavailable, and the same request works
+    /// moments later.
+    ///
+    /// Counted rather than guessed (#349): 40 embed jobs failed this way in four days,
+    /// every one an HTTP 400 returned after the same 10-12 seconds a success takes, with
+    /// no accompanying line in Ollama's own log, and every one succeeded on a retry. The
+    /// layer above answered by halving the batch to isolate an offending chunk, and there
+    /// was none - so it failed twice where it could have waited once.
+    /// </summary>
+    private static bool IsRetryable(HttpStatusCode statusCode, string errorBody) =>
+        IsTransient(statusCode) ||
+        (statusCode == HttpStatusCode.BadRequest && NamesAnUnreachableRunner(errorBody));
+
+    /// <summary>
+    /// Read from the backend's own words, which is why it lives here: this is the one
+    /// layer that owns what Ollama says, and the layers above it must not have to learn
+    /// the vocabulary. Ollama does not translate these, so matching them is stable in a
+    /// way that matching our own text would not be.
+    /// </summary>
+    private static bool NamesAnUnreachableRunner(string errorBody) =>
+        errorBody.Contains("dial tcp", StringComparison.OrdinalIgnoreCase) ||
+        errorBody.Contains("connection refused", StringComparison.OrdinalIgnoreCase) ||
+        errorBody.Contains("actively refused", StringComparison.OrdinalIgnoreCase);
 
     private static TimeSpan? GetBoundedRetryAfter(RetryConditionHeaderValue? retryAfter)
     {
