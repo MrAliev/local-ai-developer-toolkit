@@ -336,8 +336,7 @@ public static class DoctorCommand
     {
         yield return PolicyCheck(
             "policy.models",
-            RuntimeDirectories.SettingsFile(root, BrokerPolicy.FileName),
-            () => new ModelResidencyPolicyStore(root).Read(),
+            () => new ModelResidencyPolicyStore(root).ReadWithSource(),
             policy => CliText.PolicyModels(
                 policy.ModelResidency,
                 policy.IdleModelKeepAliveSeconds),
@@ -348,8 +347,7 @@ public static class DoctorCommand
 
         yield return PolicyCheck(
             "policy.retention",
-            RuntimeDirectories.SettingsFile(root, RuntimeRetentionPolicy.FileName),
-            () => new RuntimeRetentionPolicyStore(root).Read(),
+            () => new RuntimeRetentionPolicyStore(root).ReadWithSource(),
             policy => CliText.PolicyRetention(
                 policy.GenerationsPerRepository,
                 policy.InstalledVersions,
@@ -362,8 +360,7 @@ public static class DoctorCommand
 
         yield return PolicyCheck(
             "policy.languageServers",
-            RuntimeDirectories.SettingsFile(root, LanguageServerPolicy.FileName),
-            () => new LanguageServerPolicyStore(root).Read(),
+            () => new LanguageServerPolicyStore(root).ReadWithSource(),
             policy => policy.Enabled
                 ? CliText.PolicyLanguageServersEnabled(string.Join(
                     ", ",
@@ -454,22 +451,40 @@ public static class DoctorCommand
         };
     }
 
+    /// <summary>
+    /// One policy, and whether the file that configures it is doing anything.
+    ///
+    /// A store answers a document it cannot use with its defaults rather than an error, which is
+    /// right at runtime and used to be invisible here: the file was on disk, so this check said
+    /// the policy was configured and printed the defaults beside it as though they had come from
+    /// the file. Whoever wrote that file had no way to learn it stopped counting.
+    /// </summary>
     private static DoctorCheck PolicyCheck<T>(
         string name,
-        string path,
-        Func<T> read,
+        Func<PolicyRead<T>> read,
         Func<T, string> describe,
         Func<T, bool, IReadOnlyList<DoctorFact>> facts)
     {
         try
         {
-            var policy = read();
-            var found = File.Exists(path);
+            var outcome = read();
+            var detail = describe(outcome.Policy);
             return new DoctorCheck(
                 name,
-                DoctorStatus.Ok,
-                found ? describe(policy) : CliText.PolicyDefaults(describe(policy)),
-                facts(policy, found));
+                outcome.FileFound && !outcome.FileUsed
+                    ? DoctorStatus.Warning
+                    : DoctorStatus.Ok,
+                outcome.FileFound
+                    ? outcome.FileUsed
+                        ? detail
+                        : CliText.PolicyFileNotUsed(detail, outcome.Path)
+                    : CliText.PolicyDefaults(detail),
+                [
+                    .. facts(outcome.Policy, outcome.FileFound),
+                    // Written in all three cases, false included: a caller must never have to
+                    // read an absent field as a value.
+                    new DoctorFact("fileUsed", outcome.FileUsed),
+                ]);
         }
         catch (Exception exception)
         {

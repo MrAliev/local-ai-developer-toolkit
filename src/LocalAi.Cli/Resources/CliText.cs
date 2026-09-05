@@ -86,6 +86,14 @@ public static class CliText
     public static string PolicyDefaults(string detail) =>
         Catalogue.Format(nameof(PolicyDefaults), detail);
 
+    /// <summary>
+    /// A policy file that is on disk and is doing nothing. Every store answers a document it
+    /// cannot use with its defaults rather than an error, so without this line the report showed
+    /// those defaults as though the file had produced them.
+    /// </summary>
+    public static string PolicyFileNotUsed(string detail, string path) =>
+        Catalogue.Format(nameof(PolicyFileNotUsed), detail, path);
+
     // What `localai policy` itself prints. The report above answers about a machine; these
     // answer to somebody changing it, and say what the change costs.
 

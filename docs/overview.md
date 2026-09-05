@@ -673,11 +673,13 @@ optional:
 | `name` | `version`, `launcher`, `broker`, `queue`, `policy.models`, `policy.retention`, `policy.languageServers`, `update`, `repository` — the last only when `--root` was given |
 | `status` | `Ok`, `Warning` or `Failed` |
 | `detail` | the line the prose face prints for that check, in English. Shown to a person, never parsed — the same promise as `error.message` |
-| the rest | what that check established: `versionDirectory`, `releaseVersion` and `missingFiles` on `version`; `path` on `launcher`; `processId` and `heartbeatAgeSeconds` on `broker`; `queued`, `quarantined` and `oldestUnattemptedMinutes` on `queue`; the values of each policy plus `fileFound`; `enabled`, `availability`, `latestVersion`, `releaseUrl` and `checkedAtUtc` on `update`; `repositoryId`, `repositoryRoot`, `state` and `generationId` on `repository`. A field is absent when the check could not establish it; nothing is written as `null` |
+| the rest | what that check established: `versionDirectory`, `releaseVersion` and `missingFiles` on `version`; `path` on `launcher`; `processId` and `heartbeatAgeSeconds` on `broker`; `queued`, `quarantined` and `oldestUnattemptedMinutes` on `queue`; the values of each policy plus `fileFound` and `fileUsed`; `enabled`, `availability`, `latestVersion`, `releaseUrl` and `checkedAtUtc` on `update`; `repositoryId`, `repositoryRoot`, `state` and `generationId` on `repository`. A field is absent when the check could not establish it; nothing is written as `null` |
 
-**`fileFound` says a file was there, not that it was read.** Every policy store answers a
-malformed document with its defaults rather than an error, so a file that stopped parsing is
-reported as found, with default values beside it.
+**`fileFound` says a file is there; `fileUsed` says it is the one that answered.** Every policy
+store meets a document it cannot use — malformed, a schema it does not know, a value out of range
+— with its defaults rather than an error, which is right at runtime and leaves a file on disk that
+looks configured and does nothing. That case is `fileFound: true, fileUsed: false`, the check is a
+warning, and the line names the file so it can be corrected.
 
 **Its exit code is a verdict.** 0 when nothing failed, 1 when something did, `ok: true` for
 both. `ok: false` from this command means no report was produced at all.

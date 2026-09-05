@@ -198,6 +198,59 @@ public sealed class DoctorCommandTests : IDisposable
         Assert.Equal(0, report.ExitCode);
     }
 
+    /// <summary>
+    /// The case the policy checks existed for and did not catch. A store answers a document it
+    /// cannot use with its defaults, so the file stays on disk looking configured while doing
+    /// nothing; this check used to print those defaults as though the file had produced them.
+    /// </summary>
+    [Fact]
+    public void A_policy_file_that_stopped_parsing_is_not_reported_as_configured()
+    {
+        Install("v1");
+        Directory.CreateDirectory(Path.Combine(_root, "settings"));
+        File.WriteAllText(
+            Path.Combine(_root, "settings", BrokerPolicy.FileName),
+            "{ this is not json");
+
+        var check = Check(DoctorCommand.Inspect(_root), "policy.models");
+
+        Assert.Equal(DoctorStatus.Warning, check.Status);
+        Assert.Contains(
+            Path.Combine(_root, "settings", BrokerPolicy.FileName),
+            check.Detail,
+            StringComparison.Ordinal);
+        // A warning, not a failure: every store falls back towards its safe value, so an ignored
+        // file can only make the machine stricter than asked, never looser.
+        Assert.Equal(0, DoctorCommand.Inspect(_root).ExitCode);
+    }
+
+    /// <summary>
+    /// "No file" and "a file that does nothing" are different things to whoever wrote one, so a
+    /// program can tell them apart without reading the sentence.
+    /// </summary>
+    [Fact]
+    public void The_machine_face_tells_a_missing_file_from_one_that_is_ignored()
+    {
+        Install("v1");
+        Directory.CreateDirectory(Path.Combine(_root, "settings"));
+        File.WriteAllText(
+            Path.Combine(_root, "settings", BrokerPolicy.FileName),
+            "{ this is not json");
+
+        using var document = JsonDocument.Parse(
+            MachineOutput.Answer("doctor", DoctorCommand.Describe(DoctorCommand.Inspect(_root))));
+        var checks = document.RootElement.GetProperty("data").GetProperty("checks");
+        var models = checks.EnumerateArray()
+            .Single(check => check.GetProperty("name").GetString() == "policy.models");
+        var retention = checks.EnumerateArray()
+            .Single(check => check.GetProperty("name").GetString() == "policy.retention");
+
+        Assert.True(models.GetProperty("fileFound").GetBoolean());
+        Assert.False(models.GetProperty("fileUsed").GetBoolean());
+        Assert.False(retention.GetProperty("fileFound").GetBoolean());
+        Assert.False(retention.GetProperty("fileUsed").GetBoolean());
+    }
+
     private static DoctorCheck Check(DoctorReport report, string name) =>
         report.Checks.Single(check => check.Name == name);
 

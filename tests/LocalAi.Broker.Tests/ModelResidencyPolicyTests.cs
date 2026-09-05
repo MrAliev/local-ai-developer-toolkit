@@ -1,4 +1,4 @@
-using LocalAi.Contracts;
+﻿using LocalAi.Contracts;
 
 namespace LocalAi.Broker.Tests;
 
@@ -87,6 +87,69 @@ public sealed class ModelResidencyPolicyTests : IDisposable
         var policy = new ModelResidencyPolicyStore(_root).Read();
 
         Assert.Equal(0, policy.IdleModelKeepAliveSeconds);
+    }
+
+    /// <summary>
+    /// A file that stopped parsing is not the same as no file, and the store is the only thing
+    /// that knows which it read. It answers a malformed document with its defaults — right at
+    /// runtime, and invisible to whoever wrote the file: it is still on disk, still looks
+    /// configured, and no longer does anything.
+    /// </summary>
+    [Fact]
+    public void A_file_that_did_not_parse_is_reported_as_found_and_unused()
+    {
+        File.WriteAllText(
+            Path.Combine(_root, BrokerPolicy.FileName),
+            "{ this is not json");
+
+        var read = new ModelResidencyPolicyStore(_root).ReadWithSource();
+
+        Assert.True(read.FileFound);
+        Assert.False(read.FileUsed);
+        Assert.Equal(BrokerPolicy.Default, read.Policy);
+    }
+
+    [Fact]
+    public void A_file_the_store_could_use_is_reported_as_used()
+    {
+        new ModelResidencyPolicyStore(_root).Write(
+            BrokerPolicy.Default with { IdleModelKeepAliveSeconds = 45 });
+
+        var read = new ModelResidencyPolicyStore(_root).ReadWithSource();
+
+        Assert.True(read.FileFound);
+        Assert.True(read.FileUsed);
+        Assert.Equal(45, read.Policy.IdleModelKeepAliveSeconds);
+    }
+
+    [Fact]
+    public void No_file_at_all_is_neither_found_nor_used()
+    {
+        var read = new ModelResidencyPolicyStore(_root).ReadWithSource();
+
+        Assert.False(read.FileFound);
+        Assert.False(read.FileUsed);
+    }
+
+    /// <summary>
+    /// A schema this build does not know is refused the same way malformed JSON is: the values
+    /// are not applied, so the file is found and unused rather than found and honoured.
+    /// </summary>
+    [Fact]
+    public void A_retention_file_from_another_schema_is_found_and_unused()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "settings"));
+        File.WriteAllText(
+            Path.Combine(_root, "settings", RuntimeRetentionPolicy.FileName),
+            """{"SchemaVersion":99,"GenerationsPerRepository":7}""");
+
+        var read = new RuntimeRetentionPolicyStore(_root).ReadWithSource();
+
+        Assert.True(read.FileFound);
+        Assert.False(read.FileUsed);
+        Assert.Equal(
+            RuntimeRetentionPolicy.Default.GenerationsPerRepository,
+            read.Policy.GenerationsPerRepository);
     }
 
     [Fact]
