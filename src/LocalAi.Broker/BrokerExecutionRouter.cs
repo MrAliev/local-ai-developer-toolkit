@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using LocalAi.Contracts;
 
 namespace LocalAi.Broker;
@@ -130,11 +130,22 @@ public sealed class BrokerExecutionRouter
         return await _executeDirect(request, cancellationToken);
     }
 
+    /// <summary>
+    /// Remembers the model this broker just used, whatever it was.
+    ///
+    /// It used to record only models the catalog names, which reads as caution and is not: what
+    /// this field answers is "which model is loaded", and the scheduler asks it to decide whether
+    /// the next job is a cold switch. A model outside the catalog was therefore never warm, so
+    /// every job targeting one waited out the gather window — two seconds a job, on the one path
+    /// where jobs arrive back to back.
+    ///
+    /// Nothing about what LocalAi is willing to unload changes with this:
+    /// <see cref="UnloadResidentAsync"/> filters by the catalog itself, which is what keeps a
+    /// model somebody else loaded out of our hands, and it has its own test.
+    /// </summary>
     private void TrackResidentModel(string? model)
     {
-        if (!string.IsNullOrWhiteSpace(model) &&
-            _catalog.Models.Any(candidate =>
-                string.Equals(candidate.Tag, model, StringComparison.Ordinal)))
+        if (!string.IsNullOrWhiteSpace(model))
         {
             Volatile.Write(ref _residentModel, model);
         }
