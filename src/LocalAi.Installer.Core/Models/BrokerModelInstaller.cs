@@ -445,15 +445,20 @@ public sealed class BrokerModelInstaller : IDisposable
                 if (!installed.Contains(action.Model))
                 {
                     pullAttempted = true;
+                    // Asked for in its machine form, so what lands on standard error is
+                    // parseable rather than prose: the installer and the console can be
+                    // set to different languages, and a sentence is not a channel.
                     var pull = await RunAsync(
                         [
                             "run", "localai", "model", "pull",
                             "--model", action.Model,
                             "--catalog-version", trust.CatalogVersion,
+                            "--progress-json",
                         ],
                         mayChangeExternalState: true,
                         pullTimeout,
-                        cancellationToken);
+                        cancellationToken,
+                        reportsProgress: true);
                     EnsureExitSuccess(pull, "pull", mayChangeExternalState: true);
                     ValidatePull(
                         Parse<ModelPullCommandSuccess>(
@@ -551,11 +556,18 @@ public sealed class BrokerModelInstaller : IDisposable
         }
     }
 
+    /// <summary>
+    /// <paramref name="reportsProgress"/> says this invocation was asked for progress on
+    /// standard error, so lines that are progress objects are expected rather than a
+    /// protocol failure. Everything else keeps the old rule, which is what catches a
+    /// binary that has started printing warnings.
+    /// </summary>
     private async Task<ProcessResult> RunAsync(
         IReadOnlyList<string> arguments,
         bool mayChangeExternalState,
         TimeSpan commandTimeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool reportsProgress = false)
     {
         try
         {
@@ -647,9 +659,8 @@ public sealed class BrokerModelInstaller : IDisposable
         }
 
         if (process.StandardOutputTruncated ||
-            process.StandardErrorTruncated ||
             process.StandardOutput.Length > MaximumResponseCharacters ||
-            process.StandardError.Length != 0)
+            !IsExpectedStandardError(process, reportsProgress))
         {
             throw Failure(
                 BrokerModelBatchStopReason.ProtocolFailure,
@@ -658,6 +669,72 @@ public sealed class BrokerModelInstaller : IDisposable
         }
 
         return process;
+    }
+
+    /// <summary>
+    /// Nothing on standard error, or — for an invocation that was asked for progress —
+    /// nothing but progress objects.
+    ///
+    /// Truncation is tolerated for those, and only those: a twelve-hour download reports
+    /// thousands of lines and this runner keeps a bounded prefix of them. Losing the tail
+    /// of a progress report costs nothing, because the answer is on standard output; a
+    /// truncated answer still fails, as it always did.
+    /// </summary>
+    private static bool IsExpectedStandardError(ProcessResult process, bool reportsProgress)
+    {
+        if (process.StandardError.Length == 0)
+        {
+            return !process.StandardErrorTruncated;
+        }
+
+        if (!reportsProgress)
+        {
+            return false;
+        }
+
+        var lines = process.StandardError.Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index].Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            // The last line of a truncated capture is a line cut in half, and half a
+            // progress object is still a progress object that was reported.
+            if (index == lines.Length - 1 && process.StandardErrorTruncated)
+            {
+                continue;
+            }
+
+            if (!IsProgressLine(line))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Read as a shape rather than as a schema: this is a guard against unexpected output,
+    /// not a parser, and the installer does not act on what it finds here.
+    /// </summary>
+    private static bool IsProgressLine(string line)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty("operation", out var operation) &&
+                   operation.ValueKind == JsonValueKind.String &&
+                   string.Equals(operation.GetString(), "pull", StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static void EnsureExitSuccess(

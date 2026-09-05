@@ -37,6 +37,7 @@ public sealed class BrokerDrainTests
 
         async Task<BrokerExecutionResult> Execute(
             LocalJobRequest request,
+            IJobProgress progress,
             CancellationToken cancellationToken)
         {
             // The drain arrives while this job is running: the job that started before it is
@@ -83,7 +84,7 @@ public sealed class BrokerDrainTests
         var host = new BrokerHost(
             queue,
             "drain-worker",
-            (_, _) => throw new InvalidOperationException("Nothing may be leased while draining."),
+            (_, _, _) => throw new InvalidOperationException("Nothing may be leased while draining."),
             idleDelay: static (delay, token) => Task.Delay(delay, token),
             idleInterval: TimeSpan.FromMilliseconds(5),
             heartbeatInterval: TimeSpan.FromMilliseconds(10));

@@ -117,7 +117,7 @@ public sealed class AFailedJobKeepsItsReasonTests
         var host = new BrokerHost(
             queue,
             "reporting-worker",
-            (_, _) => throw new HttpRequestException(Reason),
+            (_, _, _) => throw new HttpRequestException(Reason),
             idleDelay: (_, _) =>
             {
                 stop.Cancel();

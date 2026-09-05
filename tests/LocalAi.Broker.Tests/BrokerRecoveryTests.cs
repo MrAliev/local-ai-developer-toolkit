@@ -96,7 +96,7 @@ public sealed class BrokerRecoveryTests
         var completed = 0;
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        async Task<BrokerExecutionResult> Execute(LocalJobRequest request, CancellationToken cancellationToken)
+        async Task<BrokerExecutionResult> Execute(LocalJobRequest request, IJobProgress progress, CancellationToken cancellationToken)
         {
             var current = Interlocked.Increment(ref concurrent);
             maximum = Math.Max(maximum, current);
@@ -135,7 +135,7 @@ public sealed class BrokerRecoveryTests
         var host = new BrokerHost(
             queue,
             "idle-unload-worker",
-            (_, _) => throw new UnreachableException(),
+            (_, _, _) => throw new UnreachableException(),
             clock,
             idleDelay: (delay, _) =>
             {
@@ -167,7 +167,7 @@ public sealed class BrokerRecoveryTests
         var host = new BrokerHost(
             queue,
             "idle-unload-without-marker",
-            (_, _) => throw new InvalidOperationException("No job should execute."),
+            (_, _, _) => throw new InvalidOperationException("No job should execute."),
             idleInterval: TimeSpan.FromMilliseconds(1),
             residentModel: () => null,
             idleUnload: _ =>
@@ -197,7 +197,7 @@ public sealed class BrokerRecoveryTests
         var host = new BrokerHost(
             queue,
             "configured-idle-unload-worker",
-            (_, _) => throw new UnreachableException(),
+            (_, _, _) => throw new UnreachableException(),
             clock,
             idleDelay: (delay, _) =>
             {
@@ -267,7 +267,7 @@ public sealed class BrokerRecoveryTests
         var host = new BrokerHost(
             queue,
             "blocked-unload-worker",
-            (_, _) => throw new UnreachableException(),
+            (_, _, _) => throw new UnreachableException(),
             clock,
             idleDelay: (delay, _) =>
             {
@@ -316,7 +316,7 @@ public sealed class BrokerRecoveryTests
         var host = new BrokerHost(
             queue,
             "different-model-unload-worker",
-            (_, _) => throw new UnreachableException(),
+            (_, _, _) => throw new UnreachableException(),
             clock,
             idleDelay: (delay, _) =>
             {
@@ -353,7 +353,7 @@ public sealed class BrokerRecoveryTests
         using var stop = new CancellationTokenSource();
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        async Task<BrokerExecutionResult> Execute(LocalJobRequest request, CancellationToken cancellationToken)
+        async Task<BrokerExecutionResult> Execute(LocalJobRequest request, IJobProgress progress, CancellationToken cancellationToken)
         {
             started.SetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
@@ -380,7 +380,7 @@ public sealed class BrokerRecoveryTests
         };
         var executorSawCancellation = false;
 
-        Task<BrokerExecutionResult> Execute(LocalJobRequest request, CancellationToken token)
+        Task<BrokerExecutionResult> Execute(LocalJobRequest request, IJobProgress progress, CancellationToken token)
         {
             executorSawCancellation = token.IsCancellationRequested;
             token.ThrowIfCancellationRequested();
@@ -409,7 +409,7 @@ public sealed class BrokerRecoveryTests
         var cancelledAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var executions = 0;
 
-        async Task<BrokerExecutionResult> Execute(LocalJobRequest request, CancellationToken token)
+        async Task<BrokerExecutionResult> Execute(LocalJobRequest request, IJobProgress progress, CancellationToken token)
         {
             if (Interlocked.Increment(ref executions) == 1)
             {
@@ -454,7 +454,7 @@ public sealed class BrokerRecoveryTests
         var diagnostics = new List<BrokerHostDiagnostic>();
         var executorCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        async Task<BrokerExecutionResult> Execute(LocalJobRequest request, CancellationToken token)
+        async Task<BrokerExecutionResult> Execute(LocalJobRequest request, IJobProgress progress, CancellationToken token)
         {
             try
             {
@@ -504,6 +504,7 @@ public sealed class BrokerRecoveryTests
 
         async Task<BrokerExecutionResult> Execute(
             LocalJobRequest request,
+            IJobProgress progress,
             CancellationToken token)
         {
             try
@@ -557,6 +558,7 @@ public sealed class BrokerRecoveryTests
 
         async Task<BrokerExecutionResult> Execute(
             LocalJobRequest request,
+            IJobProgress progress,
             CancellationToken token)
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, token);
@@ -604,7 +606,7 @@ public sealed class BrokerRecoveryTests
             TestLease("next", "worker"));
         var executions = 0;
 
-        Task<BrokerExecutionResult> Execute(LocalJobRequest request, CancellationToken token)
+        Task<BrokerExecutionResult> Execute(LocalJobRequest request, IJobProgress progress, CancellationToken token)
         {
             if (Interlocked.Increment(ref executions) == 1)
             {
@@ -646,7 +648,7 @@ public sealed class BrokerRecoveryTests
         var diagnostics = new List<BrokerHostDiagnostic>();
         var executions = 0;
 
-        Task<BrokerExecutionResult> Execute(LocalJobRequest request, CancellationToken token)
+        Task<BrokerExecutionResult> Execute(LocalJobRequest request, IJobProgress progress, CancellationToken token)
         {
             var count = Interlocked.Increment(ref executions);
             if (count == 1 && operation == "fail")
@@ -1023,6 +1025,18 @@ internal sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
 
 internal sealed class ScriptedBrokerQueue(params LeasedJob[] leases) : IBrokerQueue
 {
+    /// <summary>
+    /// This fake exists for the recovery tests, where nothing reports a position. A
+    /// throwing stub would make it the queue's job to fail a download that only wanted
+    /// to say how far it had got.
+    /// </summary>
+    public Task ReportProgressAsync(
+        Guid jobId,
+        string workerId,
+        Guid leaseId,
+        JobProgress progress,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
+
     private readonly Queue<LeasedJob> _leases = new(leases);
 
     public Exception? HeartbeatException { get; set; }

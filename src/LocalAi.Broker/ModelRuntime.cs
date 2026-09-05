@@ -63,13 +63,23 @@ public sealed record ModelResidencyProof(
     }
 }
 
+/// <summary>
+/// One line of the model backend's pull stream, as facts rather than words. The backend
+/// counts per layer, so <c>Completed</c> and <c>Total</c> restart as each digest begins;
+/// summing them into one figure is the caller's job, not the transport's.
+/// </summary>
+public sealed record ModelPullProgress(string Status, string? Digest, long Completed, long Total);
+
 public interface IModelRuntimeTransport
 {
     Task<IReadOnlyList<string>> ListInstalledAsync(CancellationToken ct);
 
     Task<IReadOnlyList<OllamaProcessInfo>> ListProcessesAsync(CancellationToken ct);
 
-    Task PullAsync(string model, CancellationToken ct);
+    Task PullAsync(
+        string model,
+        Func<ModelPullProgress, CancellationToken, Task>? onProgress,
+        CancellationToken ct);
 
     Task PreflightAsync(string model, int contextTokens, CancellationToken ct);
 
@@ -87,6 +97,7 @@ public interface IModelRuntime
 
     Task PullAsync(
         string model,
+        IJobProgress? progress,
         CancellationToken cancellationToken = default);
 
     Task<ModelResidencyProof> EnsureReadyAsync(
@@ -142,6 +153,7 @@ public sealed class ModelRuntime : IModelRuntime
 
     public async Task PullAsync(
         string model,
+        IJobProgress? progress,
         CancellationToken cancellationToken = default)
     {
         if (!_catalog.IsMaintenanceAllowed(model))
@@ -151,7 +163,23 @@ public sealed class ModelRuntime : IModelRuntime
                 nameof(model));
         }
 
-        await _transport.PullAsync(model, cancellationToken);
+        if (progress is null)
+        {
+            await _transport.PullAsync(model, onProgress: null, cancellationToken);
+            return;
+        }
+
+        var tracker = new ModelPullTracker(() => DateTimeOffset.UtcNow);
+        await _transport.PullAsync(
+            model,
+            async (line, token) =>
+            {
+                if (tracker.Accept(line) is { } position)
+                {
+                    await progress.ReportAsync(position, token);
+                }
+            },
+            cancellationToken);
     }
 
     public async Task<ModelResidencyProof> EnsureReadyAsync(

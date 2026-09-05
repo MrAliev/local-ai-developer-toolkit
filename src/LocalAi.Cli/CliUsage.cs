@@ -4,7 +4,8 @@ internal static class CliUsage
 {
     public const string ModelStatus = "localai model status";
     public const string ModelPull =
-        "localai model pull --model <model> --catalog-version <version>";
+        "localai model pull --model <model> --catalog-version <version> "  +
+        "[--progress-json]";
     public const string ModelPreflight =
         "localai model preflight --model <model> --context <tokens> " +
         "--catalog-version <version>";

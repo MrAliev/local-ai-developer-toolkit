@@ -205,6 +205,80 @@ public sealed class LocalRunProgressTests
     }
 
     /// <summary>
+    /// A download is the running heartbeat for the job it belongs to: it prints on the same
+    /// silence clock, and "the model is working" would be false beside it — no model is
+    /// working, a file is arriving.
+    /// </summary>
+    [Fact]
+    public void A_download_speaks_on_the_same_clock_the_heartbeat_does()
+    {
+        var progress = Progress();
+        After(9);
+        progress.Report(new ModelDownloadProgress("downloading", null, 1, 2));
+        Assert.Empty(Lines());
+
+        After(1);
+        progress.Report(new ModelDownloadProgress("downloading", null, 1, 2));
+        Assert.Single(Lines());
+    }
+
+    /// <summary>
+    /// A change of phase is not a byte update — it answers a different question, and holding
+    /// it for the silence clock would leave the reader watching a download line while the run
+    /// had moved on to hashing the file.
+    /// </summary>
+    [Fact]
+    public void A_change_of_phase_does_not_wait_for_the_clock()
+    {
+        var progress = Progress();
+        After(10);
+        progress.Report(new ModelDownloadProgress("downloading", null, 1, 2));
+
+        After(1);
+        progress.Report(new ModelDownloadProgress("verifying", null, 0, 0));
+
+        Assert.Equal(2, Lines().Length);
+    }
+
+    /// <summary>
+    /// Gigabytes to one decimal, invariant, and both figures rather than a percent: the total
+    /// is a sum over the layers named so far, so it grows, and a percent against a growing
+    /// denominator goes backwards.
+    /// </summary>
+    [Fact]
+    public void The_download_line_shows_both_figures_in_gigabytes()
+    {
+        using var reading = TestCulture.Reading("ru");
+        var progress = Progress();
+        After(10);
+
+        progress.Report(
+            new ModelDownloadProgress("downloading", null, 5_046_586_573, 13_743_895_347));
+
+        var line = Assert.Single(Lines());
+        Assert.Contains("4.7", line, StringComparison.Ordinal);
+        Assert.Contains("12.8", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("4,7", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The backend's own word, quoted rather than mapped to one of our phases. Silence here
+    /// would recreate this whole defect for every status the backend adds later.
+    /// </summary>
+    [Fact]
+    public void An_unrecognised_phase_is_quoted_with_its_source_named()
+    {
+        var progress = Progress();
+        After(10);
+
+        progress.Report(new ModelDownloadProgress("other", "pulling fs layer", 0, 0));
+
+        var line = Assert.Single(Lines());
+        Assert.Contains("pulling fs layer", line, StringComparison.Ordinal);
+        Assert.Contains("Ollama", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Whole lines, always. A carriage return rewrites the terminal and fills a redirected log
     /// with the same line a hundred times; this console is driven by hooks and agents as often
     /// as by people, and the transcript has to be the same bytes in both.

@@ -40,24 +40,35 @@ public static class ModelCommand
             cancellationToken);
     }
 
+    /// <summary>
+    /// A download is given the same twelve hours the installer allows the whole command.
+    /// The thirty-minute default belonged to a call to a model; on a download it made the
+    /// console announce a cancellation nobody had asked for while the broker was still
+    /// pulling, and the installer reported that as a failed model.
+    /// </summary>
+    private static readonly TimeSpan PullDeadline = TimeSpan.FromHours(12);
+
     public static Task<int> ExecuteProductionAsync(
         IReadOnlyList<string> arguments,
         TextWriter output,
         CancellationToken cancellationToken) =>
         ExecuteProductionAsync(
             arguments,
-            static token =>
+            static (observer, deadline, token) =>
             {
                 token.ThrowIfCancellationRequested();
                 return new BrokerLocalModelClient(
-                    BrokerClientFactory.CreateDefault());
+                    BrokerClientFactory.CreateDefault(
+                        observer: observer,
+                        deadline: deadline));
             },
             output,
             cancellationToken);
 
     internal static async Task<int> ExecuteProductionAsync(
         IReadOnlyList<string> arguments,
-        Func<CancellationToken, ILocalModelClient> clientFactory,
+        Func<ILocalRunObserver?, TimeSpan?, CancellationToken, ILocalModelClient>
+            clientFactory,
         TextWriter output,
         CancellationToken cancellationToken)
     {
@@ -71,11 +82,19 @@ public static class ModelCommand
                 output, "invalid", "invalid_arguments", InvalidArgumentsExitCode);
         }
 
+        // Only a pull is long enough to have anything to say, and only a pull needs the
+        // long guard. Everything else here answers in a moment.
+        var isPull = string.Equals(request.Operation, "pull", StringComparison.Ordinal);
+        var observer = isPull ? Watching(request) : null;
+
         ILocalModelClient client;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            client = clientFactory(cancellationToken) ??
+            client = clientFactory(
+                    observer,
+                    isPull ? PullDeadline : null,
+                    cancellationToken) ??
                 throw new InvalidOperationException();
             cancellationToken.ThrowIfCancellationRequested();
         }
@@ -294,14 +313,23 @@ public static class ModelCommand
             return true;
         }
 
-        if (arguments.Count == 5 &&
+        // The one place this parser is not strictly positional: the flag is optional and
+        // last. It picks the progress channel's form, and nothing else about the run.
+        if (arguments.Count is 5 or 6 &&
             string.Equals(arguments[0], "pull", StringComparison.Ordinal) &&
             string.Equals(arguments[1], "--model", StringComparison.Ordinal) &&
             string.Equals(arguments[3], "--catalog-version", StringComparison.Ordinal) &&
             IsSafeModel(arguments[2]) &&
-            IsSafeCatalogVersion(arguments[4]))
+            IsSafeCatalogVersion(arguments[4]) &&
+            (arguments.Count == 5 ||
+             string.Equals(arguments[5], "--progress-json", StringComparison.Ordinal)))
         {
-            request = new Request("pull", arguments[2], arguments[4], 0);
+            request = new Request(
+                "pull",
+                arguments[2],
+                arguments[4],
+                0,
+                ProgressJson: arguments.Count == 6);
             return true;
         }
 
@@ -375,9 +403,23 @@ public static class ModelCommand
         return exitCode;
     }
 
+    /// <summary>
+    /// One face at a time: numbers for a program, sentences for a person. Both go to
+    /// standard error, which leaves the single JSON object on standard output exactly as
+    /// it was — that is the answer, and an answer is not a progress report.
+    /// </summary>
+    private static ILocalRunObserver Watching(Request request) =>
+        request.ProgressJson
+            ? new ModelPullProgressJson(Console.Error, request.Model ?? string.Empty)
+            : new LocalRunProgress(
+                Console.Error,
+                static () => DateTimeOffset.UtcNow,
+                request.Model);
+
     private sealed record Request(
         string Operation,
         string? Model,
         string? CatalogVersion,
-        int ContextTokens);
+        int ContextTokens,
+        bool ProgressJson = false);
 }

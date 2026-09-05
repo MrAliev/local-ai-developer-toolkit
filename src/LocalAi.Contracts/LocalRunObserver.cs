@@ -27,6 +27,21 @@ public abstract record LocalRunStep;
 public sealed record BrokerJobPending(bool Running) : LocalRunStep;
 
 /// <summary>
+/// How far a download has got, as the broker wrote it down.
+///
+/// Two figures and no percent: <paramref name="Total"/> is the sum of the layer sizes the
+/// backend has named so far, so it grows as layers appear, and a percent against a growing
+/// denominator goes backwards. <paramref name="Phase"/> is one of ours - preparing, downloading,
+/// verifying, storing, other - and <paramref name="Detail"/> carries the backend's own word only
+/// when the phase is other.
+/// </summary>
+public sealed record ModelDownloadProgress(
+    string Phase,
+    string? Detail,
+    long Completed,
+    long Total) : LocalRunStep;
+
+/// <summary>
 /// About to translate one fragment of <paramref name="Total"/>. Reported before the call rather
 /// than after it: the total is known before the first one, and it is the fact that decides
 /// whether the reader waits.

@@ -274,7 +274,7 @@ public sealed class ModelCommandTests
 
         var exitCode = await ModelCommand.ExecuteProductionAsync(
             ["status"],
-            _ => throw new InvalidOperationException("secret ACL path and runtime detail"),
+            (_, _, _) => throw new InvalidOperationException("secret ACL path and runtime detail"),
             output,
             TestContext.Current.CancellationToken);
 
@@ -298,7 +298,7 @@ public sealed class ModelCommandTests
         var exitCode = await ModelCommand.ExecuteProductionAsync(
             ["preflight", "--model", "qwen3.5:9b", "--context", "2048",
              "--catalog-version", "signed-7"],
-            token =>
+            (_, _, token) =>
             {
                 factoryCalled = true;
                 throw new OperationCanceledException(token);
@@ -322,7 +322,7 @@ public sealed class ModelCommandTests
 
         var exitCode = await ModelCommand.ExecuteProductionAsync(
             ["pull", "--model", "qwen3.5:9b", "--catalog-version", "catalog-7"],
-            token =>
+            (_, _, token) =>
             {
                 factoryCalled = true;
                 throw new OperationCanceledException("secret initialization detail", token);
@@ -353,7 +353,7 @@ public sealed class ModelCommandTests
 
         var exitCode = await ModelCommand.ExecuteProductionAsync(
             ["status"],
-            token =>
+            (_, _, token) =>
             {
                 observedFactoryToken = token;
                 return client;
@@ -380,7 +380,7 @@ public sealed class ModelCommandTests
 
         var exitCode = await ModelCommand.ExecuteProductionAsync(
             ["status"],
-            _ =>
+            (_, _, _) =>
             {
                 cancellation.Cancel();
                 return client;

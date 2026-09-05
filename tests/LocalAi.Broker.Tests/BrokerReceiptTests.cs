@@ -114,7 +114,7 @@ public sealed class BrokerReceiptTests
         var host = new BrokerHost(
             queue,
             "receipt-worker",
-            transport.ExecuteAsync);
+            (request, _, token) => transport.ExecuteAsync(request, token));
         var hostTask = host.RunAsync(shutdown.Token);
         var results = await Task.WhenAll(first, second);
         shutdown.Cancel();
@@ -164,7 +164,7 @@ public sealed class BrokerReceiptTests
         var host = new BrokerHost(
             queue,
             "duration-worker",
-            (_, _) =>
+            (_, _, _) =>
             {
                 clock.Advance(TimeSpan.FromSeconds(7));
                 return Task.FromResult(new BrokerExecutionResult(

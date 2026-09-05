@@ -222,33 +222,127 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         }
     }
 
+    /// <summary>
+    /// Streamed, because a pull is gigabytes and minutes and the only place its size is known is
+    /// inside it. Unstreamed, this call sat silent until the download ended and then returned one
+    /// object; nothing above it could say anything true about how far it had got.
+    ///
+    /// Each line is one JSON object. A line that cannot be read is skipped rather than fatal: the
+    /// stream is an encouragement and the answer is the last line, which is checked.
+    /// </summary>
     public async Task PullAsync(
         string model,
+        Func<ModelPullProgress, CancellationToken, Task>? onProgress,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
-        var body = JsonSerializer.Serialize(new PullRequest(model, Stream: false));
-        using var document = await SendAsync(
-            HttpMethod.Post,
-            "api/pull",
-            body,
-            [model],
-            cancellationToken);
-        PullResponse response;
-        try
+        var body = JsonSerializer.Serialize(new PullRequest(model, Stream: true));
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            response = document.RootElement.Deserialize<PullResponse>(ExternalResponseJson)
-                ?? throw new InvalidDataException("Ollama returned a null pull response.");
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException("Ollama returned an invalid pull response.", exception);
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (await TryPullAsync(model, body, onProgress, cancellationToken))
+                {
+                    return;
+                }
+
+                throw new InvalidDataException("Ollama did not confirm model pull success.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (InvalidDataException)
+            {
+                throw;
+            }
+            catch (HttpRequestException exception)
+                when (exception.StatusCode is null && attempt < MaxAttempts)
+            {
+                // A retry restarts the counters, and the reader sees them restart. That is
+                // honest: the layers already on disk are skipped, so the second pass is short.
+                await _retryDelay(TimeSpan.FromSeconds(2 * attempt), cancellationToken);
+            }
+            catch (IOException) when (attempt < MaxAttempts)
+            {
+                await _retryDelay(TimeSpan.FromSeconds(2 * attempt), cancellationToken);
+            }
         }
 
-        if (!string.Equals(response.Status, "success", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidDataException("Ollama did not confirm model pull success.");
+    }
+
+    private async Task<bool> TryPullAsync(
+        string model,
+        string body,
+        Func<ModelPullProgress, CancellationToken, Task>? onProgress,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_baseUri, "api/pull"))
         {
-            throw new InvalidDataException("Ollama did not confirm model pull success.");
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await ReadBoundedErrorBodyAsync(response.Content, cancellationToken);
+            throw CreateStatusException(
+                response,
+                Redact(errorBody.Text, errorBody.IsTruncated, [model]));
         }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var bounded = new BoundedReadStream(
+            stream,
+            DefaultResponseCeilingBytes,
+            "api/pull");
+        using var reader = new StreamReader(bounded, Encoding.UTF8);
+        var succeeded = false;
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            PullStreamLine? parsed;
+            try
+            {
+                parsed = JsonSerializer.Deserialize<PullStreamLine>(line, ExternalResponseJson);
+            }
+            catch (JsonException)
+            {
+                // One unreadable line is not a failed download. The answer is the last line.
+                continue;
+            }
+
+            if (parsed?.Status is not { } status)
+            {
+                continue;
+            }
+
+            if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
+            {
+                succeeded = true;
+            }
+
+            if (onProgress is not null)
+            {
+                await onProgress(
+                    new ModelPullProgress(
+                        status,
+                        parsed.Digest,
+                        parsed.Completed ?? 0,
+                        parsed.Total ?? 0),
+                    cancellationToken);
+            }
+        }
+
+        return succeeded;
     }
 
     public async Task PreflightAsync(
@@ -907,6 +1001,17 @@ public sealed class OllamaTransport : IModelRuntimeTransport, IDisposable
         [property: JsonPropertyName("status")]
         [property: JsonRequired]
         string Status);
+
+    /// <summary>
+    /// One line of the pull stream. Every field is optional because the backend sends different
+    /// shapes for different phases, and a required field would turn a manifest line into a
+    /// failure.
+    /// </summary>
+    private sealed record PullStreamLine(
+        [property: JsonPropertyName("status")] string? Status,
+        [property: JsonPropertyName("digest")] string? Digest,
+        [property: JsonPropertyName("total")] long? Total,
+        [property: JsonPropertyName("completed")] long? Completed);
 
     private sealed record GenerateRequest(
         [property: JsonPropertyName("model")] string Model,

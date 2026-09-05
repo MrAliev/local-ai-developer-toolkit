@@ -490,6 +490,21 @@ public static class CliText
     // Every number below is formatted invariantly by the caller before it arrives here: these
     // lines are quoted verbatim by agents and read out of redirected logs, and a decimal comma
     // would make the estimate a different number to whoever parses it.
+    public static string ProgressPullPreparing(string model, int seconds) =>
+        Catalogue.Format(nameof(ProgressPullPreparing), model, seconds);
+
+    public static string ProgressPullDownloading(string model, string completed, string total) =>
+        Catalogue.Format(nameof(ProgressPullDownloading), model, completed, total);
+
+    public static string ProgressPullVerifying(int seconds) =>
+        Catalogue.Format(nameof(ProgressPullVerifying), seconds);
+
+    public static string ProgressPullStoring(int seconds) =>
+        Catalogue.Format(nameof(ProgressPullStoring), seconds);
+
+    public static string ProgressPullStatus(string status, int seconds) =>
+        Catalogue.Format(nameof(ProgressPullStatus), status, seconds);
+
     public static string ProgressQueued(int seconds) =>
         Catalogue.Format(nameof(ProgressQueued), seconds);
 
