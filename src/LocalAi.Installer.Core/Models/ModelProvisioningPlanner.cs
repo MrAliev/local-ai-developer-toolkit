@@ -33,7 +33,17 @@ public sealed record ModelProvisioningPlan(
 /// slow installation, it is an installation that looks hung — and the only button on offer is
 /// Cancel.
 /// </summary>
-public sealed record ModelProvisioningProgress(string Message, int Completed, int Total);
+/// <summary>
+/// <paramref name="IsMilestone"/> separates the two readers this record has. The rail
+/// shows every report, because its whole job is to move; the run log keeps only
+/// milestones, because it does not scroll and a hundred byte counts per model would push
+/// everything worth reading out of sight.
+/// </summary>
+public sealed record ModelProvisioningProgress(
+    string Message,
+    int Completed,
+    int Total,
+    bool IsMilestone = false);
 
 /// <summary>
 /// Turns a model choice into requests the broker installer will actually accept.

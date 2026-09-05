@@ -41,10 +41,34 @@ public sealed class SystemProcessRunner : IProcessRunner, IProcessFileRunner
         _maximumCapturedCharacters = maximumCapturedCharacters;
     }
 
-    public async Task<ProcessResult> RunAsync(
+    public Task<ProcessResult> RunAsync(
         string executable,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
+        CancellationToken cancellationToken) =>
+        RunCoreAsync(executable, arguments, timeout, null, cancellationToken);
+
+    public Task<ProcessResult> RunAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        Action<string> onStandardErrorLine,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(onStandardErrorLine);
+        return RunCoreAsync(
+            executable,
+            arguments,
+            timeout,
+            onStandardErrorLine,
+            cancellationToken);
+    }
+
+    private async Task<ProcessResult> RunCoreAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        Action<string>? onStandardErrorLine,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
@@ -67,7 +91,8 @@ public sealed class SystemProcessRunner : IProcessRunner, IProcessFileRunner
             drainCancellation.Token);
         var standardError = DrainBoundedAsync(
             process.StandardError,
-            drainCancellation.Token);
+            drainCancellation.Token,
+            onStandardErrorLine);
         var processExit = process.WaitForExitAsync(CancellationToken.None);
         var timeoutElapsed = Task.Delay(timeout, CancellationToken.None);
         var callerCancelled = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
@@ -357,13 +382,22 @@ public sealed class SystemProcessRunner : IProcessRunner, IProcessFileRunner
         return string.Join(" ", values.Select(value => $"\"{value}\""));
     }
 
+    /// <summary>
+    /// A line longer than this is cut rather than grown. The capture is bounded already;
+    /// this bounds the one line a reader is handed, so a child that never writes a newline
+    /// cannot make a caller hold its whole output in one string.
+    /// </summary>
+    private const int MaximumLineCharacters = 4_096;
+
     private async Task<CapturedText> DrainBoundedAsync(
         TextReader reader,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? onLine = null)
     {
         var captured = new StringBuilder(
             Math.Min(_maximumCapturedCharacters, 4_096));
         var buffer = new char[4_096];
+        var line = onLine is null ? null : new StringBuilder();
         var truncated = false;
         try
         {
@@ -383,13 +417,46 @@ public sealed class SystemProcessRunner : IProcessRunner, IProcessFileRunner
                 }
 
                 truncated |= read > remaining;
+                if (line is not null)
+                {
+                    // Split here rather than after the run: what this reader is for is a
+                    // caller who has to show the line while the run is still going.
+                    for (var index = 0; index < read; index++)
+                    {
+                        var character = buffer[index];
+                        if (character == '\n')
+                        {
+                            Emit(line, onLine!);
+                        }
+                        else if (character != '\r' && line.Length < MaximumLineCharacters)
+                        {
+                            line.Append(character);
+                        }
+                    }
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
 
+        // A child that ended without a final newline still said something.
+        if (line is { Length: > 0 })
+        {
+            Emit(line, onLine!);
+        }
+
         return new CapturedText(captured.ToString(), truncated);
+    }
+
+    private static void Emit(StringBuilder line, Action<string> onLine)
+    {
+        var text = line.ToString();
+        line.Clear();
+        if (text.Length > 0)
+        {
+            onLine(text);
+        }
     }
 
     private static async Task<ProcessResult> CreateExitResultAsync(

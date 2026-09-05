@@ -1112,6 +1112,78 @@ public sealed class BrokerModelInstallerTests : IDisposable
         Assert.Equal(BrokerModelBatchStopReason.ProtocolFailure, result.StopReason);
     }
 
+    /// <summary>
+    /// The rail's whole job is to move. A model download is minutes to hours, and until now the
+    /// window showed one motionless line for all of it — the figures existed in the child process
+    /// and stopped at its standard error.
+    /// </summary>
+    [Fact]
+    public async Task The_rail_is_given_the_figures_while_the_download_runs()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status([], [], "signed-7")),
+            new ProcessResult(
+                0,
+                Pull("model-a", "signed-7"),
+                """
+                {"schemaVersion":1,"operation":"pull","model":"model-a","phase":"downloading","completedBytes":5046586573,"totalBytes":13743895347}
+                {"schemaVersion":1,"operation":"pull","model":"model-a","phase":"verifying"}
+                """,
+                false,
+                false),
+            Success(Preflight("model-a", 2048, 80, 80, true)));
+        var reported = new List<ModelProvisioningProgress>();
+        var installer = Installer(runner, Launcher());
+
+        await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7")],
+            new ImmediateProgress<ModelProvisioningProgress>(reported.Add),
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(reported, step => step.Message.Contains("4.7", StringComparison.Ordinal) &&
+                                          step.Message.Contains("12.8", StringComparison.Ordinal));
+        Assert.Contains(reported, step => step.Message.Contains("model-a", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The run log does not scroll, so a hundred byte counts per model would push everything worth
+    /// reading out of sight. The rail takes every report; the log keeps the milestones.
+    /// </summary>
+    [Fact]
+    public async Task The_byte_counts_are_not_milestones_and_the_phases_are()
+    {
+        var runner = new RecordingProcessRunner(
+            Success(Status([], [], "signed-7")),
+            new ProcessResult(
+                0,
+                Pull("model-a", "signed-7"),
+                """
+                {"schemaVersion":1,"operation":"pull","model":"model-a","phase":"downloading","completedBytes":1,"totalBytes":2}
+                {"schemaVersion":1,"operation":"pull","model":"model-a","phase":"downloading","completedBytes":2,"totalBytes":2}
+                """,
+                false,
+                false),
+            Success(Preflight("model-a", 2048, 80, 80, true)));
+        var reported = new List<ModelProvisioningProgress>();
+        var installer = Installer(runner, Launcher());
+
+        await installer.InstallAsync(
+            [Request("a", "model-a", 2048, "signed-7")],
+            new ImmediateProgress<ModelProvisioningProgress>(reported.Add),
+            TestContext.Current.CancellationToken);
+
+        var figures = reported
+            .Where(step => step.Message.Contains(" of ", StringComparison.Ordinal) ||
+                           step.Message.Contains(" из ", StringComparison.Ordinal))
+            .ToArray();
+
+        // Asserted before the rest: without it the check below passes over an empty set, and
+        // a test that is green because nothing happened is worse than no test.
+        Assert.Equal(2, figures.Length);
+        Assert.All(figures, step => Assert.False(step.IsMilestone));
+        Assert.Contains(reported, step => step.IsMilestone);
+    }
+
     private static ProcessResult Success(string stdout) =>
         new(0, stdout, string.Empty, false, false);
 
@@ -1154,6 +1226,32 @@ public sealed class BrokerModelInstallerTests : IDisposable
         {
             Calls.Add(new Call(executable, arguments.ToArray(), timeout));
             return Task.FromResult(results.Dequeue());
+        }
+
+        /// <summary>
+        /// Hands over the standard error this result carries, line by line, before returning it.
+        /// The real runner does this while the child is still running; what matters to the
+        /// installer is the same either way — that it sees the lines at all.
+        /// </summary>
+        public Task<ProcessResult> RunAsync(
+            string executable,
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            Action<string> onStandardErrorLine,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add(new Call(executable, arguments.ToArray(), timeout));
+            var result = results.Dequeue();
+            foreach (var line in result.StandardError.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length > 0)
+                {
+                    onStandardErrorLine(trimmed);
+                }
+            }
+
+            return Task.FromResult(result);
         }
     }
 
