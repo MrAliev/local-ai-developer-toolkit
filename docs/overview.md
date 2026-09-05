@@ -594,7 +594,7 @@ One envelope, whatever the command:
 | --- | --- |
 | `schema` | the envelope's version, an integer. Adding a field does not change it; removing, renaming or retyping one does |
 | `command` | the command as typed, without its options — `repo status`. Empty only when none was given |
-| `ok` | whether the run succeeded, mirroring the exit code |
+| `ok` | whether the run produced its answer. Not the verdict: a run whose answer is "this installation is broken" is `ok: true`, with the verdict in `data` |
 | `data` | the command's own answer. Absent when `ok` is false |
 | `error` | `code` and `message`. Absent when `ok` is true |
 
@@ -611,8 +611,8 @@ for both. Two things are per-binary rather than shared: `localai` pins its langu
 under `--json`, while `codesearch` pins English for everything it prints, because the prose around
 what its index core says is still English literals and one Russian sentence inside an English
 answer is worse than none; and the exit codes are different vocabularies — `localai` uses sysexits
-values, `codesearch` returns 1 for every failure. `ok` still mirrors the exit code in both; it is
-the numbers that do not transfer.
+values, `codesearch` returns 1 for every failure. `ok` means the same in both — the run produced its
+answer; it is the numbers that do not transfer.
 
 The MCP tools are the other half of that and behave the opposite way: they are catalogued
 throughout and follow the reader, so the same refusal from the same index core arrives in Russian
@@ -629,15 +629,19 @@ are `subject_state` — `root_value_missing`, `repository_ambiguous`, `argument_
 never name the command, because the envelope already carries it and the same refusal recurs across
 commands.
 
-**Exit codes are unchanged**, and `ok` follows the exit code rather than the outcome. The
-difference is not academic: `localai sync` prints `REFUSED …` and exits 0 on purpose, because a
-run that correctly declined to do something did exactly what it was asked. That run is `ok: true`
-with the refusal inside `data`.
+**Exit codes are unchanged**, and `ok` is not one of them. It says the run produced its answer,
+which is not the same as the answer being good news, and two commands show the two ways those come
+apart. `localai sync` prints `REFUSED …` and exits 0 on purpose, because a run that correctly
+declined to do something did exactly what it was asked; that run is `ok: true` with the refusal
+inside `data`. `localai doctor` exits 1 when a check failed — a verdict about the machine, not
+about the run — and it is `ok: true` too, with the failed checks inside `data`, which is where a
+caller most needs them. `ok: false` is kept for the runs that produced no answer at all: an
+argument refused, a broker that could not be reached, an unexpected failure.
 
 **Commands that do not answer `--json` refuse it** rather than printing prose, so the promise
 holds without exception: if the flag was passed, standard output is an envelope. The usage block
 marks the commands that take it with `[--json]`, and today those are `localai repo status`,
-`localai ask`, `localai triage`, `localai read-image`, `localai translate`,
+`localai doctor`, `localai ask`, `localai triage`, `localai read-image`, `localai translate`,
 `codesearch search`, `codesearch get-chunk` and `codesearch status` — plus `capabilities` in both
 binaries, which appears there without the brackets because its flag is required rather than
 optional:
@@ -651,6 +655,32 @@ optional:
 | `repositoryId` | the identity every runtime directory is named by, and what `SYNCED repository=` prints |
 | `commonDirectory` | which repository this answer is about — the identity spelling: absolute, native separators, upper-cased on Windows. A plugin comparing it against its own workspace path must do so case-insensitively |
 | `status` | `CONFIGURED` or `NOT_CONFIGURED`, the same token the prose prints |
+
+`doctor` fills it with the report — one object per check, three of nine here:
+
+```json
+{"schema":1,"command":"doctor","ok":true,"data":{"verdict":"Failed","failed":1,"warned":3,"checks":[{"name":"version","status":"Failed","detail":"The pointer names 0.1.51 and that directory does not exist.","versionDirectory":"0.1.51"},{"name":"queue","status":"Warning","detail":"4 queued, 2 quarantined. Quarantined jobs are never retried.","queued":4,"quarantined":2},{"name":"repository","status":"Warning","detail":"R:\LocalAi is not connected. Index it: localai sync --root R:\LocalAi","repositoryId":"0ecc9019…","repositoryRoot":"R:\LocalAi","state":"NotConfigured"}]}}
+```
+
+| `data` | |
+| --- | --- |
+| `verdict` | `Ok`, `Warning` or `Failed` — the report in one word. A warning is not a failure: a broker that is not running starts on demand |
+| `failed`, `warned` | how many checks came back each way |
+| `checks[]` | one per check, in the order the report prints them. A release may add a check; a caller ignores a name it does not know |
+
+| A check | |
+| --- | --- |
+| `name` | `version`, `launcher`, `broker`, `queue`, `policy.models`, `policy.retention`, `policy.languageServers`, `update`, `repository` — the last only when `--root` was given |
+| `status` | `Ok`, `Warning` or `Failed` |
+| `detail` | the line the prose face prints for that check, in English. Shown to a person, never parsed — the same promise as `error.message` |
+| the rest | what that check established: `versionDirectory`, `releaseVersion` and `missingFiles` on `version`; `path` on `launcher`; `processId` and `heartbeatAgeSeconds` on `broker`; `queued`, `quarantined` and `oldestUnattemptedMinutes` on `queue`; the values of each policy plus `fileFound`; `enabled`, `availability`, `latestVersion`, `releaseUrl` and `checkedAtUtc` on `update`; `repositoryId`, `repositoryRoot`, `state` and `generationId` on `repository`. A field is absent when the check could not establish it; nothing is written as `null` |
+
+**`fileFound` says a file was there, not that it was read.** Every policy store answers a
+malformed document with its defaults rather than an error, so a file that stopped parsing is
+reported as found, with default values beside it.
+
+**Its exit code is a verdict.** 0 when nothing failed, 1 when something did, `ok: true` for
+both. `ok: false` from this command means no report was produced at all.
 
 `ask` and `triage` fill the same envelope with the answer and what the run cost:
 

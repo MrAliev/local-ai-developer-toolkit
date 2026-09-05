@@ -1,4 +1,4 @@
-using LocalAi.Cli;
+﻿using LocalAi.Cli;
 using LocalAi.Cli.Resources;
 using LocalAi.Tests.Shared;
 
@@ -83,8 +83,8 @@ public sealed class DoctorReportFollowsTheReaderTests : IDisposable
         // it runs on rather than about the language it answers in.
         foreach (var name in new[]
                  {
-                     "version", "launcher", "broker", "queue", "policy: models",
-                     "policy: retention", "policy: language servers", "update",
+                     "version", "launcher", "broker", "queue", "policy.models",
+                     "policy.retention", "policy.languageServers", "update",
                  })
         {
             Assert.Contains(name, rendered, StringComparison.Ordinal);

@@ -406,11 +406,30 @@ static async Task<int> RunAsync(string[] args, bool machineReadable)
 
     if (args is ["doctor", ..])
     {
-        var rootIndex = Array.IndexOf(args, "--root");
-        return DoctorCommand.Execute(
+        if (!DoctorCommand.TryParseArguments(
+                args.AsSpan(1).ToArray(),
+                out var repositoryRoot,
+                out var doctorRefusal))
+        {
+            return Refuse("doctor", doctorRefusal!, machineReadable);
+        }
+
+        // One report, two renderings. Its exit code is a verdict about the machine and does not
+        // change with the face: a caller that added --json to get something parseable must not
+        // lose the signal it was reading from $? before.
+        var report = DoctorCommand.Inspect(
             ModelResidencyPolicyStore.DefaultRuntimeRoot,
-            rootIndex >= 0 && rootIndex + 1 < args.Length ? args[rootIndex + 1] : null,
-            Console.Out);
+            repositoryRoot);
+        if (machineReadable)
+        {
+            Console.WriteLine(MachineOutput.Answer("doctor", DoctorCommand.Describe(report)));
+        }
+        else
+        {
+            Console.Out.Write(DoctorCommand.Render(report));
+        }
+
+        return report.ExitCode;
     }
 
     if (args is ["policy", ..])
