@@ -553,6 +553,20 @@ dotnet build 2>&1 | localai triage
 else. The notice names the model, what it processed, how long it took and what it saved; it is on
 standard error because it is about the run rather than the result.
 
+**A long run says where it is, on standard error.** A translation is one model call per
+fragment and a triage is one per fragment plus its merges, so both count out loud: `translate`
+knows its total before the first call and prints `Translating fragment 3 of 21` with an
+estimate from the second line on, while `triage` cannot know its total until the log ends and
+so counts without a denominator rather than inventing one. `ask` and `read-image` are a single
+call and count nothing.
+
+Under all four, a job that has not finished is waiting for one of two different things, and
+the line says which: `Waiting in the broker queue` is another client or a stalled broker,
+`The model is working` is a slow model. These appear only into silence — the first after ten
+seconds of a run that has said nothing, then whenever thirty seconds pass with no line at all.
+Every line is written whole; nothing rewrites itself with a carriage return, so a redirected
+log holds the same bytes a terminal showed.
+
 **A redirected answer carries provenance markers and a terminal one does not.** The answer was
 written by a local model out of files it read, so where it can be read again later — a file, a
 pipe, another program — it arrives wrapped in the same nonce-bound `<untrusted-content>` markers
@@ -606,6 +620,12 @@ One envelope, whatever the command:
 | `ok` | whether the run produced its answer. Not the verdict: a run whose answer is "this installation is broken" is `ok: true`, with the verdict in `data` |
 | `data` | the command's own answer. Absent when `ok` is false |
 | `error` | `code` and `message`. Absent when `ok` is true |
+
+**The envelope's promise is about standard output, and only that.** One object on stdout,
+nothing else — but a two-hour translation under `--json` still prints its progress on
+standard error, in English like everything else under the flag, because the reader who
+most needs to know the run is alive is the scheduled task with no window to look at. A
+caller who does not want those lines redirects them; there is no flag to suppress them.
 
 **`--json` also fixes the language to English.** Output that is versioned cannot follow the
 machine it came from, so the flag decides both. A reader who set `LOCALAI_LANGUAGE=ru` and then
