@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -517,46 +517,113 @@ public sealed class IndexBuilder(
         var position = 0;
         var budget = InitialBatchChars;
 
-        while (position < queue.Count)
+        // One batch stays on the queue while the one ahead of it is consumed. The broker keeps
+        // a model resident only while the queue holds work for it, and a build that posted the
+        // next batch after the previous one had answered left the queue empty between every
+        // two — so every batch began by loading the model again, about a third of a sync's
+        // wall time (#350). One in flight is enough to keep the queue from running dry; more
+        // would only hold texts and vectors in memory for longer.
+        InFlightBatch? current = null;
+        InFlightBatch? next = null;
+        var lastCompletedAt = stopwatch.Elapsed;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-
-            var batch = new List<(string RelPath, int Slot, string Text)>();
-            var chars = 0;
-            while (position < queue.Count && batch.Count < BatchMaxItems &&
-                   (batch.Count == 0 || chars + queue[position].Text.Length <= budget))
+            while (position < queue.Count || current is not null)
             {
-                chars += queue[position].Text.Length;
-                batch.Add(queue[position]);
-                position++;
-            }
+                ct.ThrowIfCancellationRequested();
 
-            var batchStarted = stopwatch.Elapsed;
-            var embeddings = await EmbedBatchAsync(batch, ct);
-            checkpoint?.SaveBatch(
-                batch.Select(item => item.Text).ToArray(),
-                embeddings);
-            budget = NextBudget(budget, chars, stopwatch.Elapsed - batchStarted);
-            for (var i = 0; i < batch.Count; i++)
-            {
-                vectors[batch[i].RelPath][batch[i].Slot] = embeddings[i];
-            }
+                // Nothing is posted behind a batch that has already failed: the failure is
+                // about to be reported, and a batch posted now would be work the broker does
+                // for nobody — and, on a resumed build, work done twice, because nothing that
+                // was never consumed reaches the checkpoint.
+                var aheadHasFailed = current is not null &&
+                                     current.Embeddings.IsCompleted &&
+                                     !current.Embeddings.IsCompletedSuccessfully;
+                next = null;
+                if (position < queue.Count && !aheadHasFailed)
+                {
+                    var batch = new List<(string RelPath, int Slot, string Text)>();
+                    var chars = 0;
+                    while (position < queue.Count && batch.Count < BatchMaxItems &&
+                           (batch.Count == 0 || chars + queue[position].Text.Length <= budget))
+                    {
+                        chars += queue[position].Text.Length;
+                        batch.Add(queue[position]);
+                        position++;
+                    }
 
-            done += batch.Count;
-            embeddedThisRun += batch.Count;
-            var rate = embeddedThisRun / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
-            // Against everything this build has to produce, not against what is left to embed.
-            // `done` starts at the number the checkpoint restored, so counting it against the
-            // queue reports 21 075 of 20 980 on a resumed build, with a negative estimate to
-            // match — and the progress store rejects both, which killed the build after every
-            // chunk of it had already been embedded.
-            var remaining = TimeSpan.FromSeconds((total - done) / Math.Max(0.001, rate));
-            _log($"Embedded {done}/{total} chunks ({rate:F1}/s, ~{remaining.TotalMinutes:F1} min left)");
-            _progress(new IndexBuildProgress(done, total, rate, remaining));
+                    next = new InFlightBatch(
+                        batch,
+                        chars,
+                        stopwatch.Elapsed,
+                        EmbedBatchAsync(batch, ct));
+                }
+
+                if (current is not null)
+                {
+                    var embeddings = await current.Embeddings;
+                    checkpoint?.SaveBatch(
+                        current.Items.Select(item => item.Text).ToArray(),
+                        embeddings);
+                    // However early it was posted, the batch was worked on only after the one
+                    // ahead of it finished, so its cost runs from that moment — from its own
+                    // post only when nothing was ahead of it.
+                    var startedAt = current.PostedAt > lastCompletedAt
+                        ? current.PostedAt
+                        : lastCompletedAt;
+                    lastCompletedAt = stopwatch.Elapsed;
+                    budget = NextBudget(budget, current.Chars, lastCompletedAt - startedAt);
+                    for (var i = 0; i < current.Items.Count; i++)
+                    {
+                        vectors[current.Items[i].RelPath][current.Items[i].Slot] = embeddings[i];
+                    }
+
+                    done += current.Items.Count;
+                    embeddedThisRun += current.Items.Count;
+                    var rate = embeddedThisRun / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
+                    // Against everything this build has to produce, not against what is left to
+                    // embed. `done` starts at the number the checkpoint restored, so counting it
+                    // against the queue reports 21 075 of 20 980 on a resumed build, with a
+                    // negative estimate to match — and the progress store rejects both, which
+                    // killed the build after every chunk of it had already been embedded.
+                    var remaining = TimeSpan.FromSeconds((total - done) / Math.Max(0.001, rate));
+                    _log($"Embedded {done}/{total} chunks ({rate:F1}/s, ~{remaining.TotalMinutes:F1} min left)");
+                    _progress(new IndexBuildProgress(done, total, rate, remaining));
+                }
+
+                current = next;
+            }
+        }
+        catch
+        {
+            // The batch behind the one that failed is already on the queue and cannot be
+            // recalled. Its fault, if it ends in one, is read here so that it cannot surface
+            // later as a second, unowned report of a build that has already said how it ended.
+            Observe(current?.Embeddings);
+            Observe(next?.Embeddings);
+            throw;
         }
 
         return vectors;
     }
+
+    private sealed record InFlightBatch(
+        IReadOnlyList<(string RelPath, int Slot, string Text)> Items,
+        int Chars,
+        TimeSpan PostedAt,
+        Task<float[][]> Embeddings);
+
+    /// <summary>
+    /// Reads a fault nobody is going to await, and only a fault: a task that ends cancelled or
+    /// successfully has nothing to report, and reading <c>Exception</c> is what marks a faulted
+    /// one handled.
+    /// </summary>
+    private static void Observe(Task? task) =>
+        task?.ContinueWith(
+            completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     /// <summary>
     /// The next character budget, from what the last batch actually cost.
