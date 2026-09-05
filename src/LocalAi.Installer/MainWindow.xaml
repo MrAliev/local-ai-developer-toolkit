@@ -446,7 +446,7 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <TextBlock Text="{Binding ProgressText}" Margin="0,0,0,8" />
+                        <TextBlock Text="{Binding ProgressText}" TextWrapping="Wrap" Margin="0,0,0,8" />
                         <ProgressBar Value="{Binding Progress, Mode=OneWay}" Maximum="100" Height="16" />
                         <TextBlock Text="{x:Static vm:PageLabels.Log}" Margin="0,14,0,4" FontWeight="SemiBold" />
                         <TextBox Text="{Binding Finish.Progress, Mode=OneWay}"

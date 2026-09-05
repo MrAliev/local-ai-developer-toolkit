@@ -7,6 +7,26 @@ public interface IProcessRunner
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The same run, with each line of standard error handed over as it arrives rather
+    /// than at the end. A model download reports for minutes and finishes once, so a
+    /// caller that only learns at the end learns nothing it could have shown.
+    ///
+    /// The captured text is unchanged: what a line-reader sees, the result still holds,
+    /// bounded exactly as before.
+    ///
+    /// A runner that cannot stream inherits this, runs without streaming, and reports no
+    /// lines — which is the truth about it rather than a silence dressed as none arriving.
+    /// Every caller here already treats zero lines as ordinary: a fast run reports none.
+    /// </summary>
+    Task<ProcessResult> RunAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        Action<string> onStandardErrorLine,
+        CancellationToken cancellationToken) =>
+        RunAsync(executable, arguments, timeout, cancellationToken);
 }
 
 /// <summary>

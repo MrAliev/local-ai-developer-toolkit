@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Runtime.Versioning;
+using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using LocalAi.Contracts;
 using LocalAi.Contracts.Activation;
 using LocalAi.Installer.Core.Abstractions;
@@ -435,11 +437,18 @@ public sealed class BrokerModelInstaller : IDisposable
             var pullCompleted = false;
             // Reported before the work, not after: the wait is what needs explaining.
             progress?.Report(new ModelProvisioningProgress(
-                installed.Contains(action.Model)
-                    ? $"{action.Model}: checking it fits in video memory"
-                    : $"{action.Model}: downloading",
+                string.Format(
+                    installed.Contains(action.Model)
+                        ? InstallerCulture.Pick(
+                            "{0}: checking it fits in video memory",
+                            "{0}: проверяется, помещается ли в видеопамять")
+                        : InstallerCulture.Pick(
+                            "{0}: downloading",
+                            "{0}: скачивается"),
+                    action.Model),
                 results.Count,
-                snapshot.Length));
+                snapshot.Length,
+                IsMilestone: true));
             try
             {
                 if (!installed.Contains(action.Model))
@@ -458,7 +467,13 @@ public sealed class BrokerModelInstaller : IDisposable
                         mayChangeExternalState: true,
                         pullTimeout,
                         cancellationToken,
-                        reportsProgress: true);
+                        reportsProgress: true,
+                        onProgressLine: line => ReportPullLine(
+                            progress,
+                            line,
+                            action.Model,
+                            results.Count,
+                            snapshot.Length));
                     EnsureExitSuccess(pull, "pull", mayChangeExternalState: true);
                     ValidatePull(
                         Parse<ModelPullCommandSuccess>(
@@ -567,7 +582,8 @@ public sealed class BrokerModelInstaller : IDisposable
         bool mayChangeExternalState,
         TimeSpan commandTimeout,
         CancellationToken cancellationToken,
-        bool reportsProgress = false)
+        bool reportsProgress = false,
+        Action<string>? onProgressLine = null)
     {
         try
         {
@@ -585,11 +601,21 @@ public sealed class BrokerModelInstaller : IDisposable
         CommandFailure? processFailure = null;
         try
         {
-            process = await processRunner.RunAsync(
-                launcherPath,
-                arguments,
-                commandTimeout,
-                cancellationToken);
+            // The overload with a line reader exists for exactly this: a download reports
+            // for minutes and finishes once, so a caller that only learns at the end
+            // learns nothing it could have shown.
+            process = onProgressLine is null
+                ? await processRunner.RunAsync(
+                    launcherPath,
+                    arguments,
+                    commandTimeout,
+                    cancellationToken)
+                : await processRunner.RunAsync(
+                    launcherPath,
+                    arguments,
+                    commandTimeout,
+                    onProgressLine,
+                    cancellationToken);
         }
         catch (ProcessTerminationException exception)
         {
@@ -670,6 +696,91 @@ public sealed class BrokerModelInstaller : IDisposable
 
         return process;
     }
+
+    /// <summary>
+    /// One line of the child's progress, turned into the installer's own sentence.
+    ///
+    /// Composed here rather than shown as the child wrote it: the installer and the
+    /// console pick their language separately, so streaming the child's prose would put
+    /// English into a Russian window whenever the two disagree — and would make a
+    /// reviewer's wording change a parser break.
+    ///
+    /// None of these are milestones. They move the rail and stay out of the log.
+    /// </summary>
+    private static void ReportPullLine(
+        IProgress<ModelProvisioningProgress>? progress,
+        string line,
+        string model,
+        int completed,
+        int total)
+    {
+        if (progress is null)
+        {
+            return;
+        }
+
+        ModelPullProgressLine? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<ModelPullProgressLine>(line);
+        }
+        catch (JsonException)
+        {
+            // The guard on standard error decides whether an unreadable line is a fault.
+            // Here it is simply nothing to show.
+            return;
+        }
+
+        if (parsed?.Phase is not { } phase)
+        {
+            return;
+        }
+
+        var message = phase switch
+        {
+            "downloading" when parsed is { CompletedBytes: { } done, TotalBytes: { } size } =>
+                string.Format(
+                    InstallerCulture.Pick("{0}: {1} of {2} GB", "{0}: {1} из {2} ГБ"),
+                    model,
+                    Gigabytes(done),
+                    Gigabytes(size)),
+            "verifying" => string.Format(
+                InstallerCulture.Pick(
+                    "{0}: checking the download",
+                    "{0}: проверяется скачанное"),
+                model),
+            "storing" => string.Format(
+                InstallerCulture.Pick(
+                    "{0}: adding to Ollama",
+                    "{0}: добавляется в Ollama"),
+                model),
+            "other" when parsed.Status is { Length: > 0 } status => string.Format(
+                InstallerCulture.Pick(
+                    "{0}: Ollama reports {1}",
+                    "{0}: Ollama сообщает {1}"),
+                model,
+                status),
+            _ => null,
+        };
+
+        if (message is not null)
+        {
+            progress.Report(new ModelProvisioningProgress(message, completed, total));
+        }
+    }
+
+    /// <summary>
+    /// Gibibytes to one decimal, invariant — the same figure the console prints, so the
+    /// window and a terminal beside it do not disagree about the size of one download.
+    /// </summary>
+    private static string Gigabytes(long bytes) =>
+        (bytes / (1024d * 1024 * 1024)).ToString("F1", CultureInfo.InvariantCulture);
+
+    private sealed record ModelPullProgressLine(
+        [property: JsonPropertyName("phase")] string? Phase,
+        [property: JsonPropertyName("completedBytes")] long? CompletedBytes,
+        [property: JsonPropertyName("totalBytes")] long? TotalBytes,
+        [property: JsonPropertyName("status")] string? Status);
 
     /// <summary>
     /// Nothing on standard error, or — for an invocation that was asked for progress —

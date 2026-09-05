@@ -22,6 +22,35 @@ public sealed class SystemProcessRunnerTests
     /// </remarks>
     private static readonly TimeSpan Completion = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// A model download reports for minutes and finishes once, so a caller that only learns
+    /// at the end learns nothing it could have shown. What the reader is handed, the result
+    /// still holds: this is an additional view of the same bytes, not a diversion of them.
+    /// </summary>
+    [Fact]
+    public async Task Standard_error_lines_reach_a_reader_and_the_result_keeps_them_too()
+    {
+        var runner = new SystemProcessRunner();
+        var lines = new List<string>();
+
+        var result = await runner.RunAsync(
+            Fixture,
+            ["error-lines", "3"],
+            Completion,
+            line =>
+            {
+                lock (lines)
+                {
+                    lines.Add(line);
+                }
+            },
+            TestContext.Current.CancellationToken);
+
+        AssertCompleted(result);
+        Assert.Equal(["line 1", "line 2", "line 3"], lines);
+        Assert.Contains("line 3", result.StandardError, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Preserves_arguments_without_building_a_shell_command()
     {

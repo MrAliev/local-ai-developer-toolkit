@@ -579,7 +579,8 @@ download line has already reached its own total.
 `--progress-json` gives the same run to a program instead: one object per line on standard
 error, no prose, and never both at once. The installer passes it, because a sentence is not a
 channel — the installer and the console can be set to different languages, and a reviewer's
-wording change must not be a parser break.
+wording change must not be a parser break. The installer's own progress line shows the same
+figures in its own words, and its run log keeps one line a phase rather than one a second.
 
 A pull is also given the twelve hours the installer allows it, rather than the thirty minutes
 that belong to a call to a model. Below that, the console gave up while the broker went on

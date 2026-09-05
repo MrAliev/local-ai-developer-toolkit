@@ -2258,7 +2258,13 @@ public sealed class InstallerWizardViewModel : ObservableObject
                         step.Total,
                         step.Message)
                     : step.Message);
-            AppendLog(report, step.Message);
+            if (step.IsMilestone)
+            {
+                // The rail moves with every report; the log keeps the ones worth reading
+                // afterwards. It does not scroll, so a hundred byte counts per model would
+                // push everything else out of sight.
+                AppendLog(report, step.Message);
+            }
         });
         var selection = models.BuildProvisioningSelection();
         // The intent covers the download too, but the download only touches the temp

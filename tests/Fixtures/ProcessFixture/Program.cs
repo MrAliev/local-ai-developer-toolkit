@@ -37,6 +37,17 @@ switch (args[0])
         Console.Error.Write(new string('e', int.Parse(args[2])));
         return 0;
 
+    case "error-lines":
+        // Numbered lines on standard error, one at a time, for a parent that claims to
+        // hand them over as they arrive rather than at the end.
+        for (var line = 1; line <= int.Parse(args[1]); line++)
+        {
+            Console.Error.WriteLine($"line {line}");
+            Console.Error.Flush();
+        }
+
+        return 0;
+
     case "write-binary":
     {
         // Bytes that are not valid UTF-8 on purpose, written to the raw stream, so a parent that
