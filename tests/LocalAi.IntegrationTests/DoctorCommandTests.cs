@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using LocalAi.Cli;
 using LocalAi.Contracts;
@@ -194,7 +194,7 @@ public sealed class DoctorCommandTests : IDisposable
 
         var report = DoctorCommand.Inspect(_root);
 
-        Assert.Equal(DoctorStatus.Ok, Check(report, "policy: models").Status);
+        Assert.Equal(DoctorStatus.Ok, Check(report, "policy.models").Status);
         Assert.Equal(0, report.ExitCode);
     }
 

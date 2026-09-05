@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CodeSearch.Core.Semantics;
 using LocalAi.Cli.Resources;
 using LocalAi.Contracts;
@@ -16,7 +17,21 @@ public enum DoctorStatus
     Failed
 }
 
-public sealed record DoctorCheck(string Name, DoctorStatus Status, string Detail);
+/// <summary>
+/// One fact a check established, for the face that is parsed rather than read.
+///
+/// The prose states these inside sentences — "process 24188, heartbeat 3s ago" — and a caller
+/// is told never to parse a sentence, so what a check knows as a number, an identifier or a
+/// path is published as itself. Nothing here is derived: a fact exists only where the check
+/// already had it in hand.
+/// </summary>
+public sealed record DoctorFact(string Name, object? Value);
+
+public sealed record DoctorCheck(
+    string Name,
+    DoctorStatus Status,
+    string Detail,
+    IReadOnlyList<DoctorFact>? Facts = null);
 
 public sealed record DoctorReport(IReadOnlyList<DoctorCheck> Checks)
 {
@@ -26,6 +41,14 @@ public sealed record DoctorReport(IReadOnlyList<DoctorCheck> Checks)
     /// it into a script to ignore the exit code.
     /// </summary>
     public int ExitCode => Checks.Any(check => check.Status == DoctorStatus.Failed) ? 1 : 0;
+
+    /// <summary>The report in one word, for a caller that wants the answer before the detail.</summary>
+    public DoctorStatus Verdict =>
+        Checks.Any(check => check.Status == DoctorStatus.Failed)
+            ? DoctorStatus.Failed
+            : Checks.Any(check => check.Status == DoctorStatus.Warning)
+                ? DoctorStatus.Warning
+                : DoctorStatus.Ok;
 }
 
 /// <summary>
@@ -110,13 +133,15 @@ public static class DoctorCommand
                 CliText.VersionPointerEmpty);
         }
 
+        var release = InstalledVersionReader.Read(root).ReleaseVersion;
         var directory = Path.Combine(binRoot, "versions", version);
         if (!Directory.Exists(directory))
         {
             return new DoctorCheck(
                 "version",
                 DoctorStatus.Failed,
-                CliText.VersionDirectoryMissing(version));
+                CliText.VersionDirectoryMissing(version),
+                Facts(("versionDirectory", version), ("releaseVersion", release)));
         }
 
         // The pointer agreeing with a directory that is missing half its binaries is the shape a
@@ -124,15 +149,21 @@ public static class DoctorCommand
         var missing = LocalAiPackageLayout.VersionRequiredFiles
             .Where(file => !File.Exists(Path.Combine(directory, file)))
             .ToArray();
+        var versionFacts = Facts(
+            ("versionDirectory", version),
+            ("releaseVersion", release),
+            ("missingFiles", missing));
         return missing.Length > 0
             ? new DoctorCheck(
                 "version",
                 DoctorStatus.Failed,
-                CliText.VersionFilesMissing(version, string.Join(", ", missing)))
+                CliText.VersionFilesMissing(version, string.Join(", ", missing)),
+                versionFacts)
             : new DoctorCheck(
                 "version",
                 DoctorStatus.Ok,
-                CliText.VersionComplete(version, LocalAiPackageLayout.VersionRequiredFiles.Count));
+                CliText.VersionComplete(version, LocalAiPackageLayout.VersionRequiredFiles.Count),
+                versionFacts);
     }
 
     private static DoctorCheck CheckLauncher(string root)
@@ -143,7 +174,11 @@ public static class DoctorCommand
             "launcher",
             LocalAiPackageLayout.StableLauncherFile);
         return File.Exists(launcher)
-            ? new DoctorCheck("launcher", DoctorStatus.Ok, launcher)
+            ? new DoctorCheck(
+                "launcher",
+                DoctorStatus.Ok,
+                launcher,
+                Facts(("path", launcher)))
             : new DoctorCheck(
                 "launcher",
                 DoctorStatus.Failed,
@@ -197,7 +232,8 @@ public static class DoctorCommand
                 DoctorStatus.Ok,
                 CliText.BrokerAlive(
                     state.ProcessId,
-                    silence.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture)));
+                    silence.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture)),
+                BrokerFacts(state, silence));
     }
 
     /// <summary>
@@ -224,7 +260,8 @@ public static class DoctorCommand
                 DoctorStatus.Warning,
                 CliText.QueueStalled(
                     queued,
-                    ((int)age.TotalMinutes).ToString(CultureInfo.InvariantCulture)));
+                    ((int)age.TotalMinutes).ToString(CultureInfo.InvariantCulture)),
+                QueueFacts(queued, quarantined, stalled));
         }
 
         // Quarantine is the interesting number. A job lands there when it could not be parsed or
@@ -233,8 +270,13 @@ public static class DoctorCommand
             ? new DoctorCheck(
                 "queue",
                 DoctorStatus.Warning,
-                CliText.QueueQuarantined(queued, quarantined))
-            : new DoctorCheck("queue", DoctorStatus.Ok, CliText.QueueClean(queued));
+                CliText.QueueQuarantined(queued, quarantined),
+                QueueFacts(queued, quarantined, stalled))
+            : new DoctorCheck(
+                "queue",
+                DoctorStatus.Ok,
+                CliText.QueueClean(queued),
+                QueueFacts(queued, quarantined, stalled));
 
         static int Count(string path) =>
             Directory.Exists(path)
@@ -293,31 +335,47 @@ public static class DoctorCommand
     private static IEnumerable<DoctorCheck> CheckPolicies(string root)
     {
         yield return PolicyCheck(
-            "policy: models",
+            "policy.models",
             RuntimeDirectories.SettingsFile(root, BrokerPolicy.FileName),
             () => new ModelResidencyPolicyStore(root).Read(),
             policy => CliText.PolicyModels(
                 policy.ModelResidency,
-                policy.IdleModelKeepAliveSeconds));
+                policy.IdleModelKeepAliveSeconds),
+            (policy, found) => Facts(
+                ("modelResidency", policy.ModelResidency.ToString()),
+                ("keepAliveSeconds", policy.IdleModelKeepAliveSeconds),
+                ("fileFound", found)));
 
         yield return PolicyCheck(
-            "policy: retention",
+            "policy.retention",
             RuntimeDirectories.SettingsFile(root, RuntimeRetentionPolicy.FileName),
             () => new RuntimeRetentionPolicyStore(root).Read(),
             policy => CliText.PolicyRetention(
                 policy.GenerationsPerRepository,
                 policy.InstalledVersions,
-                policy.TelemetryRetentionDays));
+                policy.TelemetryRetentionDays),
+            (policy, found) => Facts(
+                ("generationsPerRepository", policy.GenerationsPerRepository),
+                ("installedVersions", policy.InstalledVersions),
+                ("telemetryRetentionDays", policy.TelemetryRetentionDays),
+                ("fileFound", found)));
 
         yield return PolicyCheck(
-            "policy: language servers",
+            "policy.languageServers",
             RuntimeDirectories.SettingsFile(root, LanguageServerPolicy.FileName),
             () => new LanguageServerPolicyStore(root).Read(),
             policy => policy.Enabled
                 ? CliText.PolicyLanguageServersEnabled(string.Join(
                     ", ",
                     policy.Languages.Where(l => l.Value.Enabled).Select(l => l.Key)))
-                : CliText.PolicyLanguageServersDisabled);
+                : CliText.PolicyLanguageServersDisabled,
+            (policy, found) => Facts(
+                ("enabled", policy.Enabled),
+                ("languages", policy.Languages
+                    .Where(language => language.Value.Enabled)
+                    .Select(language => language.Key)
+                    .ToArray()),
+                ("fileFound", found)));
 
         yield return CheckUpdates(root);
     }
@@ -339,12 +397,21 @@ public static class DoctorCommand
             return new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                CliText.UpdateCheckDisabled);
+                CliText.UpdateCheckDisabled,
+                Facts(("enabled", false)));
         }
 
         var state = new UpdateCheckStateStore(root).Read();
         var installed = InstalledVersionReader.Read(root);
-        return UpdateComparison.Compare(state, installed) switch
+        var availability = UpdateComparison.Compare(state, installed);
+        var updateFacts = Facts(
+            ("enabled", true),
+            ("availability", availability.ToString()),
+            ("latestVersion", state.LatestVersion),
+            ("releaseUrl", state.ReleaseUrl),
+            ("checkedAtUtc", state.CheckedAtUtc?.ToUniversalTime()
+                .ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)));
+        return availability switch
         {
             UpdateAvailability.Available => new DoctorCheck(
                 "update",
@@ -352,7 +419,8 @@ public static class DoctorCommand
                 CliText.UpdateAvailable(
                     state.LatestVersion,
                     installed.DisplayName,
-                    state.ReleaseUrl)),
+                    state.ReleaseUrl),
+                updateFacts),
             UpdateAvailability.UpToDate => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
@@ -360,13 +428,15 @@ public static class DoctorCommand
                     installed.DisplayName,
                     state.CheckedAtUtc?.ToString(
                         "yyyy-MM-dd HH:mm",
-                        CultureInfo.InvariantCulture))),
+                        CultureInfo.InvariantCulture)),
+                updateFacts),
             _ when state.Status == UpdateCheckStatus.Unavailable => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
                 CliText.UpdateUnknownUnavailable(state.CheckedAtUtc?.ToString(
                     "yyyy-MM-dd HH:mm",
-                    CultureInfo.InvariantCulture))),
+                    CultureInfo.InvariantCulture)),
+                updateFacts),
             // Verified, but nothing here can be compared against it: an installation made
             // before the release version was recorded knows only its directory name. Said
             // plainly, because answering "up to date" from a comparison that failed is the
@@ -374,11 +444,13 @@ public static class DoctorCommand
             _ when state.Status == UpdateCheckStatus.Verified => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                CliText.UpdateIncomparable(state.LatestVersion)),
+                CliText.UpdateIncomparable(state.LatestVersion),
+                updateFacts),
             _ => new DoctorCheck(
                 "update",
                 DoctorStatus.Ok,
-                CliText.UpdateNeverChecked),
+                CliText.UpdateNeverChecked,
+                updateFacts),
         };
     }
 
@@ -386,17 +458,18 @@ public static class DoctorCommand
         string name,
         string path,
         Func<T> read,
-        Func<T, string> describe)
+        Func<T, string> describe,
+        Func<T, bool, IReadOnlyList<DoctorFact>> facts)
     {
         try
         {
             var policy = read();
+            var found = File.Exists(path);
             return new DoctorCheck(
                 name,
                 DoctorStatus.Ok,
-                File.Exists(path)
-                    ? describe(policy)
-                    : $"{describe(policy)} (defaults, no file)");
+                found ? describe(policy) : CliText.PolicyDefaults(describe(policy)),
+                facts(policy, found));
         }
         catch (Exception exception)
         {
@@ -417,22 +490,25 @@ public static class DoctorCommand
                 return new DoctorCheck(
                     "repository",
                     DoctorStatus.Warning,
-                    CliText.RepositoryNotConnected(identity.RepositoryRoot.Value));
+                    CliText.RepositoryNotConnected(identity.RepositoryRoot.Value),
+                    Facts(
+                        ("repositoryId", identity.RepositoryId),
+                        ("repositoryRoot", identity.RepositoryRoot.Value),
+                        ("state", nameof(RepositoryIndexState.NotConfigured))));
             }
 
-            return manifest.State == RepositoryIndexState.Current
-                ? new DoctorCheck(
-                    "repository",
-                    DoctorStatus.Ok,
-                    CliText.RepositoryState(
-                        manifest.State,
-                        Short(manifest.CurrentGenerationId)))
-                : new DoctorCheck(
-                    "repository",
-                    DoctorStatus.Warning,
-                    CliText.RepositoryState(
-                        manifest.State,
-                        Short(manifest.CurrentGenerationId)));
+            var repositoryFacts = Facts(
+                ("repositoryId", identity.RepositoryId),
+                ("repositoryRoot", identity.RepositoryRoot.Value),
+                ("state", manifest.State.ToString()),
+                ("generationId", manifest.CurrentGenerationId));
+            return new DoctorCheck(
+                "repository",
+                manifest.State == RepositoryIndexState.Current
+                    ? DoctorStatus.Ok
+                    : DoctorStatus.Warning,
+                CliText.RepositoryState(manifest.State, Short(manifest.CurrentGenerationId)),
+                repositoryFacts);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or InvalidOperationException
@@ -443,6 +519,135 @@ public static class DoctorCommand
 
         static string Short(string? id) =>
             string.IsNullOrEmpty(id) ? CliText.GenerationNone : id[..Math.Min(12, id.Length)];
+    }
+
+    /// <summary>
+    /// The facts a check established, in the order they are published. A pair whose value is
+    /// null is dropped rather than written: absent says the check could not establish it, and
+    /// a null would make a caller test for two things that mean the same.
+    /// </summary>
+    private static IReadOnlyList<DoctorFact> Facts(
+        params (string Name, object? Value)[] facts) =>
+        facts
+            .Where(fact => fact.Value is not null)
+            .Select(fact => new DoctorFact(fact.Name, fact.Value))
+            .ToArray();
+
+    private static IReadOnlyList<DoctorFact> BrokerFacts(
+        BrokerProcessState state,
+        TimeSpan silence) =>
+        Facts(
+            ("processId", state.ProcessId),
+            ("heartbeatAgeSeconds", (int)silence.TotalSeconds));
+
+    private static IReadOnlyList<DoctorFact> QueueFacts(
+        int queued,
+        int quarantined,
+        TimeSpan? oldestUnattempted) =>
+        Facts(
+            ("queued", queued),
+            ("quarantined", quarantined),
+            ("oldestUnattemptedMinutes", oldestUnattempted is { } age
+                ? (int)age.TotalMinutes
+                : null));
+
+    /// <summary>
+    /// Reads the arguments of <c>doctor</c>, refusing anything it does not understand.
+    ///
+    /// It used to find <c>--root</c> with an index search and ignore the rest, so a typo and a
+    /// deliberate omission produced the same report: one with no repository check and nothing
+    /// saying why. Under <c>--json</c> that would have been the same envelope, and a caller
+    /// cannot see the difference between a check that was not asked for and one it misspelled.
+    /// </summary>
+    public static bool TryParseArguments(
+        IReadOnlyList<string> arguments,
+        out string? repositoryRoot,
+        out CommandRefusal? refusal)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        repositoryRoot = null;
+        refusal = null;
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            var argument = arguments[index];
+            if (argument == "--root")
+            {
+                if (index + 1 >= arguments.Count)
+                {
+                    refusal = new CommandRefusal(
+                        "root_value_missing",
+                        CliText.DoctorRootWithoutDirectory);
+                    return false;
+                }
+
+                if (repositoryRoot is not null)
+                {
+                    refusal = new CommandRefusal(
+                        "repository_ambiguous",
+                        CliText.DoctorTwoRepositories);
+                    return false;
+                }
+
+                repositoryRoot = arguments[++index];
+                continue;
+            }
+
+            refusal = new CommandRefusal(
+                "argument_unknown",
+                CliText.DoctorUnknownArgument(argument, CliUsage.Doctor));
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The report as a program reads it.
+    ///
+    /// The verdict is inside the answer rather than in the envelope's <c>ok</c>: this command
+    /// exits 1 when a check failed, which is a verdict about the machine and not about the run,
+    /// and an envelope that dropped its data there would deny a caller the report in exactly the
+    /// case it asked for it.
+    /// </summary>
+    public static JsonObject Describe(DoctorReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        var checks = new JsonArray();
+        foreach (var check in report.Checks)
+        {
+            var described = new JsonObject
+            {
+                ["name"] = check.Name,
+                ["status"] = check.Status.ToString(),
+                ["detail"] = check.Detail,
+            };
+            foreach (var fact in check.Facts ?? [])
+            {
+                described[fact.Name] = Value(fact.Value);
+            }
+
+            checks.Add(described);
+        }
+
+        return new JsonObject
+        {
+            ["verdict"] = report.Verdict.ToString(),
+            ["failed"] = report.Checks.Count(check => check.Status == DoctorStatus.Failed),
+            ["warned"] = report.Checks.Count(check => check.Status == DoctorStatus.Warning),
+            ["checks"] = checks,
+        };
+
+        static JsonNode? Value(object? value) => value switch
+        {
+            null => null,
+            string text => JsonValue.Create(text),
+            bool flag => JsonValue.Create(flag),
+            int number => JsonValue.Create(number),
+            long number => JsonValue.Create(number),
+            IEnumerable<string> values => new JsonArray(
+                values.Select(item => (JsonNode?)JsonValue.Create(item)).ToArray()),
+            _ => JsonValue.Create(value.ToString()),
+        };
     }
 
     public static string Render(DoctorReport report)

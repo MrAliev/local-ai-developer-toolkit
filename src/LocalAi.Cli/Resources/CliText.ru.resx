@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     What the CLI says. The same rule as CodeSearch decides what is here: anything left of the first colon — or of a two-space column, which is the same thing wearing different punctuation — is a field name and stays English, and so does every status marker, enum name, option, command and wire-format token. Sentences and clauses are translated. Numbers arrive already formatted invariantly.
@@ -627,5 +627,15 @@
   <data name="WorktreeVanished" xml:space="preserve">
     <value>Worktree {0} исчез во время проверки; его overlay пропущен.</value>
     <comment>Kept apart from WorktreeGone on purpose: one is a stale listing, the other a race during the run, and the exception filter exists to tell them apart.</comment>
+  </data>
+  <data name="DoctorRootWithoutDirectory" xml:space="preserve">
+    <value>Команде localai doctor нужен каталог после --root.</value>
+  </data>
+  <data name="DoctorTwoRepositories" xml:space="preserve">
+    <value>Команда localai doctor принимает один репозиторий, а не два.</value>
+  </data>
+  <data name="DoctorUnknownArgument" xml:space="preserve">
+    <value>Команда localai doctor не понимает '{0}'. Usage: {1}</value>
+    <comment>0 is the argument as it was typed and 1 is the usage line; both stay as they are.</comment>
   </data>
 </root>

@@ -1,4 +1,4 @@
-using LocalAi.Contracts.Localization;
+﻿using LocalAi.Contracts.Localization;
 
 namespace LocalAi.Cli.Resources;
 
@@ -73,6 +73,15 @@ public static class CliText
 
     public static string PolicyLanguageServersDisabled =>
         Catalogue.Get(nameof(PolicyLanguageServersDisabled));
+
+    public static string DoctorRootWithoutDirectory =>
+        Catalogue.Get(nameof(DoctorRootWithoutDirectory));
+
+    public static string DoctorTwoRepositories =>
+        Catalogue.Get(nameof(DoctorTwoRepositories));
+
+    public static string DoctorUnknownArgument(string argument, string usage) =>
+        Catalogue.Format(nameof(DoctorUnknownArgument), argument, usage);
 
     public static string PolicyDefaults(string detail) =>
         Catalogue.Format(nameof(PolicyDefaults), detail);

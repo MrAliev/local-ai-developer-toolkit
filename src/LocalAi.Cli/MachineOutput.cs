@@ -1,4 +1,4 @@
-using LocalAi.Contracts;
+﻿using LocalAi.Contracts;
 
 namespace LocalAi.Cli;
 
@@ -53,7 +53,7 @@ internal static class MachineOutput
     /// special case.
     /// </summary>
     public static IReadOnlyList<string> Commands { get; } =
-        ["repo status", "ask", "triage", "read-image", "translate", "capabilities"];
+        ["repo status", "doctor", "ask", "triage", "read-image", "translate", "capabilities"];
 
     /// <summary>
     /// The commands that printed a JSON shape of their own before the envelope existed, and still
