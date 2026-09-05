@@ -1,3 +1,4 @@
+﻿using System.Text;
 using System.Text.Json;
 using LocalAi.Broker.Client.Resources;
 using LocalAi.Contracts;
@@ -113,7 +114,8 @@ public sealed class BrokerClient : IBrokerClient
                 case LocalJobState.Failed:
                     throw new BrokerJobFailedException(
                         jobId,
-                        diagnostic.FailureCode ?? "UnknownFailure");
+                        diagnostic.FailureCode ?? "UnknownFailure",
+                        diagnostic.FailureReason);
 
                 case LocalJobState.Cancelled:
                     throw new BrokerJobCancelledException(jobId);
@@ -147,12 +149,74 @@ public sealed class BrokerBackendUnreachableException(string endpoint)
     public string Endpoint { get; } = endpoint;
 }
 
-public sealed class BrokerJobFailedException(Guid jobId, string failureCode)
-    : InvalidOperationException(BrokerClientText.BrokerJobFailed(jobId, failureCode))
+public sealed class BrokerJobFailedException(
+    Guid jobId,
+    string failureCode,
+    string? failureReason = null)
+    : InvalidOperationException(Describe(jobId, failureCode, failureReason))
 {
+    /// <summary>
+    /// What the message shows of the reason. The whole of it stays on
+    /// <see cref="FailureReason"/> and in the broker's diagnostics log; this is the part that
+    /// fits a line somebody is reading in passing, and the realistic refusal — one
+    /// <c>{"error":"…"}</c> object — is well inside it.
+    /// </summary>
+    private const int ShownReasonCharacters = 200;
+
     public Guid JobId { get; } = jobId;
 
     public string FailureCode { get; } = failureCode;
+
+    /// <summary>
+    /// What was reported with the failure, as it was recorded, or null when nothing was.
+    ///
+    /// Written by whatever refused the job, so it is quoted rather than parsed: a caller that
+    /// needs to decide something matches on <see cref="FailureCode"/>, which is ours and stable.
+    /// </summary>
+    public string? FailureReason { get; } = failureReason;
+
+    private static string Describe(Guid jobId, string failureCode, string? failureReason) =>
+        Excerpt(failureReason) is { } reason
+            ? BrokerClientText.BrokerJobFailedWithReason(jobId, failureCode, reason)
+            : BrokerClientText.BrokerJobFailed(jobId, failureCode);
+
+    /// <summary>
+    /// One line, short enough to sit inside a sentence somebody else is writing. The message is
+    /// printed inside a log line the index build composes, so a newline in the middle of it
+    /// would leave the rest of that line orphaned under a JSON body.
+    /// </summary>
+    private static string? Excerpt(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return null;
+        }
+
+        var collapsed = new StringBuilder(Math.Min(reason.Length, ShownReasonCharacters + 1));
+        var pendingSpace = false;
+        foreach (var character in reason)
+        {
+            if (char.IsControl(character) || char.IsWhiteSpace(character))
+            {
+                pendingSpace = collapsed.Length > 0;
+                continue;
+            }
+
+            if (pendingSpace)
+            {
+                collapsed.Append(' ');
+                pendingSpace = false;
+            }
+
+            collapsed.Append(character);
+            if (collapsed.Length == ShownReasonCharacters)
+            {
+                return collapsed.Append('…').ToString();
+            }
+        }
+
+        return collapsed.Length == 0 ? null : collapsed.ToString();
+    }
 }
 
 public sealed class BrokerJobCancelledException(Guid jobId)

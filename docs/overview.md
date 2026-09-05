@@ -1,4 +1,4 @@
-# Local AI Developer Toolkit (LocalAi)
+﻿# Local AI Developer Toolkit (LocalAi)
 
 **The full picture, for developers who work with Codex and Claude every day**
 
@@ -995,7 +995,7 @@ consent to talk to the network.
 | `update-state.json` | What the last look-up found; every surface answers from this file |
 | `bin\installed-release.json` | Which published release the active version directory came from |
 | `telemetry\metrics` | Task records |
-| `diagnostics.jsonl` | What the broker last failed at, one JSON object per line. Bounded, with one rotation kept |
+| `diagnostics.jsonl` | What the broker last failed at and, when the failure was a job's own, what it failed with. One JSON object per line, bounded, with one rotation kept |
 
 Every path is relative to the LocalAi runtime directory in the user's local application data.
 The installer's run reports and run journals live beside that directory, in

@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -222,6 +222,15 @@ public sealed class DurableQueue : ISelectableBrokerQueue
         return Task.FromResult(new LeaseHeartbeat(jobId, workerId, leaseId, now, expires));
     }
 
+    /// <summary>
+    /// What a failure may say, in characters. Longer than the transport's own 400-character
+    /// excerpt so that an excerpt at exactly that bound is not cut a second time by the words
+    /// wrapped around it.
+    /// </summary>
+    public const int MaximumFailureReasonCharacters = 512;
+
+    private const string FailureFileName = "failure.json";
+
     public Task CompleteAsync(
         Guid jobId,
         string workerId,
@@ -242,11 +251,25 @@ public sealed class DurableQueue : ISelectableBrokerQueue
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Records the failure, and beside it whatever was reported with it.
+    ///
+    /// The reason goes into a file of its own, the way a succeeded job's body does, rather than
+    /// into the state document: every property there is required and unmapped members are
+    /// refused, so a new one would make every state file written here unreadable to the release
+    /// the reader may still be running. A file nobody older opens costs nothing to them.
+    /// </summary>
+    /// <param name="failureReason">
+    /// What was reported with the failure, or null when nothing was. Bounded here as well as by
+    /// the caller: this is a durable file, and the caller is not always the one transport that
+    /// already bounds and redacts what a backend said.
+    /// </param>
     public Task FailAsync(
         Guid jobId,
         string workerId,
         Guid leaseId,
         string failureCode,
+        string? failureReason,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(failureCode);
@@ -255,9 +278,51 @@ public sealed class DurableQueue : ISelectableBrokerQueue
         var entry = RequireLease(jobId, workerId, leaseId);
         var now = _timeProvider.GetUtcNow();
         EnsureLeaseIsCurrent(entry.State, now);
+        if (Bound(failureReason) is { } reason)
+        {
+            AtomicWriteJson(
+                Path.Combine(entry.Directory, FailureFileName),
+                new JobFailure(1, jobId, now, reason));
+        }
+
         WriteState(entry.Directory, ToTerminal(entry.State, LocalJobState.Failed, now, failureCode));
         Archive(entry.Directory, jobId);
         return Task.CompletedTask;
+    }
+
+    private static string? Bound(string? failureReason) =>
+        string.IsNullOrWhiteSpace(failureReason)
+            ? null
+            : failureReason.Length <= MaximumFailureReasonCharacters
+                ? failureReason
+                : failureReason[..MaximumFailureReasonCharacters];
+
+    private static string? ReadFailureReason(JobEntry entry)
+    {
+        if (entry.State.State != LocalJobState.Failed)
+        {
+            return null;
+        }
+
+        var path = Path.Combine(entry.Directory, FailureFileName);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var failure = JsonSerializer.Deserialize<JobFailure>(File.ReadAllText(path), JsonOptions);
+            return failure?.SchemaVersion == 1 && failure.JobId == entry.State.JobId
+                ? failure.Reason
+                : null;
+        }
+        catch (Exception exception) when (exception is JsonException or IOException)
+        {
+            // The reason is an explanation, not a fact the caller acts on. A file that cannot be
+            // read must not turn a job that plainly failed into a job that cannot be read at all.
+            return null;
+        }
     }
 
     public Task CancelAsync(
@@ -340,7 +405,8 @@ public sealed class DurableQueue : ISelectableBrokerQueue
             state.LeaseExpiresAtUtc,
             state.AttemptCount,
             state.RecoveryCount,
-            state.FailureCode));
+            state.FailureCode,
+            ReadFailureReason(entry)));
     }
 
     private static void ValidateWorkerId(string workerId) =>
@@ -1084,6 +1150,13 @@ public sealed record JobResponse(
     [property: JsonRequired] DateTimeOffset CompletedAtUtc,
     [property: JsonRequired] JsonElement Body);
 
+/// <summary>The sentence recorded with a failed job, if anything was.</summary>
+public sealed record JobFailure(
+    [property: JsonRequired] int SchemaVersion,
+    [property: JsonRequired] Guid JobId,
+    [property: JsonRequired] DateTimeOffset FailedAtUtc,
+    [property: JsonRequired] string Reason);
+
 public sealed record JobDiagnostic(
     Guid JobId,
     long Sequence,
@@ -1095,7 +1168,8 @@ public sealed record JobDiagnostic(
     DateTimeOffset? LeaseExpiresAtUtc,
     int AttemptCount,
     int RecoveryCount,
-    string? FailureCode);
+    string? FailureCode,
+    string? FailureReason);
 
 public sealed class LeaseLostException(string message) : InvalidOperationException(message);
 
@@ -1125,6 +1199,7 @@ public interface IBrokerQueue
         string workerId,
         Guid leaseId,
         string failureCode,
+        string? failureReason,
         CancellationToken cancellationToken = default);
 
     Task CancelAsync(

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -48,7 +48,7 @@ public sealed class BrokerDiagnosticLog
     /// failure being reported with one about reporting it, which is how a diagnostic makes an
     /// incident harder to read rather than easier.
     /// </summary>
-    public void Write(string operation, string failure, Guid jobId)
+    public void Write(string operation, string failure, Guid jobId, string? reason = null)
     {
         try
         {
@@ -56,7 +56,8 @@ public sealed class BrokerDiagnosticLog
                 DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
                 operation,
                 failure,
-                jobId == Guid.Empty ? null : jobId.ToString("N")));
+                jobId == Guid.Empty ? null : jobId.ToString("N"),
+                string.IsNullOrWhiteSpace(reason) ? null : reason));
 
             lock (_gate)
             {
@@ -102,5 +103,11 @@ public sealed class BrokerDiagnosticLog
         /// scheduling failure is, and the one this log was written for.
         [property: JsonPropertyName("jobId"), JsonPropertyOrder(3),
                    JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        string? JobId);
+        string? JobId,
+        /// What was reported with the failure, whole: the type left of it says what kind of
+        /// failure it was, and this says what it said. Last, and absent when there is nothing,
+        /// so the short fields a reader scans stay where they were.
+        [property: JsonPropertyName("reason"), JsonPropertyOrder(4),
+                   JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Reason = null);
 }

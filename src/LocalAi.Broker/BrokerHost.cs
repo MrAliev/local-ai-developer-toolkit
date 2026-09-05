@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using LocalAi.Contracts;
 
 namespace LocalAi.Broker;
@@ -396,6 +396,11 @@ public sealed class BrokerHost
 
     private async Task TryFailAsync(LeasedJob lease, Exception executionException)
     {
+        // Why the job failed, said once into the log that exists for exactly this and recorded
+        // beside the job for whoever awaits it. Until now the type was the whole account, and a
+        // backend that refused a batch in a sentence of its own had that sentence dropped three
+        // times over: here, in the durable state, and again in the exception the client threw.
+        Report(lease, "execute", executionException, executionException.Message);
         try
         {
             await _queue.FailAsync(
@@ -403,6 +408,7 @@ public sealed class BrokerHost
                 _workerId,
                 lease.LeaseId,
                 executionException.GetType().Name,
+                executionException.Message,
                 CancellationToken.None);
         }
         catch (LeaseLostException exception)
@@ -474,8 +480,12 @@ public sealed class BrokerHost
         }
     }
 
-    private void Report(LeasedJob lease, string operation, Exception exception) =>
-        Report(lease.Request.JobId, lease.LeaseId, operation, exception);
+    private void Report(
+        LeasedJob lease,
+        string operation,
+        Exception exception,
+        string? reason = null) =>
+        Report(lease.Request.JobId, lease.LeaseId, operation, exception, reason);
 
     /// <summary>
     /// Reports a failure that happened before any job was leased, so there is no job and no
@@ -484,7 +494,19 @@ public sealed class BrokerHost
     private void Report(string operation, Exception exception) =>
         Report(Guid.Empty, Guid.Empty, operation, exception);
 
-    private void Report(Guid jobId, Guid leaseId, string operation, Exception exception)
+    /// <param name="reason">
+    /// What the failure said, for the one operation where that is the answer somebody is
+    /// looking for: the job's own execution. Every other operation here is this broker's
+    /// plumbing — a heartbeat that could not be written, a state file that would not move —
+    /// and their messages carry filesystem paths rather than explanations, which is why this
+    /// log has recorded types alone since it was written.
+    /// </param>
+    private void Report(
+        Guid jobId,
+        Guid leaseId,
+        string operation,
+        Exception exception,
+        string? reason = null)
     {
         try
         {
@@ -493,7 +515,8 @@ public sealed class BrokerHost
                 _workerId,
                 leaseId,
                 operation,
-                exception.GetType().Name));
+                exception.GetType().Name,
+                reason));
         }
         catch
         {
@@ -511,4 +534,5 @@ public sealed record BrokerHostDiagnostic(
     string WorkerId,
     Guid LeaseId,
     string Operation,
-    string ExceptionType);
+    string ExceptionType,
+    string? Reason = null);

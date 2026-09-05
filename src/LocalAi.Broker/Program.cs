@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using LocalAi.Broker;
 using LocalAi.Contracts;
 
@@ -155,7 +155,8 @@ internal static class BrokerProgram
                     diagnosticLog.Write(
                         diagnostic.Operation,
                         diagnostic.ExceptionType,
-                        diagnostic.JobId);
+                        diagnostic.JobId,
+                        diagnostic.Reason);
                     backendHintPrinted = ReportUnreachableBackend(
                         diagnostic,
                         ollamaUri,
